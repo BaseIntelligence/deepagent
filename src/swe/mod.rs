@@ -373,7 +373,9 @@ impl SweTask {
             let v = node_ver.trim();
             cmds.push(format!(
                 "curl -fsSL https://deb.nodesource.com/setup_{v}.x | bash - && \
-                 apt-get install -y nodejs"
+                 apt-get install -y nodejs && \
+                 corepack enable 2>/dev/null; \
+                 npm install -g yarn pnpm 2>/dev/null; true"
             ));
         }
 
