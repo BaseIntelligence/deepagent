@@ -29,7 +29,7 @@ use crate::llm::{GenerationRequest, LlmProvider, Message, ToolChoice, ToolDefini
 const MAX_FRESH_CYCLES: usize = 5;
 
 /// Maximum agent turns for install exploration.
-const MAX_INSTALL_AGENT_TURNS: usize = 50;
+const MAX_INSTALL_AGENT_TURNS: usize = 200;
 
 /// Default model for the install agent (overridden by SWE_FORGE_INSTALL_MODEL env var).
 const DEFAULT_INSTALL_MODEL: &str = "openai/gpt-4.1-mini";
