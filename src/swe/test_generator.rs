@@ -12,7 +12,8 @@ use crate::llm::{
     GenerationRequest, LlmProvider, Message, ToolCallInfo, ToolChoice, ToolDefinition,
 };
 use crate::swe::docker_sandbox::DockerSandbox;
-use crate::swe::{validate_file_path, SweTask};
+use crate::swe::sandbox_tools::{self, dispatch_tool, truncate_utf8, ToolOutput};
+use crate::swe::SweTask;
 
 const MAX_AGENT_TURNS: usize = 200;
 const MAX_VALIDATION_RETRIES: usize = 3;
@@ -130,27 +131,6 @@ ANTI-PATTERNS THAT WILL BE REJECTED:
 - `const src = fs.readFileSync(...); assert(src.includes(...))` -> REJECTED
 - Tests with fewer than 2 meaningful assertions -> REJECTED"#;
 
-fn shell_tool() -> ToolDefinition {
-    ToolDefinition::function(
-        "shell",
-        "Execute a shell command in the repository. Returns stdout, stderr, and exit code.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "Shell command to execute"
-                },
-                "timeout_ms": {
-                    "type": "integer",
-                    "description": "Timeout in milliseconds (default: 30000)"
-                }
-            },
-            "required": ["command"]
-        }),
-    )
-}
-
 fn write_file_tool() -> ToolDefinition {
     ToolDefinition::function(
         "write_file",
@@ -212,106 +192,6 @@ fn submit_tool() -> ToolDefinition {
     )
 }
 
-fn read_file_tool() -> ToolDefinition {
-    ToolDefinition::function(
-        "read_file",
-        "Read file contents with line numbers. Supports offset/limit for pagination. More token-efficient than `cat`.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to read (relative to repo root or absolute)"
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Line offset to start from (0-based, default: 0)"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of lines to read (omit for all)"
-                }
-            },
-            "required": ["file_path"]
-        }),
-    )
-}
-
-fn list_dir_tool() -> ToolDefinition {
-    ToolDefinition::function(
-        "list_dir",
-        "List directory contents. Cleaner output than `ls`. Skips .git, node_modules, __pycache__, etc.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "directory_path": {
-                    "type": "string",
-                    "description": "Path to directory (default: '.' = repo root)"
-                },
-                "recursive": {
-                    "type": "boolean",
-                    "description": "List recursively (default: false)"
-                },
-                "include_hidden": {
-                    "type": "boolean",
-                    "description": "Include hidden files (default: false)"
-                }
-            },
-            "required": []
-        }),
-    )
-}
-
-fn grep_files_tool() -> ToolDefinition {
-    ToolDefinition::function(
-        "grep_files",
-        "Search file contents with regex pattern. Returns matching lines with file paths and line numbers.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Regex pattern to search for"
-                },
-                "include": {
-                    "type": "string",
-                    "description": "Glob pattern to filter files (e.g. '*.py', '*.js')"
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Directory to search in (default: repo root)"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max number of matching lines (default: 100)"
-                }
-            },
-            "required": ["pattern"]
-        }),
-    )
-}
-
-fn search_files_tool() -> ToolDefinition {
-    ToolDefinition::function(
-        "search_files",
-        "Find files matching a glob pattern. Skips .git, node_modules, etc.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Glob pattern (e.g. '*.py', '**/*.test.js', 'src/**/*.rs')"
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Base directory to search from (default: repo root)"
-                }
-            },
-            "required": ["pattern"]
-        }),
-    )
-}
-
 fn apply_patch_tool() -> ToolDefinition {
     ToolDefinition::function(
         "apply_patch",
@@ -327,16 +207,6 @@ fn apply_patch_tool() -> ToolDefinition {
             "required": ["patch"]
         }),
     )
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct ShellArgs {
-    command: String,
-    #[serde(default = "default_timeout")]
-    timeout_ms: u64,
-}
-fn default_timeout() -> u64 {
-    30_000
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -440,11 +310,11 @@ impl TestGenerator {
         );
 
         let tools = vec![
-            read_file_tool(),
-            list_dir_tool(),
-            grep_files_tool(),
-            search_files_tool(),
-            shell_tool(),
+            sandbox_tools::read_file_tool(),
+            sandbox_tools::list_dir_tool(),
+            sandbox_tools::grep_files_tool(),
+            sandbox_tools::search_files_tool(),
+            sandbox_tools::shell_tool(),
             write_file_tool(),
             apply_patch_tool(),
             submit_tool(),
@@ -874,24 +744,6 @@ impl TestGenerator {
         written_files: &mut Vec<TestFile>,
     ) -> ToolResult {
         match tc.function.name.as_str() {
-            "shell" => {
-                let args: ShellArgs = match serde_json::from_str(&tc.function.arguments) {
-                    Ok(a) => a,
-                    Err(e) => return ToolResult::Error(format!("Invalid shell args: {}", e)),
-                };
-                let result = sandbox.exec(&args.command, args.timeout_ms).await;
-                tracing::debug!(
-                    task_id = task_id, turn = turn,
-                    cmd = %args.command, exit = result.exit_code,
-                    "Agent shell (Docker)"
-                );
-                ToolResult::ShellOutput(format!(
-                    "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
-                    result.exit_code,
-                    truncate_utf8(&result.stdout, 3000),
-                    truncate_utf8(&result.stderr, 1500),
-                ))
-            }
             "write_file" => {
                 let args: WriteFileArgs = match serde_json::from_str(&tc.function.arguments) {
                     Ok(a) => a,
@@ -919,45 +771,42 @@ impl TestGenerator {
                     Err(e) => ToolResult::Error(format!("Failed to write {}: {}", args.path, e)),
                 }
             }
-            "read_file" | "list_dir" | "grep_files" | "search_files" | "apply_patch" => {
-                let tool_name = tc.function.name.as_str();
-                let args_json = &tc.function.arguments;
-
-                let output = if sandbox.has_tool_server() {
-                    let result = sandbox.tool_request(tool_name, args_json).await;
-                    let server_down = result.exit_code != 0
-                        && result.stdout.is_empty()
-                        && (result.stderr.contains("Connection refused")
-                            || result.stderr.contains("URLError")
-                            || result.stderr.contains("Tool request error"));
-                    if server_down {
-                        tracing::debug!(
-                            task_id = task_id,
-                            turn = turn,
-                            tool = tool_name,
-                            "Tool server unavailable, falling back to shell"
-                        );
-                        shell_fallback(sandbox, tool_name, args_json).await
-                    } else {
-                        parse_tool_response(&result)
-                    }
-                } else {
-                    shell_fallback(sandbox, tool_name, args_json).await
+            "apply_patch" => {
+                // apply_patch is test_generator-specific, not in sandbox_tools
+                let args: serde_json::Value = match serde_json::from_str(&tc.function.arguments) {
+                    Ok(v) => v,
+                    Err(e) => return ToolResult::Error(format!("Invalid apply_patch args: {}", e)),
                 };
-
-                tracing::debug!(
-                    task_id = task_id,
-                    turn = turn,
-                    tool = tool_name,
-                    "Agent tool call"
-                );
-                ToolResult::ShellOutput(truncate_utf8(&output, 4000).to_string())
+                let patch = args.get("patch").and_then(|v| v.as_str()).unwrap_or("");
+                if patch.is_empty() {
+                    return ToolResult::Error("Error: missing patch".to_string());
+                }
+                match sandbox.write_file(".swe_forge_tool_patch.tmp", patch).await {
+                    Ok(_) => {
+                        let result = sandbox
+                            .exec(
+                                "git apply --allow-empty .swe_forge_tool_patch.tmp 2>&1 && rm -f .swe_forge_tool_patch.tmp",
+                                30_000,
+                            )
+                            .await;
+                        if result.exit_code == 0 {
+                            ToolResult::ShellOutput("Patch applied successfully.".to_string())
+                        } else {
+                            ToolResult::ShellOutput(format!("git apply failed: {}", result.stdout))
+                        }
+                    }
+                    Err(e) => ToolResult::Error(format!("Failed to write patch file: {}", e)),
+                }
             }
             "submit_tests" => match serde_json::from_str::<SubmitArgs>(&tc.function.arguments) {
                 Ok(s) => ToolResult::Submit(s),
                 Err(e) => ToolResult::Error(format!("Invalid submit_tests args: {}", e)),
             },
-            other => ToolResult::Error(format!("Unknown tool: {}", other)),
+            // Delegate shell, read_file, list_dir, grep_files, search_files to shared dispatch
+            _ => match dispatch_tool(tc, sandbox, task_id, turn).await {
+                ToolOutput::Text(s) => ToolResult::ShellOutput(s),
+                ToolOutput::Error(s) => ToolResult::Error(s),
+            },
         }
     }
 }
@@ -966,190 +815,6 @@ enum ToolResult {
     ShellOutput(String),
     Submit(SubmitArgs),
     Error(String),
-}
-
-/// Parse a JSON response from the tool server into a user-friendly string.
-fn parse_tool_response(result: &crate::swe::docker_sandbox::SandboxOutput) -> String {
-    if !result.stdout.is_empty() {
-        match serde_json::from_str::<serde_json::Value>(result.stdout.trim()) {
-            Ok(v) => {
-                if let Some(err) = v.get("error").and_then(|e| e.as_str()) {
-                    err.to_string()
-                } else if let Some(out) = v.get("output").and_then(|o| o.as_str()) {
-                    let mut s = out.to_string();
-                    if let Some(total) = v.get("total_lines").and_then(|t| t.as_u64()) {
-                        if v.get("truncated")
-                            .and_then(|t| t.as_bool())
-                            .unwrap_or(false)
-                        {
-                            s.push_str(&format!(
-                                "\n\n[Showing {}/{} lines. Use offset/limit to see more.]",
-                                v.get("shown_lines").and_then(|sl| sl.as_u64()).unwrap_or(0),
-                                total
-                            ));
-                        } else {
-                            s.push_str(&format!("\n\n[{} total lines]", total));
-                        }
-                    }
-                    s
-                } else {
-                    result.stdout.clone()
-                }
-            }
-            Err(_) => result.stdout.clone(),
-        }
-    } else if !result.stderr.is_empty() {
-        format!("Error: {}", truncate_utf8(&result.stderr, 1500))
-    } else {
-        "No output".to_string()
-    }
-}
-
-/// Escape a string for safe inclusion inside a POSIX single-quoted shell argument.
-///
-/// Replaces each `'` with `'\''` (end quote, backslash-escaped literal quote,
-/// re-open quote). This is the standard POSIX technique for embedding single
-/// quotes inside single-quoted strings and prevents shell breakout.
-fn sanitize_shell_arg(s: &str) -> String {
-    s.replace('\'', "'\\''")
-}
-
-/// Execute a tool via direct shell commands when the HTTP tool server is unavailable.
-///
-/// All values interpolated into shell commands are either validated via
-/// [`validate_file_path`] (for filesystem paths) or escaped via
-/// [`sanitize_shell_arg`] (for patterns/globs that may contain special chars).
-async fn shell_fallback(sandbox: &DockerSandbox, tool_name: &str, args_json: &str) -> String {
-    let args: serde_json::Value = match serde_json::from_str(args_json) {
-        Ok(v) => v,
-        Err(e) => return format!("Invalid tool args: {}", e),
-    };
-
-    match tool_name {
-        "read_file" => {
-            let file_path = args.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-            if file_path.is_empty() {
-                return "Error: missing file_path".to_string();
-            }
-            if let Err(e) = validate_file_path(file_path) {
-                return format!("Error: invalid file_path: {}", e);
-            }
-            let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0);
-            let limit = args.get("limit").and_then(|v| v.as_u64());
-            let cmd = match limit {
-                Some(lim) => format!(
-                    "awk 'NR>{} && NR<={}{{print NR\": \"$0}}' '{}'",
-                    offset,
-                    offset + lim,
-                    file_path
-                ),
-                None => format!("awk '{{print NR\": \"$0}}' '{}'", file_path),
-            };
-            let result = sandbox.exec(&cmd, 10_000).await;
-            if result.exit_code != 0 {
-                format!("Error reading file: {}", result.stderr)
-            } else if result.stdout.is_empty() {
-                "(empty file)".to_string()
-            } else {
-                result.stdout
-            }
-        }
-        "list_dir" => {
-            let dir = args
-                .get("directory_path")
-                .and_then(|v| v.as_str())
-                .unwrap_or(".");
-            if dir != "." {
-                if let Err(e) = validate_file_path(dir) {
-                    return format!("Error: invalid directory_path: {}", e);
-                }
-            }
-            let cmd = format!("ls -la '{}'", sanitize_shell_arg(dir));
-            let result = sandbox.exec(&cmd, 10_000).await;
-            if result.exit_code != 0 {
-                format!("Error listing directory: {}", result.stderr)
-            } else {
-                result.stdout
-            }
-        }
-        "grep_files" => {
-            let pattern = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
-            if pattern.is_empty() {
-                return "Error: missing pattern".to_string();
-            }
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            if path != "." {
-                if let Err(e) = validate_file_path(path) {
-                    return format!("Error: invalid path: {}", e);
-                }
-            }
-            let include = args.get("include").and_then(|v| v.as_str());
-            let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100);
-            let include_arg = match include {
-                Some(glob) => format!(" --include='{}'", sanitize_shell_arg(glob)),
-                None => String::new(),
-            };
-            let cmd = format!(
-                "grep -rn --color=never{} '{}' '{}' | head -n {}",
-                include_arg,
-                sanitize_shell_arg(pattern),
-                sanitize_shell_arg(path),
-                limit
-            );
-            let result = sandbox.exec(&cmd, 30_000).await;
-            if result.stdout.is_empty() {
-                "No matches found.".to_string()
-            } else {
-                result.stdout
-            }
-        }
-        "search_files" => {
-            let pattern = args.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
-            if pattern.is_empty() {
-                return "Error: missing pattern".to_string();
-            }
-            let path = args.get("path").and_then(|v| v.as_str()).unwrap_or(".");
-            if path != "." {
-                if let Err(e) = validate_file_path(path) {
-                    return format!("Error: invalid path: {}", e);
-                }
-            }
-            let cmd = format!(
-                "find '{}' -name '{}' -not -path '*/.git/*' -not -path '*/node_modules/*' | sort",
-                sanitize_shell_arg(path),
-                sanitize_shell_arg(pattern)
-            );
-            let result = sandbox.exec(&cmd, 30_000).await;
-            if result.stdout.is_empty() {
-                format!("No files matching '{}'", pattern)
-            } else {
-                result.stdout
-            }
-        }
-        "apply_patch" => {
-            let patch = args.get("patch").and_then(|v| v.as_str()).unwrap_or("");
-            if patch.is_empty() {
-                return "Error: missing patch".to_string();
-            }
-            match sandbox.write_file(".swe_forge_tool_patch.tmp", patch).await {
-                Ok(_) => {
-                    let result = sandbox
-                        .exec(
-                            "git apply --allow-empty .swe_forge_tool_patch.tmp 2>&1 && rm -f .swe_forge_tool_patch.tmp",
-                            30_000,
-                        )
-                        .await;
-                    if result.exit_code == 0 {
-                        "Patch applied successfully.".to_string()
-                    } else {
-                        format!("git apply failed: {}", result.stdout)
-                    }
-                }
-                Err(e) => format!("Failed to write patch file: {}", e),
-            }
-        }
-        _ => format!("Unknown tool: {}", tool_name),
-    }
 }
 
 /// Scan test files for string-matching anti-patterns and return a rejection reason if found.
@@ -1291,13 +956,4 @@ fn validate_test_scripts(files: &[TestFile]) -> Option<String> {
     }
 }
 
-fn truncate_utf8(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut end = max;
-    while !s.is_char_boundary(end) && end > 0 {
-        end -= 1;
-    }
-    &s[..end]
-}
+
