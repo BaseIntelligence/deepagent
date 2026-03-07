@@ -659,8 +659,8 @@ impl WorkspaceValidator {
                 verify_sandbox.destroy().await;
             }
 
-            // ── Step 2: Final blind replay in a brand-new container ───────
-            let confirm_sandbox = match DockerSandbox::start(
+            // ── Step 2a: Base-commit tests in a fresh container ─────────
+            let base_sandbox = match DockerSandbox::start(
                 &task.repo,
                 &task.base_commit,
                 &task.language,
@@ -672,46 +672,96 @@ impl WorkspaceValidator {
                 Err(e) => {
                     return Ok(ValidationOutcome::Rejected {
                         reason: format!(
-                            "Fresh replay cycle {}: confirm container start failed: {e}",
+                            "Fresh replay cycle {}: base container start failed: {e}",
                             cycle + 1
                         ),
                     });
                 }
             };
 
-            let install_ok = self.replay_install(&confirm_sandbox, task).await;
-            if !install_ok {
+            let base_install_ok = self.replay_install(&base_sandbox, task).await;
+            if !base_install_ok {
                 tracing::warn!(
                     task_id = %task.id, cycle = cycle + 1,
-                    "Blind replay install failed after verify agent, retrying"
+                    "Blind replay install failed (base container) after verify agent, retrying"
                 );
-                confirm_sandbox.destroy().await;
+                base_sandbox.destroy().await;
                 continue;
             }
 
-            // Copy test files
+            // Copy test files into base container
             if let Some(test_files_json) = task.meta.get("test_files") {
                 if let Ok(files) = serde_json::from_str::<Vec<TestFile>>(test_files_json) {
                     for tf in &files {
-                        let _ = confirm_sandbox.write_file(&tf.path, &tf.content).await;
+                        let _ = base_sandbox.write_file(&tf.path, &tf.content).await;
                     }
                 }
             }
 
-            let tests_ok = self.run_all_tests(&confirm_sandbox, task).await;
-            confirm_sandbox.destroy().await;
+            let base_tests_ok = self.run_base_tests(&base_sandbox, task).await;
+            base_sandbox.destroy().await;
 
-            if tests_ok {
+            if !base_tests_ok {
+                tracing::warn!(
+                    task_id = %task.id, cycle = cycle + 1,
+                    "Blind replay base tests failed after verify agent, retrying"
+                );
+                continue;
+            }
+
+            // ── Step 2b: Patched-commit tests in another fresh container ──
+            let patched_sandbox = match DockerSandbox::start(
+                &task.repo,
+                &task.base_commit,
+                &task.language,
+                self.image_override.as_deref(),
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    return Ok(ValidationOutcome::Rejected {
+                        reason: format!(
+                            "Fresh replay cycle {}: patched container start failed: {e}",
+                            cycle + 1
+                        ),
+                    });
+                }
+            };
+
+            let patched_install_ok = self.replay_install(&patched_sandbox, task).await;
+            if !patched_install_ok {
+                tracing::warn!(
+                    task_id = %task.id, cycle = cycle + 1,
+                    "Blind replay install failed (patched container) after verify agent, retrying"
+                );
+                patched_sandbox.destroy().await;
+                continue;
+            }
+
+            // Copy test files into patched container
+            if let Some(test_files_json) = task.meta.get("test_files") {
+                if let Ok(files) = serde_json::from_str::<Vec<TestFile>>(test_files_json) {
+                    for tf in &files {
+                        let _ = patched_sandbox.write_file(&tf.path, &tf.content).await;
+                    }
+                }
+            }
+
+            let patched_tests_ok = self.run_patched_tests(&patched_sandbox, task).await;
+            patched_sandbox.destroy().await;
+
+            if base_tests_ok && patched_tests_ok {
                 tracing::info!(
                     task_id = %task.id, cycle = cycle + 1,
-                    "Workspace validation PASSED (fresh replay confirmed)"
+                    "Workspace validation PASSED (fresh replay confirmed with isolated containers)"
                 );
                 return Ok(ValidationOutcome::Passed);
             }
 
             tracing::warn!(
                 task_id = %task.id, cycle = cycle + 1,
-                "Blind replay tests failed after verify agent, retrying"
+                "Blind replay patched tests failed after verify agent, retrying"
             );
         }
 
@@ -993,9 +1043,10 @@ impl WorkspaceValidator {
         true
     }
 
-    /// Run f2p (must FAIL) and p2p (must PASS) tests on base commit,
-    /// then apply patch and verify f2p PASS and p2p PASS.
-    async fn run_all_tests(&self, sandbox: &DockerSandbox, task: &SweTask) -> bool {
+    /// Run base-commit tests in an isolated container: f2p must FAIL, p2p must PASS.
+    /// No patch is applied — this validates that the test expectations hold on the
+    /// unmodified base commit.
+    async fn run_base_tests(&self, sandbox: &DockerSandbox, task: &SweTask) -> bool {
         // Base commit: f2p must FAIL
         for cmd in &task.fail_to_pass {
             let r = sandbox.exec(&format!("cd /repo && {}", cmd), 120_000).await;
@@ -1003,10 +1054,15 @@ impl WorkspaceValidator {
                 tracing::warn!(
                     task_id = %task.id,
                     cmd = %cmd,
-                    "Fresh replay: f2p already passes on base"
+                    "Fresh replay (base): f2p already passes on base"
                 );
                 return false;
             }
+            tracing::info!(
+                task_id = %task.id,
+                cmd = %cmd,
+                "Fresh replay (base): f2p correctly fails"
+            );
         }
 
         // Base commit: p2p must PASS
@@ -1017,18 +1073,29 @@ impl WorkspaceValidator {
                     task_id = %task.id,
                     cmd = %cmd,
                     exit = r.exit_code,
-                    "Fresh replay: p2p fails on base"
+                    "Fresh replay (base): p2p fails on base"
                 );
                 return false;
             }
+            tracing::info!(
+                task_id = %task.id,
+                cmd = %cmd,
+                "Fresh replay (base): p2p passes"
+            );
         }
 
+        true
+    }
+
+    /// Apply the patch and run tests in an isolated container: f2p must PASS, p2p must PASS.
+    /// This validates that the patch fixes the failing tests without breaking passing ones.
+    async fn run_patched_tests(&self, sandbox: &DockerSandbox, task: &SweTask) -> bool {
         // Apply patch
         if let Err(e) = sandbox
             .write_file(".swe_forge_validation.patch", &task.patch)
             .await
         {
-            tracing::warn!(task_id = %task.id, error = %e, "Fresh replay: failed to write patch");
+            tracing::warn!(task_id = %task.id, error = %e, "Fresh replay (patched): failed to write patch");
             return false;
         }
 
@@ -1046,12 +1113,12 @@ impl WorkspaceValidator {
                 )
                 .await;
             if apply_3way.exit_code != 0 {
-                tracing::warn!(task_id = %task.id, "Fresh replay: patch apply failed");
+                tracing::warn!(task_id = %task.id, "Fresh replay (patched): patch apply failed");
                 return false;
             }
         }
 
-        // Re-write test files
+        // Re-write test files (patch may have clobbered them)
         if let Some(test_files_json) = task.meta.get("test_files") {
             if let Ok(files) = serde_json::from_str::<Vec<TestFile>>(test_files_json) {
                 for tf in &files {
@@ -1068,10 +1135,15 @@ impl WorkspaceValidator {
                     task_id = %task.id,
                     cmd = %cmd,
                     exit = r.exit_code,
-                    "Fresh replay: f2p still fails after patch"
+                    "Fresh replay (patched): f2p still fails after patch"
                 );
                 return false;
             }
+            tracing::info!(
+                task_id = %task.id,
+                cmd = %cmd,
+                "Fresh replay (patched): f2p passes after patch"
+            );
         }
 
         // Patched: p2p must still PASS
@@ -1082,10 +1154,15 @@ impl WorkspaceValidator {
                     task_id = %task.id,
                     cmd = %cmd,
                     exit = r.exit_code,
-                    "Fresh replay: p2p fails after patch"
+                    "Fresh replay (patched): p2p fails after patch"
                 );
                 return false;
             }
+            tracing::info!(
+                task_id = %task.id,
+                cmd = %cmd,
+                "Fresh replay (patched): p2p still passes"
+            );
         }
 
         true
