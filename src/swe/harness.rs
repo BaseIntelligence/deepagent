@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{info, warn};
 
-use super::{validate_file_path, validate_git_ref, validate_repo_name, SweTask};
+use super::{validate_file_path, validate_git_ref, validate_repo_name, Rechecker, RecheckerConfig, SweTask};
 
 // ---------------------------------------------------------------------------
 // Config
@@ -26,6 +26,8 @@ pub struct HarnessConfig {
     pub docker_image: String,
     pub keep_containers: bool,
     pub parallel: usize,
+    /// Maximum rechecker attempts for setup errors (0 = disabled)
+    pub rechecker_max_attempts: u32,
 }
 
 impl Default for HarnessConfig {
@@ -38,6 +40,7 @@ impl Default for HarnessConfig {
             docker_image: "python:3.12-slim".to_string(),
             keep_containers: false,
             parallel: 1,
+            rechecker_max_attempts: 3,
         }
     }
 }
@@ -351,16 +354,135 @@ async fn evaluate_task(task: &SweTask, config: &HarnessConfig) -> HarnessResult 
         }
     }
 
-    // Install project deps from install_config
+    // Install project deps from install_config with rechecker retry logic
+    let mut setup_error: Option<String> = None;
     if let Some(install_cmd) = task.install_config.get("install") {
         if !install_cmd.is_empty() {
             info!(task_id = %task.id, "Installing deps: {}", install_cmd);
             let (code, _, err) =
                 docker_exec(&cname, &format!("cd /repo && {} 2>&1", install_cmd), 300).await;
             if code != 0 {
-                warn!(task_id = %task.id, "Install command failed (continuing): {}", truncate(&err, 200));
+                let err_msg = truncate(&err, 500);
+                warn!(task_id = %task.id, "Install command failed: {}", err_msg);
+                setup_error = Some(format!("Install failed: {}", err_msg));
             }
         }
+    }
+
+    // If install failed, use rechecker to try alternative strategies
+    let mut rechecker_fix_applied = false;
+    if setup_error.is_some() && config.rechecker_max_attempts > 0 {
+        let rechecker_config = RecheckerConfig::with_max_attempts(config.rechecker_max_attempts);
+        let rechecker = Rechecker::new(rechecker_config);
+
+        info!(task_id = %task.id, "Attempting rechecker fixes for setup error");
+
+        // Try alternative install strategies
+        for attempt in 1..=config.rechecker_max_attempts {
+            if let Some(next_cmd) = rechecker.get_next_install_attempt(
+                task,
+                setup_error.as_deref(),
+                attempt,
+            ) {
+                info!(task_id = %task.id, attempt = attempt, "Trying alternative install: {}", truncate(&next_cmd, 100));
+
+                // Remove existing container and start fresh for retry
+                docker_rm(&cname).await;
+
+                // Restart container with same config
+                let start_output = Command::new("docker")
+                    .args([
+                        "run",
+                        "-d",
+                        "--name",
+                        &cname,
+                        "--network=host",
+                        "--memory=32g",
+                        "-w",
+                        "/repo",
+                        &docker_image,
+                        "sleep",
+                        "7200",
+                    ])
+                    .output()
+                    .await;
+
+                match start_output {
+                    Ok(o) if o.status.success() => {
+                        // Re-clone and checkout
+                        let clone_cmd = format!("git clone https://github.com/{}.git /repo 2>&1", task.repo);
+                        let (code, _, _) = docker_exec(&cname, &clone_cmd, 600).await;
+                        if code != 0 {
+                            warn!(task_id = %task.id, attempt = attempt, "Retry clone failed");
+                            continue;
+                        }
+
+                        if !task.base_commit.is_empty() {
+                            let (code, _, _) = docker_exec(
+                                &cname,
+                                &format!("cd /repo && git checkout {} --force 2>&1", task.base_commit),
+                                60,
+                            )
+                            .await;
+                            if code != 0 {
+                                warn!(task_id = %task.id, attempt = attempt, "Retry checkout failed");
+                                continue;
+                            }
+                        }
+
+                        // Re-install runtime
+                        let runtime_cmds = SweTask::runtime_install_commands(&task.install_config);
+                        if !runtime_cmds.is_empty() {
+                            let _ = docker_exec(&cname, &format!("{} 2>&1", runtime_cmds), 300).await;
+                        }
+
+                        // Try the alternative install command
+                        let (code, _, err) = docker_exec(
+                            &cname,
+                            &format!("cd /repo && {} 2>&1", next_cmd),
+                            300,
+                        )
+                        .await;
+
+                        if code == 0 {
+                            info!(task_id = %task.id, attempt = attempt, "Alternative install succeeded");
+                            setup_error = None;
+                            rechecker_fix_applied = true;
+                            break; // Success!
+                        } else {
+                            warn!(task_id = %task.id, attempt = attempt, "Alternative install failed: {}", truncate(&err, 200));
+                        }
+                    }
+                    _ => {
+                        warn!(task_id = %task.id, attempt = attempt, "Failed to restart container for retry");
+                    }
+                }
+            } else {
+                warn!(task_id = %task.id, attempt = attempt, "No more alternative strategies available");
+                break;
+            }
+        }
+
+        // If we succeeded with a fix, copy agent files again
+        if rechecker_fix_applied {
+            let agent_src = format!("{}/.", agent_dir_abs.display());
+            let agent_dst = format!("{}:/agent/", cname);
+            let _ = Command::new("docker")
+                .args(["cp", &agent_src, &agent_dst])
+                .output()
+                .await;
+        }
+    }
+
+    // If setup still failed after all retries, return SetupError
+    if let Some(err) = setup_error {
+        result.status = HarnessStatus::SetupError;
+        result.error = Some(err);
+        if !config.keep_containers {
+            docker_rm(&cname).await;
+        }
+        result.total_duration_secs = total_start.elapsed().as_secs_f64();
+        return result;
     }
 
     // Install agent requirements
@@ -700,6 +822,25 @@ mod tests {
         assert!(!config.keep_containers);
         assert_eq!(config.parallel, 1);
         assert_eq!(config.agent_cmd, "python /agent/agent.py");
+        assert_eq!(config.rechecker_max_attempts, 3); // Default rechecker attempts
+    }
+
+    #[test]
+    fn test_harness_config_rechecker_disabled() {
+        let config = HarnessConfig {
+            rechecker_max_attempts: 0,
+            ..Default::default()
+        };
+        assert_eq!(config.rechecker_max_attempts, 0);
+    }
+
+    #[test]
+    fn test_harness_config_custom_rechecker_attempts() {
+        let config = HarnessConfig {
+            rechecker_max_attempts: 5,
+            ..Default::default()
+        };
+        assert_eq!(config.rechecker_max_attempts, 5);
     }
 
     #[test]

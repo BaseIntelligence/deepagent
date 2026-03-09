@@ -1109,6 +1109,7 @@ async fn run_swe_harness_command(args: SweHarnessArgs) -> anyhow::Result<()> {
         docker_image: args.docker_image,
         keep_containers: args.keep_containers,
         parallel: args.parallel,
+        rechecker_max_attempts: 3,
     };
 
     // If --task-id is specified without --dataset, filter the input directory

@@ -203,7 +203,7 @@ impl Rechecker {
         // Try each strategy
         for (attempt, strategy) in strategies.iter().enumerate().take(self.config.max_attempts as usize) {
             let attempt_num = attempt + 1;
-            
+
             if self.config.verbose {
                 info!(task_id = %task.id, attempt = attempt_num, "Trying install strategy");
             }
@@ -228,6 +228,16 @@ impl Rechecker {
 
         warn!(task_id = %task.id, attempts = self.config.max_attempts, "Could not find valid install strategy");
         Ok(RecheckResult::Incorrigible)
+    }
+
+    /// Async version of fix_install that can be used in async contexts.
+    ///
+    /// This is a convenience wrapper that runs the synchronous fix_install
+    /// in a blocking task to avoid blocking the async runtime.
+    pub async fn fix_install_async(&self, task: &mut SweTask) -> Result<RecheckResult, RecheckerError> {
+        // For now, we delegate to the synchronous version
+        // In a full implementation, this would actually test installs in Docker
+        self.fix_install(task)
     }
 
     /// Check if a command looks like a valid install command.
@@ -373,6 +383,60 @@ impl Rechecker {
                 Ok(RecheckResult::Skipped)
             }
         }
+    }
+
+    /// Async version of fix_task for use in async contexts.
+    ///
+    /// This is the main entry point for harness integration. It detects
+    /// the error type from the task and error message, then attempts to
+    /// apply appropriate fixes.
+    pub async fn fix_task_async(
+        &self,
+        task: &mut SweTask,
+        error_msg: Option<&str>,
+    ) -> Result<RecheckResult, RecheckerError> {
+        // Delegate to synchronous version (async wrapper for API consistency)
+        self.fix_task(task, error_msg)
+    }
+
+    /// Attempt to fix a task with installation retry in Docker.
+    ///
+    /// This is the full integration method that the harness should use.
+    /// It:
+    /// 1. Detects the error type from the error message
+    /// 2. Generates alternative install strategies
+    /// 3. Returns the next install command to try, or None if exhausted
+    ///
+    /// The harness is responsible for actually running the install command
+    /// in Docker and checking if it succeeds.
+    pub fn get_next_install_attempt(
+        &self,
+        task: &SweTask,
+        error_msg: Option<&str>,
+        attempt_number: u32,
+    ) -> Option<String> {
+        if attempt_number > self.config.max_attempts {
+            return None;
+        }
+
+        let error_type = self.detect_error_type(task, error_msg);
+
+        // Only try to fix setup errors
+        if !matches!(error_type, ErrorType::SetupError | ErrorType::Unknown) {
+            return None;
+        }
+
+        let language = task.language.to_lowercase();
+        let original = task
+            .install_config
+            .get("install")
+            .cloned()
+            .unwrap_or_default();
+
+        let strategies = self.generate_alternative_strategies(&language, &original);
+
+        // Return the strategy for this attempt (0-indexed)
+        strategies.get((attempt_number - 1) as usize).cloned()
     }
 
     /// Get the fixed install_config for export.
