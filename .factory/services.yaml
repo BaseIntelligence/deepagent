@@ -1,0 +1,28 @@
+commands:
+  install: cargo build
+  build: cargo build --release
+  test: cargo test --lib
+  test-release: cargo test --release -- --test-threads=$(nproc)
+  typecheck: cargo clippy --all-targets --all-features -- -D warnings
+  lint: cargo fmt --all -- --check
+  lint-fix: cargo fmt --all
+  harness-help: cargo run -- swe harness --help
+  mine-help: cargo run -- swe mine --help
+
+test:
+  # Run library tests (unit tests in src/)
+  unit: cargo test --lib -- --test-threads=$(nproc)
+  # Run all tests including integration
+  all: cargo test --release -- --test-threads=$(nproc)
+  # Run tests for specific module
+  module: cargo test --lib
+
+services:
+  docker:
+    # Docker daemon must be running
+    check: docker ps
+    # No start command - Docker is a system service
+    stop: echo "Docker daemon managed by system"
+    healthcheck: docker ps > /dev/null 2>&1 && echo "Docker OK"
+    port: 0  # Docker doesn't use a fixed port
+    depends_on: []

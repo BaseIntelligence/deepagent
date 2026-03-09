@@ -717,7 +717,14 @@ mod tests {
     /// Helper to check if a container exists
     async fn container_exists(name: &str) -> bool {
         let output = Command::new("docker")
-            .args(["ps", "-a", "--filter", &format!("name={}", name), "--format", "{{.Names}}"])
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                &format!("name={}", name),
+                "--format",
+                "{{.Names}}",
+            ])
             .output()
             .await
             .unwrap();
@@ -734,24 +741,35 @@ mod tests {
 
         // Start a sandbox
         let sandbox = DockerSandbox::start(
-            "octocat/Hello-World",  // Small public repo
-            "",  // No specific commit
+            "octocat/Hello-World", // Small public repo
+            "",                    // No specific commit
             "python",
             Some("python:3.12-slim"),
-        ).await;
+        )
+        .await;
 
-        assert!(sandbox.is_ok(), "Failed to create sandbox: {:?}", sandbox.err());
+        assert!(
+            sandbox.is_ok(),
+            "Failed to create sandbox: {:?}",
+            sandbox.err()
+        );
         let sandbox = sandbox.unwrap();
         let container_name = sandbox.name().to_string();
 
         // Verify container exists
-        assert!(container_exists(&container_name).await, "Container should exist after creation");
+        assert!(
+            container_exists(&container_name).await,
+            "Container should exist after creation"
+        );
 
         // Destroy the sandbox
         sandbox.destroy().await;
 
         // Verify container no longer exists
-        assert!(!container_exists(&container_name).await, "Container should be destroyed");
+        assert!(
+            !container_exists(&container_name).await,
+            "Container should be destroyed"
+        );
     }
 
     #[tokio::test]
@@ -766,13 +784,24 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test successful command
         let result = sandbox.exec("echo 'hello world'", 10_000).await;
-        assert_eq!(result.exit_code, 0, "Command should succeed with exit code 0");
-        assert!(result.stdout.contains("hello world"), "Stdout should contain 'hello world'");
-        assert!(result.stderr.is_empty(), "Stderr should be empty for successful command");
+        assert_eq!(
+            result.exit_code, 0,
+            "Command should succeed with exit code 0"
+        );
+        assert!(
+            result.stdout.contains("hello world"),
+            "Stdout should contain 'hello world'"
+        );
+        assert!(
+            result.stderr.is_empty(),
+            "Stderr should be empty for successful command"
+        );
 
         sandbox.destroy().await;
     }
@@ -789,16 +818,24 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test failing command
         let result = sandbox.exec("exit 42", 10_000).await;
-        assert_eq!(result.exit_code, 42, "Command should fail with exit code 42");
+        assert_eq!(
+            result.exit_code, 42,
+            "Command should fail with exit code 42"
+        );
 
         // Test non-existent command
         let result = sandbox.exec("nonexistent_command_xyz", 10_000).await;
         assert_ne!(result.exit_code, 0, "Non-existent command should fail");
-        assert!(!result.stderr.is_empty(), "Stderr should contain error message");
+        assert!(
+            !result.stderr.is_empty(),
+            "Stderr should contain error message"
+        );
 
         sandbox.destroy().await;
     }
@@ -815,12 +852,17 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test timeout - sleep for 5 seconds with 1 second timeout
         let result = sandbox.exec("sleep 5", 1_000).await;
         assert_eq!(result.exit_code, -1, "Timeout should return exit code -1");
-        assert!(result.stderr.contains("timed out"), "Stderr should indicate timeout");
+        assert!(
+            result.stderr.contains("timed out"),
+            "Stderr should indicate timeout"
+        );
 
         sandbox.destroy().await;
     }
@@ -837,17 +879,31 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test writing a file
         let test_content = "Hello, World!\nThis is a test file.\n";
         let write_result = sandbox.write_file("test_file.txt", test_content).await;
-        assert!(write_result.is_ok(), "Write file should succeed: {:?}", write_result.err());
+        assert!(
+            write_result.is_ok(),
+            "Write file should succeed: {:?}",
+            write_result.err()
+        );
 
         // Test reading the file back
         let read_result = sandbox.read_file("test_file.txt").await;
-        assert!(read_result.is_ok(), "Read file should succeed: {:?}", read_result.err());
-        assert_eq!(read_result.unwrap(), test_content, "Read content should match written content");
+        assert!(
+            read_result.is_ok(),
+            "Read file should succeed: {:?}",
+            read_result.err()
+        );
+        assert_eq!(
+            read_result.unwrap(),
+            test_content,
+            "Read content should match written content"
+        );
 
         sandbox.destroy().await;
     }
@@ -864,11 +920,15 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test writing to a subdirectory
         let test_content = "Nested file content";
-        let write_result = sandbox.write_file("subdir/nested/file.txt", test_content).await;
+        let write_result = sandbox
+            .write_file("subdir/nested/file.txt", test_content)
+            .await;
         assert!(write_result.is_ok(), "Write to nested path should succeed");
 
         // Verify the file exists
@@ -891,11 +951,16 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test reading non-existent file
         let read_result = sandbox.read_file("nonexistent_file_xyz.txt").await;
-        assert!(read_result.is_err(), "Reading non-existent file should fail");
+        assert!(
+            read_result.is_err(),
+            "Reading non-existent file should fail"
+        );
 
         sandbox.destroy().await;
     }
@@ -915,10 +980,15 @@ mod tests {
                 "",
                 "python",
                 Some("python:3.12-slim"),
-            ).await.expect("Failed to create sandbox");
+            )
+            .await
+            .expect("Failed to create sandbox");
 
             container_name = sandbox.name().to_string();
-            assert!(container_exists(&container_name).await, "Container should exist");
+            assert!(
+                container_exists(&container_name).await,
+                "Container should exist"
+            );
 
             // Sandbox will be dropped here
         }
@@ -927,7 +997,10 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         // Verify container no longer exists
-        assert!(!container_exists(&container_name).await, "Container should be destroyed on drop");
+        assert!(
+            !container_exists(&container_name).await,
+            "Container should be destroyed on drop"
+        );
     }
 
     #[tokio::test]
@@ -945,17 +1018,25 @@ mod tests {
             known_commit,
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Verify the repo was cloned
         let result = sandbox.exec("ls -la /repo", 10_000).await;
         assert_eq!(result.exit_code, 0, "Repo directory should exist");
-        assert!(result.stdout.contains("README"), "README should exist in repo");
+        assert!(
+            result.stdout.contains("README"),
+            "README should exist in repo"
+        );
 
         // Verify we're at the correct commit
         let result = sandbox.exec("cd /repo && git rev-parse HEAD", 10_000).await;
         assert_eq!(result.exit_code, 0, "Git command should succeed");
-        assert!(result.stdout.contains(known_commit), "Should be at the specified commit");
+        assert!(
+            result.stdout.contains(known_commit),
+            "Should be at the specified commit"
+        );
 
         sandbox.destroy().await;
     }
@@ -972,7 +1053,9 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Write multiple files
         let files = vec![
@@ -990,11 +1073,18 @@ mod tests {
         for (path, expected_content) in &files {
             let result = sandbox.read_file(path).await;
             assert!(result.is_ok(), "Should read {} successfully", path);
-            assert_eq!(result.unwrap(), *expected_content, "Content should match for {}", path);
+            assert_eq!(
+                result.unwrap(),
+                *expected_content,
+                "Content should match for {}",
+                path
+            );
         }
 
         // List all files in repo
-        let result = sandbox.exec("find /repo -type f -name '*.txt' | sort", 10_000).await;
+        let result = sandbox
+            .exec("find /repo -type f -name '*.txt' | sort", 10_000)
+            .await;
         assert_eq!(result.exit_code, 0);
         assert!(result.stdout.contains("file1.txt"));
         assert!(result.stdout.contains("file2.txt"));
@@ -1015,12 +1105,22 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Test command with special characters
-        let result = sandbox.exec("echo 'Hello $USER! This is a test with > < & | ;'", 10_000).await;
-        assert_eq!(result.exit_code, 0, "Command with special chars should succeed");
-        assert!(result.stdout.contains("Hello"), "Output should contain 'Hello'");
+        let result = sandbox
+            .exec("echo 'Hello $USER! This is a test with > < & | ;'", 10_000)
+            .await;
+        assert_eq!(
+            result.exit_code, 0,
+            "Command with special chars should succeed"
+        );
+        assert!(
+            result.stdout.contains("Hello"),
+            "Output should contain 'Hello'"
+        );
 
         sandbox.destroy().await;
     }
@@ -1037,7 +1137,9 @@ mod tests {
             "",
             "python",
             Some("python:3.12-slim"),
-        ).await.expect("Failed to create sandbox");
+        )
+        .await
+        .expect("Failed to create sandbox");
 
         // Check that memory limit is set (32g from the code)
         let result = sandbox.exec("cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory.limit_in_bytes 2>/dev/null || echo 'unlimited'", 10_000).await;

@@ -955,5 +955,3 @@ fn validate_test_scripts(files: &[TestFile]) -> Option<String> {
         ))
     }
 }
-
-

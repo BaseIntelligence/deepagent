@@ -234,7 +234,11 @@ async fn llm_diagnose_failure(
                     }
                 }
             }
-            tracing::warn!(task_id = task_id, cmd = cmd, "LLM diagnosis returned no usable result, assuming real failure");
+            tracing::warn!(
+                task_id = task_id,
+                cmd = cmd,
+                "LLM diagnosis returned no usable result, assuming real failure"
+            );
             false
         }
         Err(e) => {
@@ -357,15 +361,16 @@ impl WorkspaceValidator {
             match self.run_install_agent(sandbox, task, llm).await {
                 Ok(cmds) if !cmds.is_empty() => {
                     let combined = cmds.join(" && ");
-                    task.install_config
-                        .insert("install".to_string(), combined);
+                    task.install_config.insert("install".to_string(), combined);
                     // Remove runtime version keys -- the install agent includes
                     // runtime setup in its commands already.
                     for key in &["go", "node", "rust", "java"] {
                         task.install_config.remove(*key);
                     }
-                    task.meta
-                        .insert("install_source".to_string(), "llm-install-agent".to_string());
+                    task.meta.insert(
+                        "install_source".to_string(),
+                        "llm-install-agent".to_string(),
+                    );
                     tracing::info!(task_id = %task.id, "Install agent succeeded");
                 }
                 Ok(_) => {
@@ -412,7 +417,9 @@ impl WorkspaceValidator {
             // No LLM: run static install commands
             let runtime_cmds = SweTask::runtime_install_commands(&task.install_config);
             if !runtime_cmds.is_empty() {
-                let r = sandbox.exec(&format!("{} 2>&1", runtime_cmds), 300_000).await;
+                let r = sandbox
+                    .exec(&format!("{} 2>&1", runtime_cmds), 300_000)
+                    .await;
                 if r.exit_code != 0 {
                     tracing::warn!(task_id = %task.id, "Runtime install failed (continuing)");
                 }
@@ -745,18 +752,15 @@ impl WorkspaceValidator {
                 match self.run_verify_agent(&verify_sandbox, task, llm).await {
                     Ok(new_cmds) if !new_cmds.is_empty() => {
                         let combined = new_cmds.join(" && ");
-                        task.install_config
-                            .insert("install".to_string(), combined);
+                        task.install_config.insert("install".to_string(), combined);
                         // Remove runtime version keys so replay_install doesn't
                         // run conflicting runtime_install_commands -- the verify
                         // agent already includes runtime setup in its commands.
                         for key in &["go", "node", "rust", "java"] {
                             task.install_config.remove(*key);
                         }
-                        task.meta.insert(
-                            "install_source".to_string(),
-                            "llm-verify-agent".to_string(),
-                        );
+                        task.meta
+                            .insert("install_source".to_string(), "llm-verify-agent".to_string());
                         tracing::info!(
                             task_id = %task.id, cycle = cycle + 1,
                             "Verify agent submitted corrected install commands"
@@ -824,7 +828,10 @@ impl WorkspaceValidator {
 
             match base_result {
                 TestRunResult::Ok => {}
-                TestRunResult::EnvironmentBroken { ref cmd, ref diagnosis } => {
+                TestRunResult::EnvironmentBroken {
+                    ref cmd,
+                    ref diagnosis,
+                } => {
                     tracing::warn!(
                         task_id = %task.id, cycle = cycle + 1,
                         cmd = %cmd, diagnosis = %diagnosis,
@@ -832,7 +839,10 @@ impl WorkspaceValidator {
                     );
                     continue;
                 }
-                TestRunResult::RealFailure { ref cmd, ref detail } => {
+                TestRunResult::RealFailure {
+                    ref cmd,
+                    ref detail,
+                } => {
                     tracing::warn!(
                         task_id = %task.id, cycle = cycle + 1,
                         cmd = %cmd, detail = %detail,
@@ -892,14 +902,20 @@ impl WorkspaceValidator {
                     );
                     return Ok(ValidationOutcome::Passed);
                 }
-                TestRunResult::EnvironmentBroken { ref cmd, ref diagnosis } => {
+                TestRunResult::EnvironmentBroken {
+                    ref cmd,
+                    ref diagnosis,
+                } => {
                     tracing::warn!(
                         task_id = %task.id, cycle = cycle + 1,
                         cmd = %cmd, diagnosis = %diagnosis,
                         "Patched tests: LLM detected broken environment, retrying with verify agent"
                     );
                 }
-                TestRunResult::RealFailure { ref cmd, ref detail } => {
+                TestRunResult::RealFailure {
+                    ref cmd,
+                    ref detail,
+                } => {
                     tracing::warn!(
                         task_id = %task.id, cycle = cycle + 1,
                         cmd = %cmd, detail = %detail,
@@ -910,10 +926,7 @@ impl WorkspaceValidator {
         }
 
         Ok(ValidationOutcome::Rejected {
-            reason: format!(
-                "Failed after {} fresh-container cycles",
-                MAX_FRESH_CYCLES,
-            ),
+            reason: format!("Failed after {} fresh-container cycles", MAX_FRESH_CYCLES,),
         })
     }
 
@@ -979,10 +992,7 @@ impl WorkspaceValidator {
             submit_verified_install_tool(),
         ];
 
-        let mut messages = vec![
-            Message::system(system_prompt),
-            Message::user(user_msg),
-        ];
+        let mut messages = vec![Message::system(system_prompt), Message::user(user_msg)];
 
         for turn in 0..MAX_VERIFY_AGENT_TURNS {
             let request = GenerationRequest {
@@ -1076,9 +1086,8 @@ impl WorkspaceValidator {
                                 test_tools_verified: bool,
                             }
 
-                            match serde_json::from_str::<SubmitVerifiedArgs>(
-                                &tc.function.arguments,
-                            ) {
+                            match serde_json::from_str::<SubmitVerifiedArgs>(&tc.function.arguments)
+                            {
                                 Ok(args) => {
                                     if args.install_commands.is_empty() {
                                         messages.push(Message::tool_result(
@@ -1155,7 +1164,9 @@ impl WorkspaceValidator {
         // Runtime install
         let runtime_cmds = SweTask::runtime_install_commands(&task.install_config);
         if !runtime_cmds.is_empty() {
-            let r = sandbox.exec(&format!("{} 2>&1", runtime_cmds), 300_000).await;
+            let r = sandbox
+                .exec(&format!("{} 2>&1", runtime_cmds), 300_000)
+                .await;
             if r.exit_code != 0 {
                 tracing::warn!(
                     task_id = %task.id,
@@ -1214,7 +1225,8 @@ impl WorkspaceValidator {
                     );
                     return TestRunResult::EnvironmentBroken {
                         cmd: cmd.clone(),
-                        diagnosis: "f2p fails due to broken environment, not test logic".to_string(),
+                        diagnosis: "f2p fails due to broken environment, not test logic"
+                            .to_string(),
                     };
                 }
             }
@@ -1323,7 +1335,8 @@ impl WorkspaceValidator {
                         );
                         return TestRunResult::EnvironmentBroken {
                             cmd: cmd.clone(),
-                            diagnosis: "f2p fails due to broken environment after patch".to_string(),
+                            diagnosis: "f2p fails due to broken environment after patch"
+                                .to_string(),
                         };
                     }
                 }
@@ -1358,7 +1371,8 @@ impl WorkspaceValidator {
                         );
                         return TestRunResult::EnvironmentBroken {
                             cmd: cmd.clone(),
-                            diagnosis: "p2p fails due to broken environment after patch".to_string(),
+                            diagnosis: "p2p fails due to broken environment after patch"
+                                .to_string(),
                         };
                     }
                 }

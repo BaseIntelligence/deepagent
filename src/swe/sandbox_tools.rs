@@ -199,7 +199,12 @@ pub async fn dispatch_tool(
                 shell_fallback(sandbox, tool_name, args_json).await
             };
 
-            tracing::debug!(task_id = task_id, turn = turn, tool = tool_name, "Agent tool call");
+            tracing::debug!(
+                task_id = task_id,
+                turn = turn,
+                tool = tool_name,
+                "Agent tool call"
+            );
             ToolOutput::Text(truncate_utf8(&output, 4000).to_string())
         }
         other => ToolOutput::Error(format!("Unknown tool: {}", other)),

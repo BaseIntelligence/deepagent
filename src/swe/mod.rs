@@ -313,7 +313,11 @@ impl SweTask {
         match language.to_lowercase().as_str() {
             "python" => {
                 map.insert("python".to_string(), "3.11".to_string());
-                map.insert("install".to_string(), "pip install --break-system-packages -e . 2>&1 || pip install -e . 2>&1".to_string());
+                map.insert(
+                    "install".to_string(),
+                    "pip install --break-system-packages -e . 2>&1 || pip install -e . 2>&1"
+                        .to_string(),
+                );
                 map.insert("test_cmd".to_string(), "pytest".to_string());
             }
             "javascript" | "typescript" | "js" | "ts" => {
@@ -360,9 +364,17 @@ impl SweTask {
         let mut cmds: Vec<String> = Vec::new();
 
         if let Some(go_ver) = install_config.get("go") {
-            let v = if go_ver.starts_with("1.") { go_ver.as_str() } else { "1.23.0" };
+            let v = if go_ver.starts_with("1.") {
+                go_ver.as_str()
+            } else {
+                "1.23.0"
+            };
             // Normalize: "1.22" -> "1.22.0"
-            let v = if v.matches('.').count() == 1 { format!("{v}.0") } else { v.to_string() };
+            let v = if v.matches('.').count() == 1 {
+                format!("{v}.0")
+            } else {
+                v.to_string()
+            };
             cmds.push(format!(
                 "rm -rf /usr/local/go && \
                  curl -fsSL https://go.dev/dl/go{v}.linux-amd64.tar.gz | tar -C /usr/local -xzf - && \
@@ -383,7 +395,8 @@ impl SweTask {
         if let Some(_rust_ver) = install_config.get("rust") {
             cmds.push(
                 "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && \
-                 export PATH=$HOME/.cargo/bin:$PATH".to_string()
+                 export PATH=$HOME/.cargo/bin:$PATH"
+                    .to_string(),
             );
         }
 

@@ -617,11 +617,11 @@ async fn run_swe_fix_tasks_command(args: SweFixTasksArgs) -> anyhow::Result<()> 
     if let Some(ref filter_id) = args.task_id {
         task_dirs.retain(|p| {
             let dir_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let rel = p.strip_prefix(input_dir)
+            let rel = p
+                .strip_prefix(input_dir)
                 .map(|r| r.to_string_lossy().to_string())
                 .unwrap_or_default();
-            dir_name == filter_id.as_str()
-                || rel.contains(filter_id.as_str())
+            dir_name == filter_id.as_str() || rel.contains(filter_id.as_str())
         });
     }
 
@@ -640,7 +640,11 @@ async fn run_swe_fix_tasks_command(args: SweFixTasksArgs) -> anyhow::Result<()> 
 
     let parallel = args.parallel.max(1);
     let dry_run = args.dry_run;
-    info!(count = task_dirs.len(), parallel = parallel, "Found tasks to check");
+    info!(
+        count = task_dirs.len(),
+        parallel = parallel,
+        "Found tasks to check"
+    );
 
     let validator = Arc::new(validator);
 
@@ -677,7 +681,14 @@ async fn run_swe_fix_tasks_command(args: SweFixTasksArgs) -> anyhow::Result<()> 
         let ok = results.iter().filter(|r| r.status == "ok").count();
         let fixed = results.iter().filter(|r| r.status == "fixed").count();
         let failed = results.iter().filter(|r| r.status == "failed").count();
-        info!(done = done, total = total, ok = ok, fixed = fixed, failed = failed, "Progress");
+        info!(
+            done = done,
+            total = total,
+            ok = ok,
+            fixed = fixed,
+            failed = failed,
+            "Progress"
+        );
     }
 
     let ok_count = results.iter().filter(|r| r.status == "ok").count();

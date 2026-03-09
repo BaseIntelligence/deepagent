@@ -105,7 +105,11 @@ pub fn tasks_to_record_batch(tasks: &[SweTask]) -> anyhow::Result<RecordBatch> {
             env_setup_commit.append_value(&env_commit);
         }
 
-        let install_cmd = task.install_config.get("install").cloned().unwrap_or_default();
+        let install_cmd = task
+            .install_config
+            .get("install")
+            .cloned()
+            .unwrap_or_default();
         if install_cmd.is_empty() {
             install.append_null();
         } else {
@@ -324,7 +328,8 @@ pub fn read_parquet(input_path: &Path) -> anyhow::Result<Vec<SweTask>> {
 
             if let Some(ref inst) = installs[i] {
                 if !inst.is_empty() {
-                    task.install_config.insert("install".to_string(), inst.clone());
+                    task.install_config
+                        .insert("install".to_string(), inst.clone());
                 }
             }
 
