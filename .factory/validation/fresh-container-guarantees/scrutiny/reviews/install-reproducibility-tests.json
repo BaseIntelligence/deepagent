@@ -1,0 +1,58 @@
+{
+  "featureId": "install-reproducibility-tests",
+  "reviewedAt": "2026-03-09T12:05:00Z",
+  "commitId": "c36c4ed1786554fa3f6d234b95818ab9c4d3e12a",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "Comprehensive, well-structured test suite for install reproducibility. The implementation includes 8 tests covering core VAL-FRESH-002 requirements plus edge cases. Test code follows existing patterns in docker_sandbox.rs with proper helper functions, good documentation, and appropriate assertions. All tests pass (435 total).",
+    "issues": []
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "Tests use --break-system-packages flag for pip installs in Docker containers. This is a pragmatic choice for test containers but could be noted as a testing-specific pattern in AGENTS.md to avoid confusion with production code patterns.",
+      "evidence": "src/swe/docker_sandbox.rs:1664-1665 - pip install --break-system-packages used in test_python_package_reproducibility"
+    },
+    {
+      "area": "conventions",
+      "observation": "The worker uses a consistent pattern of checking docker_available() at test start and returning early if Docker is unavailable. This is a good defensive pattern that could be documented as a testing convention.",
+      "evidence": "src/swe/docker_sandbox.rs:1498-1502, 1559-1563 - All tests follow this pattern consistently"
+    }
+  ],
+  "coverage": {
+    "VAL-FRESH-002": {
+      "assertion": "Install commands produce the same environment when replayed in fresh containers",
+      "evidence": "test_install_reproducibility_basic (lines 1489-1549) records commands in container 1, replays in container 2, verifies tool paths identical; test_install_reproducibility_multiple_containers (lines 1702-1773) extends this to 3 containers with path equivalence verification",
+      "coverage": "complete"
+    },
+    "idempotency": {
+      "assertion": "Install commands are idempotent",
+      "evidence": "test_install_idempotency (lines 1551-1594) verifies curl version identical after two identical install commands",
+      "coverage": "complete"
+    },
+    "python_packages": {
+      "assertion": "Python pip packages are reproducible across containers",
+      "evidence": "test_python_package_reproducibility (lines 1596-1660) verifies requests package version identical across fresh containers",
+      "coverage": "complete"
+    },
+    "failed_command_filtering": {
+      "assertion": "Only successful commands recorded (failed commands excluded)",
+      "evidence": "test_install_reproducibility_failed_commands_excluded (lines 1662-1700) mixes successful and failing commands, verifies only 2 of 3 recorded",
+      "coverage": "complete"
+    },
+    "complex_sequences": {
+      "assertion": "Complex multi-step installs are reproducible",
+      "evidence": "test_install_reproducibility_complex_sequence (lines 1775-1852) tests 4-step sequence with system deps, Python tools, testing framework, linters",
+      "coverage": "complete"
+    },
+    "edge_cases": {
+      "assertion": "Empty commands and environment variables handled correctly",
+      "evidence": "test_install_reproducibility_empty_commands (lines 1854-1880) tests empty vec; test_install_reproducibility_with_env_vars (lines 1882-1930) tests DEBIAN_FRONTEND preservation",
+      "coverage": "complete"
+    }
+  },
+  "summary": "The install-reproducibility-tests feature is well-implemented and fully covers VAL-FRESH-002. The 8 tests added to src/swe/docker_sandbox.rs provide comprehensive coverage: basic replay verification, idempotency, Python packages, failed command filtering, multiple container equivalence, complex sequences, empty commands, and environment variable handling. All tests follow the established patterns in the codebase, use appropriate helper functions, have clear doc comments, and verify tool availability with path-level assertions. The tests properly clean up containers after use. All 435 tests pass. No blocking or non-blocking issues identified."
+}
+</invoke>

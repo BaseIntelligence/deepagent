@@ -1,0 +1,46 @@
+{
+  "milestone": "fresh-container-guarantees",
+  "round": 1,
+  "status": "pass",
+  "validatorsRun": {
+    "test": { "passed": true, "command": "cargo test --lib", "exitCode": 0, "testCount": 435 },
+    "typecheck": { "passed": true, "command": "cargo clippy --all-targets --all-features -- -D warnings", "exitCode": 0 },
+    "lint": { "passed": true, "command": "cargo fmt --all -- --check", "exitCode": 0 }
+  },
+  "reviewsSummary": {
+    "total": 2,
+    "passed": 2,
+    "failed": 0,
+    "failedFeatures": []
+  },
+  "blockingIssues": [],
+  "appliedUpdates": [
+    {
+      "target": "src/swe/docker_sandbox.rs",
+      "description": "Fixed clippy expect_fun_call warning: changed .expect(&format!()) to .unwrap_or_else(|_| panic!())",
+      "sourceFeature": "scrutiny-validator"
+    }
+  ],
+  "suggestedGuidanceUpdates": [
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document the pattern of using pinned commits from well-known public repos (e.g., octocat/Hello-World@7fd1a60b) for Docker integration tests as a best practice.",
+      "evidence": "Both fresh-container-tests and install-reproducibility-tests use octocat/Hello-World with a specific commit hash for reproducible Docker tests.",
+      "isSystemic": true
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Document the defensive pattern of checking docker_available() at test start and returning early if Docker is unavailable.",
+      "evidence": "All Docker integration tests in src/swe/docker_sandbox.rs follow this pattern consistently.",
+      "isSystemic": false
+    },
+    {
+      "target": "AGENTS.md",
+      "suggestion": "Note that --break-system-packages flag for pip installs is acceptable in Docker test containers but should not be used in production code.",
+      "evidence": "test_python_package_reproducibility uses pip install --break-system-packages for pragmatic testing.",
+      "isSystemic": false
+    }
+  ],
+  "rejectedObservations": [],
+  "previousRound": null
+}

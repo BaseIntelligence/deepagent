@@ -1,0 +1,73 @@
+{
+  "featureId": "fresh-container-tests",
+  "reviewedAt": "2026-03-09T11:45:00.000Z",
+  "commitId": "40c2478",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The fresh-container-tests feature successfully implements 4 comprehensive integration tests that verify fresh container guarantees. The tests are well-structured, properly documented, and effectively validate the expected behaviors for VAL-FRESH-001, VAL-FRESH-003, and VAL-FRESH-004. All tests follow the established patterns in docker_sandbox.rs, include proper Docker availability checks, and ensure container cleanup.",
+    "issues": [
+      {
+        "file": "src/swe/docker_sandbox.rs",
+        "line": 1285,
+        "severity": "non_blocking",
+        "description": "In test_fresh_container_no_install_leakage, the stderr assertion 'check_result.stderr.contains(\"no curl\") || check_result.stderr.is_empty()' is fragile. The 'which' command typically doesn't output anything to stderr when a command is not found - it simply returns exit code 1 with empty stdout. The assertion could be simplified to just check exit_code != 0 and stdout.is_empty()."
+      },
+      {
+        "file": "src/swe/docker_sandbox.rs",
+        "line": 1208,
+        "severity": "non_blocking",
+        "description": "The get_container_id helper function is defined inside test_fresh_container_different_ids. While this works for a single test, it limits reusability. Consider moving it to the module-level test helpers if other tests need container ID inspection in the future."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The tests use '2>&1' redirection pattern in exec commands (e.g., line 1284) which is appropriate for capturing stderr, but this pattern isn't documented in AGENTS.md as a recommended approach for command testing.",
+      "evidence": "src/swe/docker_sandbox.rs:1284 - 'let check_result = sandbox2.exec(\"which curl 2>&1\", 10_000).await;'"
+    },
+    {
+      "area": "patterns",
+      "observation": "The worker correctly used the existing docker_available() and container_exists() helper functions from the test module, demonstrating good understanding of the existing test infrastructure.",
+      "evidence": "All 4 tests use 'if !docker_available().await { return; }' pattern consistent with other tests in the file."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The tests use octocat/Hello-World as a test repository with a specific known commit (7fd1a60b01f91b314f59955a4e4d4e80d8edf11d). This pattern of using well-known public repos with pinned commits should be documented as a best practice for Docker integration tests.",
+      "evidence": "src/swe/docker_sandbox.rs:1298 - 'let known_commit = \"7fd1a60b01f91b314f59955a4e4d4e80d8edf11d\";'"
+    }
+  ],
+  "coverage": {
+    "VAL-FRESH-001": {
+      "status": "fully_covered",
+      "test": "test_fresh_container_different_ids",
+      "evidence": "Creates two containers sequentially, verifies unique names using container_name1 != container_name2, and verifies unique IDs using docker inspect. This directly validates that each validation cycle uses brand new containers."
+    },
+    "VAL-FRESH-003": {
+      "status": "fully_covered",
+      "test": "test_fresh_container_no_file_leakage, test_fresh_container_no_install_leakage",
+      "evidence": "test_fresh_container_no_file_leakage: Writes file in container 1, destroys it, creates container 2, verifies file doesn't exist using 'test -f' command. test_fresh_container_no_install_leakage: Installs curl in container 1, destroys it, creates container 2, verifies curl not available using 'which curl'. Both tests comprehensively validate no state leakage between containers."
+    },
+    "VAL-FRESH-004": {
+      "status": "fully_covered",
+      "test": "test_fresh_container_clean_git_checkout",
+      "evidence": "Creates container at specific commit, verifies clean git status with 'git status --porcelain', verifies correct commit with 'git rev-parse HEAD', dirties the repo with a file, destroys container, creates new container, verifies clean state again. This validates each fresh container starts with a clean repository checkout at the base commit."
+    }
+  },
+  "testQuality": {
+    "strengths": [
+      "Tests follow clear Arrange-Act-Assert pattern",
+      "Proper Docker availability guards prevent false failures in non-Docker environments",
+      "Explicit container cleanup with destroy() calls ensures no resource leaks",
+      "Descriptive assertion messages make debugging easier",
+      "Tests use realistic scenarios (file writes, package installs, git operations)"
+    ],
+    "suggestions": [
+      "Consider adding timeout assertions to ensure container operations complete within expected timeframes",
+      "The install leakage test could be made more robust by checking multiple packages or using a package that doesn't require apt update"
+    ]
+  },
+  "summary": "The fresh-container-tests feature successfully delivers high-quality integration tests that thoroughly validate the fresh container guarantees. All 4 tests pass, properly cleanup resources, and effectively cover the validation assertions VAL-FRESH-001, VAL-FRESH-003, and VAL-FRESH-004. The code follows established patterns, includes comprehensive assertions, and provides good test documentation. Minor non-blocking issues exist around assertion fragility and helper function placement, but these do not impact the overall quality or correctness of the tests. The feature should be approved for merge."
+}

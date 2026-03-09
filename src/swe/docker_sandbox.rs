@@ -1815,7 +1815,7 @@ mod tests {
                 Some("python:3.12-slim"),
             )
             .await
-            .expect(&format!("Failed to create sandbox {}", i));
+            .unwrap_or_else(|_| panic!("Failed to create sandbox {}", i));
             containers.push(sandbox);
         }
 
