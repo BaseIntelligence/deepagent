@@ -1,6 +1,6 @@
 {
   "milestone": "fresh-container-guarantees",
-  "round": 1,
+  "round": 2,
   "status": "pass",
   "validatorsRun": {
     "test": { "passed": true, "command": "cargo test --lib", "exitCode": 0, "testCount": 435 },
@@ -14,13 +14,7 @@
     "failedFeatures": []
   },
   "blockingIssues": [],
-  "appliedUpdates": [
-    {
-      "target": "src/swe/docker_sandbox.rs",
-      "description": "Fixed clippy expect_fun_call warning: changed .expect(&format!()) to .unwrap_or_else(|_| panic!())",
-      "sourceFeature": "scrutiny-validator"
-    }
-  ],
+  "appliedUpdates": [],
   "suggestedGuidanceUpdates": [
     {
       "target": "AGENTS.md",
@@ -42,5 +36,5 @@
     }
   ],
   "rejectedObservations": [],
-  "previousRound": null
+  "previousRound": ".factory/validation/fresh-container-guarantees/scrutiny/synthesis.json"
 }
