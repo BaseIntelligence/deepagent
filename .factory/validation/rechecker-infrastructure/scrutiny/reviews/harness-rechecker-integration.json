@@ -1,0 +1,50 @@
+{
+  "featureId": "harness-rechecker-integration",
+  "reviewedAt": "2026-03-09T19:20:00Z",
+  "commitId": "30073c0",
+  "transcriptSkeletonReviewed": true,
+  "diffReviewed": true,
+  "status": "pass",
+  "codeReview": {
+    "summary": "The harness-rechecker-integration feature successfully implements automatic retry logic for failed installations during task execution. The implementation adds a `rechecker_max_attempts` field to `HarnessConfig` (default: 3), detects setup errors during dependency installation, and uses the rechecker's `get_next_install_attempt()` method to iteratively try alternative install strategies. On successful fix, the harness continues to test execution; on failure after max attempts, it returns a SetupError. The integration is clean and well-tested.",
+    "issues": [
+      {
+        "file": "src/swe/harness.rs",
+        "line": 354,
+        "severity": "non_blocking",
+        "description": "The rechecker integration does not persist the successful alternative install command back to the task's install_config. The `rechecker_fix_applied` flag tracks that a fix worked, but the task metadata is not updated with the working command. This means the fix is ephemeral for this run only - if the task is re-run later, it will start with the original broken command again. Consider updating task.install_config after a successful fix."
+      },
+      {
+        "file": "src/swe/harness.rs",
+        "line": 381,
+        "severity": "non_blocking",
+        "description": "Container restart logic duplicates code from lines 318-335 (initial container creation). This duplication could be refactored into a helper function like `restart_container(&cname, &docker_image)` to reduce code duplication and improve maintainability."
+      },
+      {
+        "file": "src/swe/harness.rs",
+        "line": 360,
+        "severity": "non_blocking",
+        "description": "The setup error detection only checks if install command exit code != 0. While functional, it could be enhanced to detect specific error patterns (e.g., 'command not found', 'permission denied') to better categorize errors before invoking rechecker. The rechecker does have error type detection but the harness doesn't leverage it for early filtering."
+      }
+    ]
+  },
+  "sharedStateObservations": [
+    {
+      "area": "conventions",
+      "observation": "The worker followed AGENTS.md conventions correctly: used tracing for logging (not println), used typed errors via thiserror (RecheckerError), used Arc<dyn> for async Send+Sync compatibility, and added proper documentation comments. No convention gaps identified.",
+      "evidence": "src/swe/harness.rs:354-499 - All logging uses tracing::info/tracing::warn. Error handling uses proper Result types. Async code uses standard tokio patterns."
+    },
+    {
+      "area": "skills",
+      "observation": "The worker followed the rust-dev-worker skill procedure correctly: read existing code, designed the solution, wrote tests first (3 new config tests), implemented the integration, and verified with full test suite. The skillFeedback in the handoff confirms followedProcedure: true.",
+      "evidence": "Handoff file shows: test_harness_config_default, test_harness_config_rechecker_disabled, test_harness_config_custom_rechecker_attempts were added. All 454 tests passed."
+    },
+    {
+      "area": "knowledge",
+      "observation": "The rechecker module uses a BTreeMap for install_config (not HashMap) for deterministic serialization as specified in AGENTS.md DO's section. This convention was correctly followed.",
+      "evidence": "src/swe/rechecker.rs uses BTreeMap consistently for install_config operations."
+    }
+  ],
+  "addressesFailureFrom": null,
+  "summary": "The harness-rechecker-integration feature is well-implemented and passes review. It adds the required rechecker_max_attempts field to HarnessConfig, implements retry logic for SetupError in evaluate_task, uses get_next_install_attempt() for iterative fixes, and continues to test execution after successful fixes. The implementation includes 3 comprehensive tests for the new configuration options. Three non-blocking issues were identified: (1) successful fixes aren't persisted to task metadata, (2) some container restart code is duplicated, and (3) error detection could be more sophisticated. These are minor improvements and don't block the feature from shipping."
+}
