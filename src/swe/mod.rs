@@ -25,6 +25,7 @@ pub mod pr_cache;
 pub mod progress;
 pub mod prompt_rewriter;
 pub mod quality;
+pub mod rechecker;
 pub mod sandbox_tools;
 pub mod test_generator;
 pub mod tool_server;
@@ -41,6 +42,7 @@ pub use pr_cache::{OptionalCache, PrCache, PrCacheEntry};
 pub use progress::{ProgressCounters, ProgressMonitor, ProgressSnapshot};
 pub use prompt_rewriter::PromptRewriter;
 pub use quality::{QualityAssessment, QualityConfig, QualityScorer};
+pub use rechecker::{RecheckResult, Rechecker, RecheckerConfig, ErrorType};
 pub use test_generator::{TestFile, TestGenerator};
 pub use workspace_validator::{ValidationOutcome, WorkspaceValidator};
 

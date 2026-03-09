@@ -300,3 +300,25 @@ pub enum ExportError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 }
+
+/// Errors that can occur during rechecker operations.
+#[derive(Debug, Error)]
+pub enum RecheckerError {
+    #[error("Task is incorrigible after {attempts} fix attempts: {reason}")]
+    Incorrigible { attempts: u32, reason: String },
+
+    #[error("Invalid install configuration: {0}")]
+    InvalidConfig(String),
+
+    #[error("Fix strategy generation failed: {0}")]
+    StrategyGenerationFailed(String),
+
+    #[error("Max attempts ({0}) reached without success")]
+    MaxAttemptsReached(u32),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+}
