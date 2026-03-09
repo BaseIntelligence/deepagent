@@ -1476,4 +1476,576 @@ mod tests {
 
         sandbox2.destroy().await;
     }
+
+    // =========================================================================
+    // Install Reproducibility Tests (VAL-FRESH-002)
+    // =========================================================================
+
+    /// Helper: Run a set of install commands and return the ones that succeeded
+    async fn record_install_commands(sandbox: &DockerSandbox, commands: &[String]) -> Vec<String> {
+        let mut successful = Vec::new();
+        for cmd in commands {
+            let result = sandbox.exec(cmd, 120_000).await;
+            if result.exit_code == 0 {
+                successful.push(cmd.clone());
+            }
+        }
+        successful
+    }
+
+    /// Helper: Replay install commands in a fresh container and verify all succeed
+    async fn replay_install_commands(sandbox: &DockerSandbox, commands: &[String]) -> bool {
+        for cmd in commands {
+            let result = sandbox.exec(cmd, 120_000).await;
+            if result.exit_code != 0 {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// VAL-FRESH-002: Install commands produce the same environment when replayed in fresh containers
+    /// - Record successful install commands from first container
+    /// - Replay in fresh container
+    /// - Verify same tools are available
+    #[tokio::test]
+    async fn test_install_reproducibility_basic() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create first container (source environment)
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        // Define install commands to test
+        let install_commands = vec![
+            "apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1".to_string(),
+            "apt-get install -y -qq jq > /dev/null 2>&1".to_string(),
+        ];
+
+        // Record successful commands from first container
+        let recorded = record_install_commands(&sandbox1, &install_commands).await;
+        assert!(
+            !recorded.is_empty(),
+            "Should have recorded some successful install commands"
+        );
+
+        // Verify tools are available in first container
+        let curl_check1 = sandbox1.exec("which curl", 10_000).await;
+        let jq_check1 = sandbox1.exec("which jq", 10_000).await;
+        assert_eq!(
+            curl_check1.exit_code, 0,
+            "curl should be in first container"
+        );
+        assert_eq!(jq_check1.exit_code, 0, "jq should be in first container");
+
+        // Destroy first container
+        sandbox1.destroy().await;
+
+        // Create second container (fresh)
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        // Replay recorded commands in fresh container
+        let replay_success = replay_install_commands(&sandbox2, &recorded).await;
+        assert!(
+            replay_success,
+            "All recorded commands should succeed in fresh container"
+        );
+
+        // Verify same tools are available in second container
+        let curl_check2 = sandbox2.exec("which curl", 10_000).await;
+        let jq_check2 = sandbox2.exec("which jq", 10_000).await;
+        assert_eq!(
+            curl_check2.exit_code, 0,
+            "curl should be available in second container after replay"
+        );
+        assert_eq!(
+            jq_check2.exit_code, 0,
+            "jq should be available in second container after replay"
+        );
+
+        // Verify tool paths are identical
+        assert_eq!(
+            curl_check1.stdout.trim(),
+            curl_check2.stdout.trim(),
+            "curl path should be identical in both containers"
+        );
+        assert_eq!(
+            jq_check1.stdout.trim(),
+            jq_check2.stdout.trim(),
+            "jq path should be identical in both containers"
+        );
+
+        sandbox2.destroy().await;
+    }
+
+    /// Test: Install commands are idempotent - running same commands twice produces same result
+    #[tokio::test]
+    async fn test_install_idempotency() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        let sandbox = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create sandbox");
+
+        // Install curl
+        let install_cmd = "apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1";
+        let result1 = sandbox.exec(install_cmd, 120_000).await;
+        assert_eq!(result1.exit_code, 0, "First install should succeed");
+
+        // Check curl version after first install
+        let version1 = sandbox.exec("curl --version | head -1", 10_000).await;
+        assert_eq!(
+            version1.exit_code, 0,
+            "curl should work after first install"
+        );
+
+        // Run same install command again (idempotency test)
+        let result2 = sandbox.exec(install_cmd, 120_000).await;
+        assert_eq!(
+            result2.exit_code, 0,
+            "Second install should also succeed (idempotent)"
+        );
+
+        // Check curl version after second install - should be same
+        let version2 = sandbox.exec("curl --version | head -1", 10_000).await;
+        assert_eq!(
+            version1.stdout.trim(),
+            version2.stdout.trim(),
+            "Tool version should be identical after reinstall (idempotent)"
+        );
+
+        sandbox.destroy().await;
+    }
+
+    /// Test: Python package installation reproducibility
+    #[tokio::test]
+    async fn test_python_package_reproducibility() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create first container
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        // Record Python package installs
+        let pip_commands = vec![
+            "pip install --break-system-packages requests 2>&1".to_string(),
+            "pip install --break-system-packages pytest 2>&1".to_string(),
+        ];
+
+        let recorded = record_install_commands(&sandbox1, &pip_commands).await;
+        assert_eq!(
+            recorded.len(),
+            2,
+            "Both pip commands should succeed in first container"
+        );
+
+        // Verify packages are available
+        let requests_check1 = sandbox1
+            .exec(
+                "python3 -c 'import requests; print(requests.__version__)'",
+                10_000,
+            )
+            .await;
+        let pytest_check1 = sandbox1.exec("which pytest", 10_000).await;
+        assert_eq!(
+            requests_check1.exit_code, 0,
+            "requests should be importable"
+        );
+        assert_eq!(pytest_check1.exit_code, 0, "pytest should be available");
+
+        // Record package versions
+        let requests_version1 = requests_check1.stdout.trim().to_string();
+
+        sandbox1.destroy().await;
+
+        // Create fresh container and replay
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        let replay_success = replay_install_commands(&sandbox2, &recorded).await;
+        assert!(
+            replay_success,
+            "All pip commands should succeed in fresh container"
+        );
+
+        // Verify packages in second container
+        let requests_check2 = sandbox2
+            .exec(
+                "python3 -c 'import requests; print(requests.__version__)'",
+                10_000,
+            )
+            .await;
+        let pytest_check2 = sandbox2.exec("which pytest", 10_000).await;
+        assert_eq!(
+            requests_check2.exit_code, 0,
+            "requests should be importable in fresh container"
+        );
+        assert_eq!(
+            pytest_check2.exit_code, 0,
+            "pytest should be available in fresh container"
+        );
+
+        // Verify same versions
+        let requests_version2 = requests_check2.stdout.trim().to_string();
+        assert_eq!(
+            requests_version1, requests_version2,
+            "Package versions should be identical in both containers"
+        );
+
+        sandbox2.destroy().await;
+    }
+
+    /// Test: Only successful commands should be recorded (failed commands should not leak)
+    #[tokio::test]
+    async fn test_install_reproducibility_failed_commands_excluded() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        let sandbox = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create sandbox");
+
+        // Mix of commands - some succeed, some fail
+        let mixed_commands = vec![
+            "apt-get update -qq > /dev/null 2>&1".to_string(), // Succeeds
+            "apt-get install -y -qq nonexistent-package-xyz123 2>&1".to_string(), // Fails
+            "apt-get install -y -qq curl > /dev/null 2>&1".to_string(), // Succeeds
+        ];
+
+        let recorded = record_install_commands(&sandbox, &mixed_commands).await;
+
+        // Should only record successful commands
+        assert_eq!(
+            recorded.len(),
+            2,
+            "Should only record 2 successful commands"
+        );
+        assert!(
+            recorded[0].contains("apt-get update"),
+            "First recorded should be apt-get update"
+        );
+        assert!(
+            recorded[1].contains("curl"),
+            "Second recorded should be curl install"
+        );
+
+        sandbox.destroy().await;
+    }
+
+    /// Test: Multiple fresh containers from same recorded commands produce equivalent environments
+    #[tokio::test]
+    async fn test_install_reproducibility_multiple_containers() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Source container to record commands
+        let sandbox_source = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create source sandbox");
+
+        let install_commands = vec![
+            "apt-get update -qq > /dev/null 2>&1".to_string(),
+            "apt-get install -y -qq curl jq > /dev/null 2>&1".to_string(),
+            "pip install --break-system-packages pytest > /dev/null 2>&1".to_string(),
+        ];
+
+        let recorded = record_install_commands(&sandbox_source, &install_commands).await;
+        sandbox_source.destroy().await;
+
+        // Create multiple fresh containers with same recorded commands
+        let mut containers = Vec::new();
+        for i in 0..3 {
+            let sandbox = DockerSandbox::start(
+                "octocat/Hello-World",
+                "",
+                "python",
+                Some("python:3.12-slim"),
+            )
+            .await
+            .expect(&format!("Failed to create sandbox {}", i));
+            containers.push(sandbox);
+        }
+
+        // Replay commands in all containers
+        for (i, sandbox) in containers.iter().enumerate() {
+            let success = replay_install_commands(sandbox, &recorded).await;
+            assert!(success, "Container {}: All commands should succeed", i);
+        }
+
+        // Verify equivalence across all containers
+        let mut curl_paths = Vec::new();
+        let mut jq_paths = Vec::new();
+        let mut pytest_paths = Vec::new();
+
+        for sandbox in &containers {
+            let curl = sandbox.exec("which curl", 10_000).await;
+            let jq = sandbox.exec("which jq", 10_000).await;
+            let pytest = sandbox.exec("which pytest", 10_000).await;
+
+            assert_eq!(curl.exit_code, 0, "curl should be available");
+            assert_eq!(jq.exit_code, 0, "jq should be available");
+            assert_eq!(pytest.exit_code, 0, "pytest should be available");
+
+            curl_paths.push(curl.stdout.trim().to_string());
+            jq_paths.push(jq.stdout.trim().to_string());
+            pytest_paths.push(pytest.stdout.trim().to_string());
+        }
+
+        // All paths should be identical
+        assert!(
+            curl_paths.windows(2).all(|w| w[0] == w[1]),
+            "All containers should have curl at the same path: {:?}",
+            curl_paths
+        );
+        assert!(
+            jq_paths.windows(2).all(|w| w[0] == w[1]),
+            "All containers should have jq at the same path: {:?}",
+            jq_paths
+        );
+        assert!(
+            pytest_paths.windows(2).all(|w| w[0] == w[1]),
+            "All containers should have pytest at the same path: {:?}",
+            pytest_paths
+        );
+
+        // Cleanup all containers
+        for sandbox in containers {
+            sandbox.destroy().await;
+        }
+    }
+
+    /// Test: Complex install sequence reproducibility (simulating real project setup)
+    #[tokio::test]
+    async fn test_install_reproducibility_complex_sequence() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Source container
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        // Complex multi-step install sequence
+        let complex_commands = vec![
+            // System dependencies
+            "apt-get update -qq > /dev/null 2>&1 && apt-get install -y -qq build-essential git > /dev/null 2>&1".to_string(),
+            // Python development tools
+            "pip install --break-system-packages setuptools wheel > /dev/null 2>&1".to_string(),
+            // Testing framework
+            "pip install --break-system-packages pytest pytest-cov > /dev/null 2>&1".to_string(),
+            // Linting tools
+            "pip install --break-system-packages flake8 black > /dev/null 2>&1".to_string(),
+        ];
+
+        let recorded = record_install_commands(&sandbox1, &complex_commands).await;
+        assert_eq!(recorded.len(), 4, "All complex commands should succeed");
+
+        // Verify tools in first container
+        let tools_to_check = vec![
+            ("git", "which git"),
+            ("pytest", "which pytest"),
+            ("flake8", "which flake8"),
+            ("black", "which black"),
+        ];
+
+        for (name, cmd) in &tools_to_check {
+            let result = sandbox1.exec(cmd, 10_000).await;
+            assert_eq!(
+                result.exit_code, 0,
+                "{} should be available in first container",
+                name
+            );
+        }
+
+        sandbox1.destroy().await;
+
+        // Replay in fresh container
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        let replay_success = replay_install_commands(&sandbox2, &recorded).await;
+        assert!(
+            replay_success,
+            "Complex command sequence should succeed in fresh container"
+        );
+
+        // Verify same tools in second container
+        for (name, cmd) in &tools_to_check {
+            let result = sandbox2.exec(cmd, 10_000).await;
+            assert_eq!(
+                result.exit_code, 0,
+                "{} should be available in second container after replay",
+                name
+            );
+        }
+
+        // Verify tool functionality is equivalent
+        let flake8_result = sandbox2.exec("flake8 --version", 10_000).await;
+        assert_eq!(
+            flake8_result.exit_code, 0,
+            "flake8 should be functional in fresh container"
+        );
+
+        sandbox2.destroy().await;
+    }
+
+    /// Test: Empty install commands list is handled correctly
+    #[tokio::test]
+    async fn test_install_reproducibility_empty_commands() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        let sandbox = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create sandbox");
+
+        // Empty command list
+        let empty_commands: Vec<String> = vec![];
+        let recorded = record_install_commands(&sandbox, &empty_commands).await;
+
+        assert!(
+            recorded.is_empty(),
+            "Empty command list should produce empty recorded list"
+        );
+
+        // Replaying empty list should succeed (vacuously true)
+        let replay_success = replay_install_commands(&sandbox, &recorded).await;
+        assert!(
+            replay_success,
+            "Replaying empty commands should succeed (no-op)"
+        );
+
+        sandbox.destroy().await;
+    }
+
+    /// Test: Install commands with environment variables are reproducible
+    #[tokio::test]
+    async fn test_install_reproducibility_with_env_vars() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Source container
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        // Install with environment variable
+        let env_commands = vec![
+            "DEBIAN_FRONTEND=noninteractive apt-get update -qq > /dev/null 2>&1".to_string(),
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl > /dev/null 2>&1"
+                .to_string(),
+        ];
+
+        let recorded = record_install_commands(&sandbox1, &env_commands).await;
+        assert_eq!(recorded.len(), 2, "Both env commands should succeed");
+
+        let curl_check1 = sandbox1.exec("which curl", 10_000).await;
+        assert_eq!(curl_check1.exit_code, 0, "curl should be available");
+
+        sandbox1.destroy().await;
+
+        // Replay in fresh container
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        let replay_success = replay_install_commands(&sandbox2, &recorded).await;
+        assert!(
+            replay_success,
+            "Commands with env vars should replay successfully"
+        );
+
+        let curl_check2 = sandbox2.exec("which curl", 10_000).await;
+        assert_eq!(
+            curl_check2.exit_code, 0,
+            "curl should be available after replay"
+        );
+
+        sandbox2.destroy().await;
+    }
 }
