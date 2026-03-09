@@ -1148,4 +1148,332 @@ mod tests {
 
         sandbox.destroy().await;
     }
+
+    // =========================================================================
+    // Fresh Container Guarantee Tests (VAL-FRESH-001, VAL-FRESH-003, VAL-FRESH-004)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_fresh_container_different_ids() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create first container
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+        let container_name1 = sandbox1.name().to_string();
+
+        // Create second container
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+        let container_name2 = sandbox2.name().to_string();
+
+        // Verify both containers exist
+        assert!(
+            container_exists(&container_name1).await,
+            "First container should exist"
+        );
+        assert!(
+            container_exists(&container_name2).await,
+            "Second container should exist"
+        );
+
+        // Verify container names are different
+        assert_ne!(
+            container_name1, container_name2,
+            "Each container must have a unique name"
+        );
+
+        // Get container IDs (full ID from inspect)
+        async fn get_container_id(name: &str) -> String {
+            let output = Command::new("docker")
+                .args(["inspect", "--format", "{{.Id}}", name])
+                .output()
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
+
+        let id1 = get_container_id(&container_name1).await;
+        let id2 = get_container_id(&container_name2).await;
+
+        // Verify container IDs are different
+        assert!(
+            !id1.is_empty() && !id2.is_empty(),
+            "Both containers should have valid IDs"
+        );
+        assert_ne!(id1, id2, "Each container must have a unique ID");
+
+        // Cleanup
+        sandbox1.destroy().await;
+        sandbox2.destroy().await;
+    }
+
+    #[tokio::test]
+    async fn test_fresh_container_no_file_leakage() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create first container and write a file
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        let test_content = "This file should not leak to other containers";
+        sandbox1
+            .write_file("leak_test_file.txt", test_content)
+            .await
+            .expect("Should write file in first container");
+
+        // Verify file exists in first container
+        let result = sandbox1.read_file("leak_test_file.txt").await;
+        assert!(
+            result.is_ok(),
+            "File should exist in first container: {:?}",
+            result.err()
+        );
+        assert_eq!(result.unwrap(), test_content);
+
+        // Get first container name for later verification
+        let container1_name = sandbox1.name().to_string();
+
+        // Destroy first container
+        sandbox1.destroy().await;
+
+        // Create second container (fresh)
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        // Verify file does NOT exist in second container using test command
+        let test_result = sandbox2
+            .exec("test -f /repo/leak_test_file.txt", 10_000)
+            .await;
+        assert_ne!(
+            test_result.exit_code, 0,
+            "test -f should fail - file from first container should NOT exist in second"
+        );
+
+        // Also try cat command and verify it fails
+        let cat_result = sandbox2.exec("cat /repo/leak_test_file.txt", 10_000).await;
+        assert_ne!(
+            cat_result.exit_code, 0,
+            "cat should fail for non-existent file"
+        );
+
+        // Verify first container was actually destroyed
+        assert!(
+            !container_exists(&container1_name).await,
+            "First container should be destroyed"
+        );
+
+        sandbox2.destroy().await;
+    }
+
+    #[tokio::test]
+    async fn test_fresh_container_no_install_leakage() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create first container and install a package
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        // Install curl in first container
+        let install_result = sandbox1
+            .exec(
+                "apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1",
+                120_000,
+            )
+            .await;
+        assert_eq!(
+            install_result.exit_code, 0,
+            "Install should succeed in first container: {}",
+            install_result.stderr
+        );
+
+        // Verify curl is available in first container
+        let check_result = sandbox1.exec("which curl", 10_000).await;
+        assert_eq!(
+            check_result.exit_code, 0,
+            "curl should be available in first container"
+        );
+        assert!(
+            check_result.stdout.contains("/usr/bin/curl"),
+            "curl path should be found: {}",
+            check_result.stdout
+        );
+
+        // Destroy first container
+        sandbox1.destroy().await;
+
+        // Create second container (fresh)
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            "",
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        // Verify curl is NOT available in second container
+        let check_result = sandbox2.exec("which curl 2>&1", 10_000).await;
+        assert_ne!(
+            check_result.exit_code, 0,
+            "curl should NOT be available in second container"
+        );
+        assert!(
+            check_result.stdout.is_empty(),
+            "which curl should return nothing: {}",
+            check_result.stdout
+        );
+        assert!(
+            check_result.stderr.contains("no curl") || check_result.stderr.is_empty(),
+            "curl should not be found: {}",
+            check_result.stderr
+        );
+
+        sandbox2.destroy().await;
+    }
+
+    #[tokio::test]
+    async fn test_fresh_container_clean_git_checkout() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Use a known commit from octocat/Hello-World
+        let known_commit = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d";
+
+        // Create first container at specific commit
+        let sandbox1 = DockerSandbox::start(
+            "octocat/Hello-World",
+            known_commit,
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create first sandbox");
+
+        // Verify clean git state in first container
+        let status_result = sandbox1
+            .exec("cd /repo && git status --porcelain", 10_000)
+            .await;
+        assert_eq!(status_result.exit_code, 0, "git status should succeed");
+        assert!(
+            status_result.stdout.is_empty(),
+            "Working tree should be clean in first container, got: {}",
+            status_result.stdout
+        );
+
+        // Verify correct commit in first container
+        let commit_result = sandbox1
+            .exec("cd /repo && git rev-parse HEAD", 10_000)
+            .await;
+        assert_eq!(commit_result.exit_code, 0, "git rev-parse should succeed");
+        assert!(
+            commit_result.stdout.contains(known_commit),
+            "Should be at correct commit: {}",
+            commit_result.stdout
+        );
+
+        // Make a change in first container
+        sandbox1
+            .write_file("dirty_file.txt", "dirty content")
+            .await
+            .expect("Should write file in first container");
+
+        // Verify the repo is now dirty
+        let status_result = sandbox1
+            .exec("cd /repo && git status --porcelain", 10_000)
+            .await;
+        assert!(
+            status_result.stdout.contains("dirty_file.txt"),
+            "First container should show dirty file"
+        );
+
+        // Destroy first container
+        sandbox1.destroy().await;
+
+        // Create second container (fresh) at same commit
+        let sandbox2 = DockerSandbox::start(
+            "octocat/Hello-World",
+            known_commit,
+            "python",
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to create second sandbox");
+
+        // Verify clean git state in second container
+        let status_result = sandbox2
+            .exec("cd /repo && git status --porcelain", 10_000)
+            .await;
+        assert_eq!(
+            status_result.exit_code, 0,
+            "git status should succeed in second container"
+        );
+        assert!(
+            status_result.stdout.is_empty(),
+            "Second container should have clean working tree, not affected by first container. Got: {}",
+            status_result.stdout
+        );
+
+        // Verify correct commit in second container
+        let commit_result = sandbox2
+            .exec("cd /repo && git rev-parse HEAD", 10_000)
+            .await;
+        assert_eq!(commit_result.exit_code, 0);
+        assert!(
+            commit_result.stdout.contains(known_commit),
+            "Second container should be at correct commit"
+        );
+
+        // Verify dirty file from first container is not present
+        let ls_result = sandbox2
+            .exec("ls -la /repo/dirty_file.txt 2>&1", 10_000)
+            .await;
+        assert_ne!(
+            ls_result.exit_code, 0,
+            "Dirty file from first container should not exist in second"
+        );
+
+        sandbox2.destroy().await;
+    }
 }
