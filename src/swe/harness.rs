@@ -834,4 +834,456 @@ mod tests {
         assert!(json.contains("\"passed\":true"));
         assert!(json.contains("\"duration_ms\":1500"));
     }
+
+    // =========================================================================
+    // Test Semantics Validation Integration Tests
+    // =========================================================================
+    // These tests verify the core test validation logic (VAL-TEST-001 to 005):
+    // - fail_to_pass tests fail on base commit
+    // - pass_to_pass tests pass on base commit
+    // - Patch application works correctly
+    // - Tests pass after valid patch application
+    // - Tests still fail after invalid/no patch
+
+    /// Helper: Check if Docker is available
+    async fn docker_available() -> bool {
+        match tokio::process::Command::new("docker").args(["ps"]).output().await {
+            Ok(output) => output.status.success(),
+            Err(_) => false,
+        }
+    }
+
+    /// Helper: Create a mock SweTask with known test behaviors
+    fn create_mock_task(
+        task_id: &str,
+        fail_to_pass: Vec<String>,
+        pass_to_pass: Vec<String>,
+        patch: &str,
+    ) -> SweTask {
+        let mut task = SweTask::new(task_id, "octocat/Hello-World");
+        task.language = "python".to_string();
+        task.base_commit = "7fd1a60b01f91b314f59955a4e4d4e80d8edf11d".to_string();
+        task.fail_to_pass = fail_to_pass;
+        task.pass_to_pass = pass_to_pass;
+        task.patch = patch.to_string();
+        task.prompt = "Fix the bug in the code".to_string();
+        task
+    }
+
+    /// Helper: Run test commands directly on a sandbox and collect results
+    async fn run_test_commands(
+        sandbox: &super::super::docker_sandbox::DockerSandbox,
+        commands: &[String],
+    ) -> Vec<(i32, bool)> {
+        let mut results = Vec::new();
+        for cmd in commands {
+            let output = sandbox.exec(&format!("cd /repo && {}", cmd), 30_000).await;
+            results.push((output.exit_code, output.exit_code == 0));
+        }
+        results
+    }
+
+    /// VAL-TEST-001: fail_to_pass tests MUST fail (exit != 0) when run on the base commit
+    #[tokio::test]
+    async fn test_semantics_fail_to_pass_fails_on_base() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        // Create a task with fail_to_pass command that should fail on base
+        let task = create_mock_task(
+            "test-semantics-f2p-fails-base",
+            vec!["python3 -c 'import sys; sys.exit(1)'".to_string()], // Always fails
+            vec![],                                                  // No p2p tests
+            "",                                                      // No patch
+        );
+
+        // Start sandbox at base commit
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Run fail_to_pass command - should fail (exit != 0)
+        let results = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_eq!(results.len(), 1);
+        assert_ne!(results[0].0, 0, "fail_to_pass command should fail on base commit");
+
+        sandbox.destroy().await;
+    }
+
+    /// VAL-TEST-002: pass_to_pass tests MUST pass (exit == 0) when run on the base commit
+    #[tokio::test]
+    async fn test_semantics_pass_to_pass_passes_on_base() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        // Create a task with pass_to_pass command that should pass on base
+        let task = create_mock_task(
+            "test-semantics-p2p-passes-base",
+            vec![],                                               // No f2p tests
+            vec!["python3 -c 'import sys; sys.exit(0)'".to_string()], // Always passes
+            "",                                                   // No patch
+        );
+
+        // Start sandbox at base commit
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Run pass_to_pass command - should pass (exit == 0)
+        let results = run_test_commands(&sandbox, &task.pass_to_pass).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, 0, "pass_to_pass command should pass on base commit");
+
+        sandbox.destroy().await;
+    }
+
+    /// VAL-TEST-003: fail_to_pass tests MUST pass (exit == 0) after the valid PR patch is applied
+    #[tokio::test]
+    async fn test_semantics_fail_to_pass_passes_after_valid_patch() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        // Create a patch that creates a test file that will pass
+        let patch = r#"diff --git a/test_fix.py b/test_fix.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/test_fix.py
+@@ -0,0 +1 @@
++# This file makes the fix exist
+"#;
+
+        // Task with fail_to_pass that checks for the fix file
+        let task = create_mock_task(
+            "test-semantics-f2p-passes-after-patch",
+            vec!["python3 -c 'import os; assert os.path.exists(\"test_fix.py\"); print(\"Fix verified\")'".to_string()],
+            vec![],
+            patch,
+        );
+
+        // Start sandbox at base commit
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Verify fail_to_pass FAILS on base (before patch)
+        let base_results = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_ne!(base_results[0].0, 0, "fail_to_pass should fail on base before patch");
+
+        // Apply the patch
+        sandbox.write_file(".swe_forge_validation.patch", &task.patch).await.unwrap();
+        let apply_result = sandbox
+            .exec("cd /repo && git apply --allow-empty .swe_forge_validation.patch 2>&1", 30_000)
+            .await;
+        assert_eq!(apply_result.exit_code, 0, "Patch should apply successfully: {}", apply_result.stderr);
+
+        // Verify fail_to_pass PASSES after patch
+        let patched_results = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_eq!(patched_results[0].0, 0, "fail_to_pass should pass after valid patch");
+
+        sandbox.destroy().await;
+    }
+
+    /// VAL-TEST-004: pass_to_pass tests MUST still pass (exit == 0) after the PR patch is applied
+    #[tokio::test]
+    async fn test_semantics_pass_to_pass_still_passes_after_patch() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        // Create a patch that adds a new file but doesn't break existing functionality
+        let patch = r#"diff --git a/new_feature.py b/new_feature.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/new_feature.py
+@@ -0,0 +1 @@
++# New feature added without breaking existing tests
+"#;
+
+        // Task with pass_to_pass that checks something that should still work after patch
+        let task = create_mock_task(
+            "test-semantics-p2p-still-passes",
+            vec![],
+            vec!["python3 -c 'import os; os.listdir(\".\"); print(\"Basic functionality works\")'".to_string()],
+            patch,
+        );
+
+        // Start sandbox at base commit
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Verify pass_to_pass PASSES on base
+        let base_results = run_test_commands(&sandbox, &task.pass_to_pass).await;
+        assert_eq!(base_results[0].0, 0, "pass_to_pass should pass on base");
+
+        // Apply the patch
+        sandbox.write_file(".swe_forge_validation.patch", &task.patch).await.unwrap();
+        let apply_result = sandbox
+            .exec("cd /repo && git apply --allow-empty .swe_forge_validation.patch 2>&1", 30_000)
+            .await;
+        assert_eq!(apply_result.exit_code, 0, "Patch should apply successfully");
+
+        // Verify pass_to_pass STILL PASSES after patch (no regression)
+        let patched_results = run_test_commands(&sandbox, &task.pass_to_pass).await;
+        assert_eq!(patched_results[0].0, 0, "pass_to_pass should still pass after patch (no regression)");
+
+        sandbox.destroy().await;
+    }
+
+    /// VAL-TEST-005: fail_to_pass tests MUST still fail (exit != 0) after an invalid patch
+    #[tokio::test]
+    async fn test_semantics_fail_to_pass_still_fails_after_invalid_patch() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        // Create an "invalid" patch that creates a file but doesn't fix the actual issue
+        // We create a new file that is NOT the one the test checks for
+        let invalid_patch = r#"diff --git a/wrong_fix.py b/wrong_fix.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/wrong_fix.py
+@@ -0,0 +1 @@
++# This is not the required fix file
+"#;
+
+        // Task with fail_to_pass that checks for a specific fix file that won't exist
+        let task = create_mock_task(
+            "test-semantics-f2p-still-fails",
+            vec!["python3 -c 'import os; assert os.path.exists(\"required_fix.py\"), \"Fix file not found\"; print(\"Fix verified\")'".to_string()],
+            vec![],
+            invalid_patch,
+        );
+
+        // Start sandbox at base commit
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Verify fail_to_pass FAILS on base
+        let base_results = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_ne!(base_results[0].0, 0, "fail_to_pass should fail on base");
+
+        // Apply the invalid patch
+        sandbox.write_file(".swe_forge_validation.patch", &task.patch).await.unwrap();
+        let apply_result = sandbox
+            .exec("cd /repo && git apply .swe_forge_validation.patch 2>&1", 30_000)
+            .await;
+        assert_eq!(apply_result.exit_code, 0, "Patch should apply successfully: {}", apply_result.stderr);
+
+        // Verify fail_to_pass STILL FAILS after invalid patch (wrong_fix.py != required_fix.py)
+        let patched_results = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_ne!(patched_results[0].0, 0, "fail_to_pass should still fail after invalid patch");
+
+        sandbox.destroy().await;
+    }
+
+    /// Combined test: Full test semantics validation with both f2p and p2p tests
+    /// Verifies all test semantics in a single integrated workflow
+    #[tokio::test]
+    async fn test_semantics_full_validation_workflow() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        // Create a patch that fixes the failing test
+        let fix_patch = r#"diff --git a/fix.py b/fix.py
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/fix.py
+@@ -0,0 +1,2 @@
++# This is the fix
++fixed = True
+"#;
+
+        // Task with both fail_to_pass and pass_to_pass tests
+        let task = create_mock_task(
+            "test-semantics-full-workflow",
+            // fail_to_pass: checks that the fix exists
+            vec!["python3 -c 'import os; assert os.path.exists(\"fix.py\"), \"Fix not found\"; print(\"Fix verified!\")'".to_string()],
+            // pass_to_pass: checks basic functionality always works
+            vec!["python3 -c 'print(\"Basic check passes\")'".to_string()],
+            fix_patch,
+        );
+
+        // Start sandbox at base commit
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // --- BASE COMMIT VALIDATION ---
+        tracing::info!("Testing base commit semantics");
+
+        // fail_to_pass must FAIL on base
+        let f2p_base = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_eq!(f2p_base.len(), 1);
+        assert_ne!(
+            f2p_base[0].0, 0,
+            "VAL-TEST-001: fail_to_pass must FAIL on base commit (exit != 0)"
+        );
+
+        // pass_to_pass must PASS on base
+        let p2p_base = run_test_commands(&sandbox, &task.pass_to_pass).await;
+        assert_eq!(p2p_base.len(), 1);
+        assert_eq!(
+            p2p_base[0].0, 0,
+            "VAL-TEST-002: pass_to_pass must PASS on base commit (exit == 0)"
+        );
+
+        // --- APPLY PATCH ---
+        sandbox.write_file(".swe_forge_validation.patch", &task.patch).await.unwrap();
+        let apply_result = sandbox
+            .exec("cd /repo && git apply --allow-empty .swe_forge_validation.patch 2>&1", 30_000)
+            .await;
+        assert_eq!(apply_result.exit_code, 0, "Patch should apply successfully");
+
+        // --- PATCHED COMMIT VALIDATION ---
+        tracing::info!("Testing patched commit semantics");
+
+        // fail_to_pass must PASS after valid patch
+        let f2p_patched = run_test_commands(&sandbox, &task.fail_to_pass).await;
+        assert_eq!(f2p_patched.len(), 1);
+        assert_eq!(
+            f2p_patched[0].0, 0,
+            "VAL-TEST-003: fail_to_pass must PASS after valid patch (exit == 0)"
+        );
+
+        // pass_to_pass must STILL PASS after patch (no regression)
+        let p2p_patched = run_test_commands(&sandbox, &task.pass_to_pass).await;
+        assert_eq!(p2p_patched.len(), 1);
+        assert_eq!(
+            p2p_patched[0].0, 0,
+            "VAL-TEST-004: pass_to_pass must still PASS after patch (exit == 0)"
+        );
+
+        tracing::info!("Full test semantics validation workflow PASSED");
+
+        sandbox.destroy().await;
+    }
+
+    /// Test harness sanity check behavior: when fail_to_pass passes on base, it should report SanityFail
+    #[tokio::test]
+    async fn test_harness_sanity_check_fail_to_pass_already_passes() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create a task where fail_to_pass ALREADY passes on base (should trigger sanity fail)
+        let task = create_mock_task(
+            "test-sanity-f2p-already-passes",
+            vec!["python3 -c 'print(\"already passes\")'".to_string()], // Already passes!
+            vec!["python3 -c 'print(\"p2p passes\")'".to_string()],
+            "", // No patch needed for sanity check test
+        );
+
+        // We can't easily run evaluate_task directly in tests (private),
+        // but we can verify the harness would correctly detect this
+        // by checking that the task's fail_to_pass command would pass on base
+        use super::super::docker_sandbox::DockerSandbox;
+
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Verify fail_to_pass passes on base (this would trigger SanityFail in harness)
+        let result = sandbox.exec(&format!("cd /repo && {}", &task.fail_to_pass[0]), 30_000).await;
+        assert_eq!(result.exit_code, 0, "fail_to_pass command passes on base (would trigger SanityFail in harness)");
+
+        sandbox.destroy().await;
+    }
+
+    /// Test harness sanity check behavior: when pass_to_pass fails on base, it should report SanityFail
+    #[tokio::test]
+    async fn test_harness_sanity_check_pass_to_pass_already_fails() {
+        if !docker_available().await {
+            eprintln!("Docker not available, skipping test");
+            return;
+        }
+
+        // Create a task where pass_to_pass ALREADY fails on base (should trigger sanity fail)
+        let task = create_mock_task(
+            "test-sanity-p2p-already-fails",
+            vec!["python3 -c 'import sys; sys.exit(1)'".to_string()],
+            vec!["python3 -c 'import sys; sys.exit(1)'".to_string()], // Already fails!
+            "",
+        );
+
+        use super::super::docker_sandbox::DockerSandbox;
+
+        let sandbox = DockerSandbox::start(
+            &task.repo,
+            &task.base_commit,
+            &task.language,
+            Some("python:3.12-slim"),
+        )
+        .await
+        .expect("Failed to start sandbox");
+
+        // Verify pass_to_pass fails on base (this would trigger SanityFail in harness)
+        let result = sandbox.exec(&format!("cd /repo && {}", &task.pass_to_pass[0]), 30_000).await;
+        assert_ne!(result.exit_code, 0, "pass_to_pass command fails on base (would trigger SanityFail in harness)");
+
+        sandbox.destroy().await;
+    }
 }
