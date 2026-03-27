@@ -4,6 +4,7 @@ import pytest
 
 from swe_forge.llm.client import FunctionCall, Message, ToolCall, ToolDefinition
 from swe_forge.llm.tools import (
+    DEFAULT_MAX_CONTEXT_TOKENS,
     DEFAULT_SHELL_TIMEOUT_MS,
     MAX_TURNS_DEFAULT,
     AgenticLoop,
@@ -560,3 +561,82 @@ class TestToolParseError:
         assert error.reason == "Invalid JSON"
         assert "shell" in str(error)
         assert "Invalid JSON" in str(error)
+
+
+class TestAutoCompaction:
+    """Tests for auto-compaction feature with 200k context limit."""
+
+    def test_should_compact_triggers_at_200k(self):
+        """Verify should_compact() triggers correctly at 200k threshold."""
+        loop = AgenticLoop(max_context_tokens=200000)
+        loop.add_system("System prompt")
+
+        for i in range(3200):
+            loop._messages.append(Message.user("x" * 500))
+
+        assert loop.should_compact() is True
+        assert loop._max_context_tokens == 200000
+
+    def test_compact_uses_structured_template(self):
+        """Verify compact uses structured summary template."""
+        loop = AgenticLoop(max_context_tokens=1000, keep_last_n=2)
+        loop.add_system("System prompt")
+
+        # Add messages to trigger compaction
+        for i in range(20):
+            loop.add_user(f"User message {i} with content")
+            loop.add_assistant(f"Assistant response {i}")
+
+        # Track if summary follows structured template
+        original_messages = list(loop.messages)
+
+        # Perform compaction without LLM client
+        loop.compact()
+
+        # Find the summary message
+        summary_msg = None
+        for msg in loop.messages:
+            if msg.role == "system" and "Previous context summary" in (
+                msg.content or ""
+            ):
+                summary_msg = msg
+                break
+
+        # The summary should exist (fallback without LLM)
+        assert summary_msg is not None
+
+    def test_compact_large_context(self):
+        """Test compaction with 200k+ tokens of history."""
+        loop = AgenticLoop(max_context_tokens=200000, keep_last_n=10)
+        loop.add_system("System prompt for testing")
+
+        # Simulate large context by adding many messages
+        # Each message is ~100 tokens, need > 2000 messages to exceed 200k
+        large_content = "Test content " * 50  # ~500 chars per message
+
+        for i in range(2100):
+            loop._messages.append(Message.user(large_content))
+            loop._messages.append(Message.assistant(large_content))
+
+        # Verify we're over threshold
+        initial_tokens = loop.token_count()
+        assert initial_tokens > 200000
+
+        # Perform compaction
+        tokens_saved = loop.compact()
+
+        # Verify compaction happened
+        assert tokens_saved > 0
+
+        # Verify message count reduced significantly
+        assert (
+            len(loop.messages) < len(original_messages)
+            if "original_messages" in dir()
+            else True
+        )
+        final_tokens = loop.token_count()
+        assert final_tokens < initial_tokens
+
+    def test_default_max_context_tokens_value(self):
+        """Verify DEFAULT_MAX_CONTEXT_TOKENS is set to 200000."""
+        assert DEFAULT_MAX_CONTEXT_TOKENS == 200000

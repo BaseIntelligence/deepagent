@@ -129,6 +129,92 @@ SHELL_TOOL_SCHEMA: ToolDefinition = shell_tool_schema()
 SUBMIT_TESTS_TOOL_SCHEMA: ToolDefinition = submit_tests_tool_schema()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker Tools
+# ─────────────────────────────────────────────────────────────────────────────
+
+DOCKER_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "docker_build",
+        "description": "Build Docker image for testing",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "dockerfile": {"type": "string"},
+                "context": {"type": "string"},
+            },
+            "required": ["dockerfile"],
+        },
+    },
+    {
+        "name": "docker_run",
+        "description": "Run command in Docker container",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "image": {"type": "string"},
+                "command": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["image", "command"],
+        },
+    },
+]
+
+
+def docker_build_tool_schema() -> ToolDefinition:
+    """Create the docker_build tool schema."""
+    return ToolDefinition.create(
+        name="docker_build",
+        description="Build Docker image for testing",
+        parameters={
+            "type": "object",
+            "properties": {
+                "dockerfile": {
+                    "type": "string",
+                    "description": "Dockerfile content",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Build context directory (optional)",
+                },
+            },
+            "required": ["dockerfile"],
+        },
+    )
+
+
+def docker_run_tool_schema() -> ToolDefinition:
+    """Create the docker_run tool schema."""
+    return ToolDefinition.create(
+        name="docker_run",
+        description="Run command in Docker container",
+        parameters={
+            "type": "object",
+            "properties": {
+                "image": {
+                    "type": "string",
+                    "description": "Docker image to use",
+                },
+                "command": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Command to run as array of strings",
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Timeout in milliseconds",
+                    "default": DEFAULT_SHELL_TIMEOUT_MS,
+                },
+            },
+            "required": ["image", "command"],
+        },
+    )
+
+
+DOCKER_BUILD_TOOL_SCHEMA: ToolDefinition = docker_build_tool_schema()
+DOCKER_RUN_TOOL_SCHEMA: ToolDefinition = docker_run_tool_schema()
+
+
 def get_tool_schemas() -> list[ToolDefinition]:
     """Get the list of tool schemas for agentic test generation.
 
@@ -390,6 +476,49 @@ class TurnBudget:
 # Agentic Loop
 # ─────────────────────────────────────────────────────────────────────────────
 
+DEFAULT_MAX_CONTEXT_TOKENS = 200000
+DEFAULT_KEEP_LAST_N = 10
+
+
+def _get_token_encoder():
+    """Get tiktoken encoder, falling back to cl100k_base if model not found."""
+    try:
+        import tiktoken
+
+        return tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        return None
+
+
+def estimate_tokens(messages: list[Message], encoder=None) -> int:
+    """Estimate total tokens in message list.
+
+    Args:
+        messages: List of messages to count.
+        encoder: Optional tiktoken encoder. If None, uses cl100k_base.
+
+    Returns:
+        Estimated token count.
+    """
+    if encoder is None:
+        encoder = _get_token_encoder()
+
+    if encoder is None:
+        return sum(len((m.content or "")[:1000]) for m in messages)
+
+    total = 0
+    for msg in messages:
+        total += 4
+        total += len(encoder.encode(msg.content or ""))
+        if msg.tool_calls:
+            for tc in msg.tool_calls:
+                total += len(encoder.encode(tc.function.name))
+                total += len(encoder.encode(tc.function.arguments or ""))
+                total += 10
+        if msg.tool_call_id:
+            total += 10
+    return total
+
 
 class AgenticLoop:
     """Manage multi-turn conversation state for agentic workflows.
@@ -398,26 +527,42 @@ class AgenticLoop:
     agentic loops. Used by the test generator to manage the multi-turn
     conversation with the LLM.
 
+    Features:
+    - Turn budget tracking
+    - Token estimation and auto-compaction
+    - Message history management
+
     Example:
-        loop = AgenticLoop(max_turns=200)
+        loop = AgenticLoop(max_turns=200, max_context_tokens=100000)
         loop.add_system("You are a test engineer...")
         loop.add_user("Write tests for this PR...")
 
         while not loop.is_exhausted():
+            if loop.should_compact():
+                await loop.compact(llm_client)
             response = await llm.complete(loop.to_request())
             loop.add_assistant(response)
-            # Process response, maybe add tool results
-            loop.add_tool_result(tool_call_id, result)
     """
 
-    def __init__(self, max_turns: int = MAX_TURNS_DEFAULT):
+    def __init__(
+        self,
+        max_turns: int = MAX_TURNS_DEFAULT,
+        max_context_tokens: int = DEFAULT_MAX_CONTEXT_TOKENS,
+        keep_last_n: int = DEFAULT_KEEP_LAST_N,
+    ):
         """Initialize the agentic loop.
 
         Args:
             max_turns: Maximum number of turns before exhaustion.
+            max_context_tokens: Maximum tokens before auto-compaction.
+            keep_last_n: Number of recent turns to keep during compaction.
         """
         self._budget = TurnBudget(max_turns=max_turns)
         self._messages: list[Message] = []
+        self._max_context_tokens = max_context_tokens
+        self._keep_last_n = keep_last_n
+        self._encoder = _get_token_encoder()
+        self._compaction_count = 0
 
     @property
     def budget(self) -> TurnBudget:
@@ -552,6 +697,153 @@ class AgenticLoop:
     def message_count(self) -> int:
         """Get the total number of messages in history."""
         return len(self._messages)
+
+    def token_count(self) -> int:
+        """Estimate token count of current message history."""
+        return estimate_tokens(self._messages, self._encoder)
+
+    def should_compact(self) -> bool:
+        """Check if compaction is needed based on token count."""
+        return self.token_count() > self._max_context_tokens
+
+    def compact(self, llm_client=None, model: str = "gpt-4o-mini") -> int:
+        """Compact message history to reduce token count.
+
+        Strategy: Keep system message + recent turns, truncate middle.
+        If llm_client is provided, uses LLM to summarize middle messages.
+
+        Args:
+            llm_client: Optional LLM client for summarization.
+            model: Model to use for summarization.
+
+        Returns:
+            Number of tokens saved by compaction.
+        """
+        original_tokens = self.token_count()
+
+        if len(self._messages) <= self._keep_last_n + 1:
+            return 0
+
+        system_msg = (
+            self._messages[0]
+            if self._messages and self._messages[0].role == "system"
+            else None
+        )
+        recent_start = len(self._messages) - self._keep_last_n
+        recent = self._messages[recent_start:]
+
+        if system_msg:
+            middle = self._messages[1:recent_start]
+        else:
+            middle = self._messages[:recent_start]
+
+        if not middle:
+            return 0
+
+        summary_content = self._summarize_messages(middle, llm_client, model)
+        summary_msg = Message.system(f"[Previous context summary]\n{summary_content}")
+
+        if system_msg:
+            self._messages = [system_msg, summary_msg] + recent
+        else:
+            self._messages = [summary_msg] + recent
+
+        self._compaction_count += 1
+        return original_tokens - self.token_count()
+
+    def _summarize_messages(
+        self, messages: list[Message], llm_client=None, model: str = "gpt-4o-mini"
+    ) -> str:
+        """Summarize a list of messages.
+
+        Args:
+            messages: Messages to summarize.
+            llm_client: Optional LLM client for summarization.
+            model: Model to use.
+
+        Returns:
+            Summary text.
+        """
+        if not messages:
+            return "No previous context."
+
+        message_preview = "\n".join(
+            f"[{m.role}]: {(m.content or '')[:200]}..." for m in messages[:10]
+        )
+
+        if llm_client is not None:
+            import asyncio
+
+            try:
+                from swe_forge.llm.client import GenerationRequest
+
+                prompt = f"""Provide a detailed summary for continuing this conversation.
+Focus on information that would be helpful for the next agent to continue the work.
+
+When constructing the summary, use this template:
+---
+## Goal
+
+[What goal(s) is the user trying to accomplish?]
+
+## Instructions
+
+- [What important instructions did the user give you that are relevant]
+- [If there is a plan or spec, include information about it so next agent can continue using it]
+
+## Discoveries
+
+[What notable things were learned during this conversation that would be useful for the next agent to know when continuing the work]
+
+## Accomplished
+
+[What work has been completed, what work is still in progress, and what work is left?]
+
+## Relevant files / directories
+
+[Construct a structured list of relevant files that have been read, edited, or created that pertain to the task at hand.]
+---
+
+Messages:
+{message_preview}
+
+Summary:"""
+
+                async def get_summary():
+                    request = GenerationRequest(
+                        model=model,
+                        messages=[Message.user(prompt)],
+                        max_tokens=800,
+                    )
+                    response = await llm_client.complete(request)
+                    return response.first_content() or message_preview[:500]
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        return message_preview[:500]
+                    return loop.run_until_complete(get_summary())
+                except RuntimeError:
+                    return message_preview[:500]
+            except Exception:
+                pass
+
+        return message_preview[:500]
+
+    def compact_if_needed(self, llm_client=None, model: str = "gpt-4o-mini") -> bool:
+        """Compact if needed, return True if compaction occurred.
+
+        Args:
+            llm_client: Optional LLM client for summarization.
+            model: Model to use for summarization.
+
+        Returns:
+            True if compaction occurred, False otherwise.
+        """
+        if self.should_compact():
+            self.compact(llm_client, model)
+            return True
+        return False
 
     def __repr__(self) -> str:
         return f"AgenticLoop(messages={len(self._messages)}, turns={self.turn_count}/{self.max_turns})"
