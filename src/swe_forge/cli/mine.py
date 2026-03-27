@@ -32,7 +32,6 @@ from swe_forge.swe.pipeline import (
     DifficultyTargets,
     SwePipeline,
     SwePipelineConfig,
-    SwePipelineEvent,
     SwePipelineEventType,
 )
 from swe_forge.swe.concurrency import set_docker_containers_limit
@@ -295,7 +294,7 @@ async def _run_pipeline(
     config: SwePipelineConfig,
     repo_filter: Optional[str],
     verbose: bool,
-) -> "PipelineResult":
+):
     """Run the SWE pipeline with progress tracking."""
     from dataclasses import dataclass, field
 
@@ -408,7 +407,7 @@ def mine_complete(
 
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
 
-    console.print(f"[bold blue]Complete Mining Pipeline[/bold blue]")
+    console.print("[bold blue]Complete Mining Pipeline[/bold blue]")
     console.print(f"  Repository: {repo}")
     console.print(f"  PR: #{pr}")
     console.print(f"  Model: {llm_model}")
@@ -450,7 +449,7 @@ async def _run_complete_mining(
     model: str,
     github_token: str,
     openrouter_key: str,
-) -> "ValidatedTask | None":
+):
     """Run the complete mining pipeline."""
     from swe_forge.pipeline import CompleteMiningPipeline
     from swe_forge.llm.openrouter import OpenRouterClient

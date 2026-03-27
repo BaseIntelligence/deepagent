@@ -213,7 +213,6 @@ def _print_summary(results: list[dict]) -> None:
 
     for status, count in sorted(status_counts.items()):
         pct = (count / total_count * 100) if total_count > 0 else 0
-        style = "green" if status == HarnessStatus.RESOLVED.value else "red"
         table.add_row(status, str(count), f"{pct:.1f}%")
 
     console.print(table)

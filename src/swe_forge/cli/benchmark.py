@@ -27,7 +27,7 @@ from rich.table import Table
 
 from swe_forge.export.jsonl import export_jsonl
 from swe_forge.swe.github_api import GitHubClient
-from swe_forge.swe.harness import HarnessConfig, HarnessRunner, HarnessStatus
+from swe_forge.swe.harness import HarnessConfig, HarnessStatus
 from swe_forge.swe.models import SweTask
 from swe_forge.swe.pipeline import SwePipeline, SwePipelineConfig
 
@@ -139,9 +139,7 @@ def benchmark(
     )
 
     if difficulty and not validate_difficulty(difficulty):
-        console.print(
-            f"[red]Error: Difficulty must be one of: easy, medium, hard[/red]"
-        )
+        console.print("[red]Error: Difficulty must be one of: easy, medium, hard[/red]")
         raise typer.Exit(code=1)
 
     if not model.strip():
@@ -276,10 +274,7 @@ async def _mine_tasks(
         task_id = progress.add_task("Mining tasks...", total=num_tasks)
 
         async with SwePipeline(gh_client, config=config) as pipeline:
-            from swe_forge.swe.pipeline import (
-                SwePipelineEvent,
-                SwePipelineEventType,
-            )
+            from swe_forge.swe.pipeline import SwePipelineEventType
 
             async for event in pipeline.run_with_progress():
                 if event.event_type == SwePipelineEventType.TASK_EXTRACTED:
@@ -468,7 +463,6 @@ def _print_summary(results: list[dict]) -> None:
 
     for status, count in sorted(status_counts.items()):
         pct = (count / total_count * 100) if total_count > 0 else 0
-        style = "green" if status == HarnessStatus.RESOLVED.value else "red"
         table.add_row(status, str(count), f"{pct:.1f}%")
 
     console.print(table)
