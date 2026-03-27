@@ -93,7 +93,7 @@ class TestSwePipelineConfig:
 
     def test_default_values(self):
         config = SwePipelineConfig()
-        assert config.min_stars == 20
+        assert config.min_stars == 100
         assert config.max_candidates == 50
         assert config.max_tasks == 1
         assert config.once is True
@@ -383,3 +383,177 @@ class TestPipelineEventType:
         assert SwePipelineEventType.TASK_EXTRACTED.value == "task_extracted"
         assert SwePipelineEventType.QUALITY_SCORED.value == "quality_scored"
         assert SwePipelineEventType.PIPELINE_COMPLETED.value == "pipeline_completed"
+
+
+class TestDifficultyClassifierIntegration:
+    """Tests for difficulty classifier integration with pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_difficulty_classifier_integration(self, mock_gh_client):
+        """Verify classifier called when llm_client available."""
+        from unittest.mock import AsyncMock
+
+        from swe_forge.swe.difficulty import (
+            ClassifyResponse,
+            DifficultyClassifier,
+            TriageResponse,
+        )
+        from swe_forge.swe.enricher import EnrichedPullRequest
+
+        mock_classifier = MagicMock(spec=DifficultyClassifier)
+        mock_classifier.classify_triage = AsyncMock(
+            return_value=TriageResponse(difficulty="hard", reasoning="Complex changes")
+        )
+        mock_classifier.classify_full = AsyncMock(
+            return_value=ClassifyResponse(
+                difficulty="hard",
+                score=0.8,
+                quality_good=True,
+                reasoning="High complexity",
+            )
+        )
+
+        config = SwePipelineConfig(difficulty_classifier=mock_classifier)
+        pipeline = SwePipeline(mock_gh_client, config=config)
+
+        enriched = EnrichedPullRequest(
+            id="test-1",
+            repo="owner/repo",
+            number=1,
+            title="Fix critical bug",
+            body="This PR fixes a critical bug",
+            base_commit="abc123",
+            merge_commit="def456",
+            language="python",
+            files_changed=10,
+            additions=100,
+            deletions=50,
+            changed_files=["src/main.py", "src/utils.py"],
+            stars=100,
+        )
+
+        metrics = BenchmarkMetrics()
+        semaphore = asyncio.Semaphore(10)
+
+        result = await pipeline._preclassify_stage(enriched, semaphore, metrics)
+
+        assert result == "hard"
+        mock_classifier.classify_triage.assert_called_once()
+        assert metrics.preclassify_hard == 1
+
+    @pytest.mark.asyncio
+    async def test_difficulty_classifier_fallback(self, mock_gh_client):
+        """Verify heuristics used when llm_client=None."""
+        from swe_forge.swe.enricher import EnrichedPullRequest
+
+        config = SwePipelineConfig()
+        pipeline = SwePipeline(mock_gh_client, config=config)
+
+        enriched = EnrichedPullRequest(
+            id="test-1",
+            repo="owner/repo",
+            number=1,
+            title="Fix bug",
+            body="Bug fix",
+            base_commit="abc123",
+            merge_commit="def456",
+            language="python",
+            files_changed=1,
+            additions=10,
+            deletions=5,
+            changed_files=["src/main.py"],
+            stars=100,
+        )
+
+        metrics = BenchmarkMetrics()
+        semaphore = asyncio.Semaphore(10)
+
+        result = await pipeline._preclassify_stage(enriched, semaphore, metrics)
+
+        assert result == "easy"
+        assert metrics.preclassify_easy == 1
+
+    @pytest.mark.asyncio
+    async def test_difficulty_classifier_score_mapping(self, mock_gh_client):
+        """Verify score conversion (0.5 -> 5, 0.3 -> 3, etc.)."""
+        from unittest.mock import AsyncMock
+
+        from swe_forge.swe.difficulty import (
+            ClassifyResponse,
+            DifficultyClassifier,
+        )
+        from swe_forge.swe.enricher import EnrichedPullRequest
+
+        test_cases = [
+            (0.5, 5),
+            (0.3, 3),
+            (0.1, 1),
+            (1.0, 10),
+            (0.95, 9),
+            (0.05, 1),
+        ]
+
+        for score, expected_difficulty_score in test_cases:
+            mock_classifier = MagicMock(spec=DifficultyClassifier)
+            mock_classifier.classify_full = AsyncMock(
+                return_value=ClassifyResponse(
+                    difficulty="medium",
+                    score=score,
+                    quality_good=True,
+                    reasoning="Test",
+                )
+            )
+
+            config = SwePipelineConfig(difficulty_classifier=mock_classifier)
+            pipeline = SwePipeline(mock_gh_client, config=config)
+
+            enriched = EnrichedPullRequest(
+                id="test-1",
+                repo="owner/repo",
+                number=1,
+                title="Fix bug",
+                body="Bug fix",
+                base_commit="abc123",
+                merge_commit="def456",
+                language="python",
+                files_changed=3,
+                additions=30,
+                deletions=10,
+                changed_files=["src/main.py"],
+                stars=100,
+            )
+
+            metrics = BenchmarkMetrics()
+            semaphore = asyncio.Semaphore(10)
+            event_queue = asyncio.Queue(maxsize=10)
+
+            with patch.object(pipeline, "_extract_patch", return_value=("patch", "")):
+                task = await pipeline._deep_stage(
+                    enriched, semaphore, metrics, event_queue
+                )
+
+            assert task is not None
+            assert task.difficulty_score == expected_difficulty_score, (
+                f"Score {score} should map to {expected_difficulty_score}, got {task.difficulty_score}"
+            )
+
+    def test_get_classifier_with_preconfigured(self, mock_gh_client):
+        """Verify _get_classifier returns pre-configured classifier."""
+        from swe_forge.swe.difficulty import DifficultyClassifier
+
+        mock_classifier = MagicMock(spec=DifficultyClassifier)
+        config = SwePipelineConfig(difficulty_classifier=mock_classifier)
+        pipeline = SwePipeline(mock_gh_client, config=config)
+
+        result = pipeline._get_classifier()
+
+        assert result is mock_classifier
+
+    def test_get_classifier_without_llm_client(self, mock_gh_client):
+        """Verify _get_classifier returns None when no llm_client configured."""
+        config = SwePipelineConfig()
+        pipeline = SwePipeline(mock_gh_client, config=config)
+
+        result = pipeline._get_classifier()
+
+        assert result is None

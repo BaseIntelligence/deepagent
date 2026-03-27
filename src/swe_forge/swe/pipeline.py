@@ -12,13 +12,29 @@ import random
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
+from .difficulty import (
+    ClassifyResponse,
+    DifficultyClassifier,
+    PRInfo,
+    TaskInfo,
+    TriageResponse,
+)
 from .enricher import EnrichedPullRequest, enrich_pr
 from .filters import FilterConfig, apply_filters
 from .gharchive import GhArchiveClient, GhArchiveEvent
 from .github_api import GitHubClient
 from .models import SweTask, SweTaskStatus
+from .test_generator import GeneratedTests
+
+from swe_forge.execution.docker_client import DockerClient
+from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
+
+if TYPE_CHECKING:
+    from swe_forge.llm.client import LLMClient
+
+    from .test_generator import TestGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +87,7 @@ class SwePipelineConfig:
         difficulty_targets: Per-difficulty quotas for multi-target mode.
     """
 
-    min_stars: int = 20
+    min_stars: int = 100
     languages: list[str] = field(default_factory=list)
     max_candidates: int = 50
     max_tasks: int = 1
@@ -81,6 +97,9 @@ class SwePipelineConfig:
     concurrency_deep: int = 8
     difficulty_filter: str | None = None
     difficulty_targets: DifficultyTargets | None = None
+    llm_client: "LLMClient | None" = None
+    difficulty_classifier: DifficultyClassifier | None = None
+    test_generator: "TestGenerator | None" = None
 
 
 @dataclass
@@ -158,6 +177,7 @@ class SwePipeline:
         self.config = config or SwePipelineConfig()
         self._filter_config = self._build_filter_config()
         self._active = False
+        self._classifier: DifficultyClassifier | None = None
 
     def _build_filter_config(self) -> FilterConfig:
         """Build filter config from pipeline config."""
@@ -170,6 +190,22 @@ class SwePipeline:
             exclude_bots=True,
         )
 
+    def _get_classifier(self) -> DifficultyClassifier | None:
+        """Get or create the difficulty classifier.
+
+        Creates classifier on first use. Returns None if no llm_client available,
+        which causes fallback to heuristic-based classification.
+
+        Returns:
+            DifficultyClassifier instance or None if llm_client not configured.
+        """
+        if self._classifier is None:
+            if self.config.difficulty_classifier is not None:
+                self._classifier = self.config.difficulty_classifier
+            elif self.config.llm_client is not None:
+                self._classifier = DifficultyClassifier(client=self.config.llm_client)
+        return self._classifier
+
     async def __aenter__(self) -> "SwePipeline":
         """Enter async context manager."""
         if self.gh_archive_client._session is None:
@@ -181,6 +217,28 @@ class SwePipeline:
         """Exit async context manager."""
         self._active = False
         await self.gh_archive_client.close()
+
+    async def _create_sandbox(
+        self,
+        repo_url: str,
+        base_commit: str,
+    ) -> DockerSandbox:
+        """Create a DockerSandbox configured for task execution.
+
+        Factory method for creating sandbox instances that can be used
+        for isolated repository operations during task execution.
+
+        Args:
+            repo_url: Repository URL to clone (e.g., "https://github.com/owner/repo").
+            base_commit: Base commit SHA to checkout.
+
+        Returns:
+            DockerSandbox instance configured with ubuntu:24.04 image.
+            The sandbox is not yet started - caller must use async context manager.
+        """
+        client = DockerClient()
+        config = SandboxConfig(image="ubuntu:24.04")
+        return DockerSandbox(client, config)
 
     async def _emit_event(
         self, queue: asyncio.Queue[SwePipelineEvent] | None, event: SwePipelineEvent
@@ -233,24 +291,28 @@ class SwePipeline:
         semaphore: asyncio.Semaphore,
         metrics: BenchmarkMetrics,
     ) -> str | None:
-        """Stage 3: Pre-classify difficulty using LLM.
-
-        For now, returns a mock difficulty based on file count.
-        In production, this would call an LLM.
-        """
+        """Stage 3: Pre-classify difficulty using LLM or heuristics."""
         async with semaphore:
-            # Mock classification logic based on heuristics
-            # In production, this would call LLM difficulty classifier
             metrics.preclassify_count += 1
 
-            if enriched.files_changed <= 2:
-                difficulty = "easy"
+            classifier = self._get_classifier()
+            if classifier is not None:
+                pr_info = PRInfo(title=enriched.title, body=enriched.body or "")
+                response: TriageResponse = await classifier.classify_triage(pr_info)
+                difficulty = response.difficulty
+            else:
+                if enriched.files_changed <= 2:
+                    difficulty = "easy"
+                elif enriched.files_changed <= 5:
+                    difficulty = "medium"
+                else:
+                    difficulty = "hard"
+
+            if difficulty == "easy":
                 metrics.preclassify_easy += 1
-            elif enriched.files_changed <= 5:
-                difficulty = "medium"
+            elif difficulty == "medium":
                 metrics.preclassify_medium += 1
             else:
-                difficulty = "hard"
                 metrics.preclassify_hard += 1
 
             logger.debug(
@@ -270,14 +332,15 @@ class SwePipeline:
     ) -> SweTask | None:
         """Stage 4: Deep processing (extraction, quality scoring).
 
-        For now, creates a basic task without actual extraction.
-        In production, this would run patch extraction, test generation, etc.
+        Extracts patches and generates test commands using TestGenerator when
+        configured. Falls back to mock logic when test_generator is None.
         """
         async with semaphore:
             metrics.extraction_attempted += 1
 
             try:
-                # Create basic task from enriched PR
+                patch, test_patch = await self._extract_patch(enriched)
+
                 task = SweTask(
                     id=f"{enriched.repo.replace('/', '-')}-{enriched.number}",
                     repo=enriched.repo,
@@ -287,52 +350,80 @@ class SwePipeline:
                     prompt=enriched.title,
                     original_pr_body=enriched.body or "",
                     status=SweTaskStatus.CANDIDATE,
+                    patch=patch,
+                    test_patch=test_patch,
                 )
 
                 metrics.extraction_succeeded += 1
 
-                # Mock quality scoring
-                quality_score = 0.75 + (len(enriched.changed_files) * 0.02)
-                quality_score = min(quality_score, 1.0)
-                task.quality_score = quality_score
-                task.quality_passed = quality_score >= 0.7
-
-                metrics.quality_scored += 1
-                if task.quality_passed:
-                    metrics.quality_passed += 1
+                if self.config.test_generator is not None:
+                    await self._run_test_generation(
+                        enriched, task, metrics, event_queue
+                    )
                 else:
-                    metrics.quality_failed += 1
+                    quality_score = 0.75 + (len(enriched.changed_files) * 0.02)
+                    quality_score = min(quality_score, 1.0)
+                    task.quality_score = quality_score
+                    task.quality_passed = quality_score >= 0.7
 
-                # Set difficulty
-                if enriched.files_changed <= 2:
-                    task.difficulty_score = 1
-                    metrics.difficulty_easy += 1
-                elif enriched.files_changed <= 5:
-                    task.difficulty_score = 2
-                    metrics.difficulty_medium += 1
-                else:
-                    task.difficulty_score = 3
-                    metrics.difficulty_hard += 1
+                    metrics.quality_scored += 1
+                    if task.quality_passed:
+                        metrics.quality_passed += 1
+                    else:
+                        metrics.quality_failed += 1
 
-                # Emit quality scored event
-                await self._emit_event(
-                    event_queue,
-                    SwePipelineEvent(
-                        SwePipelineEventType.QUALITY_SCORED,
-                        {
-                            "task_id": task.id,
-                            "score": quality_score,
-                            "passed": task.quality_passed,
-                        },
-                    ),
-                )
+                    classifier = self._get_classifier()
+                    if classifier is not None:
+                        pr_info = PRInfo(title=enriched.title, body=enriched.body or "")
+                        task_info = TaskInfo(
+                            pr_info=pr_info,
+                            files_changed=enriched.files_changed,
+                            lines_added=enriched.additions,
+                            lines_removed=enriched.deletions,
+                            file_paths=enriched.changed_files,
+                        )
+                        response: ClassifyResponse = await classifier.classify_full(
+                            task_info
+                        )
+                        task.difficulty_score = max(
+                            1, min(10, int(response.score * 10))
+                        )
+                        if response.difficulty == "easy":
+                            metrics.difficulty_easy += 1
+                        elif response.difficulty == "medium":
+                            metrics.difficulty_medium += 1
+                        else:
+                            metrics.difficulty_hard += 1
+                    else:
+                        if enriched.files_changed <= 2:
+                            task.difficulty_score = 1
+                            metrics.difficulty_easy += 1
+                        elif enriched.files_changed <= 5:
+                            task.difficulty_score = 2
+                            metrics.difficulty_medium += 1
+                        else:
+                            task.difficulty_score = 3
+                            metrics.difficulty_hard += 1
 
-                logger.info(
-                    "Task %s processed (score=%.2f, passed=%s)",
-                    task.id,
-                    quality_score,
-                    task.quality_passed,
-                )
+                    await self._emit_event(
+                        event_queue,
+                        SwePipelineEvent(
+                            SwePipelineEventType.QUALITY_SCORED,
+                            {
+                                "task_id": task.id,
+                                "score": quality_score,
+                                "passed": task.quality_passed,
+                            },
+                        ),
+                    )
+
+                    logger.info(
+                        "Task %s processed (score=%.2f, passed=%s, no test_generator)",
+                        task.id,
+                        quality_score,
+                        task.quality_passed,
+                    )
+
                 return task
 
             except Exception as e:
@@ -345,6 +436,114 @@ class SwePipeline:
                 )
                 return None
 
+    async def _run_test_generation(
+        self,
+        enriched: EnrichedPullRequest,
+        task: SweTask,
+        metrics: BenchmarkMetrics,
+        event_queue: asyncio.Queue[SwePipelineEvent] | None,
+    ) -> None:
+        """Run test generation for a task using configured TestGenerator.
+
+        Creates a sandbox, runs test generation, and maps results to task fields.
+        Marks task as REJECTED if generation fails.
+
+        Args:
+            enriched: Enriched PR data for sandbox setup.
+            task: SweTask to populate with generated tests.
+            metrics: Metrics tracker for quality scoring stats.
+            event_queue: Optional event queue for progress updates.
+        """
+        repo_url = f"https://github.com/{enriched.repo}"
+        sandbox: DockerSandbox | None = None
+
+        try:
+            sandbox = self._create_sandbox(repo_url, enriched.base_commit)
+
+            async with sandbox:
+                await sandbox.setup_workspace(repo_url, enriched.base_commit)
+
+                generated: GeneratedTests = (
+                    await self.config.test_generator.generate_tests(  # type: ignore[union-attr]
+                        task, sandbox
+                    )
+                )
+
+                task.fail_to_pass = generated.fail_to_pass
+                task.pass_to_pass = generated.pass_to_pass
+
+                if generated.test_files:
+                    test_files_content = "\n".join(
+                        f"# Test file: {tf.path}\n{tf.content}"
+                        for tf in generated.test_files
+                    )
+                    if task.test_patch:
+                        task.test_patch = f"{task.test_patch}\n\n{test_files_content}"
+                    else:
+                        task.test_patch = test_files_content
+
+                if generated.success:
+                    task.quality_score = 1.0
+                    task.quality_passed = True
+                    task.status = SweTaskStatus.READY
+                else:
+                    task.quality_score = 0.0
+                    task.quality_passed = False
+                    task.status = SweTaskStatus.REJECTED
+
+                if generated.install_commands:
+                    task.install_config["install_commands"] = generated.install_commands
+                    task.install_config["validated"] = True
+
+                metrics.quality_scored += 1
+                if task.quality_passed:
+                    metrics.quality_passed += 1
+                else:
+                    metrics.quality_failed += 1
+
+                if generated.turn_count <= 2:
+                    task.difficulty_score = 1
+                    metrics.difficulty_easy += 1
+                elif generated.turn_count <= 5:
+                    task.difficulty_score = 2
+                    metrics.difficulty_medium += 1
+                else:
+                    task.difficulty_score = 3
+                    metrics.difficulty_hard += 1
+
+                await self._emit_event(
+                    event_queue,
+                    SwePipelineEvent(
+                        SwePipelineEventType.QUALITY_SCORED,
+                        {
+                            "task_id": task.id,
+                            "score": task.quality_score,
+                            "passed": task.quality_passed,
+                            "turn_count": generated.turn_count,
+                        },
+                    ),
+                )
+
+                logger.info(
+                    "Task %s processed with tests (score=%.2f, passed=%s, turns=%d)",
+                    task.id,
+                    task.quality_score,
+                    task.quality_passed,
+                    generated.turn_count,
+                )
+
+        except Exception as e:
+            task.quality_score = 0.0
+            task.quality_passed = False
+            task.status = SweTaskStatus.REJECTED
+            metrics.quality_failed += 1
+            logger.warning(
+                "Test generation failed for %s#%d: %s",
+                enriched.repo,
+                enriched.number,
+                e,
+            )
+
     def _should_skip_event(self, event: GhArchiveEvent) -> bool:
         """Pre-filter events before enrichment."""
         if event.pull_number == 0:
@@ -354,6 +553,108 @@ class SwePipeline:
         if not event.has_org:
             return True
         return False
+
+    def _is_test_file(self, filename: str) -> bool:
+        """Check if a filename is a test file.
+
+        Detects test files by patterns:
+        - starts with 'tests/' or 'test/'
+        - contains 'test_' in filename
+        - ends with '_test.py'
+        - contains '/spec/' in path
+        """
+        filename_lower = filename.lower()
+        return (
+            filename_lower.startswith("tests/")
+            or filename_lower.startswith("test/")
+            or "test_" in filename_lower
+            or filename_lower.endswith("_test.py")
+            or "/spec/" in filename_lower
+        )
+
+    async def _extract_patch(self, enriched: EnrichedPullRequest) -> tuple[str, str]:
+        """Extract and separate patch into main and test patches.
+
+        Fetches PR diff from GitHub API and separates it into:
+        - patch: hunks from non-test files
+        - test_patch: hunks from test files
+
+        Args:
+            enriched: Enriched PR data containing repo and PR number.
+
+        Returns:
+            Tuple of (patch, test_patch) strings. Returns ('', '') if diff is empty.
+        """
+        # Parse repo format: "owner/repo"
+        parts = enriched.repo.split("/", 1)
+        if len(parts) != 2:
+            logger.warning("Invalid repo format: %s", enriched.repo)
+            return "", ""
+
+        owner, repo = parts[0], parts[1]
+
+        try:
+            diff = await self.gh_client.get_pr_diff(owner, repo, enriched.number)
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch diff for %s#%d: %s",
+                enriched.repo,
+                enriched.number,
+                e,
+            )
+            return "", ""
+
+        if not diff:
+            return "", ""
+
+        # Parse unified diff format
+        patch_parts: list[str] = []
+        test_patch_parts: list[str] = []
+
+        lines = diff.split("\n")
+        current_file: str | None = None
+        current_is_test: bool = False
+        current_hunk: list[str] = []
+
+        for line in lines:
+            # New file header
+            if line.startswith("diff --git "):
+                # Save previous hunk
+                if current_file is not None and current_hunk:
+                    if current_is_test:
+                        test_patch_parts.extend(current_hunk)
+                    else:
+                        patch_parts.extend(current_hunk)
+                    current_hunk = []
+
+                # Parse filename from diff --git a/path b/path
+                # Format: diff --git a/path/to/file.py b/path/to/file.py
+                match_parts = line.split(" ")
+                if len(match_parts) >= 3:
+                    # Take the 'b/' prefixed path (destination)
+                    b_path = match_parts[-1]
+                    if b_path.startswith("b/"):
+                        current_file = b_path[2:]
+                    else:
+                        current_file = b_path
+                    current_is_test = self._is_test_file(current_file)
+                else:
+                    current_file = None
+                    current_is_test = False
+
+            current_hunk.append(line)
+
+        # Don't forget the last hunk
+        if current_file is not None and current_hunk:
+            if current_is_test:
+                test_patch_parts.extend(current_hunk)
+            else:
+                patch_parts.extend(current_hunk)
+
+        patch = "\n".join(patch_parts)
+        test_patch = "\n".join(test_patch_parts)
+
+        return patch, test_patch
 
     def _difficulty_matches_filter(
         self, difficulty: str | None, config: SwePipelineConfig
