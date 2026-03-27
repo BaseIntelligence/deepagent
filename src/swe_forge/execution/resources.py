@@ -176,10 +176,10 @@ def apply_resource_limits(
         The modified container configuration dict.
 
     Example:
-        >>> config = {"Image": "ubuntu:22.04"}
+        >>> config = {"Image": "ubuntu:24.04"}
         >>> limits = ResourceLimits(memory_mb=1024, cpu_cores=2.0)
         >>> apply_resource_limits(config, limits)
-        {'Image': 'ubuntu:22.04', 'HostConfig': {'Memory': 1073741824, ...}}
+        {'Image': 'ubuntu:24.04', 'HostConfig': {'Memory': 1073741824, ...}}
     """
     if "HostConfig" not in container_config:
         container_config["HostConfig"] = {}

@@ -505,28 +505,32 @@ class TestDockerSandboxImageForLanguage:
 
     def test_python_image(self):
         # NO MORE HARDCODING - returns {language}:latest fallback
-        assert DockerSandbox.image_for_language("python") == "ubuntu:22.04"
-        assert DockerSandbox.image_for_language("Python") == "ubuntu:22.04"  # lowercase
-        assert DockerSandbox.image_for_language("python3") == "ubuntu:22.04"
+        assert DockerSandbox.image_for_language("python") == "ubuntu:24.04"
+        assert DockerSandbox.image_for_language("Python") == "ubuntu:24.04"  # lowercase
+        assert DockerSandbox.image_for_language("python3") == "ubuntu:24.04"
 
     def test_javascript_image(self):
-        assert DockerSandbox.image_for_language("javascript") == "ubuntu:22.04"  # No longer hardcoded
-        assert DockerSandbox.image_for_language("typescript") == "ubuntu:22.04"
-        assert DockerSandbox.image_for_language("node") == "ubuntu:22.04"
+        assert (
+            DockerSandbox.image_for_language("javascript") == "ubuntu:24.04"
+        )  # No longer hardcoded
+        assert DockerSandbox.image_for_language("typescript") == "ubuntu:24.04"
+        assert DockerSandbox.image_for_language("node") == "ubuntu:24.04"
 
     def test_go_image(self):
         # NO MORE HARDCODING - returns {language}:latest fallback
-        assert DockerSandbox.image_for_language("go") == "ubuntu:22.04"
-        assert DockerSandbox.image_for_language("golang") == "ubuntu:22.04"
+        assert DockerSandbox.image_for_language("go") == "ubuntu:24.04"
+        assert DockerSandbox.image_for_language("golang") == "ubuntu:24.04"
 
     def test_rust_image(self):
-        assert DockerSandbox.image_for_language("rust") == "ubuntu:22.04"  # No longer hardcoded
+        assert (
+            DockerSandbox.image_for_language("rust") == "ubuntu:24.04"
+        )  # No longer hardcoded
 
     def test_unknown_defaults_to_python(self):
         # NO MORE HARDCODING - returns {language}:latest for unknown
-        assert DockerSandbox.image_for_language("unknown") == "ubuntu:22.04"
-        assert DockerSandbox.image_for_language("foobar") == "ubuntu:22.04"
-        assert DockerSandbox.image_for_language("") == "ubuntu:22.04"
+        assert DockerSandbox.image_for_language("unknown") == "ubuntu:24.04"
+        assert DockerSandbox.image_for_language("foobar") == "ubuntu:24.04"
+        assert DockerSandbox.image_for_language("") == "ubuntu:24.04"
 
 
 class TestDockerSandboxFromSpec:

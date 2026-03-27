@@ -72,13 +72,11 @@ class MockDocker:
 
         self.images.list = AsyncMock(return_value=[])
         self.images.inspect = AsyncMock(return_value={"Id": "sha256:image-id"})
-        self.images.pull = MagicMock(return_value=self._pull_generator())
+        self.images.pull = AsyncMock(
+            return_value=[{"status": "Pulling"}, {"status": "Complete"}]
+        )
 
         self.exec.return_value = MockExec()
-
-    async def _pull_generator(self):
-        yield {"status": "Pulling"}
-        yield {"status": "Complete"}
 
 
 class TestContainerConfig:

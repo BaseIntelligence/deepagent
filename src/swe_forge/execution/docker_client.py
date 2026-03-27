@@ -388,9 +388,7 @@ class DockerClient:
         Args:
             image: Image name with optional tag.
         """
-        stream = self._client.images.pull(from_image=image)
-        async for _ in stream:
-            pass
+        await self._client.images.pull(from_image=image)
 
     async def image_exists(self, image: str) -> bool:
         """Check if an image exists locally."""

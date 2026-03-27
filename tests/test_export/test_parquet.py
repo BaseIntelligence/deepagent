@@ -187,6 +187,36 @@ class TestImportParquet:
         assert records[0]["quality_score"] is None
         assert records[0]["workspace_path"] is None
 
+    def test_import_handles_complex_install_config(self, tmp_path: Path):
+        """Test that non-string install_config values are JSON-encoded."""
+        import json
+
+        task = SweTask(
+            id="test-complex",
+            repo="owner/repo",
+            install_config={
+                "commands": ["pip install -e .", "pytest"],
+                "python": "3.11",  # string value - not encoded
+                "config": {"nested": "value"},
+            },
+        )
+        output_file = tmp_path / "complex.parquet"
+        export_parquet([task], output_file)
+        records = import_parquet(output_file)
+
+        config = dict(records[0]["install_config"])
+
+        # List values should be JSON-encoded
+        commands = json.loads(config["commands"])
+        assert commands == ["pip install -e .", "pytest"]
+
+        # String values should remain as-is
+        assert config["python"] == "3.11"
+
+        # Dict values should be JSON-encoded
+        nested = json.loads(config["config"])
+        assert nested == {"nested": "value"}
+
 
 class TestParquetIntegration:
     def test_large_dataset_roundtrip(self, tmp_path: Path):
