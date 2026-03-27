@@ -1,3 +1,0 @@
-npm test -- src/components/HomeDemo2/HeroBanner.lazyload.test.tsx
-npm test -- src/next-config.headers.test.ts
-npm test -- src/utils/booking.test.ts

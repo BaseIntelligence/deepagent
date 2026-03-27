@@ -1,2 +1,0 @@
-pytest tests/test_cache_control.py -q
-pytest tests/test_configs.py::test_router_kwargs_present_in_models -q

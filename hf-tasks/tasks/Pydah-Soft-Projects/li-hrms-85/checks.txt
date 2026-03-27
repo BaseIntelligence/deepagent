@@ -1,3 +1,0 @@
-cd /repo/backend && npm test -- --runTestsByPath tests/attendance/recalculateOnAttendanceUpdate.test.js
-cd /repo/backend && npm test -- --runTestsByPath tests/attendance/attendanceDailyHook.test.js
-cd /repo/backend && npm test -- --runTestsByPath tests/api/sanity.test.js

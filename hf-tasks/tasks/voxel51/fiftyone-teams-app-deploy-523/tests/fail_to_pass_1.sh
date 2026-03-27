@@ -1,3 +1,0 @@
-#!/bin/bash
-# This test must FAIL on base commit, PASS after fix
-cd tests/unit/compose && go test -count=1 -tags unit -run 'TestInternalAuthComposeUsesReleaseImages|TestInternalAuthComposeSetsSdkRecommendedVersion|TestLegacyAuthComposeUsesReleaseImages|TestLegacyAuthComposeSetsSdkRecommendedVersion' ./...

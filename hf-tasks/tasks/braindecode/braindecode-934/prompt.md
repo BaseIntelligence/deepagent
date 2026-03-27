@@ -1,3 +1,0 @@
-# braindecode/braindecode-934
-
-Improve dataset string and HTML representations so printing or viewing in notebooks shows a concise, meaningful summary instead of only class names. Include key metadata such as channel count, sampling frequency, duration/window size, number of windows/recordings, and a brief description. For concatenated datasets, summarize overall size and indicate when details are derived from the first record; include a compact channel/montage summary if available. Provide an optional rich (HTML) representation for notebook rendering. Ensure integer column names are handled safely in display. Add appropriate tests and documentation updates reflecting the new representations.

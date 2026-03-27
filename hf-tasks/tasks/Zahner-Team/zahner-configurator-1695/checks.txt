@@ -1,2 +1,0 @@
-npm test -- --run tests/materials/atlasRotationRepeat.test.ts
-npm test -- --run tests/materials/atlasTiling.test.ts

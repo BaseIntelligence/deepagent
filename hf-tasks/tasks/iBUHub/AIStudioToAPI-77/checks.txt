@@ -1,4 +1,0 @@
-node tests/ws_port_fixed.test.js
-node tests/ws_port_ws_server_fixed.test.js
-node tests/build_script_ws_port_fixed.test.js
-npm run build:ui

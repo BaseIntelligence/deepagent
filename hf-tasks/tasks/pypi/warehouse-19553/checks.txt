@@ -1,2 +1,0 @@
-pytest -q tests/unit/admin/templates/test_sponsor_admin_templates.py
-pytest -q tests/unit/admin/views/test_sponsors.py::TestSponsorForm

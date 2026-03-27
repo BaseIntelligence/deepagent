@@ -1,3 +1,0 @@
-#!/bin/bash
-# This test must PASS on base commit AND after fix
-cd tests/unit/helm && go test -count=1 -tags unit -run TestDeploymentCasTemplate/TestMetadataLabels ./...

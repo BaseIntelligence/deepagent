@@ -1,2 +1,0 @@
-pytest -q test/unit_tests/datasets/test_dataset_repr.py
-pytest -q test/unit_tests/datasets/test_dataset.py::test_len_base_dataset

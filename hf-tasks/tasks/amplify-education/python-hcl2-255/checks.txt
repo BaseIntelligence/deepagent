@@ -1,2 +1,0 @@
-python -m nose2 -s test/unit -v test_object_keys
-python -m nose2 -s test/unit -v test_dict_transformer

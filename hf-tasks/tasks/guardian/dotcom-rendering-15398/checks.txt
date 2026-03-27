@@ -1,2 +1,0 @@
-cd dotcom-rendering && pnpm test -- src/components/FootballMatchHeader/FootballMatchHeader.test.tsx
-cd dotcom-rendering && pnpm test -- src/components/FootballMatchList.test.tsx

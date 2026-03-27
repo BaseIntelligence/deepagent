@@ -1,2 +1,0 @@
-CI=true npm test -- --watchAll=false
-npm run build

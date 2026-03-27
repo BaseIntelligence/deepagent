@@ -1,2 +1,0 @@
-npm run test:convex:run -- convex/authWrapperPasswordReset.test.ts
-npm run test:convex:run -- convex/authWrapperRateLimit.test.ts

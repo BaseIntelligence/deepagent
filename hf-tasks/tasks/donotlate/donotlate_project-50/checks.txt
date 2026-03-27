@@ -1,2 +1,0 @@
-cd /repo/donotlate_project && chmod +x gradlew && ./gradlew test --tests com.late.donot.calculator.controller.CalculatorPushSaveControllerTest
-cd /repo/donotlate_project && chmod +x gradlew && ./gradlew assemble

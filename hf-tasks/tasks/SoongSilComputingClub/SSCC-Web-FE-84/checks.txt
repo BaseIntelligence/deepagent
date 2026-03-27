@@ -1,3 +1,0 @@
-npm test -- --run src/shared/lib/use-activity-gallery.test.tsx
-npm test -- --run src/shared/lib/recruitment.test.ts
-npm test -- --run src/shared/auth/require-admin.test.tsx

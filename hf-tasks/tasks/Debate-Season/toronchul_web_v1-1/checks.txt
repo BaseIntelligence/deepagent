@@ -1,2 +1,0 @@
-npm run build && node tests/typography-tokens.test.js
-npm run build

@@ -1,2 +1,0 @@
-chmod +x gradlew && ./gradlew :apps:core-api:test --tests com.ott.core.modules.preference.service.UserPreferenceServiceTest
-chmod +x gradlew && ./gradlew :apps:core-api:compileJava

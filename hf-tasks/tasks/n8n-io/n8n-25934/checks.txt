@@ -1,2 +1,0 @@
-pnpm --filter @n8n/workflow-sdk test -- --runTestsByPath src/expression-public-surface.test.ts
-pnpm --filter @n8n/workflow-sdk test -- --runTestsByPath src/utils/safe-access.test.ts

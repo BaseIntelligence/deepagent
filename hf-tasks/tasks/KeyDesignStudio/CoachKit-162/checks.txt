@@ -1,2 +1,0 @@
-cd apps/web && npx vitest run modules/ai-plan-builder/tests/ai-plan-builder.constraint-guardrails.unit.test.ts modules/ai-plan-builder/tests/workout-detail-renderer.explainability.unit.test.ts
-cd apps/web && npx vitest run modules/ai-plan-builder/tests/ai-plan-builder.constraint-validator.unit.test.ts

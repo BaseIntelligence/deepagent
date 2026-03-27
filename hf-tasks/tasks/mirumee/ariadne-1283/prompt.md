@@ -1,3 +1,0 @@
-# mirumee/ariadne-1283
-
-Remove deprecated Apollo Tracing and OpenTracing integrations and any related optional tracing extras or documentation. Users should no longer have access to these tracing extensions. Also remove the deprecated federation schema helper and require use of the standard GraphQL schema extension API instead. Update public-facing docs and dependencies so that no OpenTracing/Apollo Tracing guidance or dependencies remain. Ensure behavior reflects that these features are no longer supported and guide users to use the standard GraphQL schema extension function for federation schema extension.

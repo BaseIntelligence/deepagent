@@ -1,2 +1,0 @@
-yarn workspace @agoric/internal test test/typescript-upgrade.test.js
-yarn workspace @agoric/internal test test/marshal.test.js

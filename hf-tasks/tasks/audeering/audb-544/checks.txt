@@ -1,2 +1,0 @@
-pytest tests/test_load_media_missing.py -q -o addopts=''
-pytest tests/test_load.py::test_load_media -q -o addopts=''

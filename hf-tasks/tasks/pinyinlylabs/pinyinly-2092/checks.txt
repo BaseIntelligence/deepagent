@@ -1,2 +1,0 @@
-yarn workspace @pinyinly/app vitest run test/client/ui/IconImage.size.test.tsx
-yarn workspace @pinyinly/app vitest run test/client/ui/IconImage.test.ts

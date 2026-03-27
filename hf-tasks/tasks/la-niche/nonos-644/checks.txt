@@ -1,2 +1,0 @@
-pytest -q tests/test_deprecated_rotation_params.py
-pytest -q tests/test_parse_planet_inputs.py::TestParseRotationAngle::test_from_rotate_with

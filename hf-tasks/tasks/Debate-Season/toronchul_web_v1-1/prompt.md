@@ -1,3 +1,0 @@
-# Debate-Season/toronchul_web_v1-1
-
-Add a typography system that matches the TDS design tokens using the Pretendard Variable web font. Define the required font size tiers (largest, headers, body, captions) with their specified sizes, line heights, and letter-spacing, and make them available for styling. Set the application’s default typography and colors to match the dark theme, including the default background and text colors and using Pretendard as the base font. Ensure the layout uses the appropriate locale and no longer relies on external Google Fonts. Update the styling configuration so these typography tokens are supported across the app.

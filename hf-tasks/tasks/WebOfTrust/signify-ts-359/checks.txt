@@ -1,2 +1,0 @@
-npm test -- --run test/core/rotation-duplicates.test.ts
-npm test -- --run test/core/eventing.test.ts

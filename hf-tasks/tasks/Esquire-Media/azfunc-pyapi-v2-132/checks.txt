@@ -1,2 +1,0 @@
-pytest -q tests/test_fetch_audience_demographics.py
-python -m compileall libs/azure/functions/blueprints/esquire/audiences/builder/activities

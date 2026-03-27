@@ -1,2 +1,0 @@
-bash -lc "make test > /tmp/make_test_output.txt 2>&1; grep -q 'mocha -r ts-node/register' /tmp/make_test_output.txt"
-npx mocha -r ts-node/register 'test/webhook.test.ts'

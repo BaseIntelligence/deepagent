@@ -1,2 +1,0 @@
-pnpm vitest run packages/ui/src/molecules/CarouselCard/CarouselCard.test.tsx
-pnpm vitest run packages/ui/src/atoms/Button/Button.test.tsx

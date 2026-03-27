@@ -1,2 +1,0 @@
-pytest -q pef/tests/test_dry_run_cancellation.py
-pytest -q pef/tests/test_orchestrator.py::TestPEFOrchestratorDryRun::test_returns_dry_run_result

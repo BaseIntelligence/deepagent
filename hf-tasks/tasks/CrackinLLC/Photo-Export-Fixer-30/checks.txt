@@ -1,2 +1,0 @@
-pytest pef/tests/test_gui_pr_updates.py -q
-pytest pef/tests/test_utils.py -q

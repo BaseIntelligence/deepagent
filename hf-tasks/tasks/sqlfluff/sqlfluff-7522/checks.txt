@@ -1,2 +1,0 @@
-pytest -q test/dialects/databricks_materialized_view_test.py
-pytest -q test/dialects/dialects_test.py::test__dialect__base_file_parse --maxfail=1 -k "databricks and create_materialized_view"

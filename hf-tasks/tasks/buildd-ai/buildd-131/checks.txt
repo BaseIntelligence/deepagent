@@ -1,2 +1,0 @@
-source /root/.bashrc && bun test apps/local-ui/__tests__/integration-session-resume-skip.test.ts
-source /root/.bashrc && bun test apps/local-ui/__tests__/unit/workers.test.ts

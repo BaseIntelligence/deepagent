@@ -1,3 +1,0 @@
-# micro/mu-109
-
-Fix the places search so it no longer times out, supports larger search radii, offers consistent sorting, and improves map link behavior. Ensure the search waits long enough for the external Overpass API to respond. Allow users to search up to 50km and provide radius options that include 10km, 25km, and 50km. Add a sort option to order results by distance or name and surface the active sort in the results summary. Update map links so the label is generic (“View on Map”) and the generated view and directions URLs include the business name along with coordinates to resolve the correct place.

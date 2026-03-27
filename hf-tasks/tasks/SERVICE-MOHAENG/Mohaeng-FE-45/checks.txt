@@ -1,2 +1,0 @@
-npx vitest run --config apps/mohang-app/vite.config.mts apps/mohang-app/src/app/pages/auth-code-check-logging.spec.ts
-npx tsc -p libs/ui/tsconfig.lib.json --noEmit
