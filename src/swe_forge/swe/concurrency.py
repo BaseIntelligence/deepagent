@@ -16,6 +16,7 @@ class ConcurrencyConfig:
     - DEEP_BACKLOG_MULTIPLIER: Multiplier for backlog semaphores (5)
     - GITHUB_SEARCH_AUTH: Rate limit for authenticated GitHub searches (5)
     - GITHUB_SEARCH_UNAUTH: Rate limit for unauthenticated GitHub searches (2)
+    - DOCKER_CONTAINERS: Maximum concurrent Docker containers (8)
     """
 
     GH_ARCHIVE_FETCH: int = 8
@@ -25,6 +26,7 @@ class ConcurrencyConfig:
     DEEP_BACKLOG_MULTIPLIER: int = 5
     GITHUB_SEARCH_AUTH: int = 5
     GITHUB_SEARCH_UNAUTH: int = 2
+    DOCKER_CONTAINERS: int = 8
 
 
 @dataclass
@@ -47,6 +49,7 @@ class PipelineSemaphores:
     _github_search_unauth_sem: asyncio.Semaphore | None = field(
         default=None, init=False
     )
+    _docker_sem: asyncio.Semaphore | None = field(default=None, init=False)
     _initialized: bool = field(default=False, init=False)
 
     def _ensure_initialized(self) -> None:
@@ -65,6 +68,7 @@ class PipelineSemaphores:
             self._github_search_unauth_sem = asyncio.Semaphore(
                 self.config.GITHUB_SEARCH_UNAUTH
             )
+            self._docker_sem = asyncio.Semaphore(self.config.DOCKER_CONTAINERS)
             self._initialized = True
 
     @property
@@ -116,9 +120,47 @@ class PipelineSemaphores:
         assert self._github_search_unauth_sem is not None
         return self._github_search_unauth_sem
 
+    @property
+    def docker_sem(self) -> asyncio.Semaphore:
+        """Semaphore for Docker container creation."""
+        self._ensure_initialized()
+        assert self._docker_sem is not None
+        return self._docker_sem
+
 
 # GitHub API rate limiting constants
 GITHUB_RATE_LIMIT_DELAY: float = 2.1  # seconds between pages
+
+_docker_sem: asyncio.Semaphore | None = None
+_docker_containers_limit: int = 8
+
+
+def set_docker_containers_limit(limit: int) -> None:
+    """Set the maximum concurrent Docker containers.
+
+    Must be called before any container creation.
+    Resets the semaphore to use the new limit.
+
+    Args:
+        limit: Maximum number of concurrent Docker containers.
+    """
+    global _docker_sem, _docker_containers_limit
+    _docker_containers_limit = limit
+    _docker_sem = None  # Reset to force re-initialization with new limit
+
+
+def get_docker_semaphore() -> asyncio.Semaphore:
+    """Get the global Docker semaphore for container creation.
+
+    Lazy initialization - creates on first call.
+
+    Returns:
+        asyncio.Semaphore for limiting concurrent Docker containers.
+    """
+    global _docker_sem
+    if _docker_sem is None:
+        _docker_sem = asyncio.Semaphore(_docker_containers_limit)
+    return _docker_sem
 
 
 async def rate_limit_delay() -> None:
@@ -135,4 +177,6 @@ __all__ = [
     "PipelineSemaphores",
     "rate_limit_delay",
     "GITHUB_RATE_LIMIT_DELAY",
+    "get_docker_semaphore",
+    "set_docker_containers_limit",
 ]

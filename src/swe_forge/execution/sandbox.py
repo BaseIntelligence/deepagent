@@ -24,6 +24,7 @@ from swe_forge.execution.container import (
 )
 from swe_forge.execution.docker_client import DockerClient, DockerError
 from swe_forge.execution.commands import exec_in_container, ExecResult
+from swe_forge.swe.concurrency import get_docker_semaphore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -118,6 +119,7 @@ class DockerSandbox:
 
         self._state = SandboxState()
         self._manager: ContainerManager | None = None
+        self._semaphore_acquired: bool = False
 
     @classmethod
     def from_spec(
@@ -154,6 +156,10 @@ class DockerSandbox:
         Raises:
             DockerError: If container creation fails.
         """
+        sem = get_docker_semaphore()
+        await sem.acquire()
+        self._semaphore_acquired = True
+
         spec = ContainerSpec(
             name=self._container_name,
             image=self._config.image,
@@ -172,6 +178,8 @@ class DockerSandbox:
                 self._state.container_id = self._manager.container.id
         except Exception:
             self._manager = None
+            sem.release()
+            self._semaphore_acquired = False
             raise
 
         logger.info(
@@ -194,6 +202,10 @@ class DockerSandbox:
             await self._manager.__aexit__(exc_type, exc_val, exc_tb)
             self._manager = None
             self._state.container_id = None
+
+        if self._semaphore_acquired:
+            get_docker_semaphore().release()
+            self._semaphore_acquired = False
 
     def _require_running(self) -> str:
         """Assert the container is running and return its ID.
@@ -588,9 +600,9 @@ class DockerSandbox:
         NOTE: This is a FALLBACK only. The agentic system should determine
         the actual image based on repository detection via the agentic_config
         module. Use RepositoryConfig from agentic_config for real implementations.
-        
+
         DO NOT HARDCODE in production - let the agent detect!
-        
+
         For tests and backward compatibility only.
 
         Args:
@@ -600,7 +612,7 @@ class DockerSandbox:
             Docker image name (generic fallback).
         """
         language_lower = language.lower()
-        
+
         # FALLBACK: Let Docker Hub resolve based on language
         # The agent should detect and use the correct image
-        return "ubuntu:22.04"
+        return "ubuntu:24.04"

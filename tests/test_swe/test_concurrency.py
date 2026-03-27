@@ -9,6 +9,8 @@ from swe_forge.swe.concurrency import (
     PipelineSemaphores,
     rate_limit_delay,
     GITHUB_RATE_LIMIT_DELAY,
+    get_docker_semaphore,
+    set_docker_containers_limit,
 )
 
 
@@ -24,6 +26,7 @@ class TestConcurrencyConfig:
         assert config.DEEP_BACKLOG_MULTIPLIER == 5
         assert config.GITHUB_SEARCH_AUTH == 5
         assert config.GITHUB_SEARCH_UNAUTH == 2
+        assert config.DOCKER_CONTAINERS == 8
 
     def test_custom_values(self):
         config = ConcurrencyConfig(
@@ -34,6 +37,7 @@ class TestConcurrencyConfig:
             DEEP_BACKLOG_MULTIPLIER=3,
             GITHUB_SEARCH_AUTH=10,
             GITHUB_SEARCH_UNAUTH=5,
+            DOCKER_CONTAINERS=16,
         )
         assert config.GH_ARCHIVE_FETCH == 10
         assert config.ENRICHMENT == 30
@@ -42,6 +46,7 @@ class TestConcurrencyConfig:
         assert config.DEEP_BACKLOG_MULTIPLIER == 3
         assert config.GITHUB_SEARCH_AUTH == 10
         assert config.GITHUB_SEARCH_UNAUTH == 5
+        assert config.DOCKER_CONTAINERS == 16
 
 
 class TestPipelineSemaphores:
@@ -104,6 +109,21 @@ class TestPipelineSemaphores:
         sem = pipeline.github_search_unauth_sem
         assert isinstance(sem, asyncio.Semaphore)
         assert sem._value == 2
+
+    @pytest.mark.asyncio
+    async def test_docker_semaphore_creation(self):
+        pipeline = PipelineSemaphores()
+        sem = pipeline.docker_sem
+        assert isinstance(sem, asyncio.Semaphore)
+        assert sem._value == 8
+
+    @pytest.mark.asyncio
+    async def test_custom_docker_semaphore_limit(self):
+        config = ConcurrencyConfig(DOCKER_CONTAINERS=4)
+        pipeline = PipelineSemaphores(config=config)
+        sem = pipeline.docker_sem
+        assert isinstance(sem, asyncio.Semaphore)
+        assert sem._value == 4
 
     @pytest.mark.asyncio
     async def test_custom_config_affects_semaphore_limits(self):
@@ -187,3 +207,55 @@ class TestConcurrencyLimitEnforcement:
 
         async with sem:
             assert sem._value == 0
+
+
+class TestDockerSemaphore:
+    """Tests for global Docker semaphore functions."""
+
+    @pytest.mark.asyncio
+    async def test_docker_semaphore_limits_container_creation(self):
+        set_docker_containers_limit(2)
+        sem = get_docker_semaphore()
+        assert sem._value == 2
+
+        acquired_count = 0
+
+        async def acquire_slot():
+            nonlocal acquired_count
+            await sem.acquire()
+            acquired_count += 1
+
+        tasks = [asyncio.create_task(acquire_slot()) for _ in range(4)]
+
+        await asyncio.sleep(0.01)
+        assert acquired_count == 2
+
+        for _ in range(2):
+            sem.release()
+        await asyncio.gather(*tasks)
+        assert acquired_count == 4
+
+    @pytest.mark.asyncio
+    async def test_docker_semaphore_release_on_error(self):
+        set_docker_containers_limit(1)
+        sem = get_docker_semaphore()
+
+        await sem.acquire()
+        assert sem._value == 0
+
+        try:
+            raise RuntimeError("Simulated error")
+        except RuntimeError:
+            sem.release()
+
+        assert sem._value == 1
+
+    @pytest.mark.asyncio
+    async def test_docker_semaphore_configurable(self):
+        set_docker_containers_limit(4)
+        sem = get_docker_semaphore()
+        assert sem._value == 4
+
+        set_docker_containers_limit(8)
+        sem = get_docker_semaphore()
+        assert sem._value == 8
