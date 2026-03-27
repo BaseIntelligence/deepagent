@@ -1,7 +1,7 @@
 """Anthropic LLM client implementation."""
 
 import json
-from typing import Any, Literal
+from typing import Any
 
 from anthropic import AsyncAnthropic
 

@@ -20,7 +20,6 @@ from swe_forge.execution.container import (
     ContainerManager,
     ContainerSpec,
     ManagedContainerStatus,
-    VolumeMount,
 )
 from swe_forge.execution.docker_client import DockerClient, DockerError
 from swe_forge.execution.commands import exec_in_container, ExecResult
@@ -413,9 +412,9 @@ class DockerSandbox:
         if not packages and not requirements_file:
             raise ValueError("Must provide either packages or requirements_file")
 
-        container_id = self._require_running()
+        _container_id = self._require_running()
         install_timeout = timeout or self._config.install_timeout
-        workspace_dir = self._config.workspace_dir
+        _workspace_dir = self._config.workspace_dir
 
         if requirements_file:
             cmd = f"pip install -r {requirements_file}"
@@ -611,7 +610,7 @@ class DockerSandbox:
         Returns:
             Docker image name (generic fallback).
         """
-        language_lower = language.lower()
+        _language_lower = language.lower()
 
         # FALLBACK: Let Docker Hub resolve based on language
         # The agent should detect and use the correct image

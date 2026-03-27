@@ -6,7 +6,6 @@ and cleanup policy behavior.
 
 from __future__ import annotations
 
-import pytest
 
 from swe_forge.execution.resources import (
     CPU_PERIOD_US,

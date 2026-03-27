@@ -108,7 +108,9 @@ def filter_language(pr: EnrichedPullRequest, allowed_languages: list[str]) -> bo
     lang_unknown = normalized in ("", "unknown", "null")
 
     # Only reject known languages not in whitelist; unknown languages pass
-    if not lang_unknown and normalized not in [l.lower() for l in allowed_languages]:
+    if not lang_unknown and normalized not in [
+        lang.lower() for lang in allowed_languages
+    ]:
         logger.debug(
             f"Filter rejected {pr.repo}#{pr.number}: language '{pr.language}' not in whitelist"
         )

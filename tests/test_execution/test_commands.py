@@ -7,7 +7,6 @@ a running Docker daemon.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -174,7 +173,7 @@ class TestExecInContainer:
         with patch("swe_forge.execution.commands.Docker") as mock_docker_cls:
             mock_docker_cls.return_value = mock_docker
 
-            result = await exec_in_container(
+            await exec_in_container(
                 "test-container",
                 ["ls"],
                 cwd="/workspace",
@@ -190,7 +189,7 @@ class TestExecInContainer:
         with patch("swe_forge.execution.commands.Docker") as mock_docker_cls:
             mock_docker_cls.return_value = mock_docker
 
-            result = await exec_in_container(
+            await exec_in_container(
                 "test-container",
                 ["env"],
                 env={"FOO": "bar", "BAZ": "qux"},
@@ -208,7 +207,7 @@ class TestExecInContainer:
         with patch("swe_forge.execution.commands.Docker") as mock_docker_cls:
             mock_docker_cls.return_value = mock_docker
 
-            result = await exec_in_container(
+            await exec_in_container(
                 "test-container",
                 ["whoami"],
                 user="1000:1000",

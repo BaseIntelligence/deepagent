@@ -17,14 +17,12 @@ from tenacity import (
 
 from swe_forge.llm.client import (
     Choice,
-    Choice as ClientChoice,
     FunctionCall,
     GenerationRequest,
     GenerationResponse,
     LLMClient,
     Message,
     ToolCall,
-    ToolDefinition,
     Usage,
 )
 

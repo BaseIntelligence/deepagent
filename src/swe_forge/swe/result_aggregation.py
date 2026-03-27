@@ -10,7 +10,7 @@ from dataclasses import dataclass, asdict
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from swe_forge.swe.harness import HarnessResult, HarnessStatus
+    from swe_forge.swe.harness import HarnessResult
 
 
 @dataclass

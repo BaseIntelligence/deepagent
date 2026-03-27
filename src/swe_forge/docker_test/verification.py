@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Sequence
 
+from swe_forge.docker_test.harness import TestRunResult
+
 if TYPE_CHECKING:
     from swe_forge.docker_test.harness import DockerTestHarness
 
@@ -230,10 +232,8 @@ async def _run_fail_to_pass_tests(
     sandbox,
     tests: Sequence[str],
     timeout: float,
-) -> "TestRunResult":
+) -> TestRunResult:
     """Run fail_to_pass tests."""
-    from swe_forge.docker_test.harness import TestRunResult
-
     if not tests:
         return TestRunResult(
             passed=True,
@@ -265,7 +265,7 @@ async def _run_pass_to_pass_tests(
     sandbox,
     tests: Sequence[str],
     timeout: float,
-) -> "TestRunResult":
+) -> TestRunResult:
     """Run pass_to_pass tests."""
     return await _run_fail_to_pass_tests(sandbox, tests, timeout)
 

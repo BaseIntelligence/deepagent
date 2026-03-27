@@ -4,7 +4,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from swe_forge.swe.harness import HarnessResult, HarnessStatus
 from swe_forge.swe.report import HarnessReport

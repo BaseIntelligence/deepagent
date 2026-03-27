@@ -2,7 +2,6 @@
 
 import pytest
 from dataclasses import dataclass
-from unittest.mock import AsyncMock
 
 from swe_forge.swe.sanity_check import (
     SanityCheckResult,

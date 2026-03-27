@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from swe_forge.swe.harness import HarnessResult, HarnessStatus
 from swe_forge.swe.result_aggregation import (

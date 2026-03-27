@@ -6,8 +6,6 @@ a running Docker daemon.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -163,7 +161,7 @@ class TestDockerClient:
             mock_docker_cls.return_value = mock_docker
 
             try:
-                async with DockerClient() as client:
+                async with DockerClient():
                     raise ValueError("test error")
             except ValueError:
                 pass

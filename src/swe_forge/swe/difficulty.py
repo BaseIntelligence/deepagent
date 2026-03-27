@@ -297,6 +297,11 @@ Please triage this PR."""
         if len(task_info.file_paths) > 20:
             files_section += f"\n... and {len(task_info.file_paths) - 20} more files"
 
+        # Build diff preview section (avoid backslash in f-string for Python 3.11)
+        diff_preview_section = ""
+        if task_info.diff_preview:
+            diff_preview_section = f"Diff preview:\n{task_info.diff_preview[:500]}..."
+
         user_content = f"""PR Title: {task_info.pr_info.title}
 
 PR Body (truncated):
@@ -310,7 +315,7 @@ Diff Statistics:
 Changed files:
 {files_section}
 
-{f"Diff preview:\\n{task_info.diff_preview[:500]}..." if task_info.diff_preview else ""}
+{diff_preview_section}
 
 Please classify this PR."""
 

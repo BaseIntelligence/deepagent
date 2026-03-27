@@ -2,7 +2,7 @@
 
 import pytest
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from swe_forge.llm.client import (
     Choice,
@@ -514,17 +514,13 @@ class TestTestGenerator:
             prompt="Test",
         )
 
-        bad_test_file = {
-            "path": "test_bad.py",
-            "content": "content = open('src.py').read()\nassert 'def foo' in content",
-        }
 
         invalid_submit = ToolCall(
             id="call_submit",
             type="function",
             function=FunctionCall(
                 name="submit_tests",
-                arguments=f'{{"fail_to_pass": ["pytest"], "pass_to_pass": [], "test_files": [{{"path": "test_bad.py", "content": "content = open(\\"src.py\\").read()\\nassert \\"def\\" in content"}}], "install_commands": ["pip install"]}}',
+                arguments='{"fail_to_pass": ["pytest"], "pass_to_pass": [], "test_files": [{"path": "test_bad.py", "content": "content = open(\\"src.py\\").read()\\nassert \\"def\\" in content"}], "install_commands": ["pip install"]}',
             ),
         )
 
@@ -546,7 +542,7 @@ class TestTestGenerator:
         mock_sandbox = MockSandbox()
 
         generator = TestGenerator(mock_llm, max_turns=10)
-        result = await generator.generate_tests(task, mock_sandbox)
+        await generator.generate_tests(task, mock_sandbox)
 
         assert mock_llm.call_count >= 1
 

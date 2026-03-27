@@ -1,10 +1,7 @@
 """Tests for the mine CLI command."""
 
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from swe_forge.cli.mine import app as mine_app
@@ -107,7 +104,7 @@ class TestMineCommandParsing:
     def test_mine_with_difficulty(self):
         """Test --difficulty option is parsed correctly."""
         with patch("swe_forge.cli.mine._run_pipeline") as mock_run:
-            from dataclasses import dataclass, field
+            from dataclasses import dataclass
 
             @dataclass
             class MockResult:

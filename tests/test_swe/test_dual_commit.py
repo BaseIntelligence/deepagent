@@ -2,7 +2,6 @@
 
 import pytest
 from dataclasses import dataclass
-from unittest.mock import AsyncMock, MagicMock
 
 from swe_forge.swe.dual_commit import (
     DualCommitResult,
@@ -449,7 +448,7 @@ class TestDualCommitValidation:
         await validator.validate(task, sandbox)
 
         # Check that test commands got the correct timeout
-        test_commands = [
+        [
             cmd
             for cmd, timeout in sandbox.commands
             if "pytest" in cmd and timeout is not None

@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from swe_forge.execution.docker_client import DockerClient, DockerError, ExecResult
+from swe_forge.execution.docker_client import DockerClient, DockerError
 from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
 
 if TYPE_CHECKING:
@@ -112,7 +112,6 @@ class DockerTestHarness:
         context_dir: str | Path | None = None,
     ) -> str:
         """Build image from Dockerfile string."""
-        import tempfile
 
         image_tag = f"swe-test-{uuid.uuid4().hex[:8]}"
 
@@ -137,7 +136,7 @@ class DockerTestHarness:
 
     async def _build_from_workspace(self, workspace: dict[str, Any]) -> str:
         """Build image from workspace configuration."""
-        image_tag = f"swe-test-{uuid.uuid4().hex[:8]}"
+        _image_tag = f"swe-test-{uuid.uuid4().hex[:8]}"
 
         base_image = workspace.get("environment", {}).get("image", self.default_image)
         language = workspace.get("language", "python")

@@ -1,8 +1,5 @@
 """Tests for dataset validation - FRESH container testing."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-import tempfile
 import json
 
 from swe_forge.swe.dataset_validator import (

@@ -127,7 +127,7 @@ async def run_sanity_check(
             exec_result = await sandbox.run_command(cmd, timeout=timeout)
             if exec_result.exit_code == 0:
                 # Test passes on base - this is BAD (sanity fail)
-                error_msg = f"fail_to_pass command already passes on base commit"
+                error_msg = "fail_to_pass command already passes on base commit"
                 result.fail_to_pass_bad.append((cmd, error_msg))
                 result.passed = False
                 logger.warning(f"{error_msg}: {cmd}")
@@ -148,7 +148,7 @@ async def run_sanity_check(
             exec_result = await sandbox.run_command(cmd, timeout=timeout)
             if exec_result.exit_code != 0:
                 # Test fails on base - this is BAD (sanity fail)
-                error_msg = f"pass_to_pass command fails on base commit"
+                error_msg = "pass_to_pass command fails on base commit"
                 stderr = exec_result.stderr.strip() if exec_result.stderr else ""
                 detail = f"{error_msg}: {stderr}" if stderr else error_msg
                 result.pass_to_pass_bad.append((cmd, detail))

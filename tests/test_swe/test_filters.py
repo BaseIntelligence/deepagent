@@ -1,6 +1,5 @@
 """Tests for PR filtering logic."""
 
-import pytest
 
 from swe_forge.swe.enricher import EnrichedPullRequest
 from swe_forge.swe.filters import (

@@ -6,7 +6,6 @@ Writes harness evaluation results to JSON files and prints human-readable summar
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING

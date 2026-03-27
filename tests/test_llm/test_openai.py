@@ -4,14 +4,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from swe_forge.llm import (
-    Choice,
     GenerationRequest,
     GenerationResponse,
     Message,
     ToolCall,
     ToolChoice,
     ToolDefinition,
-    Usage,
 )
 from swe_forge.llm.client import FunctionCall
 from swe_forge.llm.openai_client import OpenAIClient
@@ -139,7 +137,7 @@ class TestOpenAIClientInit:
 
     def test_init_with_base_url(self):
         with patch("swe_forge.llm.openai_client.AsyncOpenAI") as mock_async_openai:
-            client = OpenAIClient(api_key="test-key", base_url="https://custom.api")
+            OpenAIClient(api_key="test-key", base_url="https://custom.api")
             mock_async_openai.assert_called_once_with(
                 api_key="test-key", base_url="https://custom.api"
             )

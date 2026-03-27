@@ -1,10 +1,7 @@
 """Tests for the benchmark CLI command."""
 
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from swe_forge.cli.benchmark import app as benchmark_app
@@ -161,7 +158,7 @@ class TestBenchmarkCommandIntegration:
                 total_count=1,
                 results=[{"task_id": "test-1", "resolved": True}],
             )
-            with patch("swe_forge.cli.benchmark._generate_report") as mock_report:
+            with patch("swe_forge.cli.benchmark._generate_report"):
                 result = runner.invoke(
                     benchmark_app,
                     ["--output", str(output_dir), "--report"],

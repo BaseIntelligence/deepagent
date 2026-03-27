@@ -110,7 +110,7 @@ class TestPRCacheJSONL:
 
         jsonl_path = temp_cache_dir / "cache.jsonl"
         content = jsonl_path.read_text()
-        lines = [l for l in content.strip().split("\n") if l]
+        lines = [line for line in content.strip().split("\n") if line]
 
         assert len(lines) == 1
         entry = json.loads(lines[0])
@@ -128,7 +128,7 @@ class TestPRCacheJSONL:
 
         jsonl_path = temp_cache_dir / "cache.jsonl"
         content = jsonl_path.read_text()
-        lines = [l for l in content.strip().split("\n") if l]
+        lines = [line for line in content.strip().split("\n") if line]
 
         assert len(lines) == 2
 

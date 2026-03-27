@@ -468,7 +468,7 @@ class HarnessRunner:
                 exec_result = await sandbox.run_command(
                     cmd, timeout=self._config.test_timeout_seconds
                 )
-                duration_ms = (time.monotonic() - start) * 1000
+                _duration_ms = (time.monotonic() - start) * 1000
 
                 passed = exec_result.exit_code == 0
                 result.fail_to_pass_results.append((cmd, passed))
@@ -488,7 +488,7 @@ class HarnessRunner:
                 exec_result = await sandbox.run_command(
                     cmd, timeout=self._config.test_timeout_seconds
                 )
-                duration_ms = (time.monotonic() - start) * 1000
+                _duration_ms = (time.monotonic() - start) * 1000
 
                 passed = exec_result.exit_code == 0
                 result.pass_to_pass_results.append((cmd, passed))

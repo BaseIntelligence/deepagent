@@ -6,14 +6,12 @@ during the _deep_stage and _run_test_generation methods.
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from typing import TYPE_CHECKING
 
 import pytest
 
 from swe_forge.swe.enricher import EnrichedPullRequest
-from swe_forge.swe.gharchive import GhArchiveEvent
 from swe_forge.swe.github_api import GitHubClient
 from swe_forge.swe.models import SweTask, SweTaskStatus
 from swe_forge.swe.pipeline import (
@@ -190,7 +188,7 @@ class TestGeneratorCalledWhenConfigured:
         config = SwePipelineConfig(test_generator=None)
         pipeline = SwePipeline(mock_gh_client, config=config)
 
-        task = SweTask(
+        SweTask(
             id="owner-repo-42",
             repo="owner/repo",
             base_commit="abc123def456",

@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pyarrow as pa
-import pytest
 
 from swe_forge.export.parquet import (
     export_parquet,

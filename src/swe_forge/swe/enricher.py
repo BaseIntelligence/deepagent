@@ -5,7 +5,6 @@ import logging
 import re
 from collections import Counter
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
 

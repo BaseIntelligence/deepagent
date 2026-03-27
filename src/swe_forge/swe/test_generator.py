@@ -20,23 +20,14 @@ from logging import getLogger
 from typing import TYPE_CHECKING, Any, Protocol
 
 from swe_forge.llm.client import (
-    FunctionCall,
     GenerationRequest,
-    GenerationResponse,
     LLMClient,
-    Message,
     ToolCall,
     ToolDefinition,
 )
 from swe_forge.llm.tools import (
     AgenticLoop,
     ShellArgs,
-    SubmitTestsArgs,
-    SubmittedTestFile,
-    TurnBudget,
-    MAX_TURNS_DEFAULT,
-    parse_tool_call,
-    ToolParseError,
 )
 
 if TYPE_CHECKING:

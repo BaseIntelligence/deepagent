@@ -185,7 +185,7 @@ class TestSwePipelineRunResult:
         assert result.benchmark_metrics is None
 
     def test_with_tasks(self):
-        task = MagicMock(spec=SweTaskStatus)
+        MagicMock(spec=SweTaskStatus)
         result = SwePipelineRunResult(
             tasks=[],
             filtered=10,

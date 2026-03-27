@@ -203,7 +203,7 @@ class TestGitHubClient:
     async def test_context_manager_closes(self) -> None:
         client = GitHubClient(token="test")
         async with client:
-            session = client._session
+            pass
         assert client._session is None
 
     @pytest.mark.asyncio

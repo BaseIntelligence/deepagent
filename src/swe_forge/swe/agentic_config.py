@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
 
+from swe_forge.llm.client import ToolDefinition
+
 if TYPE_CHECKING:
-    from swe_forge.llm.client import LLMClient, GenerationRequest, Message
+    from swe_forge.llm.client import LLMClient, Message
 
 logger = getLogger(__name__)
 
@@ -158,7 +160,7 @@ async def detect_repository_config(
 
     NO HARDCODING - everything is discovered by the agent trying commands.
     """
-    from swe_forge.llm.client import GenerationRequest, Message, ToolDefinition
+    from swe_forge.llm.client import GenerationRequest, Message
 
     # Tools available to the agent
     tools = [

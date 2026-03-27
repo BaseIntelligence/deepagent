@@ -1,12 +1,10 @@
 """Tests for logging configuration."""
 
-import json
 import logging
 import os
 from io import StringIO
 from unittest.mock import patch
 
-import pytest
 
 from swe_forge.logging_config import (
     bind_contextvars,

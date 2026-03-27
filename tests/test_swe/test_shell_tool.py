@@ -129,7 +129,7 @@ class TestValidateCommand:
 class TestShellTool:
     @pytest.fixture
     def mock_sandbox(self):
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         sandbox = MagicMock()
         sandbox.run_command = AsyncMock()

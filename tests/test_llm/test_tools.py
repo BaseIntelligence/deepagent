@@ -588,7 +588,7 @@ class TestAutoCompaction:
             loop.add_assistant(f"Assistant response {i}")
 
         # Track if summary follows structured template
-        original_messages = list(loop.messages)
+        list(loop.messages)
 
         # Perform compaction without LLM client
         loop.compact()
@@ -622,6 +622,9 @@ class TestAutoCompaction:
         initial_tokens = loop.token_count()
         assert initial_tokens > 200000
 
+        # Store original count for comparison
+        original_message_count = len(loop.messages)
+
         # Perform compaction
         tokens_saved = loop.compact()
 
@@ -629,11 +632,8 @@ class TestAutoCompaction:
         assert tokens_saved > 0
 
         # Verify message count reduced significantly
-        assert (
-            len(loop.messages) < len(original_messages)
-            if "original_messages" in dir()
-            else True
-        )
+        assert len(loop.messages) < original_message_count
+
         final_tokens = loop.token_count()
         assert final_tokens < initial_tokens
 

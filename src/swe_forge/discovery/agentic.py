@@ -13,11 +13,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from swe_forge.detection.language import Language
-    from swe_forge.detection.package_manager import PackageManager
     from swe_forge.swe.agentic_config import SandboxProtocol
     from swe_forge.llm.client import LLMClient
 

@@ -7,7 +7,6 @@ with correlation ID support for request tracing.
 import logging
 import os
 import sys
-from typing import Any
 
 import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars
@@ -74,8 +73,8 @@ def configure_logging(level: str = "INFO") -> None:
     json_mode = log_format == "json"
     log_level = _get_log_level(level)
 
-    # Get processors for the output format
-    processors = get_processors(json_mode)
+    # Get processors for the output format (used internally)
+    _processors = get_processors(json_mode)
 
     # For stdlib integration, we need to handle the renderer separately
     # ProcessorFormatter expects to do the final rendering

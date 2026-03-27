@@ -6,7 +6,6 @@ the sandbox functionality without requiring a running Docker daemon.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,8 +18,6 @@ from swe_forge.execution.sandbox import (
 )
 from swe_forge.execution.container import (
     ContainerSpec,
-    ManagedContainer,
-    ManagedContainerStatus,
 )
 from swe_forge.execution.commands import ExecResult
 
@@ -211,7 +208,7 @@ class TestDockerSandboxContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_cleanup_on_normal_exit(self):
         client = create_mock_client()
-        async with DockerSandbox(client) as sandbox:
+        async with DockerSandbox(client):
             pass
 
         client._docker._mock_container.stop.assert_called()

@@ -1,13 +1,11 @@
 """Tests for the validate CLI command."""
 
 import json
-from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from swe_forge.cli.validate import app, validate_jsonl_file
-from swe_forge.swe.models import SweTask
 
 
 @pytest.fixture

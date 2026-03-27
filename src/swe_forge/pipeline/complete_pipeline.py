@@ -15,18 +15,15 @@ This module implements the full mining workflow:
 
 from __future__ import annotations
 
-import json
 import logging
-import tempfile
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from swe_forge.detection import Language, detect_language_from_files
-from swe_forge.discovery import AgenticCommandDiscovery, DiscoveredCommands
-from swe_forge.execution.docker_client import DockerClient, ExecResult
+from swe_forge.detection import detect_language_from_files
+from swe_forge.discovery import AgenticCommandDiscovery
+from swe_forge.execution.docker_client import DockerClient
 from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
 from swe_forge.export.jsonl import export_jsonl
 from swe_forge.swe.github_api import GitHubClient, PullRequest, PRFile

@@ -1,20 +1,14 @@
 """Tests for OpenRouter client implementation."""
 
-import json
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 import aiohttp
 
 from swe_forge.llm import (
-    Choice,
     GenerationRequest,
-    GenerationResponse,
     Message,
-    ToolCall,
     ToolDefinition,
-    Usage,
 )
-from swe_forge.llm.client import FunctionCall
 from swe_forge.llm.openrouter import (
     APIError,
     DEFAULT_MODEL,

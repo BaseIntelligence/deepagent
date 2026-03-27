@@ -10,17 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
 from dataclasses import dataclass, field
 from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from swe_forge.swe.agentic_config import RepositoryConfig, detect_repository_config
-from swe_forge.swe.models import SweTask, SweTaskStatus
+from swe_forge.swe.agentic_config import detect_repository_config
+from swe_forge.swe.models import SweTask
 
 if TYPE_CHECKING:
-    from swe_forge.execution.sandbox import DockerSandbox
     from swe_forge.llm.client import LLMClient
 
 logger = getLogger(__name__)
@@ -98,7 +96,6 @@ async def validate_task_in_fresh_container(
     NO HARDCODING: All commands come from LLM agent detection.
     """
     from swe_forge.execution.sandbox import DockerSandbox
-    from swe_forge.execution.docker_client import DockerClient
 
     result = ValidationResult(task_id=task.id, passed=False, phase="setup")
 

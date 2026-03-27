@@ -6,17 +6,13 @@ without requiring a running Docker daemon.
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from swe_forge.execution import (
-    ContainerConfig,
-    ContainerStatus,
     DockerClient,
     DockerError,
-    ExecResult,
 )
 from swe_forge.execution.container import (
     ContainerManager,
@@ -294,7 +290,7 @@ class TestContainerManager:
         client = create_mock_client()
         spec = ContainerSpec(name="test", image="python:3.11-slim")
 
-        async with ContainerManager(client, spec) as manager:
+        async with ContainerManager(client, spec):
             pass
 
         client._docker._mock_container.stop.assert_called()
@@ -306,7 +302,7 @@ class TestContainerManager:
         spec = ContainerSpec(name="test", image="python:3.11-slim")
 
         with pytest.raises(ValueError):
-            async with ContainerManager(client, spec) as manager:
+            async with ContainerManager(client, spec):
                 raise ValueError("test error")
 
         client._docker._mock_container.stop.assert_called()
@@ -321,7 +317,7 @@ class TestContainerManager:
         )
 
         with pytest.raises(ValueError):
-            async with ContainerManager(client, spec) as manager:
+            async with ContainerManager(client, spec):
                 raise ValueError("test error")
 
         client._docker._mock_container.delete.assert_called_once()
@@ -544,7 +540,7 @@ class TestContainerManagerFromExisting:
 
         async with ContainerManager.from_existing(
             client, "existing-id", spec, auto_remove=True
-        ) as manager:
+        ):
             pass
 
         client._docker._mock_container.delete.assert_called()

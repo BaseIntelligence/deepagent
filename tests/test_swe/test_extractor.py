@@ -1,6 +1,5 @@
 """Tests for patch extraction functionality."""
 
-import pytest
 
 from swe_forge.swe.extractor import (
     ExtractedPatch,

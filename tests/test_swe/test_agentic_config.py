@@ -1,8 +1,5 @@
 """Tests for agentic configuration detection - NO HARDCODING."""
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from dataclasses import dataclass, field
 
 from swe_forge.swe.agentic_config import (
     RepositoryConfig,

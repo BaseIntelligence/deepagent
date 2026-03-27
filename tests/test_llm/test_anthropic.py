@@ -3,19 +3,17 @@
 import json
 from dataclasses import dataclass, field
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from swe_forge.llm import (
-    Choice,
     GenerationRequest,
     GenerationResponse,
     Message,
     ToolCall,
     ToolChoice,
     ToolDefinition,
-    Usage,
 )
 from swe_forge.llm.client import FunctionCall
 from swe_forge.llm.anthropic_client import AnthropicClient
@@ -374,7 +372,7 @@ class TestCompleteWithTools:
                 messages=[Message.user("What's the weather in NYC?")],
                 tools=[tool],
             )
-            result = await client.complete_with_tools(request)
+            await client.complete_with_tools(request)
 
             call_kwargs = mock_create.call_args.kwargs
             assert "tools" in call_kwargs

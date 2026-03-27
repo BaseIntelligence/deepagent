@@ -1,15 +1,12 @@
 """Tests for swe_forge.cli.harness module."""
 
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from swe_forge.cli.harness import app, _load_tasks, _output_results, _print_summary
-from swe_forge.swe.harness import HarnessStatus
 from swe_forge.swe.models import SweTask
 
 runner = CliRunner()
