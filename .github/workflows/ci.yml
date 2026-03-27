@@ -10,157 +10,97 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
-  RUST_BACKTRACE: short
-
 jobs:
   # ──────────────────────────────────────────────
-  # Fast checks (clippy + fmt) — run first, fail fast
+  # Lint & Format (ruff + mypy)
   # ──────────────────────────────────────────────
   lint:
     name: Lint & Format
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold clang
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          components: clippy, rustfmt
+          python-version: "3.12"
 
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: lint-${{ runner.os }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            lint-${{ runner.os }}-nightly-
+      - name: Install linting tools
+        run: pip install ruff mypy
 
       - name: Check formatting
-        run: cargo +nightly fmt --all -- --check
+        run: ruff format --check src/ tests/
 
-      - name: Clippy
-        run: cargo +nightly clippy --all-targets --all-features -- -D warnings
+      - name: Run ruff linter
+        run: ruff check src/ tests/
 
-  # ──────────────────────────────────────────────
-  # Build (release profile, nightly, max parallelism, mold)
-  # ──────────────────────────────────────────────
-  build:
-    name: Build (nightly, release)
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold clang
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: build-${{ runner.os }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            build-${{ runner.os }}-nightly-
-
-      - name: Build release
-        run: cargo +nightly build --release -j $(nproc)
-        env:
-          RUSTFLAGS: "-C debuginfo=0 -C target-cpu=native -C link-arg=-fuse-ld=mold -D warnings"
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: swe-forge-linux-x86_64
-          path: target/release/swe-forge
-          retention-days: 7
+      - name: Run mypy
+        run: mypy src/ --ignore-missing-imports
 
   # ──────────────────────────────────────────────
-  # Tests (parallel, nightly, 32 vCPU, mold)
+  # Tests (pytest)
   # ──────────────────────────────────────────────
   test:
     name: Tests
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold clang
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: test-${{ runner.os }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            test-${{ runner.os }}-nightly-
+          python-version: "3.12"
+
+      - name: Install package with dev dependencies
+        run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: cargo +nightly test --release -j $(nproc) -- --test-threads=$(nproc)
-        env:
-          RUST_LOG: warn
+        run: pytest tests/ -v --tb=short
 
   # ──────────────────────────────────────────────
-  # Doc tests (separate, lighter)
+  # Build (python -m build)
   # ──────────────────────────────────────────────
-  doc:
-    name: Doc tests
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+  build:
+    name: Build
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold clang
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: doc-${{ runner.os }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            doc-${{ runner.os }}-nightly-
+          python-version: "3.12"
 
-      - name: Run doc tests
-        run: cargo +nightly test --doc -j $(nproc)
+      - name: Install build
+        run: pip install build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
 
   # ──────────────────────────────────────────────
-  # Security audit
+  # Security audit (pip-audit)
   # ──────────────────────────────────────────────
   audit:
     name: Security audit
-    runs-on: blacksmith-2vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
 
       - name: Run audit
-        run: cargo audit
+        run: pip-audit
         continue-on-error: true

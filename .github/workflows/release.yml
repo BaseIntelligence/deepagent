@@ -4,133 +4,107 @@ on:
   push:
     tags: ['v*']
 
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_NET_RETRY: 10
+permissions:
+  contents: write
+  id-token: write
 
 jobs:
   build:
-    name: Build (${{ matrix.target }})
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: blacksmith-32vcpu-ubuntu-2404
-            arch: x86_64
-          - target: aarch64-unknown-linux-gnu
-            runner: blacksmith-32vcpu-ubuntu-2404-arm
-            arch: aarch64
-    permissions:
-      contents: write
+    name: Build Python wheel
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq mold clang
-
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: release-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            release-${{ matrix.target }}-${{ runner.os }}-
+          python-version: '3.12'
 
-      - name: Build optimized binary
-        run: cargo +nightly build --release -j $(nproc)
-        env:
-          CARGO_PROFILE_RELEASE_LTO: "fat"
-          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
-          CARGO_PROFILE_RELEASE_OPT_LEVEL: "3"
-          CARGO_PROFILE_RELEASE_STRIP: "symbols"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      - name: Install build tools
+        run: pip install build
 
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp target/release/swe-forge dist/
-          cd dist && tar czf ../swe-forge-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz swe-forge
+      - name: Build wheel and sdist
+        run: python -m build
 
-      - name: Upload artifact
+      - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
-          name: swe-forge-${{ github.ref_name }}-linux-${{ matrix.arch }}
-          path: swe-forge-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
+          name: dist
+          path: dist/
           retention-days: 90
+
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: pypi
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download dist artifact
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
-      - name: Collect release assets
-        run: |
-          mkdir -p release-assets
-          find artifacts -name '*.tar.gz' -exec cp {} release-assets/ \;
-          ls -lh release-assets/
+          name: dist
+          path: dist/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*
+          files: dist/*
           generate_release_notes: true
 
-  update-latest:
-    name: Update latest release
-    needs: release
+  docker:
+    name: Build and push Docker image
+    needs: pypi
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
-      contents: write
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          path: artifacts
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Collect release assets
-        run: |
-          mkdir -p release-assets
-          for f in artifacts/*/*.tar.gz; do
-            base=$(basename "$f")
-            # Rename to use "latest" instead of version tag
-            new_name=$(echo "$base" | sed "s/${{ github.ref_name }}/latest/")
-            cp "$f" "release-assets/$new_name"
-          done
-          ls -lh release-assets/
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Update latest release
-        uses: softprops/action-gh-release@v2
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          tag_name: latest
-          name: Latest Release
-          body: |
-            This is an automatically updated release tracking the latest tagged version (${{ github.ref_name }}).
+          images: ghcr.io/cortexlm/swe-forge
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
 
-            Install with:
-            ```bash
-            curl -fsSL https://raw.githubusercontent.com/CortexLM/swe-forge/main/install.sh | sh
-            ```
-          prerelease: true
-          files: release-assets/*
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
