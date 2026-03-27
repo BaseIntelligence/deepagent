@@ -1,10 +1,17 @@
 """Tests for swe_forge.cli.harness module."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
 
 from swe_forge.cli.harness import app, _load_tasks, _output_results, _print_summary
 from swe_forge.swe.models import SweTask
@@ -279,12 +286,13 @@ class TestCLIIntegration:
 
     def test_harness_cli_shows_options_in_help(self):
         result = runner.invoke(app, ["harness", "--help"])
+        output = strip_ansi(result.output)
 
-        assert "--input" in result.output
-        assert "--agent-script" in result.output
-        assert "--timeout" in result.output
-        assert "--parallel" in result.output
-        assert "--output" in result.output
+        assert "--input" in output
+        assert "--agent-script" in output
+        assert "--timeout" in output
+        assert "--parallel" in output
+        assert "--output" in output
 
 
 class TestEdgeCases:
