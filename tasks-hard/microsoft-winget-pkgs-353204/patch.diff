@@ -1,8 +1,0 @@
-diff --git a/manifests/e/elieserdejesus/JamTaba/.validation b/manifests/e/elieserdejesus/JamTaba/.validation
-new file mode 100644
-index 0000000000000..7a49324f820c5
---- /dev/null
-+++ b/manifests/e/elieserdejesus/JamTaba/.validation
-@@ -0,0 +1 @@
-+{"ValidationVersion":"1.0.0","Waivers":[{"WaiverId":"97ef0f30-7c30-4758-85b4-1472ff358229","TestPlan":"Policy-Test-2.5","PackagePath":"manifests/e/elieserdejesus/JamTaba/2.1.16","CommitId":"305ffe791de2d86c1fab9fdea5de16e9d56fe178"}],"InstallationVerification":{"Executables":[]}}
-\ No newline at end of file
