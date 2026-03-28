@@ -170,6 +170,21 @@ def mine(
             help="Docker Hub username for image names (user -> user/swe-forge-tasks:task-id)",
         ),
     ] = None,
+    build_docker: Annotated[
+        bool,
+        typer.Option(
+            "--build-docker",
+            "-B",
+            help="Build Docker images with repo + deps pre-installed for faster evaluation",
+        ),
+    ] = False,
+    docker_push: Annotated[
+        bool,
+        typer.Option(
+            "--docker-push",
+            help="Push built Docker images to registry",
+        ),
+    ] = False,
 ) -> None:
     """Mine SWE tasks from GitHub repositories.
 
@@ -179,6 +194,7 @@ def mine(
         swe-forge mine --repo owner/repo --limit 5 --output ./tasks.jsonl
         swe-forge mine --difficulty easy --model gpt-4 --once
         swe-forge mine --continuous --limit 100
+        swe-forge mine --limit 5 --build-docker --docker-username myuser
     """
     # Setup logging
     log_level = logging.DEBUG if verbose else logging.INFO
@@ -205,6 +221,13 @@ def mine(
     # Handle once/continuous conflict
     if continuous:
         once = False
+
+    # Validate build_docker requirements
+    if build_docker and not docker_username:
+        console.print(
+            "[red]Error: --docker-username is required when using --build-docker[/red]"
+        )
+        raise typer.Exit(code=1)
 
     # Validate output directory
     output_path = Path(output)
@@ -248,6 +271,9 @@ def mine(
     console.print(f"  Language: {language or 'python'}")
     console.print(f"  Filter: {filter_json}")
     console.print(f"  Parallel: {parallel} containers")
+    if build_docker:
+        console.print(f"  Build Docker: Yes (username: {docker_username})")
+        console.print(f"  Push Images: {'Yes' if docker_push else 'No'}")
     console.print()
 
     # Run the pipeline
@@ -269,6 +295,31 @@ def mine(
                 )
                 console.print(f"[green]Workspace export: {output_folder}[/green]")
 
+            # Build Docker images if requested
+            if build_docker and docker_username:
+                console.print("\n[bold]Building Docker images...[/bold]")
+                build_results = asyncio.run(
+                    _build_docker_images(
+                        result.tasks,
+                        docker_username,
+                        push=docker_push,
+                        parallel=min(parallel, 4),  # Limit parallel builds
+                        verbose=verbose,
+                    )
+                )
+                successful = sum(1 for r in build_results if r.success)
+                console.print(
+                    f"[green]Built {successful}/{len(build_results)} images[/green]"
+                )
+
+                # Update workspace exports with pre-built image info
+                if output_folder:
+                    for task, build_result in zip(result.tasks, build_results):
+                        if build_result.success and build_result.image_name:
+                            _update_workspace_docker(
+                                output_folder, task.id, build_result.image_name
+                            )
+
             # Print summary
             if result.benchmark_metrics:
                 metrics = result.benchmark_metrics
@@ -287,6 +338,78 @@ def mine(
         logger.error(f"Pipeline error: {e}")
         console.print(f"\n[red]Error: {e}[/red]")
         raise typer.Exit(code=1)
+
+
+async def _build_docker_images(
+    tasks: list[SweTask],
+    docker_username: str,
+    *,
+    push: bool = False,
+    parallel: int = 2,
+    verbose: bool = False,
+):
+    """Build Docker images for tasks with pre-installed dependencies."""
+    from swe_forge.docker_test.image_builder import (
+        build_images_for_tasks,
+        task_to_dict,
+    )
+    from swe_forge.execution.docker_client import DockerClient
+
+    task_dicts = [task_to_dict(t) for t in tasks]
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        progress_task = progress.add_task("Building images...", total=len(tasks))
+
+        async with DockerClient() as docker_client:
+            results = await build_images_for_tasks(
+                docker_client,
+                task_dicts,
+                docker_username,
+                push=push,
+                parallel=parallel,
+            )
+
+            for i, result in enumerate(results):
+                status = "✅" if result.success else "❌"
+                task_id = tasks[i].id
+                if verbose or not result.success:
+                    console.print(
+                        f"  {status} {task_id}: {result.image_name or result.error}"
+                    )
+                progress.update(progress_task, advance=1)
+
+    return results
+
+
+def _update_workspace_docker(
+    output_folder: Path, task_id: str, image_name: str
+) -> None:
+    """Update workspace.yaml with pre-built Docker image info."""
+    import yaml
+
+    workspace_path = output_folder / task_id / "workspace.yaml"
+    if not workspace_path.exists():
+        return
+
+    with open(workspace_path, "r") as f:
+        data = yaml.safe_load(f)
+
+    # Update docker section to indicate pre-built image
+    data["docker"] = {
+        "image": image_name,
+        "build": False,  # Already built
+        "prebuilt": True,
+    }
+
+    with open(workspace_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 async def _run_pipeline(

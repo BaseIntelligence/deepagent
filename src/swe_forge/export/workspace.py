@@ -20,8 +20,19 @@ def export_task_to_workspace(
     task: SweTask,
     output_folder: Path | str,
     docker_username: str | None = None,
+    prebuilt_image: bool = False,
 ) -> Path:
-    """Export single SweTask to workspace directory format."""
+    """Export single SweTask to workspace directory format.
+
+    Args:
+        task: SweTask to export
+        output_folder: Directory to export to
+        docker_username: Docker Hub username for image names
+        prebuilt_image: If True, indicates image is pre-built (build: false)
+
+    Returns:
+        Path to the task directory
+    """
     output_folder = Path(output_folder)
     task_dir = output_folder / task.id
     task_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +103,8 @@ def export_task_to_workspace(
     if docker_image:
         workspace_data["docker"] = {
             "image": docker_image,
-            "build": True,
+            "build": not prebuilt_image,  # False if pre-built, True if needs building
+            "prebuilt": prebuilt_image,
         }
 
     if task.meta:
@@ -133,12 +145,24 @@ def export_tasks_to_workspace(
     tasks: list[SweTask],
     output_folder: Path | str,
     docker_username: str | None = None,
+    prebuilt_images: bool = False,
 ) -> list[Path]:
-    """Export list of SweTask to workspace directories."""
+    """Export list of SweTask to workspace directories.
+
+    Args:
+        tasks: List of SweTask to export
+        output_folder: Directory to export to
+        docker_username: Docker Hub username for image names
+        prebuilt_images: If True, indicates images are pre-built
+
+    Returns:
+        List of paths to task directories
+    """
     output_folder = Path(output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
     return [
-        export_task_to_workspace(task, output_folder, docker_username) for task in tasks
+        export_task_to_workspace(task, output_folder, docker_username, prebuilt_images)
+        for task in tasks
     ]
 
 
@@ -154,3 +178,34 @@ def _extract_test_files(test_patch: str, tests_dir: Path) -> None:
         test_file = tests_dir / Path(file_path).name
         with open(test_file, "w", encoding="utf-8") as f:
             f.write(content.strip() + "\n")
+
+
+def update_workspace_with_prebuilt_image(
+    workspace_path: Path | str,
+    image_name: str,
+) -> None:
+    """Update workspace.yaml to mark Docker image as pre-built.
+
+    Args:
+        workspace_path: Path to workspace.yaml file
+        image_name: Name of the pre-built Docker image
+    """
+    workspace_path = Path(workspace_path)
+    if not workspace_path.exists():
+        return
+
+    with open(workspace_path, "r") as f:
+        data = yaml.safe_load(f)
+
+    # Update docker section
+    data["docker"] = {
+        "image": image_name,
+        "build": False,
+        "prebuilt": True,
+    }
+
+    # Update environment image
+    data["environment"]["image"] = image_name
+
+    with open(workspace_path, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
