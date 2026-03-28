@@ -253,42 +253,41 @@ async def _mine_tasks(
     verbose: bool,
 ) -> list[SweTask]:
     """Mine tasks using the SWE pipeline."""
-    gh_client = GitHubClient(token=github_token)
+    async with GitHubClient(token=github_token) as gh_client:
+        config = SwePipelineConfig(
+            max_tasks=num_tasks,
+            once=True,
+            difficulty_filter=difficulty_filter,
+        )
 
-    config = SwePipelineConfig(
-        max_tasks=num_tasks,
-        once=True,
-        difficulty_filter=difficulty_filter,
-    )
+        tasks: list[SweTask] = []
 
-    tasks: list[SweTask] = []
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task("Mining tasks...", total=num_tasks)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task_id = progress.add_task("Mining tasks...", total=num_tasks)
+            async with SwePipeline(gh_client, config=config) as pipeline:
+                from swe_forge.swe.pipeline import SwePipelineEventType
 
-        async with SwePipeline(gh_client, config=config) as pipeline:
-            from swe_forge.swe.pipeline import SwePipelineEventType
+                async for event in pipeline.run_with_progress():
+                    if event.event_type == SwePipelineEventType.TASK_EXTRACTED:
+                        task = event.data.get("task")
+                        if task and isinstance(task, SweTask):
+                            tasks.append(task)
+                            progress.update(
+                                task_id, advance=1, description=f"Mined {len(tasks)} tasks"
+                            )
 
-            async for event in pipeline.run_with_progress():
-                if event.event_type == SwePipelineEventType.TASK_EXTRACTED:
-                    task = event.data.get("task")
-                    if task and isinstance(task, SweTask):
-                        tasks.append(task)
-                        progress.update(
-                            task_id, advance=1, description=f"Mined {len(tasks)} tasks"
-                        )
+                        if len(tasks) >= num_tasks:
+                            break
 
-                    if len(tasks) >= num_tasks:
-                        break
-
-    return tasks[:num_tasks]
+        return tasks[:num_tasks]
 
 
 async def _run_harness(

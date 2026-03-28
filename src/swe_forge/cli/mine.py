@@ -303,39 +303,39 @@ async def _run_pipeline(
         tasks: list = field(default_factory=list)
         benchmark_metrics: object = None
 
-    gh_client = GitHubClient(token=token)
-    gh_archive_client = GhArchiveClient(token=token) if not repo_filter else None
+    async with GitHubClient(token=token) as gh_client:
+        gh_archive_client = GhArchiveClient(token=token) if not repo_filter else None
 
-    tasks: list[SweTask] = []
-    metrics = None
+        tasks: list[SweTask] = []
+        metrics = None
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        task_id = progress.add_task("Mining tasks...", total=config.max_tasks)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task_id = progress.add_task("Mining tasks...", total=config.max_tasks)
 
-        async with SwePipeline(
-            gh_client, gh_archive_client=gh_archive_client, config=config
-        ) as pipeline:
-            async for event in pipeline.run_with_progress():
-                if event.event_type == SwePipelineEventType.TASK_EXTRACTED:
-                    task = event.data.get("task")
-                    if task and isinstance(task, SweTask):
-                        tasks.append(task)
-                        progress.update(
-                            task_id, advance=1, description=f"Mined {len(tasks)} tasks"
-                        )
+            async with SwePipeline(
+                gh_client, gh_archive_client=gh_archive_client, config=config
+            ) as pipeline:
+                async for event in pipeline.run_with_progress():
+                    if event.event_type == SwePipelineEventType.TASK_EXTRACTED:
+                        task = event.data.get("task")
+                        if task and isinstance(task, SweTask):
+                            tasks.append(task)
+                            progress.update(
+                                task_id, advance=1, description=f"Mined {len(tasks)} tasks"
+                            )
 
-                elif event.event_type == SwePipelineEventType.PIPELINE_COMPLETED:
-                    metrics = event.data.get("metrics")
-                    progress.update(task_id, completed=len(tasks))
+                    elif event.event_type == SwePipelineEventType.PIPELINE_COMPLETED:
+                        metrics = event.data.get("metrics")
+                        progress.update(task_id, completed=len(tasks))
 
-    return PipelineResult(tasks=tasks, benchmark_metrics=metrics)
+        return PipelineResult(tasks=tasks, benchmark_metrics=metrics)
 
 
 @app.command("complete")
