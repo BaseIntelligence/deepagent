@@ -42,7 +42,7 @@ class TestFilterConfig:
         assert config.exclude_bots is True
         assert config.allowed_orgs is None
         assert config.min_stars == 0
-        assert config.allowed_languages == ["python"]
+        assert config.allowed_languages == ["python", "javascript", "typescript", "rust", "go"]
         assert config.max_files_changed == 50
 
     def test_custom_config(self):

@@ -22,7 +22,7 @@ class FilterConfig(BaseModel):
     exclude_bots: bool = True
     allowed_orgs: list[str] | None = None  # None = allow all orgs
     min_stars: Annotated[int, Field(ge=0)] = 0
-    allowed_languages: list[str] = ["python"]
+    allowed_languages: list[str] = ["python", "javascript", "typescript", "rust", "go"]
     max_files_changed: Annotated[int, Field(ge=1)] = 50
 
 
