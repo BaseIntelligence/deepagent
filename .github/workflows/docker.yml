@@ -6,10 +6,7 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'Dockerfile'
-      - 'pyproject.toml'
-      - 'src/**'
+  workflow_dispatch:  # Allow manual trigger
 
 env:
   REGISTRY_GHCR: ghcr.io
