@@ -237,7 +237,11 @@ def mine(
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Build pipeline config
-    languages = [language.lower()] if language else ["python", "javascript", "typescript", "rust", "go"]
+    languages = (
+        [language.lower()]
+        if language
+        else ["python", "javascript", "typescript", "rust", "go"]
+    )
     difficulty_filter = difficulty.lower() if difficulty else None
 
     try:
