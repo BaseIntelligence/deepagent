@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from swe_forge.exceptions import DiscoveryError
 from swe_forge.swe.models import SweTask
 
 
