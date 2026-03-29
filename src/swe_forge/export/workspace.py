@@ -1,6 +1,7 @@
 """Workspace export for SweTask to directory format."""
 
 import re
+from logging import getLogger
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ import yaml
 
 from swe_forge.exceptions import DiscoveryError
 from swe_forge.swe.models import SweTask
+
+logger = getLogger(__name__)
 
 
 def _extract_test_file_names(test_patch: str) -> list[str]:
