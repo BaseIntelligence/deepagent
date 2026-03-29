@@ -43,13 +43,10 @@ def export_task_to_workspace(
         f"{docker_username}/swe-forge-tasks:{task.id}" if docker_username else None
     )
 
-    # Get install commands from config - NO FALLBACKS
+    # Get install commands from config
     install_commands = task.install_config.get("install_commands", [])
-    if not install_commands:
-        raise DiscoveryError(
-            f"No install commands discovered for task {task.id}. "
-            "Ensure LLM-based discovery is configured (OPENROUTER_API_KEY)."
-        )
+    # If no install commands, skip Dockerfile generation but continue
+    has_install_commands = bool(install_commands)
 
     # Get test commands - fallback to test_patch extraction if empty
     fail_to_pass = list(task.fail_to_pass) if task.fail_to_pass else []
@@ -61,12 +58,9 @@ def export_task_to_workspace(
         if test_files:
             fail_to_pass = [f"pytest {f} -v" for f in test_files]
 
-    # No fallback test commands - require LLM discovery
-    if not fail_to_pass:
-        raise DiscoveryError(
-            f"No test commands discovered for task {task.id}. "
-            "Ensure TestGenerator is configured and ran successfully."
-        )
+    # Warn if no test commands but continue
+    if not fail_to_pass and not task.test_patch:
+        logger.warning(f"No test commands for task {task.id}")
 
     # Build workspace data
     workspace_data: dict[str, Any] = {
@@ -155,12 +149,33 @@ def export_tasks_to_workspace(
     Returns:
         List of paths to task directories
     """
+    import shutil
+    from logging import getLogger
+
+    logger = getLogger(__name__)
     output_folder = Path(output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
-    return [
-        export_task_to_workspace(task, output_folder, docker_username, prebuilt_images)
-        for task in tasks
-    ]
+
+    results = []
+    for task in tasks:
+        task_dir = output_folder / task.id
+        try:
+            path = export_task_to_workspace(
+                task, output_folder, docker_username, prebuilt_images
+            )
+            results.append(path)
+        except DiscoveryError as e:
+            logger.warning(f"Skipping task {task.id}: {e}")
+            # Clean up incomplete directory
+            if task_dir.exists():
+                shutil.rmtree(task_dir)
+        except Exception as e:
+            logger.error(f"Error exporting task {task.id}: {e}")
+            # Clean up incomplete directory
+            if task_dir.exists():
+                shutil.rmtree(task_dir)
+
+    return results
 
 
 def _extract_test_files(test_patch: str, tests_dir: Path) -> None:
