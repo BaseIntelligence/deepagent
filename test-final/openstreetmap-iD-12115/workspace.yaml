@@ -1,0 +1,16 @@
+task_id: openstreetmap-iD-12115
+repo:
+  url: https://github.com/openstreetmap/iD.git
+  base_commit: 3c26744a8d2fec42109ce99ca70146ce06fb8f3f
+  merge_commit: 8771596d9926254f152a1a4c0d4472350c98b223
+language: javascript
+difficulty_score: 1
+prompt: render labels (and icon) for animal=horse_walker features
+environment:
+  image: ubuntu:24.04
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

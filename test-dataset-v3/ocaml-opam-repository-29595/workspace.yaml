@@ -1,0 +1,16 @@
+task_id: ocaml-opam-repository-29595
+repo:
+  url: https://github.com/ocaml/opam-repository.git
+  base_commit: 65664dc5b276cda6cf6908fce5d2f7df2d434246
+  merge_commit: 4128027da627b98581a19b53517ed56728643045
+language: unknown
+difficulty_score: 1
+prompt: fstar.2026.03.24
+environment:
+  image: ubuntu:24.04
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

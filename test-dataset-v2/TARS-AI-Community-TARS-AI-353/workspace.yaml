@@ -1,0 +1,16 @@
+task_id: TARS-AI-Community-TARS-AI-353
+repo:
+  url: https://github.com/TARS-AI-Community/TARS-AI.git
+  base_commit: b00108e2a5ac2845d4132532fbcd0c5c4de7adba
+  merge_commit: 0da7e163c6f27e0f32ee59e3d282c9bdde15f7b1
+language: python
+difficulty_score: 1
+prompt: Update app.py
+environment:
+  image: ubuntu:24.04
+  language_version: '3.12'
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

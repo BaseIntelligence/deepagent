@@ -1,0 +1,63 @@
+diff --git a/src/app.py b/src/app.py
+index cdec0c3d..58418d41 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -16,6 +16,7 @@
+ import os
+ import sys
+ import threading
++import urllib.request
+ from datetime import datetime
+ 
+ # === Custom Modules ===
+@@ -39,6 +40,33 @@
+ CONFIG = load_config()
+ 
+ # === Helper Functions ===
++def ensure_tars_onnx():
++    """
++    Checks that src/tts/TARS.onnx exists. If not, downloads it from HuggingFace.
++    """
++    onnx_path = os.path.join(BASE_DIR, "src", "tts", "TARS.onnx")
++    onnx_url = "https://huggingface.co/olivierdion007/TARS-AI/resolve/main/TARS.onnx"
++
++    if os.path.isfile(onnx_path):
++        queue_message(f"LOAD: TARS.onnx found at {onnx_path}")
++        return
++
++    queue_message(f"LOAD: TARS.onnx not found. Downloading from HuggingFace...")
++    os.makedirs(os.path.dirname(onnx_path), exist_ok=True)
++
++    try:
++        def _progress(block_num, block_size, total_size):
++            if total_size > 0:
++                pct = min(block_num * block_size / total_size * 100, 100)
++                print(f"\r  Downloading TARS.onnx: {pct:.1f}%", end="", flush=True)
++
++        urllib.request.urlretrieve(onnx_url, onnx_path, reporthook=_progress)
++        print()  # newline after progress
++        queue_message(f"LOAD: TARS.onnx downloaded successfully to {onnx_path}")
++    except Exception as e:
++        queue_message(f"ERROR: Failed to download TARS.onnx: {e}")
++        raise
++
+ def init_app():
+     """
+     Performs initial setup for the application
+@@ -52,6 +80,9 @@ def init_app():
+     if CONFIG['TTS']['ttsoption'] == 'xttsv2':
+         update_tts_settings(CONFIG['TTS']['ttsurl'])
+ 
++    # Ensure TARS voice model is present
++    ensure_tars_onnx()
++
+ def start_discord_in_thread():
+     """
+     Start the Discord bot in a separate thread to prevent blocking.
+@@ -117,4 +148,4 @@ def start_discord_in_thread():
+     finally:
+         stt_manager.stop()
+         bt_controller_thread.join()
+-        queue_message(f"INFO: All threads and executor stopped gracefully.")
+\ No newline at end of file
++        queue_message(f"INFO: All threads and executor stopped gracefully.")

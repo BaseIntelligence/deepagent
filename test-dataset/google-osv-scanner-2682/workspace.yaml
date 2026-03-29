@@ -1,0 +1,16 @@
+task_id: google-osv-scanner-2682
+repo:
+  url: https://github.com/google/osv-scanner.git
+  base_commit: 3ba958cd6f3fbea2461890bb9fc9db6ecfbd955c
+  merge_commit: 18483bbdfbfb8c83c35f3dc7da45fe51bd60ea9f
+language: unknown
+difficulty_score: 1
+prompt: 'test: update snapshots'
+environment:
+  image: ubuntu:24.04
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

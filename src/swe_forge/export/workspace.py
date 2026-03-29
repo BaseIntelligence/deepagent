@@ -182,11 +182,71 @@ def export_tasks_to_workspace(
 
 
 def _extract_test_files(test_patch: str, tests_dir: Path) -> None:
-    """Extract test files from diff format."""
-    pattern = r"#\s*(.+\.py)\n(.+?)(?=#\s*.+\.py\n|$)"
-    matches = re.findall(pattern, test_patch, re.DOTALL)
+    """Extract test files from test_patch.
 
-    for file_path, content in matches:
+    Handles multiple formats:
+    1. Git diff format (diff --git ... +lines)
+    2. "# Test file: path" format (from TestGenerator)
+    3. Legacy "# file.py" format
+    """
+    tests_dir.mkdir(parents=True, exist_ok=True)
+
+    # Format 1: Git diff format
+    if "diff --git" in test_patch:
+        diffs = test_patch.split("diff --git")
+
+        for diff in diffs[1:]:
+            plus_match = re.search(r"\+\+\+ b/(.+)", diff)
+            if not plus_match:
+                continue
+            file_path = plus_match.group(1).strip()
+
+            content_lines = []
+            in_hunk = False
+
+            for line in diff.split("\n"):
+                if line.startswith("---") or line.startswith("+++"):
+                    continue
+                if line.startswith("index") or line.startswith("new file"):
+                    continue
+                if line.startswith("@@"):
+                    in_hunk = True
+                    continue
+                if not in_hunk:
+                    continue
+                if line.startswith("+"):
+                    content_lines.append(line[1:])
+
+            if content_lines:
+                while content_lines and not content_lines[-1].strip():
+                    content_lines.pop()
+
+                test_file = tests_dir / Path(file_path).name
+                with open(test_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(content_lines))
+                    if content_lines:
+                        f.write("\n")
+        return
+
+    # Format 2: "# Test file: path"
+    pattern2 = r"#\s*Test file:\s*(.+)\n(.+?)(?=#\s*Test file:|$)"
+    matches2 = re.findall(pattern2, test_patch, re.DOTALL)
+
+    if matches2:
+        for file_path, content in matches2:
+            file_path = file_path.strip()
+            if not file_path:
+                continue
+            test_file = tests_dir / Path(file_path).name
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write(content.strip() + "\n")
+        return
+
+    # Format 3: Legacy "# file.py" format
+    pattern3 = r"#\s*(.+\.py)\n(.+?)(?=#\s*.+\.py\n|$)"
+    matches3 = re.findall(pattern3, test_patch, re.DOTALL)
+
+    for file_path, content in matches3:
         file_path = file_path.strip()
         if not file_path:
             continue

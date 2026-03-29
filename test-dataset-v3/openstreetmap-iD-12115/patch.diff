@@ -1,0 +1,12 @@
+diff --git a/modules/svg/labels.js b/modules/svg/labels.js
+index ae43f06a55..669a9e138d 100644
+--- a/modules/svg/labels.js
++++ b/modules/svg/labels.js
+@@ -46,6 +46,7 @@ export function svgLabels(projection, context) {
+         ['area', 'craft', '*', 12],
+         ['area', 'tourism', '*', 12],
+         ['area', 'camp_site', '*', 12],
++        ['area', 'animal', 'horse_walker', 12],
+         ['point', 'aeroway', '*', 10],
+         ['point', 'amenity', '*', 10],
+         ['point', 'building', '*', 10],

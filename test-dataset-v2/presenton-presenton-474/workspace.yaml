@@ -1,0 +1,16 @@
+task_id: presenton-presenton-474
+repo:
+  url: https://github.com/presenton/presenton.git
+  base_commit: 3e469cb945e8930b62bea80c13b95eaa41654b45
+  merge_commit: 6b450a3f21e2133312983bab047701d530b475a5
+language: typescript
+difficulty_score: 1
+prompt: 'refactor: Revamp Present mode'
+environment:
+  image: ubuntu:24.04
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

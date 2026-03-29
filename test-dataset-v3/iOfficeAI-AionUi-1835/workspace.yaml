@@ -1,0 +1,16 @@
+task_id: iOfficeAI-AionUi-1835
+repo:
+  url: https://github.com/iOfficeAI/AionUi.git
+  base_commit: f1527605625b3a4928ca696bf9be1c68cbcade92
+  merge_commit: 2ab06553a3630e565c76d51561caff6968a5897a
+language: typescript
+difficulty_score: 1
+prompt: 'fix(openclaw): catch write errors in deviceAuthStore (ELECTRON-6F)'
+environment:
+  image: ubuntu:24.04
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []
