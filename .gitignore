@@ -79,3 +79,5 @@ Thumbs.db
 tasks/
 tasks-*/
 *.jsonl
+test-output/
+*.log
