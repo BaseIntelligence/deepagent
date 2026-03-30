@@ -26,7 +26,7 @@ from swe_forge.llm.client import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 DEFAULT_SHELL_TIMEOUT_MS = 30_000  # 30 seconds default timeout
-MAX_TURNS_DEFAULT = 200
+MAX_TURNS_DEFAULT = 400
 
 
 def shell_tool_schema() -> ToolDefinition:

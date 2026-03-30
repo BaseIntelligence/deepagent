@@ -40,7 +40,7 @@ logger = getLogger(__name__)
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
 
-MAX_AGENT_TURNS = 200
+MAX_AGENT_TURNS = 400
 MAX_VALIDATION_RETRIES = 3
 DEFAULT_TIMEOUT_MS = 60_000
 
@@ -565,32 +565,40 @@ Diff (truncated):
 {self._truncate(task.patch, 4000)}
 ```
 
-== WORKFLOW (FOLLOW EXACTLY) ==
+== CRITICAL: YOU MUST USE TOOLS, NOT TEXT ==
 
-Step 1: Install dependencies
-- Run: apt-get update && apt-get install -y python3 python3-pip git
-- Check pyproject.toml/setup.py for install commands
-- Run install commands via `shell`
+DO NOT write text responses. DO NOT ask questions. DO NOT explain. 
+USE TOOLS: shell, read_file, write_file, submit_tests.
 
-Step 2: Explore the changed code
-- Use `read_file` to read the files mentioned in the diff
-- Use `list_dir` to understand project structure
+== WORKFLOW (EXECUTE NOW) ==
 
-Step 3: WRITE TEST FILES (DO THIS NOW!)
-- Use `write_file` to create test_swe_<feature>.py
-- Write behavioral tests that EXERCISE the changed functionality
+Step 1: INSTALL (use shell tool)
+shell: apt-get update && apt-get install -y python3 python3-pip git
+shell: pip install -e . (or check pyproject.toml)
 
-Step 4: Run tests to validate
-- Use `shell` to run: pytest -c /dev/null test_swe_<feature>.py -v
+Step 2: READ the changed files (use read_file tool)
+read_file: path to files from the diff
 
-Step 5: SUBMIT (MUST CALL THIS!)
-- Call `submit_tests` with your test files and install commands
+Step 3: WRITE TESTS (use write_file tool) 
+write_file: path=test_swe_feature.py, content=your test code
+Tests MUST import modules and call functions - behavioral tests only.
 
-== CRITICAL REMINDERS ==
-- Do NOT just explore forever - WRITE TEST FILES using `write_file`
-- Do NOT end without calling `submit_tests`
-- Tests MUST be behavioral (import, call functions, check values)
-- Do NOT read source and assert on file content."""
+Step 4: RUN TESTS (use shell tool)
+shell: pytest -c /dev/null test_swe_feature.py -v
+
+Step 5: SUBMIT (use submit_tests tool) - THIS IS MANDATORY!
+submit_tests: fail_to_pass=["pytest test_swe_feature.py"], 
+              pass_to_pass=[], 
+              test_files=[{{path, content}}], 
+              install_commands=["apt-get...", "pip install..."]
+
+== ABSOLUTE RULES ==
+- EVERY response MUST include a tool call
+- NO text explanations - only tool calls
+- NO questions - just execute
+- MUST call submit_tests to finish
+- If unsure, try something with shell tool
+- YOU HAVE 400 TURNS - use them to complete the task"""
 
     def _test_commands_for_language(self, language: str) -> tuple[list[str], list[str]]:
         """Get suggested build and test commands for a language.
@@ -905,17 +913,16 @@ Step 5: SUBMIT (MUST CALL THIS!)
 
                 continue
 
-            # No tool calls, check for text response
-            if message.content and message.content.strip():
-                loop.add_assistant(message.content)
-                loop.add_user(
-                    "Use the `shell` tool to explore the repo and run tests, "
-                    "then call `submit_tests`."
-                )
-                continue
-
-            # Empty response, we're done
-            break
+            # No tool calls - FORCE TOOL USAGE
+            # Agent must use tools, not write text
+            loop.add_assistant(message.content or "")
+            loop.add_user(
+                "ERROR: You must use tools (shell, read_file, write_file, submit_tests), not text. "
+                "DO NOT explain. DO NOT ask questions. "
+                "Execute: shell('apt-get update'), read_file('file.py'), write_file('test.py', '...'), submit_tests(...). "
+                "Call a tool NOW."
+            )
+            continue
 
         # Exhausted turns without success
         return GeneratedTests(

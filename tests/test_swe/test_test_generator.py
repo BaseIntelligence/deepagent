@@ -651,7 +651,7 @@ class TestTestGenerator:
 
 class TestConstants:
     def test_max_agent_turns(self):
-        assert MAX_AGENT_TURNS == 200
+        assert MAX_AGENT_TURNS == 400
 
     def test_max_validation_retries(self):
         assert MAX_VALIDATION_RETRIES == 3

@@ -423,7 +423,7 @@ async def _run_pipeline(
     config: SwePipelineConfig,
     repo_filter: Optional[str],
     verbose: bool,
-    model: str = "moonshotai/kimi-k2.5",
+    model: str = "openai/gpt-5.4",
 ):
     """Run the SWE pipeline with progress tracking."""
     from dataclasses import dataclass, field

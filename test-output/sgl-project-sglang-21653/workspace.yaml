@@ -1,0 +1,16 @@
+task_id: sgl-project-sglang-21653
+repo:
+  url: https://github.com/sgl-project/sglang.git
+  base_commit: c06ca1526cb6008a8dacb4fdb06567e648134664
+  merge_commit: 0c5620e6b142898b11d01ec4546015c5687fd9eb
+language: python
+difficulty_score: 3
+prompt: '[diffusion] Fix dashboard chart display issues'
+environment:
+  image: ubuntu:24.04
+  language_version: '3.12'
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []
