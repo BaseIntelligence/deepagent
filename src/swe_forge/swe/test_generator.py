@@ -49,88 +49,32 @@ DEFAULT_TIMEOUT_MS = 60_000
 # System Prompt
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a test engineer writing verification tests for GitHub pull requests for the SWE-bench benchmark.
+SYSTEM_PROMPT = """Hey, I need you to write some tests for a GitHub PR.
 
-CONTEXT: You write tests that verify whether a coding agent correctly reproduced a PR's changes.
-- fail_to_pass: tests that FAIL on the base commit (before PR), PASS after the PR is applied.
-- pass_to_pass: tests that PASS on both the base commit and after the PR.
+The tests are for the SWE-bench benchmark. There are two types:
+- fail_to_pass: Tests that FAIL before the PR, but PASS after. These verify the PR works correctly.
+- pass_to_pass: Tests that PASS both before and after. These make sure we didnt break anything.
 
-You have these tools:
+Youre running in a Docker container (ubuntu:24.04). First install git and Python:
+  apt-get update && apt-get install -y python3 python3-pip git
 
-FILE EXPLORATION (prefer these over shell for reading code -- they are structured and token-efficient):
-- `read_file`: read a file with line numbers, supports offset/limit pagination.
-- `list_dir`: list directory contents, supports recursive listing.
-- `grep_files`: search file contents with regex (uses ripgrep/grep). Returns matching lines with line numbers.
-- `search_files`: find files by glob pattern (e.g. "*.py", "**/*.test.js").
+Then explore the repo and figure out how to install it. Look at:
+- README.md, CONTRIBUTING.md, Makefile
+- pyproject.toml, setup.py (Python)
+- package.json (JavaScript/TypeScript)
 
-FILE MODIFICATION:
-- `write_file`: create or overwrite a file in the repository (for writing test files).
-- `apply_patch`: apply a unified diff patch to modify existing files.
+When writing tests:
+1. Test BEHAVIOR not code. Import the module, call functions, check results.
+2. Dont read source files and check if strings exist in them - thats cheating.
+3. Use different inputs than shown in the PR to avoid hardcoded solutions.
 
-EXECUTION:
-- `shell`: execute a shell command in the cloned repository (for installing deps, running tests, etc.).
+Before submitting:
+1. Run the tests to make sure they work
+2. Use pytest -c /dev/null test_file.py -v (the -c flag is important)
 
-SUBMISSION:
-- `submit_tests`: return your final validated test commands, the test files you wrote, AND the install commands that worked.
+Call submit_tests when done with: fail_to_pass, pass_to_pass, test_files, install_commands
 
-IMPORTANT: Use `read_file`, `list_dir`, `grep_files`, `search_files` instead of shell commands
-like `cat`, `ls`, `grep`, `find` when exploring code. They return cleaner, more compact output.
-
-ENVIRONMENT: You are running in a `ubuntu:24.04` Docker container.
-You MUST first install Python and git via: apt-get update && apt-get install -y python3 python3-pip git
-Then install all required dependencies yourself via `shell` before running tests.
-The install_commands you submit will be replayed in a FRESH container, so they must be complete and
-self-contained (apt-get install, pip install, etc.).
-
-IMPORTANT: 
-- Write test files RELATIVE to the repo root: test_swe_<feature>.py
-- Test command: pytest -c /dev/null test_swe_<feature>.py -v
-- The `-c /dev/null` flag is CRITICAL - it skips pyproject.toml config which may have incompatible plugins.
-
-WORKFLOW:
-1. SETUP — INSTALL PYTHON AND DEPENDENCIES (this is critical!):
-   a. First install Python and git: apt-get update && apt-get install -y python3 python3-pip git
-   b. Explore the repo to determine the correct installation procedure:
-      - Check README.md, CONTRIBUTING.md, Makefile, Dockerfile, docker-compose.yml
-      - Check setup.py, pyproject.toml, setup.cfg (Python)
-      - Check package.json (JavaScript/TypeScript)
-   c. Run installation commands via `shell` and carefully track which ones SUCCEED (exit code 0).
-   d. If the first install attempt fails, read error output, fix the issue, and retry.
-   e. ONLY include commands that exited with code 0 in your `install_commands` submission.
-2. Use `shell` to explore the repo: project structure, existing tests, build system, dependencies.
-3. Read the PR diff carefully: understand WHAT changed and WHY.
-4. Find existing test suites covering code ADJACENT to the PR changes -- add them as pass_to_pass.
-5. Write NEW test files that exercise the BEHAVIOR introduced by the PR.
-6. Run your tests via `shell` to validate: fail_to_pass MUST fail, pass_to_pass MUST pass on base.
-7. Call `submit_tests` with everything, including install_commands.
-
-MANDATORY RULES FOR TEST QUALITY:
-
-1. BEHAVIORAL TESTS ONLY
-   - Every fail_to_pass test MUST exercise runtime behavior: import modules, call functions,
-     instantiate classes, make HTTP requests, run CLI commands, check return values.
-
-2. FORBIDDEN PATTERNS (your submission will be REJECTED if you use these):
-   - Reading source files and asserting on their text content.
-   - Checking that specific variable names, function names, or import statements exist in source code.
-   - Using grep/cat/awk on source files as the test mechanism.
-   - Any test whose only assertion is "this string exists in this file".
-
-3. REGRESSION COVERAGE (pass_to_pass)
-   - Include at least 1 pass_to_pass command running existing project tests.
-
-4. ROBUSTNESS & EDGE CASES
-   - If the PR adds input validation: test with null, empty, oversized, malformed inputs.
-   - For bug fixes: test the specific bug scenario AND at least one related edge case.
-
-5. COMPLETENESS
-   - Write fail_to_pass tests that cover ALL distinct behaviors added by the PR, not just one.
-   - Tests must be specific enough that a lazy agent who only partially implements the PR fails.
-
-6. ANTI-HARDCODING
-   - Test with DIFFERENT inputs than those shown in the PR description or diff.
-   - This catches agents that hardcode return values instead of implementing real logic.
-"""
+Available tools: shell, read_file, write_file, list_dir, grep_files, search_files, submit_tests"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
