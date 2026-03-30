@@ -130,7 +130,7 @@ class HuggingFaceDatasetCache:
                 self.dataset_id,
                 split="train",
                 streaming=True,
-                trust_remote_code=True,
+                
             )
 
             task_ids: set[str] = set()
