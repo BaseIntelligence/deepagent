@@ -26,25 +26,25 @@ def export_task_to_workspace(
     output_folder: Path | str,
     docker_username: str | None = None,
     prebuilt_image: bool = False,
-) -> Path:
-    """Export single SweTask to workspace directory format.
+    overwrite: bool = False,
+) -> Path | None:
+    import shutil
 
-    Args:
-        task: SweTask to export
-        output_folder: Directory to export to
-        docker_username: Docker Hub username for image names
-        prebuilt_image: If True, indicates image is pre-built (build: false)
-
-    Returns:
-        Path to the task directory
-    """
     output_folder = Path(output_folder)
     task_dir = output_folder / task.id
+
+    if task_dir.exists():
+        if overwrite:
+            shutil.rmtree(task_dir)
+        else:
+            logger.warning(f"Task directory already exists, skipping: {task_dir}")
+            return None
+
     task_dir.mkdir(parents=True, exist_ok=True)
 
     # Docker image
     docker_image = (
-        f"{docker_username}/swe-forge-tasks:{task.id}" if docker_username else None
+        f"{docker_username}/swe-forge:{task.id}" if docker_username else None
     )
 
     # Get install commands from config
@@ -78,7 +78,7 @@ def export_task_to_workspace(
         "difficulty_score": task.difficulty_score,
         "prompt": task.dataset_prompt if task.dataset_prompt else task.prompt,
         "environment": {
-            "image": docker_image or "ubuntu:24.04",
+            "image": docker_image if docker_image else f"platformnetwork/swe-forge:{task.id}",
             "language_version": (
                 task.install_config.get("language_version", "3.12")
                 if task.language == "python"
@@ -173,15 +173,14 @@ def export_tasks_to_workspace(
             path = export_task_to_workspace(
                 task, output_folder, docker_username, prebuilt_images
             )
-            results.append(path)
+            if path is not None:
+                results.append(path)
         except DiscoveryError as e:
             logger.warning(f"Skipping task {task.id}: {e}")
-            # Clean up incomplete directory
             if task_dir.exists():
                 shutil.rmtree(task_dir)
         except Exception as e:
             logger.error(f"Error exporting task {task.id}: {e}")
-            # Clean up incomplete directory
             if task_dir.exists():
                 shutil.rmtree(task_dir)
 
@@ -201,7 +200,7 @@ def _extract_test_files(test_patch: str, tests_dir: Path) -> None:
     def safe_filename(name: str, max_len: int = 200) -> str:
         """Create safe filename, truncating if too long."""
         # Remove invalid characters
-        safe = re.sub(r'[<>:"/\\|?*]', '_', name)
+        safe = re.sub(r'[<>:"/\\|?*]', "_", name)
         # Truncate to max length
         if len(safe) > max_len:
             safe = safe[:max_len]
@@ -217,15 +216,15 @@ def _extract_test_files(test_patch: str, tests_dir: Path) -> None:
             lines = part.split("\n", 1)
             filename = lines[0].strip()
             content = lines[1] if len(lines) > 1 else ""
-            
+
             if not filename or not content.strip():
                 continue
-            
+
             # Use safe filename
             safe_name = safe_filename(filename)
             if not safe_name.endswith(".py"):
                 safe_name += ".py"
-            
+
             test_file = tests_dir / safe_name
             try:
                 with open(test_file, "w", encoding="utf-8") as f:
@@ -263,7 +262,7 @@ def _extract_test_files(test_patch: str, tests_dir: Path) -> None:
             if content_lines:
                 while content_lines and not content_lines[-1].strip():
                     content_lines.pop()
-                
+
                 safe_name = safe_filename(Path(file_path).name)
                 test_file = tests_dir / safe_name
                 try:

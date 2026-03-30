@@ -15,6 +15,22 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
+def _update_workspace_image(workspace_path: Path, image_name: str) -> None:
+    """Update workspace.yaml with the built Docker image name."""
+    with open(workspace_path) as f:
+        workspace = yaml.safe_load(f)
+    
+    # Update the environment.image field
+    if "environment" not in workspace:
+        workspace["environment"] = {}
+    workspace["environment"]["image"] = image_name
+    
+    with open(workspace_path, 'w') as f:
+        yaml.dump(workspace, f, default_flow_style=False, sort_keys=False)
+    
+    logger.info(f"Updated {workspace_path} with image: {image_name}")
+
+
 @dataclass
 class BuildResult:
     """Result of a Docker image build."""
@@ -225,6 +241,9 @@ RUN chmod +x /workspace/run_tests.sh
                         error=f"Push failed: {push_error}",
                     )
                 push_url = f"https://hub.docker.com/r/{docker_user}/swe-forge"
+
+            # Update workspace.yaml with the built image name
+            _update_workspace_image(workspace_path, image_name)
 
             return BuildResult(
                 success=True,
