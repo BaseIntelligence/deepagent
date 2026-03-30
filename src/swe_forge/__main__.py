@@ -5,6 +5,7 @@ from swe_forge.cli.mine import app as mine_app
 from swe_forge.cli.validate import app as validate_app
 from swe_forge.cli.export import app as export_app
 from swe_forge.cli.benchmark import benchmark
+from swe_forge.cli.publish import publish
 
 app = typer.Typer(name="swe-forge", help="SWE-bench dataset generator")
 
@@ -18,6 +19,7 @@ def version():
 
 app.command(name="harness")(harness)
 app.command(name="benchmark")(benchmark)
+app.command(name="publish")(publish)
 app.add_typer(mine_app, name="mine")
 app.add_typer(validate_app, name="validate")
 app.add_typer(export_app, name="export")
