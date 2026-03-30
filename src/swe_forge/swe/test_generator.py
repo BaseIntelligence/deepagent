@@ -49,7 +49,10 @@ DEFAULT_TIMEOUT_MS = 60_000
 # System Prompt
 # ─────────────────────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """Write tests for the given PR changes in a Docker container."""
+SYSTEM_PROMPT = """Analyze the GitHub PR and write verification tests.
+
+First, describe what the PR does using set_dataset_prompt.
+Then explore the repo, install dependencies, write tests, and submit."""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +77,7 @@ class GeneratedTests:
         pass_to_pass: Test commands that PASS on both base and PR commit.
         test_files: Test files written by the agent.
         install_commands: Shell commands that successfully installed dependencies.
+        dataset_prompt: Natural language description of the PR changes (LLM generated).
         turn_count: Number of turns used during generation.
         success: Whether generation was successful.
     """
@@ -82,6 +86,7 @@ class GeneratedTests:
     pass_to_pass: list[str] = field(default_factory=list)
     test_files: list[TestFile] = field(default_factory=list)
     install_commands: list[str] = field(default_factory=list)
+    dataset_prompt: str = ""
     turn_count: int = 0
     success: bool = False
 
@@ -451,14 +456,20 @@ class TestGenerator:
         self._max_tokens = max_tokens
         self._max_context_tokens = max_context_tokens
         self._written_files: list[TestFile] = []
+        self._dataset_prompt: str = ""  # LLM-generated dataset description
 
     def _get_tools(self) -> list[ToolDefinition]:
         """Get all tool schemas for the agent."""
-        from swe_forge.llm.tools import shell_tool_schema, submit_tests_tool_schema
+        from swe_forge.llm.tools import (
+            shell_tool_schema,
+            submit_tests_tool_schema,
+            set_dataset_prompt_tool_schema,
+        )
 
         return [
             shell_tool_schema(),
             submit_tests_tool_schema(),
+            set_dataset_prompt_tool_schema(),
             read_file_tool_schema(),
             list_dir_tool_schema(),
             grep_files_tool_schema(),
@@ -475,9 +486,11 @@ class TestGenerator:
 
     def _build_user_message(self, task: SweTask) -> str:
         """Build the initial user message for the agent."""
-        return f"""Can you add tests for this change in {task.repo}?
+        return f"""PR in {task.repo}:
 
-{self._truncate(task.patch, 4000)}"""
+{self._truncate(task.patch, 4000)}
+
+Describe what this PR does, then write tests."""
 
     def _test_commands_for_language(self, language: str) -> tuple[list[str], list[str]]:
         """Get suggested build and test commands for a language.
@@ -656,6 +669,14 @@ class TestGenerator:
             except Exception as e:
                 return ToolResult(content=f"Error applying patch: {e}", is_error=True)
 
+        elif tool_name == "set_dataset_prompt":
+            prompt = arguments.get("prompt", "")
+            if prompt:
+                self._dataset_prompt = prompt
+                logger.info(f"Dataset prompt set: {prompt[:100]}")
+                return ToolResult(content=f"Dataset prompt set: {prompt[:100]}")
+            return ToolResult(content="Error: missing prompt", is_error=True)
+
         elif tool_name == "submit_tests":
             logger.info(
                 f"submit_tests called with: fail_to_pass={arguments.get('fail_to_pass')}, install_commands={arguments.get('install_commands')}"
@@ -806,6 +827,7 @@ class TestGenerator:
         # Exhausted turns without success
         return GeneratedTests(
             turn_count=loop.turn_count,
+            dataset_prompt=self._dataset_prompt,
             success=False,
         )
 
@@ -863,6 +885,7 @@ class TestGenerator:
             pass_to_pass=submit.pass_to_pass,
             test_files=submit.test_files,
             install_commands=submit.install_commands,
+            dataset_prompt=self._dataset_prompt,
             turn_count=turn_count,
             success=success,
         )

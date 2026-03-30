@@ -470,6 +470,7 @@ class SwePipeline:
 
                 task.fail_to_pass = generated.fail_to_pass
                 task.pass_to_pass = generated.pass_to_pass
+                task.dataset_prompt = generated.dataset_prompt
 
                 if generated.test_files:
                     test_files_content = "\n".join(

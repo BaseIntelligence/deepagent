@@ -122,9 +122,35 @@ def submit_tests_tool_schema() -> ToolDefinition:
     )
 
 
+def set_dataset_prompt_tool_schema() -> ToolDefinition:
+    """Create the set_dataset_prompt tool schema.
+    
+    This tool is used by the agent to set a natural description of the PR changes.
+    The prompt describes what the PR does, in natural language.
+    
+    Returns:
+        ToolDefinition for the set_dataset_prompt tool.
+    """
+    return ToolDefinition.create(
+        name="set_dataset_prompt",
+        description="Set a natural language description of what this PR does. Use this to describe the changes in simple terms.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string",
+                    "description": "Natural description of the PR changes (e.g., 'Fixes null pointer exception in login when email is empty')",
+                },
+            },
+            "required": ["prompt"],
+        },
+    )
+
+
 # Module-level schema constants for easy import
 SHELL_TOOL_SCHEMA: ToolDefinition = shell_tool_schema()
 SUBMIT_TESTS_TOOL_SCHEMA: ToolDefinition = submit_tests_tool_schema()
+SET_DATASET_PROMPT_TOOL_SCHEMA: ToolDefinition = set_dataset_prompt_tool_schema()
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -21,39 +21,6 @@ def _extract_test_file_names(test_patch: str) -> list[str]:
     return [Path(m).name for m in matches]
 
 
-def _make_natural_prompt(original_prompt: str, repo: str, patch: str = "") -> str:
-    """Create a simple natural prompt from PR info.
-    
-    Args:
-        original_prompt: Original PR title/description  
-        repo: Repository name
-        patch: The patch diff (optional)
-        
-    Returns:
-        Simple natural prompt describing the changes
-    """
-    if not original_prompt:
-        return f"Changes in {repo}" if repo else "Changes"
-    
-    prompt = original_prompt.strip()
-    
-    # Remove conventional commit prefixes (fix:, feat:, refactor:, etc.)
-    for prefix in ["fix:", "feat:", "refactor:", "chore:", "docs:", "style:", "test:", "build:", "perf:", "ci:"]:
-        if prompt.lower().startswith(prefix):
-            prompt = prompt[len(prefix):].strip()
-            break
-    
-    # Remove leading [brackets] like [BUG] or [Feature]
-    import re
-    prompt = re.sub(r"^\[[^\]]+\]\s*", "", prompt)
-    
-    # Capitalize first letter
-    if prompt:
-        prompt = prompt[0].upper() + prompt[1:]
-    
-    return prompt[:200] if prompt else f"Changes in {repo}"
-
-
 def export_task_to_workspace(
     task: SweTask,
     output_folder: Path | str,
@@ -109,7 +76,7 @@ def export_task_to_workspace(
         },
         "language": task.language,
         "difficulty_score": task.difficulty_score,
-        "prompt": _make_natural_prompt(task.prompt, task.repo, task.patch),
+        "prompt": task.dataset_prompt if task.dataset_prompt else task.prompt,
         "environment": {
             "image": docker_image or "ubuntu:24.04",
             "language_version": (

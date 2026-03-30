@@ -105,6 +105,7 @@ class SweTask(BaseModel):
     )
     meta: dict[str, str] = Field(default_factory=dict)
     prompt: str = ""
+    dataset_prompt: str = ""
     original_pr_body: str = ""
     quality_score: float | None = None
     quality_passed: bool = False
