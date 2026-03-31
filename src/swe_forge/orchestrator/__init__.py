@@ -19,6 +19,12 @@ Usage:
 """
 
 from .dataset_orchestrator import DatasetOrchestrator
+from .full_pipeline_orchestrator import FullPipelineOrchestrator
+from .github_source_orchestrator import (
+    GitHubRepo,
+    GitHubSourceOrchestrator,
+    PreFilterConfig,
+)
 from .master_orchestrator import MasterOrchestrator
 from .models import (
     BuildDockerResult,
@@ -46,7 +52,11 @@ from .tools import (
 
 __all__ = [
     "DatasetOrchestrator",
+    "FullPipelineOrchestrator",
     "MasterOrchestrator",
+    "GitHubRepo",
+    "GitHubSourceOrchestrator",
+    "PreFilterConfig",
     "BuildDockerResult",
     "GenerateTestsResult",
     "OrchestratorStats",
