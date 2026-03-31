@@ -34,6 +34,7 @@ from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
 if TYPE_CHECKING:
     from swe_forge.llm.client import LLMClient
 
+    from .dedup import DedupManager
     from .test_generator import TestGenerator
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,8 @@ class SwePipelineEventType(str, Enum):
     """Types of events emitted during pipeline execution."""
 
     COLLECTION_STARTED = "collection_started"
+    BATCH_FETCHED = "batch_fetched"
+    PIPELINE_PROGRESS = "pipeline_progress"
     CANDIDATE_FILTERED = "candidate_filtered"
     TASK_EXTRACTED = "task_extracted"
     QUALITY_SCORED = "quality_scored"
@@ -72,25 +75,22 @@ class DifficultyTargets:
 
 @dataclass
 class SwePipelineConfig:
-    """Configuration for the SWE mining pipeline.
-
-    Attributes:
-        min_stars: Minimum GitHub stars required for a repository.
-        languages: List of allowed programming languages (empty = all).
-        max_candidates: Maximum PR candidates to process.
-        max_tasks: Maximum tasks to extract before stopping.
-        once: If True, stop after max_tasks; otherwise run continuously.
-        concurrency_enrich: Max concurrent enrichment operations.
-        concurrency_preclassify: Max concurrent pre-classification LLM calls.
-        concurrency_deep: Max concurrent deep processing operations.
-        difficulty_filter: Filter for specific difficulty level.
-        difficulty_targets: Per-difficulty quotas for multi-target mode.
-    """
+    """Configuration for the SWE mining pipeline."""
 
     min_stars: int = 100
     languages: list[str] = field(default_factory=list)
-    max_candidates: int = 50
-    max_tasks: int = 1
+
+    # DEPRECATED: Use target_valid_tasks instead
+    max_candidates: int = 50  # No longer used in target-based mode
+    max_tasks: int = 1  # No longer used in target-based mode
+
+    # NEW: Target-based mining configuration
+    target_valid_tasks: int = 10  # Stop when THIS many VALID tasks
+    max_hours_back: int = 168  # Safety limit (7 days)
+    batch_size_hours: int = 6  # Fetch 6 hours at a time
+    min_complexity: float = 0.25  # Minimum complexity score
+    verify_docker: bool = True  # Run Docker verification
+
     once: bool = True
     concurrency_enrich: int = 20
     concurrency_preclassify: int = 25
@@ -100,6 +100,7 @@ class SwePipelineConfig:
     llm_client: "LLMClient | None" = None
     difficulty_classifier: DifficultyClassifier | None = None
     test_generator: "TestGenerator | None" = None
+    dedup_manager: "DedupManager | None" = None
 
 
 @dataclass
@@ -118,6 +119,7 @@ class BenchmarkMetrics:
     preclassify_easy: int = 0
     preclassify_medium: int = 0
     preclassify_hard: int = 0
+    duplicates_skipped: int = 0
     extraction_attempted: int = 0
     extraction_succeeded: int = 0
     extraction_failed: int = 0
@@ -711,209 +713,245 @@ class SwePipeline:
         """Run the pipeline yielding progress events.
 
         Yields events as tasks progress through the pipeline stages.
+        Uses target-based mining: continues until target_valid_tasks reached.
         """
         start_time = datetime.now(timezone.utc)
         metrics = BenchmarkMetrics()
 
-        # Create semaphores for concurrency control
         enrich_sem = asyncio.Semaphore(self.config.concurrency_enrich)
         preclassify_sem = asyncio.Semaphore(self.config.concurrency_preclassify)
         deep_sem = asyncio.Semaphore(self.config.concurrency_deep)
 
-        # Create event queue for progress tracking
         event_queue: asyncio.Queue[SwePipelineEvent] = asyncio.Queue(maxsize=1000)
 
-        # Emit collection started
+        valid_tasks_count = 0
+        accepted_tasks: list[SweTask] = []
+        hours_fetched = 0
+        max_hours = self.config.max_hours_back
+        batch_size = self.config.batch_size_hours
+
         yield SwePipelineEvent(
             SwePipelineEventType.COLLECTION_STARTED,
-            {"requested": self.config.max_candidates},
+            {"target": self.config.target_valid_tasks, "max_hours": max_hours},
         )
 
-        # Calculate hours back based on candidates
-        hours_back = min(max((self.config.max_candidates // 50) + 1, 6), 12)
+        while valid_tasks_count < self.config.target_valid_tasks:
+            if hours_fetched >= max_hours:
+                logger.warning(
+                    "Reached max_hours_back (%d) with only %d/%d valid tasks",
+                    max_hours,
+                    valid_tasks_count,
+                    self.config.target_valid_tasks,
+                )
+                break
 
-        # Fetch events from GH Archive
-        try:
-            # For testing, we might have mock events
-            events = await self._fetch_events(hours_back)
-        except Exception as e:
-            logger.error("Failed to fetch GH Archive events: %s", e)
-            yield SwePipelineEvent(
-                SwePipelineEventType.PIPELINE_COMPLETED,
-                {"emitted": 0, "error": str(e)},
+            logger.info(
+                "Fetching GH Archive: %d-%d hours back (valid: %d/%d)",
+                hours_fetched,
+                hours_fetched + batch_size,
+                valid_tasks_count,
+                self.config.target_valid_tasks,
             )
-            return
 
-        metrics.total_raw_events = len(events)
+            try:
+                events = await self._fetch_events_batch(
+                    hours_fetched, hours_fetched + batch_size
+                )
+            except Exception as e:
+                logger.error("Failed to fetch batch: %s", e)
+                hours_fetched += batch_size
+                continue
 
-        # Filter to merged PRs only
-        events = [e for e in events if e.action.lower() == "merged"]
-        metrics.total_merged_events = len(events)
+            hours_fetched += batch_size
 
-        # Pre-filter events
-        events = [e for e in events if not self._should_skip_event(e)]
-        metrics.total_prefiltered = len(events)
-
-        if not events:
-            logger.warning("No merged PRs found in GH Archive data")
             yield SwePipelineEvent(
-                SwePipelineEventType.PIPELINE_COMPLETED,
-                {"emitted": 0, "error": "No merged PRs found"},
+                SwePipelineEventType.BATCH_FETCHED,
+                {
+                    "hours_start": hours_fetched - batch_size,
+                    "hours_end": hours_fetched,
+                    "events_count": len(events),
+                },
             )
-            return
 
-        # Shuffle for diversity
-        random.shuffle(events)
+            metrics.total_raw_events += len(events)
 
-        # Truncate to max candidates
-        if self.config.max_candidates > 0 and len(events) > self.config.max_candidates:
-            events = events[: self.config.max_candidates]
+            events = [e for e in events if e.action.lower() == "merged"]
+            metrics.total_merged_events += len(events)
 
-        # Track completed tasks and per-difficulty counts
-        completed_count = 0
-        per_difficulty_counts: dict[str, int] = {}
-        accepted_tasks: list[SweTask] = []
+            events = [e for e in events if not self._should_skip_event(e)]
+            metrics.total_prefiltered += len(events)
 
-        # Process events through pipeline stages
-        pending_tasks: list[asyncio.Task] = []
+            if not events:
+                logger.debug(
+                    "No merged PRs in batch %d-%d",
+                    hours_fetched - batch_size,
+                    hours_fetched,
+                )
+                continue
 
-        async def process_event(event: GhArchiveEvent) -> SweTask | None:
-            """Process a single event through all stages."""
-            nonlocal completed_count
+            random.shuffle(events)
 
-            # Check if we've reached the target
-            if self.config.once:
-                if self.config.difficulty_targets is not None:
-                    if self.config.difficulty_targets.all_met(per_difficulty_counts):
+            completed_count = 0
+            per_difficulty_counts: dict[str, int] = {}
+            pending_tasks: list[asyncio.Task] = []
+
+            async def process_event(event: GhArchiveEvent) -> SweTask | None:
+                nonlocal completed_count
+
+                if self.config.once:
+                    if self.config.difficulty_targets is not None:
+                        if self.config.difficulty_targets.all_met(
+                            per_difficulty_counts
+                        ):
+                            return None
+                    elif completed_count >= self.config.max_tasks:
                         return None
-                elif completed_count >= self.config.max_tasks:
+
+                task_id = f"{event.repository.replace('/', '-')}-{event.pull_number}"
+
+                if self.config.dedup_manager:
+                    if await self.config.dedup_manager.is_processed(task_id):
+                        logger.debug(
+                            "Skipping duplicate task %s (%s#%d)",
+                            task_id,
+                            event.repository,
+                            event.pull_number,
+                        )
+                        metrics.duplicates_skipped += 1
+                        return None
+
+                enriched = await self._enrich_stage(event, enrich_sem, metrics)
+                if enriched is None:
                     return None
 
-            # Stage 1: Enrich
-            enriched = await self._enrich_stage(event, enrich_sem, metrics)
-            if enriched is None:
-                return None
+                if enriched.title == "Untitled change" or not enriched.merge_commit:
+                    return None
 
-            # Basic validation
-            if enriched.title == "Untitled change" or not enriched.merge_commit:
-                return None
+                if enriched.files_changed == 0:
+                    return None
 
-            if enriched.files_changed == 0:
-                return None
+                if not self._filter_stage(enriched, metrics):
+                    await self._emit_event(
+                        event_queue,
+                        SwePipelineEvent(
+                            SwePipelineEventType.CANDIDATE_FILTERED,
+                            {
+                                "event_id": event.id,
+                                "accepted": False,
+                                "reasons": ["filter_rejected"],
+                            },
+                        ),
+                    )
+                    return None
 
-            # Stage 2: Filter
-            if not self._filter_stage(enriched, metrics):
                 await self._emit_event(
                     event_queue,
                     SwePipelineEvent(
                         SwePipelineEventType.CANDIDATE_FILTERED,
-                        {
-                            "event_id": event.id,
-                            "accepted": False,
-                            "reasons": ["filter_rejected"],
-                        },
+                        {"event_id": event.id, "accepted": True, "reasons": []},
                     ),
                 )
-                return None
 
-            # Emit filter passed
-            await self._emit_event(
-                event_queue,
-                SwePipelineEvent(
-                    SwePipelineEventType.CANDIDATE_FILTERED,
-                    {"event_id": event.id, "accepted": True, "reasons": []},
-                ),
-            )
-
-            # Check again after filter
-            if self.config.once:
-                if self.config.difficulty_targets is not None:
-                    if self.config.difficulty_targets.all_met(per_difficulty_counts):
+                if self.config.once:
+                    if self.config.difficulty_targets is not None:
+                        if self.config.difficulty_targets.all_met(
+                            per_difficulty_counts
+                        ):
+                            return None
+                    elif completed_count >= self.config.max_tasks:
                         return None
-                elif completed_count >= self.config.max_tasks:
+
+                difficulty = await self._preclassify_stage(
+                    enriched, preclassify_sem, metrics
+                )
+
+                if not self._difficulty_matches_filter(difficulty, self.config):
+                    logger.debug(
+                        "Difficulty %s does not match filter for %s#%d",
+                        difficulty,
+                        enriched.repo,
+                        enriched.number,
+                    )
                     return None
 
-            # Stage 3: Pre-classify
-            difficulty = await self._preclassify_stage(
-                enriched, preclassify_sem, metrics
-            )
+                if self.config.difficulty_targets is not None and difficulty:
+                    current = per_difficulty_counts.get(difficulty, 0)
+                    quota = self.config.difficulty_targets.targets.get(difficulty, 0)
+                    if quota > 0 and current >= quota:
+                        return None
 
-            # Apply difficulty filter
-            if not self._difficulty_matches_filter(difficulty, self.config):
-                logger.debug(
-                    "Difficulty %s does not match filter for %s#%d",
-                    difficulty,
-                    enriched.repo,
-                    enriched.number,
-                )
-                return None
-
-            # Check per-difficulty quota
-            if self.config.difficulty_targets is not None and difficulty:
-                current = per_difficulty_counts.get(difficulty, 0)
-                quota = self.config.difficulty_targets.targets.get(difficulty, 0)
-                if quota > 0 and current >= quota:
+                task = await self._deep_stage(enriched, deep_sem, metrics, event_queue)
+                if task is None:
                     return None
 
-            # Stage 4: Deep processing
-            task = await self._deep_stage(enriched, deep_sem, metrics, event_queue)
-            if task is None:
-                return None
+                if task.quality_passed:
+                    task.status = SweTaskStatus.READY
+                    metrics.accepted_count += 1
+                else:
+                    task.status = SweTaskStatus.REJECTED
+                    metrics.quality_failed += 1
 
-            # Return task regardless of quality_passed (for data collection)
-            # Quality filtering can be done externally on the JSONL
-            if task.quality_passed:
-                task.status = SweTaskStatus.READY
-                metrics.accepted_count += 1
-            else:
-                task.status = SweTaskStatus.REJECTED
-                metrics.quality_failed += 1
-
-            # Track language
-            if task.language:
-                metrics.languages[task.language] = (
-                    metrics.languages.get(task.language, 0) + 1
-                )
-
-            # Track per-difficulty
-            if difficulty:
-                per_difficulty_counts[difficulty] = (
-                    per_difficulty_counts.get(difficulty, 0) + 1
-                )
-
-            completed_count += 1
-
-            return task
-
-        # Run all events concurrently (semaphores control actual concurrency)
-        for event in events:
-            task = asyncio.create_task(process_event(event))
-            pending_tasks.append(task)
-
-        # Wait for all tasks and yield events
-        for coro in asyncio.as_completed(pending_tasks):
-            try:
-                result = await coro
-                if result is not None:
-                    accepted_tasks.append(result)
-                    yield SwePipelineEvent(
-                        SwePipelineEventType.TASK_EXTRACTED,
-                        {"task": result, "task_id": result.id},
+                if task.language:
+                    metrics.languages[task.language] = (
+                        metrics.languages.get(task.language, 0) + 1
                     )
 
-                    # Check if we should stop
-                    if self.config.once:
-                        if self.config.difficulty_targets is not None:
-                            if self.config.difficulty_targets.all_met(
-                                per_difficulty_counts
-                            ):
-                                break
-                        elif completed_count >= self.config.max_tasks:
-                            break
-            except Exception as e:
-                logger.warning("Event processing failed: %s", e)
+                if difficulty:
+                    per_difficulty_counts[difficulty] = (
+                        per_difficulty_counts.get(difficulty, 0) + 1
+                    )
 
-        # Calculate timing metrics
+                completed_count += 1
+
+                if self.config.dedup_manager:
+                    await self.config.dedup_manager.mark_processed(task.id)
+
+                return task
+
+            for event in events:
+                task = asyncio.create_task(process_event(event))
+                pending_tasks.append(task)
+
+            batch_valid = 0
+            for coro in asyncio.as_completed(pending_tasks):
+                try:
+                    result = await coro
+                    if result is not None:
+                        if result.quality_passed:
+                            batch_valid += 1
+                            valid_tasks_count += 1
+
+                        accepted_tasks.append(result)
+                        yield SwePipelineEvent(
+                            SwePipelineEventType.TASK_EXTRACTED,
+                            {"task": result, "task_id": result.id},
+                        )
+
+                        yield SwePipelineEvent(
+                            SwePipelineEventType.PIPELINE_PROGRESS,
+                            {
+                                "valid_count": valid_tasks_count,
+                                "target": self.config.target_valid_tasks,
+                                "hours_fetched": hours_fetched,
+                            },
+                        )
+
+                        if valid_tasks_count >= self.config.target_valid_tasks:
+                            break
+                except Exception as e:
+                    logger.warning("Event processing failed: %s", e)
+
+            logger.info(
+                "Batch processed: %d valid, total: %d/%d",
+                batch_valid,
+                valid_tasks_count,
+                self.config.target_valid_tasks,
+            )
+
+            for remaining in pending_tasks:
+                if not remaining.done():
+                    remaining.cancel()
+
         end_time = datetime.now(timezone.utc)
         metrics.total_processing_time_ms = (
             end_time - start_time
@@ -927,14 +965,17 @@ class SwePipeline:
                 metrics.total_processing_time_ms / 1000.0, 0.001
             )
 
-        # Yield remaining queued events
         while not event_queue.empty():
             yield event_queue.get_nowait()
 
-        # Emit completion
         yield SwePipelineEvent(
             SwePipelineEventType.PIPELINE_COMPLETED,
-            {"emitted": len(accepted_tasks), "metrics": metrics},
+            {
+                "emitted": len(accepted_tasks),
+                "target_reached": valid_tasks_count >= self.config.target_valid_tasks,
+                "hours_fetched": hours_fetched,
+                "metrics": metrics,
+            },
         )
 
     async def _fetch_events(self, hours_back: int) -> list[GhArchiveEvent]:
@@ -946,6 +987,27 @@ class SwePipeline:
 
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(hours=hours_back)
+
+        return await self.gh_archive_client.fetch_merged_prs(
+            start_date, end_date, skip_missing=True
+        )
+
+    async def _fetch_events_batch(
+        self, hours_start: int, hours_end: int
+    ) -> list[GhArchiveEvent]:
+        """Fetch a specific batch of hours from GH Archive.
+
+        Args:
+            hours_start: Start of batch (hours ago)
+            hours_end: End of batch (hours ago)
+
+        Returns:
+            List of GH Archive events
+        """
+        from datetime import timedelta
+
+        end_date = datetime.now(timezone.utc) - timedelta(hours=hours_start)
+        start_date = datetime.now(timezone.utc) - timedelta(hours=hours_end)
 
         return await self.gh_archive_client.fetch_merged_prs(
             start_date, end_date, skip_missing=True

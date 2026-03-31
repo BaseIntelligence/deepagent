@@ -62,15 +62,38 @@ def mine(
             help="Target repository in owner/repo format",
         ),
     ] = None,
+    target: Annotated[
+        int,
+        typer.Option(
+            "--target",
+            "-t",
+            help="Target number of VALID tasks to mine (stops when reached)",
+            min=1,
+        ),
+    ] = 10,
     limit: Annotated[
         int,
         typer.Option(
             "--limit",
             "-l",
-            help="Maximum number of tasks to mine",
+            help="DEPRECATED: Use --target instead. Maximum number of tasks to mine",
             min=1,
         ),
-    ] = 10,
+    ] = 0,
+    max_hours: Annotated[
+        int,
+        typer.Option(
+            "--max-hours",
+            help="Maximum hours to look back in GH Archive (default: 168 = 7 days)",
+        ),
+    ] = 168,
+    min_complexity: Annotated[
+        float,
+        typer.Option(
+            "--min-complexity",
+            help="Minimum complexity score to accept tasks (default: 0.25)",
+        ),
+    ] = 0.25,
     output: Annotated[
         str,
         typer.Option(
@@ -113,9 +136,9 @@ def mine(
         int,
         typer.Option(
             "--max-candidates",
-            help="Maximum PR candidates to process",
+            help="DEPRECATED: No longer used in target-based mining",
         ),
-    ] = 50,
+    ] = 0,
     min_stars: Annotated[
         int,
         typer.Option(
@@ -186,6 +209,27 @@ def mine(
             help="Push built Docker images to registry",
         ),
     ] = False,
+    skip_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--skip-duplicates",
+            help="Skip tasks that have already been processed (checks local cache and optional HF dataset)",
+        ),
+    ] = False,
+    hf_dataset: Annotated[
+        Optional[str],
+        typer.Option(
+            "--hf-dataset",
+            help="HuggingFace dataset ID to check for existing tasks (e.g., 'CortexLM/swe-forge')",
+        ),
+    ] = None,
+    cache_dir: Annotated[
+        Optional[str],
+        typer.Option(
+            "--cache-dir",
+            help="Directory for dedup cache files (default: ./cache)",
+        ),
+    ] = None,
 ) -> None:
     """Mine SWE tasks from GitHub repositories.
 
@@ -203,15 +247,12 @@ def mine(
         level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
-    # Configure Docker container parallelism
     set_docker_containers_limit(parallel)
 
-    # Validate repo format if provided
     if repo and not validate_repo_format(repo):
         console.print("[red]Error: Repository must be in 'owner/repo' format[/red]")
         raise typer.Exit(code=1)
 
-    # Validate difficulty
     valid_difficulties = {"easy", "medium", "hard"}
     if difficulty and difficulty.lower() not in valid_difficulties:
         console.print(
@@ -219,21 +260,24 @@ def mine(
         )
         raise typer.Exit(code=1)
 
-    # Handle once/continuous conflict
     if continuous:
         once = False
 
-    # Validate build_docker requirements
     if build_docker and not docker_username:
         console.print(
             "[red]Error: --docker-username is required when using --build-docker[/red]"
         )
         raise typer.Exit(code=1)
 
-    # Ensure output folder exists
+    if limit > 0:
+        console.print(
+            "[yellow]Warning: --limit is deprecated. Use --target instead. "
+            f"Using --target {limit}[/yellow]"
+        )
+        target = limit
+
     output_folder.mkdir(parents=True, exist_ok=True)
 
-    # Build pipeline config
     languages = (
         [language.lower()]
         if language
@@ -250,8 +294,12 @@ def mine(
     difficulty_targets = DifficultyTargets(targets=filter_config)
 
     config = SwePipelineConfig(
-        max_candidates=max_candidates,
-        max_tasks=limit,
+        target_valid_tasks=target,
+        max_hours_back=max_hours,
+        batch_size_hours=6,
+        min_complexity=min_complexity,
+        max_candidates=max_candidates if max_candidates > 0 else 50,
+        max_tasks=target,
         once=once,
         min_stars=min_stars,
         languages=languages,
@@ -259,13 +307,13 @@ def mine(
         difficulty_targets=difficulty_targets,
     )
 
-    # Get GitHub token from environment
     github_token = os.environ.get("GITHUB_TOKEN", "")
 
-    # Display configuration
     console.print("[bold blue]SWE-Forge Mine Configuration[/bold blue]")
     console.print(f"  Repository: {repo or 'All repositories (from GH Archive)'}")
-    console.print(f"  Limit: {limit} tasks")
+    console.print(f"  Target: {target} valid tasks")
+    console.print(f"  Max Hours: {max_hours} hours back")
+    console.print(f"  Min Complexity: {min_complexity}")
     console.print(f"  Output: {output}")
     console.print(f"  Difficulty: {difficulty or 'All'}")
     console.print(f"  Model: {model}")
@@ -277,11 +325,26 @@ def mine(
     if build_docker:
         console.print(f"  Build Docker: Yes (username: {docker_username})")
         console.print(f"  Push Images: {'Yes' if docker_push else 'No'}")
+    if skip_duplicates:
+        console.print(f"  Skip Duplicates: Yes")
+        if hf_dataset:
+            console.print(f"  HF Dataset: {hf_dataset}")
     console.print()
 
     # Run the pipeline
     try:
-        result = asyncio.run(_run_pipeline(github_token, config, repo, verbose, model))
+        result = asyncio.run(
+            _run_pipeline(
+                github_token,
+                config,
+                repo,
+                verbose,
+                model,
+                skip_duplicates=skip_duplicates,
+                hf_dataset=hf_dataset,
+                cache_dir=cache_dir,
+            )
+        )
 
         if result.tasks:
             # Export to workspace format only
@@ -416,16 +479,19 @@ async def _run_pipeline(
     repo_filter: Optional[str],
     verbose: bool,
     model: str = "openai/gpt-5.4",
+    *,
+    skip_duplicates: bool = False,
+    hf_dataset: Optional[str] = None,
+    cache_dir: Optional[str] = None,
 ):
-    """Run the SWE pipeline with progress tracking."""
     from dataclasses import dataclass, field
+    from pathlib import Path
 
     @dataclass
     class PipelineResult:
         tasks: list = field(default_factory=list)
         benchmark_metrics: object = None
 
-    # Create LLM client and TestGenerator for test generation
     openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
     llm_client = None
     test_generator = None
@@ -433,6 +499,23 @@ async def _run_pipeline(
         llm_client = OpenRouterClient(api_key=openrouter_key, default_model=model)
         test_generator = TestGenerator(llm=llm_client, model=model)
         config.test_generator = test_generator
+
+    if skip_duplicates:
+        from swe_forge.swe.dedup import DedupManager, HuggingFaceDatasetCache
+        from swe_forge.swe.pr_cache import PRCache
+
+        cache_path = Path(cache_dir) if cache_dir else Path("./cache")
+        cache_path.mkdir(parents=True, exist_ok=True)
+
+        pr_cache = PRCache(cache_path)
+        await pr_cache.open()
+
+        hf_cache = None
+        if hf_dataset:
+            hf_cache = HuggingFaceDatasetCache(dataset_id=hf_dataset)
+            await hf_cache.fetch_task_ids()
+
+        config.dedup_manager = DedupManager(pr_cache=pr_cache, hf_cache=hf_cache)
 
     async with GitHubClient(token=token) as gh_client:
         gh_archive_client = GhArchiveClient(token=token) if not repo_filter else None
@@ -448,25 +531,51 @@ async def _run_pipeline(
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            task_id = progress.add_task("Mining tasks...", total=config.max_tasks)
+            progress_task = progress.add_task(
+                "Mining tasks...", total=config.target_valid_tasks
+            )
 
             async with SwePipeline(
                 gh_client, gh_archive_client=gh_archive_client, config=config
             ) as pipeline:
                 async for event in pipeline.run_with_progress():
-                    if event.event_type == SwePipelineEventType.TASK_EXTRACTED:
+                    if event.event_type == SwePipelineEventType.BATCH_FETCHED:
+                        hours_start = event.data.get("hours_start", 0)
+                        hours_end = event.data.get("hours_end", 0)
+                        count = event.data.get("events_count", 0)
+                        progress.update(
+                            progress_task,
+                            description=f"Fetched batch {hours_start}-{hours_end}h ({count} events)",
+                        )
+
+                    elif event.event_type == SwePipelineEventType.PIPELINE_PROGRESS:
+                        valid_count = event.data.get("valid_count", 0)
+                        target = event.data.get("target", config.target_valid_tasks)
+                        progress.update(
+                            progress_task,
+                            completed=valid_count,
+                            description=f"Mined {valid_count}/{target} valid tasks",
+                        )
+
+                    elif event.event_type == SwePipelineEventType.TASK_EXTRACTED:
                         task = event.data.get("task")
                         if task and isinstance(task, SweTask):
                             tasks.append(task)
-                            progress.update(
-                                task_id,
-                                advance=1,
-                                description=f"Mined {len(tasks)} tasks",
-                            )
 
                     elif event.event_type == SwePipelineEventType.PIPELINE_COMPLETED:
                         metrics = event.data.get("metrics")
-                        progress.update(task_id, completed=len(tasks))
+                        target_reached = event.data.get("target_reached", False)
+                        if target_reached:
+                            progress.update(
+                                progress_task,
+                                completed=config.target_valid_tasks,
+                                description=f"Target reached: {len(tasks)} tasks",
+                            )
+                        else:
+                            progress.update(
+                                progress_task,
+                                description=f"Max hours reached: {len(tasks)} tasks",
+                            )
 
         return PipelineResult(tasks=tasks, benchmark_metrics=metrics)
 

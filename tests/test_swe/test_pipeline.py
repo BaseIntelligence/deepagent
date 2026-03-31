@@ -103,6 +103,11 @@ class TestSwePipelineConfig:
         assert config.concurrency_deep == 8
         assert config.difficulty_filter is None
         assert config.difficulty_targets is None
+        assert config.target_valid_tasks == 10
+        assert config.max_hours_back == 168
+        assert config.batch_size_hours == 6
+        assert config.min_complexity == 0.25
+        assert config.verify_docker is True
 
     def test_custom_values(self):
         config = SwePipelineConfig(
@@ -379,6 +384,8 @@ class TestPipelineEventType:
 
     def test_event_types_exist(self):
         assert SwePipelineEventType.COLLECTION_STARTED.value == "collection_started"
+        assert SwePipelineEventType.BATCH_FETCHED.value == "batch_fetched"
+        assert SwePipelineEventType.PIPELINE_PROGRESS.value == "pipeline_progress"
         assert SwePipelineEventType.CANDIDATE_FILTERED.value == "candidate_filtered"
         assert SwePipelineEventType.TASK_EXTRACTED.value == "task_extracted"
         assert SwePipelineEventType.QUALITY_SCORED.value == "quality_scored"
