@@ -58,6 +58,12 @@ class GhArchiveNotFoundError(GhArchiveError):
     pass
 
 
+class GhArchiveAuthError(GhArchiveError):
+    """Raised when GH Archive returns an auth error (401)."""
+
+    pass
+
+
 class GhArchiveClient:
     """Async client for fetching GH Archive event data.
 
@@ -140,14 +146,12 @@ class GhArchiveClient:
         session = await self._ensure_session()
 
         headers = {"User-Agent": "swe_forge/1.0"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
 
         retryer = AsyncRetrying(
             stop=stop_after_attempt(self.max_retries),
             wait=wait_exponential(multiplier=1, min=1, max=10),
             retry=retry_if_exception_type(
-                (aiohttp.ClientError, aiohttp.ServerTimeoutError)
+                (aiohttp.ClientError, aiohttp.ServerTimeoutError, GhArchiveAuthError)
             ),
             reraise=True,
         )
@@ -160,6 +164,8 @@ class GhArchiveClient:
                             raise GhArchiveNotFoundError(
                                 f"GH Archive file not found: {url}"
                             )
+                        if response.status == 401:
+                            raise GhArchiveAuthError(f"GH Archive auth error for {url}")
                         if response.status != 200:
                             raise GhArchiveError(
                                 f"GH Archive returned HTTP {response.status} for {url}"
@@ -170,7 +176,8 @@ class GhArchiveClient:
         try:
             return await _fetch_with_retry()
         except GhArchiveNotFoundError:
-            # Propagate 404s without retrying
+            raise
+        except GhArchiveAuthError:
             raise
         except aiohttp.ClientError as e:
             raise GhArchiveError(f"Failed to fetch GH Archive hour file: {e}") from e

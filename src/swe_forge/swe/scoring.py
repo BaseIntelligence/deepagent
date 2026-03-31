@@ -454,6 +454,78 @@ async def assess_test_coverage(
 
 
 # =============================================================================
+# Patch Quality Assessment
+# =============================================================================
+
+
+def analyze_patch_quality(patch: str) -> float:
+    """Analyze patch quality based on content.
+
+    Scores based on:
+    - Number of lines changed (more = higher score)
+    - Presence of actual code changes (not just comments/whitespace)
+    - Multiple files modified
+
+    Args:
+        patch: The unified diff patch string
+
+    Returns:
+        Quality score from 0.0 (trivial) to 1.0 (comprehensive)
+    """
+    if not patch:
+        return 0.0
+
+    lines = patch.split("\n")
+
+    # Count added/removed lines (excluding headers)
+    added_lines = [l for l in lines if l.startswith("+") and not l.startswith("+++")]
+    removed_lines = [l for l in lines if l.startswith("-") and not l.startswith("---")]
+
+    # Filter out comment-only and whitespace-only changes
+    def is_significant(line: str) -> bool:
+        stripped = line[1:].strip()  # Remove the +/- prefix
+        if not stripped:
+            return False  # Whitespace-only
+        if stripped.startswith("#"):
+            return False  # Python comment
+        if stripped.startswith("//"):
+            return False  # C-style comment
+        if stripped.startswith("/*") or stripped.startswith("*"):
+            return False  # Block comment
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            return False  # Python docstring
+        return True
+
+    code_adds = [l for l in added_lines if is_significant(l)]
+    code_removes = [l for l in removed_lines if is_significant(l)]
+
+    total_changes = len(code_adds) + len(code_removes)
+
+    if total_changes == 0:
+        return 0.1  # Trivial patch (whitespace/comment only)
+
+    # Count files modified (indicates complexity)
+    files_modified = sum(1 for l in lines if l.startswith("+++ b/"))
+
+    # Score based on total changes
+    # Scale: 1-5 lines = 0.3, 6-20 lines = 0.5, 21+ = 0.7
+    if total_changes <= 5:
+        base_score = 0.3
+    elif total_changes <= 20:
+        base_score = 0.5
+    else:
+        base_score = 0.7
+
+    # Boost for multi-file changes
+    if files_modified >= 2:
+        base_score = min(1.0, base_score + 0.1)
+    if files_modified >= 4:
+        base_score = min(1.0, base_score + 0.1)
+
+    return base_score
+
+
+# =============================================================================
 # TaskScorer
 # =============================================================================
 
@@ -478,6 +550,7 @@ class TaskScorer:
         files_changed: int,
         fail_to_pass: list[str],
         pass_to_pass: list[str],
+        patch: str = "",
     ) -> TaskScore:
         """Score a task across all dimensions.
 
@@ -487,6 +560,7 @@ class TaskScorer:
             files_changed: Number of files modified
             fail_to_pass: Test commands for fail_to_pass
             pass_to_pass: Test commands for pass_to_pass
+            patch: The unified diff patch (optional)
 
         Returns:
             TaskScore with all assessments
@@ -536,8 +610,8 @@ class TaskScorer:
             score.test_coverage = min(0.9, 0.3 + (total_tests * 0.15))
             score.test_reasoning = f"{total_tests} tests (heuristic score)"
 
-        # 4. Patch quality (placeholder - would need actual patch analysis)
-        score.patch_quality = 0.5
+        # 4. Patch quality (analyze patch content)
+        score.patch_quality = analyze_patch_quality(patch)
 
         # Compute overall score
         score.compute_overall(self.config)
