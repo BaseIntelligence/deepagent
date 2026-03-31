@@ -1,0 +1,72 @@
+[
+  {
+    "task_id": "base-base-1783",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "bevyengine-bevy-21795",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "bevyengine-bevy-23446",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "bytebase-bytebase-19746",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "carbon-design-system-carbon-21838",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "centreon-centreon-documentation-5155",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "damoang-angple-1013",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "datacontract-datacontract-cli-1093",
+    "success": false,
+    "before_patch_fail": false,
+    "after_patch_pass": false,
+    "error": "Failed to apply patch: error: corrupt patch at line 228\n"
+  },
+  {
+    "task_id": "dfinity-ic-9596",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "elastic-kibana-259438",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  }
+]

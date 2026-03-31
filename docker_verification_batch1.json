@@ -1,0 +1,72 @@
+[
+  {
+    "task_id": "Fast-64-fast64-689",
+    "success": true,
+    "before_patch_fail": true,
+    "after_patch_pass": true,
+    "error": null
+  },
+  {
+    "task_id": "GaijinEntertainment-daScript-2363",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "GitoxideLabs-gitoxide-2492",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "IBM-Cloud-terraform-provider-ibm-6692",
+    "success": false,
+    "before_patch_fail": false,
+    "after_patch_pass": false,
+    "error": "All fail_to_pass tests PASS before patch - task may be invalid"
+  },
+  {
+    "task_id": "NVIDIA-Digital-Bio-KERMT-8",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "PostHog-posthog-js-3297",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "QwenLM-qwen-code-2707",
+    "success": false,
+    "before_patch_fail": false,
+    "after_patch_pass": false,
+    "error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-QwenLM-qwen-code-2707', 'platformnetwork/swe-forge:QwenLM-qwen-code-2707', 'sleep', '180']' returned non-zero exit status 125."
+  },
+  {
+    "task_id": "Reimagine-Robotics-piper_control-71",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "angr-angr-6291",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  },
+  {
+    "task_id": "aspect-build-rules_lint-825",
+    "success": false,
+    "before_patch_fail": true,
+    "after_patch_pass": false,
+    "error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug"
+  }
+]

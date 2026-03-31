@@ -1,0 +1,26 @@
+[
+  {
+    "task_id": "Fast-64-fast64-689",
+    "docker_image": "platformnetwork/swe-forge:Fast-64-fast64-689",
+    "prompt": "Delay Blender post-load handler via timer",
+    "agent_results": {
+      "turns_count": 3,
+      "final_patch": "",
+      "error": null
+    },
+    "verification": {
+      "fail_to_pass_results": [
+        {
+          "command": "python -m unittest tests/test_after_load_timer.py",
+          "exit_code": 1,
+          "success": false,
+          "output": "",
+          "error": "\\n\\n    del bpy.types.Scene.fast64\\n    del bpy.types.Bone.fast64\\n    del bpy.types.Object.fast64\\n    del bpy.types.Action.fast64\\n\\n    repo_settings_operators_unregister()\\n\\n    for cls in classes:\\n        unregister_class(cls)\\n\\n    bpy.app.handlers.load_post.remove(after_load)\\n\\n    addon_updater_ops.unregister()\\n    unregister_class(ExampleAddonPreferences)\\n'\n\n----------------------------------------------------------------------\nRan 3 tests in 0.001s\n\nFAILED (failures=1, errors=2)\n"
+        }
+      ],
+      "pass_to_pass_results": [],
+      "all_passed": false
+    },
+    "success": false
+  }
+]

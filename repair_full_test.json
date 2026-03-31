@@ -1,0 +1,61 @@
+{
+  "total_tasks": 5,
+  "kept": 1,
+  "rejected_complexity": 1,
+  "rejected_verification": 3,
+  "acceptance_rate": "20.0%",
+  "results": [
+    {
+      "task_id": "CaptainFact-captain-fact-api-507",
+      "complexity_score": 0.05,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.05 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "Fast-64-fast64-689",
+      "complexity_score": 0.33,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "GaijinEntertainment-daScript-2363",
+      "complexity_score": 0.5,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "GitoxideLabs-gitoxide-2492",
+      "complexity_score": 0.43,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "IBM-Cloud-terraform-provider-ibm-6692",
+      "complexity_score": 0.42,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Timeout during verification",
+      "action": "reject_verification",
+      "details": {}
+    }
+  ]
+}

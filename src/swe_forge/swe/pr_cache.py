@@ -10,6 +10,7 @@ Supports:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -61,14 +62,6 @@ class PRCache:
         jsonl_filename: str = DEFAULT_JSONL_FILENAME,
         sqlite_filename: str = DEFAULT_SQLITE_FILENAME,
     ):
-        """Initialize PR cache.
-
-        Args:
-            cache_dir: Directory to store cache files
-            use_sqlite: Whether to use SQLite backend in addition to JSONL
-            jsonl_filename: Name of JSONL file
-            sqlite_filename: Name of SQLite database file
-        """
         self.cache_dir = Path(cache_dir)
         self.use_sqlite = use_sqlite
         self.jsonl_filename = jsonl_filename
@@ -79,6 +72,7 @@ class PRCache:
         self._sqlite_path = self.cache_dir / self.sqlite_filename
         self._db: Optional[aiosqlite.Connection] = None
         self._initialized = False
+        self._lock = asyncio.Lock()
 
     @property
     def jsonl_path(self) -> Path:
@@ -193,16 +187,6 @@ class PRCache:
         metadata: Optional[dict[str, Any]] = None,
         status: str = "success",
     ) -> None:
-        """Mark a PR as processed.
-
-        Appends to JSONL file AND adds to memory set. Optionally
-        writes to SQLite if enabled.
-
-        Args:
-            pr_id: PR identifier
-            metadata: Optional metadata dict to store
-            status: Processing status (default: "success")
-        """
         if not self._initialized:
             raise RuntimeError("Cache not initialized. Call open() first.")
 
@@ -214,15 +198,12 @@ class PRCache:
             **(metadata or {}),
         }
 
-        # Append to JSONL (append-only)
-        await self._append_to_jsonl(entry)
+        async with self._lock:
+            await self._append_to_jsonl(entry)
+            self._processed_ids.add(pr_id)
 
-        # Add to memory set
-        self._processed_ids.add(pr_id)
-
-        # Write to SQLite if enabled
-        if self._db:
-            await self._upsert_sqlite(pr_id, processed_at, status, metadata)
+            if self._db:
+                await self._upsert_sqlite(pr_id, processed_at, status, metadata)
 
     async def _append_to_jsonl(self, entry: dict[str, Any]) -> None:
         """Append entry to JSONL file."""

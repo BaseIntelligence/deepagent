@@ -1,0 +1,169 @@
+{
+  "total_tasks": 15,
+  "kept": 10,
+  "rejected_complexity": 5,
+  "rejected_verification": 0,
+  "acceptance_rate": "66.7%",
+  "results": [
+    {
+      "task_id": "CaptainFact-captain-fact-api-507",
+      "complexity_score": 0.05,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.05 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "Fast-64-fast64-689",
+      "complexity_score": 0.34,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "GaijinEntertainment-daScript-2363",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "GitoxideLabs-gitoxide-2492",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "IBM-Cloud-terraform-provider-ibm-6692",
+      "complexity_score": 0.42,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "MystenLabs-sui-26047",
+      "complexity_score": 0.18,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.18 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "NVIDIA-Digital-Bio-KERMT-8",
+      "complexity_score": 0.32,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "PostHog-posthog-js-3297",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "Project-MONAI-MONAI-8773",
+      "complexity_score": 0.22,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.22 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "QwenLM-qwen-code-2707",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "Reimagine-Robotics-piper_control-71",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "SSSD-sssd-8481",
+      "complexity_score": 0.1,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.10 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "aeecleclair-Hyperion-983",
+      "complexity_score": 0.22,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.22 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "angr-angr-6291",
+      "complexity_score": 0.46,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "aspect-build-rules_lint-825",
+      "complexity_score": 0.3,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    }
+  ]
+}

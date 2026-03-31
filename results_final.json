@@ -1,0 +1,26 @@
+[
+  {
+    "task_id": "Fast-64-fast64-689",
+    "docker_image": "platformnetwork/swe-forge:Fast-64-fast64-689",
+    "prompt": "Delay Blender post-load handler via timer",
+    "agent_results": {
+      "turns_count": 2,
+      "final_patch": "diff --git a/__init__.py b/__init__.py\nindex 6413282..f5d4b6b 100644\n--- a/__init__.py\n+++ b/__init__.py\n@@ -389,19 +389,16 @@ def upgrade_scene_props_node():\n \n @bpy.app.handlers.persistent\n def after_load(_a, _b):\n-    game_data.update(bpy.context.scene.gameEditorMode)\n+    bpy.app.timers.register(after_load_impl, 0.001)\n \n+def after_load_impl():\n+    game_data.update(bpy.context.scene.gameEditorMode)\n     settings = bpy.context.scene.fast64.settings\n-    if any(mat.is_f3d for mat in bpy.data.materials):\n-        check_or_ask_color_management(bpy.context)\n-        if not settings.internal_fixed_4_2 and bpy.app.version >= (4, 2, 0):\n-            upgrade_f3d_version_all_meshes()\n-    if bpy.app.version >= (4, 2, 0):\n-        settings.internal_fixed_4_2 = True\n     upgrade_changed_props()\n     upgrade_scene_props_node()\n     resync_scene_props()\n-    try:\n+    load_repo_settings(bpy.context.scene, abspath(settings.repo_settings_path), True)\n+\n         if settings.repo_settings_path:\n             load_repo_settings(bpy.context.scene, abspath(settings.repo_settings_path), True)\n     except Exception as exc:\n",
+      "error": null
+    },
+    "verification": {
+      "fail_to_pass_results": [
+        {
+          "command": "python -m unittest tests/test_after_load_timer.py",
+          "exit_code": 1,
+          "success": false,
+          "output": "",
+          "error": "imer_with_impl_and_non_zero_delay)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/repo/tests/test_after_load_timer.py\", line 45, in test_after_load_invokes_timer_with_impl_and_non_zero_delay\n    exec(snippet, namespace)\n  File \"<string>\", line 13\n    if settings.repo_settings_path:\nIndentationError: unexpected indent\n\n----------------------------------------------------------------------\nRan 3 tests in 0.001s\n\nFAILED (errors=1)\n"
+        }
+      ],
+      "pass_to_pass_results": [],
+      "all_passed": false
+    },
+    "success": false
+  }
+]

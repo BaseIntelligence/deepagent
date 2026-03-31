@@ -1,0 +1,825 @@
+{
+  "total_tasks": 78,
+  "kept": 1,
+  "rejected_complexity": 18,
+  "rejected_verification": 59,
+  "acceptance_rate": "1.3%",
+  "results": [
+    {
+      "task_id": "CaptainFact-captain-fact-api-507",
+      "complexity_score": 0.05,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.05 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "Fast-64-fast64-689",
+      "complexity_score": 0.33,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": true,
+      "verification_error": null,
+      "action": "keep",
+      "details": {}
+    },
+    {
+      "task_id": "GaijinEntertainment-daScript-2363",
+      "complexity_score": 0.47,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "GitoxideLabs-gitoxide-2492",
+      "complexity_score": 0.42,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "IBM-Cloud-terraform-provider-ibm-6692",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Timeout during verification",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "MystenLabs-sui-26047",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "NVIDIA-Digital-Bio-KERMT-8",
+      "complexity_score": 0.28,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "PostHog-posthog-js-3297",
+      "complexity_score": 0.36,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "Project-MONAI-MONAI-8773",
+      "complexity_score": 0.22,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.22 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "QwenLM-qwen-code-2707",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-QwenLM-qwen-code-2707', 'platformnetwork/swe-forge:QwenLM-qwen-code-2707', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "Reimagine-Robotics-piper_control-71",
+      "complexity_score": 0.36,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "SSSD-sssd-8481",
+      "complexity_score": 0.1,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.10 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "aeecleclair-Hyperion-983",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "angr-angr-6291",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "aspect-build-rules_lint-825",
+      "complexity_score": 0.3,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "autogluon-autogluon-5629",
+      "complexity_score": 0.47,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-autogluon-autogluon-5629', 'platformnetwork/swe-forge:autogluon-autogluon-5629', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "aws-bedrock-agentcore-sdk-python-362",
+      "complexity_score": 0.36,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: corrupt patch at line 34\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "base-base-1783",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "bevyengine-bevy-21795",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "bevyengine-bevy-23446",
+      "complexity_score": 0.68,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "bytebase-bytebase-19746",
+      "complexity_score": 0.43,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "carbon-design-system-carbon-21838",
+      "complexity_score": 0.46,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "centreon-centreon-documentation-5155",
+      "complexity_score": 0.3,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "damoang-angple-1013",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "data",
+      "complexity_score": 0.0,
+      "complexity_difficulty": "",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": "workspace.yaml not found",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "datacontract-datacontract-cli-1093",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: corrupt patch at line 228\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "dfinity-ic-9596",
+      "complexity_score": 0.48,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "dolthub-dolt-10638",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-dolthub-dolt-10638', 'platformnetwork/swe-forge:dolthub-dolt-10638', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "donetick-frontend-74",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "elastic-kibana-259438",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "element-hq-element-web-32659",
+      "complexity_score": 0.62,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "epam-ai-dial-admin-frontend-2764",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "fonoster-fonoster-846",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-fonoster-fonoster-846', 'platformnetwork/swe-forge:fonoster-fonoster-846', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "frank-fs-frank-234",
+      "complexity_score": 0.55,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: corrupt patch at line 322\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "frappe-erpnext-53871",
+      "complexity_score": 0.18,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.18 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "fystack-multichain-indexer-92",
+      "complexity_score": 0.46,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Pre-apply validation failed:\nTest 'go test ./pkg/common/config/......' passed 3/3 times. Test appears to be broken - it always passes. Required 2/3 failures.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "getsentry-sentry-111798",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: corrupt patch at line 211\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "git-ai-project-git-ai-858",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "glassflow-clickhouse-etl-636",
+      "complexity_score": 0.48,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Pre-apply validation failed:\nTest 'cd glassflow-api && go test ./internal/models ./in...' passed 3/3 times. Test appears to be broken - it always passes. Required 2/3 failures.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "google-osv.dev-5148",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "gradio-app-gradio-13046",
+      "complexity_score": 0.68,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "gramps-project-gramps-web-1010",
+      "complexity_score": 0.56,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "hypha-dao-hypha-web-2050",
+      "complexity_score": 0.72,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "ironcore-dev-libvirt-provider-703",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Pre-apply validation failed:\nTest 'GOTOOLCHAIN=auto go test ./internal/mcr...' passed 3/3 times. Test appears to be broken - it always passes. Required 2/3 failures.\nTest 'GOTOOLCHAIN=auto go test ./cmd/libvirt-provider/ap...' passed 3/3 times. Test appears to be broken - it always passes. Required 2/3 failures.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "ironplc-ironplc-786",
+      "complexity_score": 0.1,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.10 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "kalibr-ai-kalibr-sdk-python-137",
+      "complexity_score": 0.42,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "langwatch-langwatch-2780",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "lf-edge-eve-5708",
+      "complexity_score": 0.22,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.22 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "llamastack-llama-stack-5305",
+      "complexity_score": 0.18,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.18 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "localizethedocs-ros2-docs-l10n-111",
+      "complexity_score": 0.32,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "matrixhub-ai-matrixhub-340",
+      "complexity_score": 0.62,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Pre-apply validation failed:\nTest 'go test ./internal/apiserver/handler...' passed 3/3 times. Test appears to be broken - it always passes. Required 2/3 failures.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "megaeth-labs-stateless-validator-102",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "mezonai-mezon-12683",
+      "complexity_score": 0.46,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "milvus-io-milvus.io-2267",
+      "complexity_score": 0.68,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-milvus-io-milvus-io-2267', 'platformnetwork/swe-forge:milvus-io-milvus.io-2267', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "minmatarfleet-minmatar.org-2149",
+      "complexity_score": 0.32,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-minmatarfleet-minmatar-org-2149', 'platformnetwork/swe-forge:minmatarfleet-minmatar.org-2149', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "mlrun-mlrun-9516",
+      "complexity_score": 0.47,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "mozilla-pdf.js-21002",
+      "complexity_score": 0.72,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: corrupt patch at line 2695\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "neutree-ai-neutree-324",
+      "complexity_score": 0.05,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.05 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "noetl-noetl-354",
+      "complexity_score": 0.48,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: corrupt patch at line 107\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "nostria-app-nostria-596",
+      "complexity_score": 0.68,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "open-edge-platform-edge-ai-suites-2350",
+      "complexity_score": 0.34,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "open-hax-proxx-141",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Failed to apply patch: error: cannot apply binary patch to '.tmp-go-bin/actionlint' without full index line\nerror: .tmp-go-bin/actionlint: patch does not apply\n",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "openziti-sdk-golang-898",
+      "complexity_score": 0.72,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Pre-apply validation failed:\nTest 'go test ./xgress -run 'Test_NewWriteAdapter_Enable...' passed 3/3 times. Test appears to be broken - it always passes. Required 2/3 failures.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "podman-desktop-extension-kubernetes-dashboard-822",
+      "complexity_score": 0.72,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-podman-desktop-extension-kubernetes-dashboard-822', 'platformnetwork/swe-forge:podman-desktop-extension-kubernetes-dashboard-822', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "pydantic-pydantic-12985",
+      "complexity_score": 0.46,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "reearth-reearth-flow-2007",
+      "complexity_score": 0.12,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.12 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "rust-skia-rust-skia-1276",
+      "complexity_score": 0.52,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "sgl-project-sglang-20410",
+      "complexity_score": 0.36,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "solspace-craft-freeform-2475",
+      "complexity_score": 0.58,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "stablyai-orca-214",
+      "complexity_score": 0.47,
+      "complexity_difficulty": "medium",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "taipei-doit-Taipei-City-Dashboard-1208",
+      "complexity_score": 0.7,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Timeout during verification",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "terrapkg-packages-10929",
+      "complexity_score": 0.38,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "umbraco-Umbraco-CMS-22292",
+      "complexity_score": 0.32,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "Command '['docker', 'run', '-d', '--name', 'swe-verify-umbraco-Umbraco-CMS-22292', 'platformnetwork/swe-forge:umbraco-Umbraco-CMS-22292', 'sleep', '180']' returned non-zero exit status 125.",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "wecode-ai-Wegent-872",
+      "complexity_score": 0.7,
+      "complexity_difficulty": "hard",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    },
+    {
+      "task_id": "wetware-ww-294",
+      "complexity_score": 0.2,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.20 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "ycode-ycode-107",
+      "complexity_score": 0.22,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.22 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "yuque-yuque-mcp-server-50",
+      "complexity_score": 0.18,
+      "complexity_difficulty": "easy",
+      "complexity_passed": false,
+      "verification_passed": false,
+      "verification_error": null,
+      "action": "reject_complexity",
+      "details": {
+        "reason": "Score 0.18 below threshold 0.25"
+      }
+    },
+    {
+      "task_id": "zendvolabs-zendvo-205",
+      "complexity_score": 0.34,
+      "complexity_difficulty": "easy",
+      "complexity_passed": true,
+      "verification_passed": false,
+      "verification_error": "fail_to_pass tests FAIL after patch - patch doesn't fix the bug",
+      "action": "reject_verification",
+      "details": {}
+    }
+  ]
+}
