@@ -324,7 +324,10 @@ async def build_docker(
 
         # Write test files
         for test in tests:
-            test_path = tests_dir / Path(test["path"]).name
+            test_rel_path = Path(test["path"])
+            if test_rel_path.parts and test_rel_path.parts[0] == "tests":
+                test_rel_path = Path(*test_rel_path.parts[1:])
+            test_path = tests_dir / test_rel_path
             test_path.write_text(test["content"])
 
         # Write workspace.yaml

@@ -60,6 +60,7 @@ SYSTEM_PROMPT = """Generate tests for a software bug fix.
 CRITICAL: Your tests MUST:
 1. FAIL on the base commit (before the patch applies)
 2. PASS after applying the patch
+3. Test files MUST be in tests/ directory (e.g., tests/test_xxx.py)
 
 PROCESS:
 1. Call set_dataset_prompt with a short description (5-10 words)
