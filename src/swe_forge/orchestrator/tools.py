@@ -287,6 +287,9 @@ async def build_docker(
     docker_username: str = "swe-forge",
     push: bool = False,
     install_commands: list[str] | None = None,
+    fail_to_pass: list[str] | None = None,
+    pass_to_pass: list[str] | None = None,
+    patch: str = "",
 ) -> BuildDockerResult:
     """Build Docker image with repository and tests.
 
@@ -301,6 +304,9 @@ async def build_docker(
         docker_username: Docker Hub username for image naming.
         push: Whether to push the image to Docker Hub.
         install_commands: Commands to install dependencies.
+        fail_to_pass: Test commands that should fail before patch and pass after.
+        pass_to_pass: Test commands that should pass before and after patch.
+        patch: The patch content to write to patch.diff file.
 
     Returns:
         BuildDockerResult with image name and build status.
@@ -329,15 +335,18 @@ async def build_docker(
             "repo": {"url": repo_url, "base_commit": base_commit},
             "language": language,
             "install": {"commands": install_commands or []},
-            "tests": {"fail_to_pass": [], "pass_to_pass": []},
+            "tests": {
+                "fail_to_pass": fail_to_pass or [],
+                "pass_to_pass": pass_to_pass or [],
+            },
         }
         workspace_path = task_dir / "workspace.yaml"
         with open(workspace_path, "w") as f:
             yaml.dump(workspace, f, default_flow_style=False)
 
-        # Write patch.diff placeholder
+        # Write patch.diff
         patch_path = task_dir / "patch.diff"
-        patch_path.write_text("")
+        patch_path.write_text(patch)
 
         try:
             result = await build_docker_image(

@@ -214,6 +214,9 @@ class DatasetOrchestrator:
                 docker_username=self.docker_username,
                 push=self.push_images,
                 install_commands=generate_result.install_commands,
+                fail_to_pass=generate_result.tests.get("fail_to_pass", []),
+                pass_to_pass=generate_result.tests.get("pass_to_pass", []),
+                patch=task.patch,
             )
         task.build_result = build_result
 
