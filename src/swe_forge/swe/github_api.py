@@ -510,6 +510,36 @@ class GitHubClient:
 
         return files
 
+    async def get_ci_cd_files_optimized(
+        self, owner: str, repo: str, ref: str | None = None
+    ) -> dict[str, str]:
+        """Get CI/CD files using UNgh (no rate limit).
+
+        Falls back to REST API if UNgh fails.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            ref: Git ref (branch, tag, or commit). Defaults to default branch.
+
+        Returns:
+            Dict mapping filename to content for files that exist.
+        """
+        from .ungh_client import UnghClient
+
+        branch = ref or "main"
+
+        try:
+            async with UnghClient() as ungh:
+                files = await ungh.get_ci_cd_files(owner, repo, branch)
+                if files:
+                    return files
+        except Exception as e:
+            logger.warning(f"UNgh failed, falling back to REST API: {e}")
+
+        # Fallback to existing REST API method
+        return await self.get_ci_cd_files(owner, repo, ref)
+
     async def get_rate_limit(self) -> RateLimitInfo:
         """Fetch current rate limit status.
 
