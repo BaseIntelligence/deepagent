@@ -1,0 +1,117 @@
+use commonware_codec::{varint::UInt, Encode};
+use commonware_cryptography::{
+    ed25519::PrivateKey,
+    handshake::{dial_start, listen_start, Context},
+    transcript::Transcript,
+    Signer,
+};
+use commonware_runtime::{deterministic, mocks, IoBuf, Runner as _, Sink as _};
+use commonware_stream::encrypted::{dial, listen, Config, Error};
+use std::time::Duration;
+
+const NAMESPACE: &[u8] = b"fixed_size_handshake_frames";
+const MAX_MESSAGE_SIZE: u32 = 64 * 1024;
+
+fn transport_config(signing_key: PrivateKey) -> Config<PrivateKey> {
+    Config {
+        signing_key,
+        namespace: NAMESPACE.to_vec(),
+        max_message_size: MAX_MESSAGE_SIZE,
+        synchrony_bound: Duration::from_secs(1),
+        max_handshake_age: Duration::from_secs(1),
+        handshake_timeout: Duration::from_secs(1),
+    }
+}
+
+fn oversized_handshake_prefix(message: &impl Encode) -> IoBuf {
+    let size = u32::try_from(message.encode().len()).expect("message length should fit in u32");
+    IoBuf::from(UInt(size + 1).encode())
+}
+
+#[test]
+fn listen_rejects_oversized_fixed_size_peer_key_frame() {
+    let executor = deterministic::Runner::default();
+    executor.start(|context| async move {
+        let dialer_crypto = PrivateKey::from_seed(42);
+        let listener_crypto = PrivateKey::from_seed(24);
+        let peer = dialer_crypto.public_key();
+
+        let (mut dialer_sink, listener_stream) = mocks::Channel::init();
+        let (listener_sink, _dialer_stream) = mocks::Channel::init();
+
+        let mut listener_config = transport_config(listener_crypto);
+        listener_config.max_message_size = 1024 * 1024;
+
+        dialer_sink
+            .send(oversized_handshake_prefix(&peer))
+            .await
+            .unwrap();
+
+        let result = listen(
+            context,
+            |_| async { true },
+            listener_config,
+            listener_stream,
+            listener_sink,
+        )
+        .await;
+
+        assert!(matches!(result, Err(Error::RecvTooLarge(n)) if n == peer.encode().len() + 1));
+    });
+}
+
+#[test]
+fn dial_rejects_oversized_fixed_size_syn_ack_frame() {
+    let executor = deterministic::Runner::default();
+    executor.start(|context| async move {
+        let dialer_crypto = PrivateKey::from_seed(42);
+        let listener_crypto = PrivateKey::from_seed(24);
+
+        let (dialer_sink, _listener_stream) = mocks::Channel::init();
+        let (mut listener_sink, dialer_stream) = mocks::Channel::init();
+
+        let mut dialer_config = transport_config(dialer_crypto);
+        dialer_config.max_message_size = 1024 * 1024;
+
+        let (current_time, ok_timestamps) = dialer_config.time_information(&context);
+        let mut listener_rng = context.clone();
+        let (_, syn) = dial_start(
+            context.clone(),
+            Context::new(
+                &Transcript::new(&dialer_config.namespace),
+                current_time,
+                ok_timestamps.clone(),
+                dialer_config.signing_key.clone(),
+                listener_crypto.public_key(),
+            ),
+        );
+        let (_, syn_ack) = listen_start(
+            &mut listener_rng,
+            Context::new(
+                &Transcript::new(&dialer_config.namespace),
+                current_time,
+                ok_timestamps,
+                listener_crypto.clone(),
+                dialer_config.signing_key.public_key(),
+            ),
+            syn,
+        )
+        .expect("mock handshake should produce a valid SynAck");
+
+        listener_sink
+            .send(oversized_handshake_prefix(&syn_ack))
+            .await
+            .unwrap();
+
+        let result = dial(
+            context,
+            dialer_config,
+            listener_crypto.public_key(),
+            dialer_stream,
+            dialer_sink,
+        )
+        .await;
+
+        assert!(matches!(result, Err(Error::RecvTooLarge(n)) if n == syn_ack.encode().len() + 1));
+    });
+}

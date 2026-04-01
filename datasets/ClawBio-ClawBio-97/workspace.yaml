@@ -1,0 +1,18 @@
+task_id: ClawBio-ClawBio-97
+repo:
+  url: https://github.com/ClawBio/ClawBio.git
+  base_commit: ce5be4144f7d3433592fa4872db5ffc9498bdab1
+  merge_commit: 2cd37a785137563fbc94f8abe69906330885cf5b
+language: python
+difficulty_score: 3
+prompt: Handle missing warfarin data in pharmgx reporter
+environment:
+  image: platformnetwork/swe-forge:ClawBio-ClawBio-97
+  language_version: '3.12'
+install:
+  commands:
+  - apt-get update
+tests:
+  fail_to_pass:
+  - cd /repo && pytest -q tests/test_pharmgx_reporter_missing_warfarin_data.py
+  pass_to_pass: []

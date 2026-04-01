@@ -1,0 +1,350 @@
+# Test file: tests/date-fns-direct-imports-runtime.test.ts
+import { expect, it, vi } from 'vitest';
+
+it('loads auth utils without resolving the date-fns barrel entrypoint', async () => {
+  const imported = [] as string[];
+  const realImport = globalThis.__import__ ?? null;
+
+  vi.resetModules();
+
+  await vi.isolateModules(async () => {
+    const dynamicImport = async (specifier: string) => {
+      imported.push(specifier);
+      return import(specifier);
+    };
+
+    // @ts-expect-error test hook
+    globalThis.__import__ = dynamicImport;
+
+    await import('../src/renderer/utils/auth/utils');
+  });
+
+  // @ts-expect-error cleanup
+  globalThis.__import__ = realImport;
+
+  expect(imported).not.toContain('date-fns');
+});
+
+# Test file: tests/chatSessions.commandTitles.test.ts
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import assert from 'assert';
+import { ensureNoDisposablesAreLeakedInTestSuite } from '../src/vs/base/test/common/utils.js';
+import { MenuRegistry } from '../src/vs/platform/actions/common/actions.js';
+import { registerChatActions } from '../src/vs/workbench/contrib/chat/browser/actions/chatActions.js';
+import { registerChatExecuteActions } from '../src/vs/workbench/contrib/chat/browser/actions/chatExecuteActions.js';
+import { registerChatTitleActions } from '../src/vs/workbench/contrib/chat/browser/actions/chatTitleActions.js';
+import { registerQuickChatActions } from '../src/vs/workbench/contrib/chat/browser/actions/quickChatActions.js';
+import '../src/vs/workbench/contrib/chat/browser/chatSessions/chatSessions.contribution.js';
+
+suite('Chat session provider command titles', () => {
+	let registered = false;
+
+	function ensureActionsRegistered(): void {
+		if (!registered) {
+			registerChatActions();
+			registerChatExecuteActions();
+			registerChatTitleActions();
+			registerQuickChatActions();
+			registered = true;
+		}
+	}
+
+	setup(() => {
+		ensureActionsRegistered();
+	});
+
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	for (const [provider, providerName] of [
+		['local', 'Local'],
+		['copilotcli', 'Copilot CLI'],
+	] as const) {
+		test(`uses session wording for ${provider}`, () => {
+			const command = MenuRegistry.getCommand(`workbench.action.chat.openNewChatSessionInPlace.${provider}`);
+			assert.ok(command, `expected command for ${provider} to be registered`);
+			assert.strictEqual(command.title.value, `New ${providerName} Session`);
+		});
+	}
+});
+
+# Test file: tests/input-initialize-control-value.txt
+components/input/input.spec.ts updated with test via apply_patch
+# Test file: tests/coin-solana-getSignaturesForAddress-error.test.ts
+jest.mock("@solana/web3.js", () => {
+  const actual = jest.requireActual("@solana/web3.js");
+
+  class MockConnection {
+    public getSignaturesForAddress = jest.fn();
+    public getBalance = jest.fn();
+    public getLatestBlockhash = jest.fn();
+    public getFeeForMessage = jest.fn();
+    public getBalanceAndContext = jest.fn();
+    public getParsedTokenAccountsByOwner = jest.fn();
+    public getParsedProgramAccounts = jest.fn();
+    public getInflationReward = jest.fn();
+    public getVoteAccounts = jest.fn();
+    public getParsedTransactions = jest.fn();
+    public getParsedAccountInfo = jest.fn();
+    public getMultipleParsedAccounts = jest.fn();
+    public sendRawTransaction = jest.fn();
+    public confirmTransaction = jest.fn();
+    public getRecentPrioritizationFees = jest.fn();
+    public simulateTransaction = jest.fn();
+
+    constructor(..._args: unknown[]) {}
+  }
+
+  return {
+    ...actual,
+    Connection: MockConnection,
+  };
+});
+
+import { NetworkError } from "@ledgerhq/errors";
+import { getChainAPI } from "../libs/coin-modules/coin-solana/src/network/chain";
+
+describe("coin-solana getSignaturesForAddress", () => {
+  it("retries and remaps RPC -32020 long-term storage errors", async () => {
+    const api = getChainAPI({ endpoint: "http://localhost:8899" });
+
+    const rpcError = new Error(
+      '{"code":-32020,"message":"Transaction history is not available from this node"}',
+    );
+
+    const mockedConnection = api.connection as unknown as {
+      getSignaturesForAddress: jest.Mock;
+    };
+
+    mockedConnection.getSignaturesForAddress
+      .mockRejectedValueOnce(rpcError)
+      .mockRejectedValueOnce(rpcError)
+      .mockResolvedValueOnce([{ signature: "sig1", slot: 123, blockTime: 1700000000, err: null }]);
+
+    await expect(
+      api.getSignaturesForAddress("HxCvgjSbF8HMt3fj8P3j49jmajNCMwKAqBu79HUDPtkM"),
+    ).resolves.toEqual([{ signature: "sig1", slot: 123, blockTime: 1700000000, err: null }]);
+
+    expect(mockedConnection.getSignaturesForAddress).toHaveBeenCalledTimes(3);
+  });
+
+  it("still remaps unrelated errors to NetworkError without retrying", async () => {
+    const api = getChainAPI({ endpoint: "http://localhost:8899" });
+
+    const rpcError = new Error("some other RPC failure");
+    const mockedConnection = api.connection as unknown as {
+      getSignaturesForAddress: jest.Mock;
+    };
+
+    mockedConnection.getSignaturesForAddress.mockRejectedValueOnce(rpcError);
+
+    await expect(
+      api.getSignaturesForAddress("HxCvgjSbF8HMt3fj8P3j49jmajNCMwKAqBu79HUDPtkM"),
+    ).rejects.toEqual(new NetworkError("some other RPC failure"));
+
+    expect(mockedConnection.getSignaturesForAddress).toHaveBeenCalledTimes(1);
+  });
+});
+
+# Test file: tests/test_missing_entities_table.test.tsx
+import React from 'react'
+import { render, screen } from '@testing-library/react'
+
+jest.mock('@stump/client', () => ({
+	useGraphQL: jest.fn(),
+}))
+
+jest.mock('@stump/i18n', () => ({
+	useLocaleContext: jest.fn(),
+}))
+
+jest.mock('@/paths', () => ({
+	usePaths: jest.fn(),
+}))
+
+jest.mock('../../packages/browser/src/scenes/library/tabs/settings/context', () => ({
+	useLibraryManagement: jest.fn(),
+}))
+
+jest.mock('../../packages/browser/src/components/table', () => ({
+	Table: ({ data, columns }: any) => (
+		<div data-testid="missing-entities-table">
+			<div data-testid="row-count">{data.length}</div>
+			<div>{String(columns[0].header)}</div>
+		</div>
+	),
+}))
+
+jest.mock('@stump/components', () => ({
+	Badge: ({ children }: any) => <span>{children}</span>,
+	Card: ({ children }: any) => <div>{children}</div>,
+	Heading: ({ children }: any) => <div>{children}</div>,
+	Link: ({ children, to }: any) => <a href={to}>{children}</a>,
+	Text: ({ children }: any) => <div>{children}</div>,
+}))
+
+jest.mock('@tanstack/react-query', () => ({
+	keepPreviousData: undefined,
+}))
+
+const mockUseGraphQL = jest.requireMock('@stump/client').useGraphQL as jest.Mock
+const mockUseLocaleContext = jest.requireMock('@stump/i18n').useLocaleContext as jest.Mock
+const mockUsePaths = jest.requireMock('@/paths').usePaths as jest.Mock
+const mockUseLibraryManagement = jest.requireMock('../../packages/browser/src/scenes/library/tabs/settings/context')
+	.useLibraryManagement as jest.Mock
+
+describe('MissingEntitiesTable', () => {
+	beforeEach(() => {
+		jest.resetModules()
+		mockUseLocaleContext.mockReturnValue({ t: (key: string) => key })
+		mockUsePaths.mockReturnValue({
+			bookOverview: (id: string) => `/books/${id}`,
+			seriesOverview: (id: string) => `/series/${id}`,
+		})
+		mockUseLibraryManagement.mockReturnValue({
+			library: { id: 'library-1' },
+		})
+		mockUseGraphQL.mockReturnValue({
+			data: {
+				libraryMissingEntities: {
+					nodes: [
+						{ id: 'book-1', path: '/missing/book.cbz', type: 'BOOK' },
+						{ id: 'series-1', path: '/missing/series', type: 'SERIES' },
+					],
+					pageInfo: {
+						__typename: 'OffsetPaginationInfo',
+						totalPages: 1,
+						currentPage: 1,
+						pageSize: 10,
+						pageOffset: 0,
+						zeroBased: false,
+						totalItems: 2,
+					},
+				},
+			},
+			isLoading: false,
+		})
+	})
+
+	it('renders a table for missing library entities when results exist', () => {
+		const { default: MissingEntitiesTable } = require('../../packages/browser/src/scenes/library/tabs/settings/danger/deletion/MissingEntitiesTable')
+
+		render(<MissingEntitiesTable />)
+
+		expect(screen.getByTestId('missing-entities-table')).toBeInTheDocument()
+		expect(screen.getByTestId('row-count')).toHaveTextContent('2')
+		expect(mockUseGraphQL).toHaveBeenCalled()
+	})
+})
+
+# Test file: tests/test_input_initialize_control_value.spec.ts
+import { provideZoneChangeDetection } from '@angular/core';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { By } from '@angular/platform-browser';
+import { Component } from '@angular/core';
+
+import { provideNzIconsTesting } from 'ng-zorro-antd/icon/testing';
+import { NzInputDirective } from '../components/input/input.directive';
+import { NzInputModule } from '../components/input/input.module';
+
+describe('NzInputDirective control initialization', () => {
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [provideNzIconsTesting(), provideZoneChangeDetection()]
+    });
+  });
+
+  it('initializes directive value from an existing form control value', () => {
+    const fixture: ComponentFixture<TestInputControlInitComponent> = TestBed.createComponent(TestInputControlInitComponent);
+    fixture.detectChanges();
+
+    const inputDebugElement = fixture.debugElement.query(By.directive(NzInputDirective));
+    const inputDirective = inputDebugElement.injector.get(NzInputDirective);
+
+    expect(fixture.componentInstance.formControl.value).toBe('abc');
+    expect(inputDirective.value()).toBe('abc');
+  });
+});
+
+@Component({
+  imports: [ReactiveFormsModule, NzInputModule],
+  template: `<input nz-input [formControl]="formControl" />`
+})
+class TestInputControlInitComponent {
+  formControl = new FormControl('abc');
+}
+
+# Test file: tests/test_destroy_vfs_disk_io_error.test.ts
+import { describe, expect, it } from "vitest";
+import { SqliteVfsPool } from "../rivetkit-typescript/packages/sqlite-vfs/src/pool";
+import type { KvVfsOptions } from "@rivetkit/sqlite-vfs";
+
+function keyToString(key: Uint8Array): string {
+	return Buffer.from(key).toString("hex");
+}
+
+function createKvStore(): KvVfsOptions {
+	const store = new Map<string, Uint8Array>();
+
+	return {
+		get: async (key) => {
+			const value = store.get(keyToString(key));
+			return value ? new Uint8Array(value) : null;
+		},
+		getBatch: async (keys) => {
+			return keys.map((key) => {
+				const value = store.get(keyToString(key));
+				return value ? new Uint8Array(value) : null;
+			});
+		},
+		put: async (key, value) => {
+			store.set(keyToString(key), new Uint8Array(value));
+		},
+		putBatch: async (entries) => {
+			for (const [key, value] of entries) {
+				store.set(keyToString(key), new Uint8Array(value));
+			}
+		},
+		deleteBatch: async (keys) => {
+			for (const key of keys) {
+				store.delete(keyToString(key));
+			}
+		},
+	};
+}
+
+describe("SqliteVfsPool destroy", () => {
+	it("destroying one idle instance does not break another instance's database", async () => {
+		const pool = new SqliteVfsPool({
+			actorsPerInstance: 1,
+			idleDestroyMs: 20,
+		});
+
+		const handleA = await pool.acquire("actor-a");
+		const handleB = await pool.acquire("actor-b");
+
+		const dbA = await handleA.open("db-a", createKvStore());
+		await dbA.exec("CREATE TABLE t (value TEXT)");
+		await dbA.exec("INSERT INTO t (value) VALUES ('a')");
+		await dbA.close();
+
+		const dbB = await handleB.open("db-b", createKvStore());
+		await dbB.exec("CREATE TABLE t (value TEXT)");
+		await dbB.exec("INSERT INTO t (value) VALUES ('b')");
+
+		await handleA.destroy();
+		await new Promise((resolve) => setTimeout(resolve, 80));
+
+		await expect(dbB.query("SELECT value FROM t")).resolves.toMatchObject({
+			rows: [["b"]],
+		});
+
+		await dbB.close();
+		await handleB.destroy();
+		await pool.shutdown();
+	});
+});

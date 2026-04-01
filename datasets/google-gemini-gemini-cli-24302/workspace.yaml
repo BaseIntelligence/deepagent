@@ -1,0 +1,17 @@
+task_id: google-gemini-gemini-cli-24302
+repo:
+  url: https://github.com/google-gemini/gemini-cli.git
+  base_commit: 46d6b119b6f1c7382c00ae215a3b0c6ac687639a
+  merge_commit: 573dce26c6d25476dedcd627790d18a8a4127fab
+language: typescript
+difficulty_score: 1
+prompt: 'fix(core): enable mid-stream retries for all models and re-enable compression
+  test'
+environment:
+  image: platformnetwork/swe-forge:google-gemini-gemini-cli-24302
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

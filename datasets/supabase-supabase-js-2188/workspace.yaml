@@ -1,0 +1,19 @@
+task_id: supabase-supabase-js-2188
+repo:
+  url: https://github.com/supabase/supabase-js.git
+  base_commit: 11f20cc10261985b18b51714745c7068a8e95452
+  merge_commit: e2ed14383f64af43d838ff8eddaed40e044cbb46
+language: typescript
+difficulty_score: 3
+prompt: Add beta release workflow CI coverage
+environment:
+  image: platformnetwork/swe-forge:supabase-supabase-js-2188
+  language_version: unknown
+install:
+  commands:
+  - apt-get update
+  - cd /repo && apt-get install -y nodejs npm
+tests:
+  fail_to_pass:
+  - cd /repo && node --test tests/test_beta_release_workflow.js
+  pass_to_pass: []

@@ -1,0 +1,703 @@
+diff --git a/src/cli/commands/model_delete.ts b/src/cli/commands/model_delete.ts
+index 9cdc9db2..ae0d270f 100644
+--- a/src/cli/commands/model_delete.ts
++++ b/src/cli/commands/model_delete.ts
+@@ -66,13 +66,13 @@ export const modelDeleteCommand = new Command()
+     const cliCtx = createContext(options as GlobalOptions, ["model", "delete"]);
+     cliCtx.logger.debug`Deleting model: ${modelIdOrName}`;
+ 
+-    const { repoDir } = await requireInitializedRepo({
++    const { repoDir, datastoreResolver } = await requireInitializedRepo({
+       repoDir: options.repoDir ?? ".",
+       outputMode: cliCtx.outputMode,
+     });
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createModelDeleteDeps(repoDir);
++    const deps = createModelDeleteDeps(repoDir, datastoreResolver);
+     const force = !!options.force;
+ 
+     // Phase 1: Preview — gather what will be affected
+diff --git a/src/cli/commands/model_evaluate.ts b/src/cli/commands/model_evaluate.ts
+index a2b97f64..5233bab7 100644
+--- a/src/cli/commands/model_evaluate.ts
++++ b/src/cli/commands/model_evaluate.ts
+@@ -54,13 +54,13 @@ export const modelEvaluateCommand = new Command()
+ 
+       // If --all flag or no argument, evaluate all definitions (global lock)
+       if (options.all || !modelIdOrName) {
+-        const { repoDir } = await requireInitializedRepo({
++        const { repoDir, datastoreResolver } = await requireInitializedRepo({
+           repoDir: options.repoDir ?? ".",
+           outputMode: cliCtx.outputMode,
+         });
+ 
+         const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-        const deps = createModelEvaluateDeps(repoDir);
++        const deps = createModelEvaluateDeps(repoDir, datastoreResolver);
+         const renderer = createModelEvaluateRenderer(cliCtx.outputMode);
+ 
+         await consumeStream(
+@@ -71,7 +71,7 @@ export const modelEvaluateCommand = new Command()
+       }
+ 
+       // Single model evaluation — use per-model lock
+-      const { repoDir, repoContext, datastoreConfig } =
++      const { repoDir, repoContext, datastoreConfig, datastoreResolver } =
+         await requireInitializedRepoUnlocked({
+           repoDir: options.repoDir ?? ".",
+           outputMode: cliCtx.outputMode,
+@@ -94,7 +94,7 @@ export const modelEvaluateCommand = new Command()
+       ], repoDir);
+ 
+       const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-      const deps = createModelEvaluateDeps(repoDir);
++      const deps = createModelEvaluateDeps(repoDir, datastoreResolver);
+       const renderer = createModelEvaluateRenderer(cliCtx.outputMode);
+ 
+       try {
+diff --git a/src/cli/commands/model_method_history_get.ts b/src/cli/commands/model_method_history_get.ts
+index 5b04da53..b051c1cd 100644
+--- a/src/cli/commands/model_method_history_get.ts
++++ b/src/cli/commands/model_method_history_get.ts
+@@ -50,13 +50,15 @@ export const modelMethodHistoryGetCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Getting method run: ${outputIdOrModelName}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createModelOutputGetDeps(repoDir);
++    const deps = createModelOutputGetDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createModelOutputGetRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/cli/commands/model_method_history_logs.ts b/src/cli/commands/model_method_history_logs.ts
+index f667d652..c4858d7b 100644
+--- a/src/cli/commands/model_method_history_logs.ts
++++ b/src/cli/commands/model_method_history_logs.ts
+@@ -51,13 +51,15 @@ export const modelMethodHistoryLogsCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Getting logs for method run: ${outputIdOrModelName}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createModelMethodHistoryLogsDeps(repoDir);
++    const deps = createModelMethodHistoryLogsDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createModelMethodHistoryLogsRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/cli/commands/model_output_data.ts b/src/cli/commands/model_output_data.ts
+index 221d0e3e..53dfb085 100644
+--- a/src/cli/commands/model_output_data.ts
++++ b/src/cli/commands/model_output_data.ts
+@@ -62,13 +62,15 @@ export const modelOutputDataCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Getting data for output: ${outputIdArg}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createModelOutputDataDeps(repoDir);
++    const deps = createModelOutputDataDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createModelOutputDataRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/cli/commands/model_output_get.ts b/src/cli/commands/model_output_get.ts
+index 9b326f10..db94e388 100644
+--- a/src/cli/commands/model_output_get.ts
++++ b/src/cli/commands/model_output_get.ts
+@@ -46,13 +46,15 @@ export const modelOutputGetCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Getting output: ${outputIdOrModelName}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createModelOutputGetDeps(repoDir);
++    const deps = createModelOutputGetDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createModelOutputGetRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/cli/commands/model_output_logs.ts b/src/cli/commands/model_output_logs.ts
+index b752026f..3f674dc9 100644
+--- a/src/cli/commands/model_output_logs.ts
++++ b/src/cli/commands/model_output_logs.ts
+@@ -47,13 +47,15 @@ export const modelOutputLogsCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Getting logs for output: ${outputIdArg}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createModelOutputLogsDeps(repoDir);
++    const deps = createModelOutputLogsDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createModelOutputLogsRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/cli/commands/model_validate.ts b/src/cli/commands/model_validate.ts
+index 61734b3a..a42a9910 100644
+--- a/src/cli/commands/model_validate.ts
++++ b/src/cli/commands/model_validate.ts
+@@ -65,7 +65,7 @@ export const modelValidateCommand = new Command()
+       const method = options.method as string | undefined;
+       const hasCheckOptions = (labels && labels.length > 0) || method;
+ 
+-      const { repoDir } = hasCheckOptions
++      const { repoDir, datastoreResolver } = hasCheckOptions
+         ? await requireInitializedRepo({
+           repoDir: options.repoDir ?? ".",
+           outputMode: cliCtx.outputMode,
+@@ -76,7 +76,11 @@ export const modelValidateCommand = new Command()
+         });
+ 
+       const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-      const deps = createModelValidateDeps(repoDir, { labels, method });
++      const deps = createModelValidateDeps(
++        repoDir,
++        { labels, method },
++        datastoreResolver,
++      );
+ 
+       const renderer = createModelValidateRenderer(cliCtx.outputMode);
+       await consumeStream(
+diff --git a/src/cli/commands/workflow_delete.ts b/src/cli/commands/workflow_delete.ts
+index 8003a9f7..78296e9d 100644
+--- a/src/cli/commands/workflow_delete.ts
++++ b/src/cli/commands/workflow_delete.ts
+@@ -66,13 +66,13 @@ export const workflowDeleteCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Deleting workflow: ${workflowIdOrName}`;
+ 
+-    const { repoDir } = await requireInitializedRepo({
++    const { repoDir, datastoreResolver } = await requireInitializedRepo({
+       repoDir: options.repoDir ?? ".",
+       outputMode: cliCtx.outputMode,
+     });
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createWorkflowDeleteDeps(repoDir);
++    const deps = createWorkflowDeleteDeps(repoDir, datastoreResolver);
+ 
+     // Phase 1: Preview
+     let preview;
+diff --git a/src/cli/commands/workflow_evaluate.ts b/src/cli/commands/workflow_evaluate.ts
+index 99c7d6ed..f6acd729 100644
+--- a/src/cli/commands/workflow_evaluate.ts
++++ b/src/cli/commands/workflow_evaluate.ts
+@@ -73,13 +73,13 @@ export const workflowEvaluateCommand = new Command()
+ 
+       // If --all flag or no argument, evaluate all workflows (global lock)
+       if (options.all || !workflowIdOrName) {
+-        const { repoDir } = await requireInitializedRepo({
++        const { repoDir, datastoreResolver } = await requireInitializedRepo({
+           repoDir: options.repoDir ?? ".",
+           outputMode: cliCtx.outputMode,
+         });
+ 
+         const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-        const deps = createWorkflowEvaluateDeps(repoDir);
++        const deps = createWorkflowEvaluateDeps(repoDir, datastoreResolver);
+         const renderer = createWorkflowEvaluateRenderer(cliCtx.outputMode);
+ 
+         await consumeStream(
+@@ -133,6 +133,7 @@ export const workflowEvaluateCommand = new Command()
+ 
+       let flushModelLocks: (() => Promise<void>) | null = null;
+       let repoDir: string;
++      let datastoreResolver = unlocked.datastoreResolver;
+ 
+       if (modelRefs !== null && modelRefs.length > 0) {
+         // Resolve model references to { modelType, modelId }
+@@ -172,13 +173,14 @@ export const workflowEvaluateCommand = new Command()
+           outputMode: cliCtx.outputMode,
+         });
+         repoDir = globalResult.repoDir;
++        datastoreResolver = globalResult.datastoreResolver;
+       } else {
+         // No model references
+         repoDir = unlocked.repoDir;
+       }
+ 
+       const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-      const deps = createWorkflowEvaluateDeps(repoDir);
++      const deps = createWorkflowEvaluateDeps(repoDir, datastoreResolver);
+       const renderer = createWorkflowEvaluateRenderer(cliCtx.outputMode);
+ 
+       try {
+diff --git a/src/cli/commands/workflow_history_get.ts b/src/cli/commands/workflow_history_get.ts
+index 2f66ebf0..5186bf8b 100644
+--- a/src/cli/commands/workflow_history_get.ts
++++ b/src/cli/commands/workflow_history_get.ts
+@@ -46,13 +46,15 @@ export const workflowHistoryGetCommand = new Command()
+     ]);
+     cliCtx.logger.debug`Getting latest run for workflow: ${workflowIdOrName}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createWorkflowHistoryGetDeps(repoDir);
++    const deps = createWorkflowHistoryGetDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createWorkflowHistoryGetRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/cli/commands/workflow_history_logs.ts b/src/cli/commands/workflow_history_logs.ts
+index 873cf803..eac1496f 100644
+--- a/src/cli/commands/workflow_history_logs.ts
++++ b/src/cli/commands/workflow_history_logs.ts
+@@ -49,13 +49,15 @@ export const workflowHistoryLogsCommand = new Command()
+     );
+     cliCtx.logger.debug`Getting logs for workflow run: ${runIdOrWorkflow}`;
+ 
+-    const { repoDir } = await requireInitializedRepoReadOnly({
+-      repoDir: options.repoDir ?? ".",
+-      outputMode: cliCtx.outputMode,
+-    });
++    const { repoDir, datastoreResolver } = await requireInitializedRepoReadOnly(
++      {
++        repoDir: options.repoDir ?? ".",
++        outputMode: cliCtx.outputMode,
++      },
++    );
+ 
+     const ctx = createLibSwampContext({ logger: cliCtx.logger });
+-    const deps = createWorkflowHistoryLogsDeps(repoDir);
++    const deps = createWorkflowHistoryLogsDeps(repoDir, datastoreResolver);
+ 
+     const renderer = createWorkflowHistoryLogsRenderer(cliCtx.outputMode);
+     await consumeStream(
+diff --git a/src/libswamp/models/delete.ts b/src/libswamp/models/delete.ts
+index 9f3c5248..dfb9d7d6 100644
+--- a/src/libswamp/models/delete.ts
++++ b/src/libswamp/models/delete.ts
+@@ -26,6 +26,8 @@ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_
+ import { YamlWorkflowRepository } from "../../infrastructure/persistence/yaml_workflow_repository.ts";
+ import { FileSystemUnifiedDataRepository } from "../../infrastructure/persistence/unified_data_repository.ts";
+ import { YamlOutputRepository } from "../../infrastructure/persistence/yaml_output_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import { createModelOutputId } from "../../domain/models/model_output.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import type { SwampError } from "../errors.ts";
+@@ -95,11 +97,22 @@ export interface ModelDeleteDeps {
+ }
+ 
+ /** Wires real infrastructure into ModelDeleteDeps. */
+-export function createModelDeleteDeps(repoDir: string): ModelDeleteDeps {
++export function createModelDeleteDeps(
++  repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
++): ModelDeleteDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+   const workflowRepo = new YamlWorkflowRepository(repoDir);
+-  const unifiedDataRepo = new FileSystemUnifiedDataRepository(repoDir);
+-  const outputRepo = new YamlOutputRepository(repoDir);
++  const unifiedDataRepo = new FileSystemUnifiedDataRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.data),
++  );
++  const outputRepo = new YamlOutputRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.outputs),
++  );
+   return {
+     lookupDefinition: (idOrName) =>
+       findDefinitionByIdOrName(definitionRepo, idOrName),
+diff --git a/src/libswamp/models/evaluate.ts b/src/libswamp/models/evaluate.ts
+index ea76f6c7..2a3a0a2f 100644
+--- a/src/libswamp/models/evaluate.ts
++++ b/src/libswamp/models/evaluate.ts
+@@ -28,6 +28,8 @@ import { findDefinitionByIdOrName } from "../../domain/models/model_lookup.ts";
+ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_definition_repository.ts";
+ import { YamlEvaluatedDefinitionRepository } from "../../infrastructure/persistence/yaml_evaluated_definition_repository.ts";
+ import { FileSystemUnifiedDataRepository } from "../../infrastructure/persistence/unified_data_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError } from "../errors.ts";
+ 
+@@ -82,15 +84,26 @@ export interface ModelEvaluateDeps {
+ }
+ 
+ /** Wires real infrastructure into ModelEvaluateDeps. */
+-export function createModelEvaluateDeps(repoDir: string): ModelEvaluateDeps {
++export function createModelEvaluateDeps(
++  repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
++): ModelEvaluateDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+-  const dataRepo = new FileSystemUnifiedDataRepository(repoDir);
++  const dataRepo = new FileSystemUnifiedDataRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.data),
++  );
+   const evaluationService = new ExpressionEvaluationService(
+     definitionRepo,
+     repoDir,
+     { dataRepo },
+   );
+-  const evaluatedDefRepo = new YamlEvaluatedDefinitionRepository(repoDir);
++  const evaluatedDefRepo = new YamlEvaluatedDefinitionRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.definitionsEvaluated),
++  );
+ 
+   return {
+     lookupDefinition: (idOrName) =>
+diff --git a/src/libswamp/models/method_history_logs.ts b/src/libswamp/models/method_history_logs.ts
+index 7b9d3b0a..f0509a30 100644
+--- a/src/libswamp/models/method_history_logs.ts
++++ b/src/libswamp/models/method_history_logs.ts
+@@ -33,6 +33,8 @@ import { readLogFile } from "../../presentation/output/log_file_reader.ts";
+ import { toRelativePath } from "../../infrastructure/persistence/paths.ts";
+ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_definition_repository.ts";
+ import { YamlOutputRepository } from "../../infrastructure/persistence/yaml_output_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError, validationFailed } from "../errors.ts";
+ 
+@@ -106,9 +108,15 @@ export interface ModelMethodHistoryLogsDeps {
+ /** Wires real infrastructure into ModelMethodHistoryLogsDeps. */
+ export function createModelMethodHistoryLogsDeps(
+   repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
+ ): ModelMethodHistoryLogsDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+-  const outputRepo = new YamlOutputRepository(repoDir);
++  const outputRepo = new YamlOutputRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.outputs),
++  );
+   return {
+     isPartialId,
+     matchOutputByPartialId: async (idPrefix: string) => {
+diff --git a/src/libswamp/models/output_data.ts b/src/libswamp/models/output_data.ts
+index d1796e71..213d0673 100644
+--- a/src/libswamp/models/output_data.ts
++++ b/src/libswamp/models/output_data.ts
+@@ -30,6 +30,8 @@ import {
+ import { YamlOutputRepository } from "../../infrastructure/persistence/yaml_output_repository.ts";
+ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_definition_repository.ts";
+ import { FileSystemUnifiedDataRepository } from "../../infrastructure/persistence/unified_data_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError, validationFailed } from "../errors.ts";
+ 
+@@ -100,10 +102,19 @@ export interface ModelOutputDataDeps {
+ /** Wires real infrastructure into ModelOutputDataDeps. */
+ export function createModelOutputDataDeps(
+   repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
+ ): ModelOutputDataDeps {
+-  const outputRepo = new YamlOutputRepository(repoDir);
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
++  const outputRepo = new YamlOutputRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.outputs),
++  );
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+-  const dataRepo = new FileSystemUnifiedDataRepository(repoDir);
++  const dataRepo = new FileSystemUnifiedDataRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.data),
++  );
+   return {
+     isPartialId,
+     matchOutputByPartialId: async (idPrefix: string) => {
+diff --git a/src/libswamp/models/output_get.ts b/src/libswamp/models/output_get.ts
+index 37224dfa..75301d7e 100644
+--- a/src/libswamp/models/output_get.ts
++++ b/src/libswamp/models/output_get.ts
+@@ -29,6 +29,8 @@ import {
+ } from "../../domain/models/model_lookup.ts";
+ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_definition_repository.ts";
+ import { YamlOutputRepository } from "../../infrastructure/persistence/yaml_output_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import type { SwampError } from "../errors.ts";
+ import { notFound } from "../errors.ts";
+@@ -143,9 +145,17 @@ export interface ModelOutputGetDeps {
+ }
+ 
+ /** Wires real infrastructure into ModelOutputGetDeps. */
+-export function createModelOutputGetDeps(repoDir: string): ModelOutputGetDeps {
++export function createModelOutputGetDeps(
++  repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
++): ModelOutputGetDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+-  const outputRepo = new YamlOutputRepository(repoDir);
++  const outputRepo = new YamlOutputRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.outputs),
++  );
+   return {
+     findAllOutputsGlobal: () => outputRepo.findAllGlobal(),
+     findDefinitionByIdOrName: (idOrName) =>
+diff --git a/src/libswamp/models/output_logs.ts b/src/libswamp/models/output_logs.ts
+index a8b1d9f3..4db2f1a9 100644
+--- a/src/libswamp/models/output_logs.ts
++++ b/src/libswamp/models/output_logs.ts
+@@ -25,6 +25,8 @@ import {
+ } from "../../domain/models/model_lookup.ts";
+ import { YamlOutputRepository } from "../../infrastructure/persistence/yaml_output_repository.ts";
+ import { FileSystemUnifiedDataRepository } from "../../infrastructure/persistence/unified_data_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError, validationFailed } from "../errors.ts";
+ 
+@@ -77,9 +79,18 @@ export interface ModelOutputLogsDeps {
+ /** Wires real infrastructure into ModelOutputLogsDeps. */
+ export function createModelOutputLogsDeps(
+   repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
+ ): ModelOutputLogsDeps {
+-  const outputRepo = new YamlOutputRepository(repoDir);
+-  const dataRepo = new FileSystemUnifiedDataRepository(repoDir);
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
++  const outputRepo = new YamlOutputRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.outputs),
++  );
++  const dataRepo = new FileSystemUnifiedDataRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.data),
++  );
+   return {
+     isPartialId,
+     matchOutputByPartialId: async (idPrefix: string) => {
+diff --git a/src/libswamp/models/validate.ts b/src/libswamp/models/validate.ts
+index fe765b74..461404b3 100644
+--- a/src/libswamp/models/validate.ts
++++ b/src/libswamp/models/validate.ts
+@@ -28,6 +28,8 @@ import {
+ } from "../../domain/models/validation_service.ts";
+ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_definition_repository.ts";
+ import { FileSystemUnifiedDataRepository } from "../../infrastructure/persistence/unified_data_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { ModelType } from "../../domain/models/model_type.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError, validationFailed } from "../errors.ts";
+@@ -114,9 +116,15 @@ export interface ModelValidateDeps {
+ export function createModelValidateDeps(
+   repoDir: string,
+   options?: { labels?: string[]; method?: string },
++  datastoreResolver?: DatastorePathResolver,
+ ): ModelValidateDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+-  const dataRepo = new FileSystemUnifiedDataRepository(repoDir);
++  const dataRepo = new FileSystemUnifiedDataRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.data),
++  );
+   const validationService = new DefaultModelValidationService();
+ 
+   const checkContext: CheckValidationContext = {
+diff --git a/src/libswamp/workflows/delete.ts b/src/libswamp/workflows/delete.ts
+index ebf00571..0f3893a1 100644
+--- a/src/libswamp/workflows/delete.ts
++++ b/src/libswamp/workflows/delete.ts
+@@ -25,6 +25,8 @@ import {
+ import { YamlWorkflowRepository } from "../../infrastructure/persistence/yaml_workflow_repository.ts";
+ import { YamlWorkflowRunRepository } from "../../infrastructure/persistence/yaml_workflow_run_repository.ts";
+ import { YamlEvaluatedWorkflowRepository } from "../../infrastructure/persistence/yaml_evaluated_workflow_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import type { SwampError } from "../errors.ts";
+ import { notFound, validationFailed } from "../errors.ts";
+@@ -76,10 +78,22 @@ export interface WorkflowDeleteDeps {
+ }
+ 
+ /** Wires real infrastructure into WorkflowDeleteDeps. */
+-export function createWorkflowDeleteDeps(repoDir: string): WorkflowDeleteDeps {
++export function createWorkflowDeleteDeps(
++  repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
++): WorkflowDeleteDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const workflowRepo = new YamlWorkflowRepository(repoDir);
+-  const workflowRunRepo = new YamlWorkflowRunRepository(repoDir);
+-  const evaluatedWorkflowRepo = new YamlEvaluatedWorkflowRepository(repoDir);
++  const workflowRunRepo = new YamlWorkflowRunRepository(
++    repoDir,
++    undefined,
++    dsPath(SWAMP_SUBDIRS.workflowRuns),
++  );
++  const evaluatedWorkflowRepo = new YamlEvaluatedWorkflowRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.workflowsEvaluated),
++  );
+   return {
+     findById: (id) => workflowRepo.findById(id),
+     findByName: (name) => workflowRepo.findByName(name),
+diff --git a/src/libswamp/workflows/evaluate.ts b/src/libswamp/workflows/evaluate.ts
+index 1625acff..ec66200b 100644
+--- a/src/libswamp/workflows/evaluate.ts
++++ b/src/libswamp/workflows/evaluate.ts
+@@ -40,6 +40,8 @@ import { YamlWorkflowRepository } from "../../infrastructure/persistence/yaml_wo
+ import { YamlEvaluatedWorkflowRepository } from "../../infrastructure/persistence/yaml_evaluated_workflow_repository.ts";
+ import { YamlDefinitionRepository } from "../../infrastructure/persistence/yaml_definition_repository.ts";
+ import { FileSystemUnifiedDataRepository } from "../../infrastructure/persistence/unified_data_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError } from "../errors.ts";
+ 
+@@ -97,11 +99,20 @@ export interface WorkflowEvaluateDeps {
+ /** Wires real infrastructure into WorkflowEvaluateDeps. */
+ export function createWorkflowEvaluateDeps(
+   repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
+ ): WorkflowEvaluateDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const workflowRepo = new YamlWorkflowRepository(repoDir);
+   const definitionRepo = new YamlDefinitionRepository(repoDir);
+-  const dataRepo = new FileSystemUnifiedDataRepository(repoDir);
+-  const evaluatedWorkflowRepo = new YamlEvaluatedWorkflowRepository(repoDir);
++  const dataRepo = new FileSystemUnifiedDataRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.data),
++  );
++  const evaluatedWorkflowRepo = new YamlEvaluatedWorkflowRepository(
++    repoDir,
++    dsPath(SWAMP_SUBDIRS.workflowsEvaluated),
++  );
+   const modelResolver = new ModelResolver(definitionRepo, {
+     repoDir,
+     dataRepo,
+diff --git a/src/libswamp/workflows/history_get.ts b/src/libswamp/workflows/history_get.ts
+index 1242dfed..436f732b 100644
+--- a/src/libswamp/workflows/history_get.ts
++++ b/src/libswamp/workflows/history_get.ts
+@@ -26,6 +26,8 @@ import {
+ } from "../../domain/workflows/workflow_id.ts";
+ import { YamlWorkflowRepository } from "../../infrastructure/persistence/yaml_workflow_repository.ts";
+ import { YamlWorkflowRunRepository } from "../../infrastructure/persistence/yaml_workflow_run_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import type { SwampError } from "../errors.ts";
+ import { notFound } from "../errors.ts";
+@@ -48,9 +50,16 @@ export interface WorkflowHistoryGetDeps {
+ /** Wires real infrastructure into WorkflowHistoryGetDeps. */
+ export function createWorkflowHistoryGetDeps(
+   repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
+ ): WorkflowHistoryGetDeps {
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
+   const workflowRepo = new YamlWorkflowRepository(repoDir);
+-  const runRepo = new YamlWorkflowRunRepository(repoDir);
++  const runRepo = new YamlWorkflowRunRepository(
++    repoDir,
++    undefined,
++    dsPath(SWAMP_SUBDIRS.workflowRuns),
++  );
+   return {
+     findWorkflow: async (idOrName) =>
+       await workflowRepo.findByName(idOrName) ??
+diff --git a/src/libswamp/workflows/history_logs.ts b/src/libswamp/workflows/history_logs.ts
+index baef4d02..dc9a64f6 100644
+--- a/src/libswamp/workflows/history_logs.ts
++++ b/src/libswamp/workflows/history_logs.ts
+@@ -28,6 +28,8 @@ import { readLogFile } from "../../presentation/output/log_file_reader.ts";
+ import { toRelativePath } from "../../infrastructure/persistence/paths.ts";
+ import { YamlWorkflowRepository } from "../../infrastructure/persistence/yaml_workflow_repository.ts";
+ import { YamlWorkflowRunRepository } from "../../infrastructure/persistence/yaml_workflow_run_repository.ts";
++import { SWAMP_SUBDIRS } from "../../infrastructure/persistence/paths.ts";
++import type { DatastorePathResolver } from "../../domain/datastore/datastore_path_resolver.ts";
+ import type { LibSwampContext } from "../context.ts";
+ import { notFound, type SwampError, validationFailed } from "../errors.ts";
+ 
+@@ -92,8 +94,15 @@ export interface WorkflowHistoryLogsDeps {
+ /** Wires real infrastructure into WorkflowHistoryLogsDeps. */
+ export function createWorkflowHistoryLogsDeps(
+   repoDir: string,
++  datastoreResolver?: DatastorePathResolver,
+ ): WorkflowHistoryLogsDeps {
+-  const runRepo = new YamlWorkflowRunRepository(repoDir);
++  const dsPath = (subdir: string): string | undefined =>
++    datastoreResolver?.resolvePath(subdir);
++  const runRepo = new YamlWorkflowRunRepository(
++    repoDir,
++    undefined,
++    dsPath(SWAMP_SUBDIRS.workflowRuns),
++  );
+   const workflowRepo = new YamlWorkflowRepository(repoDir);
+   return {
+     isPartialId,

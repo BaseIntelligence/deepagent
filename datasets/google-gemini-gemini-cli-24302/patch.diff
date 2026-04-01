@@ -1,0 +1,177 @@
+diff --git a/integration-tests/api-resilience.responses b/integration-tests/api-resilience.responses
+index d30d29906eb..d0520047f7e 100644
+--- a/integration-tests/api-resilience.responses
++++ b/integration-tests/api-resilience.responses
+@@ -1 +1 @@
+-{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"Part 1. "}],"role":"model"},"index":0}]},{"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":10,"totalTokenCount":110}},{"candidates":[{"content":{"parts":[{"text":"Part 2."}],"role":"model"},"index":0}],"finishReason":"STOP"}]}
++{"method":"generateContentStream","response":[{"candidates":[{"content":{"parts":[{"text":"Part 1. "}],"role":"model"},"index":0}]},{"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":10,"totalTokenCount":110}},{"candidates":[{"content":{"parts":[{"text":"Part 2."}],"role":"model"},"index":0,"finishReason":"STOP"}]}]}
+diff --git a/integration-tests/context-compress-interactive.test.ts b/integration-tests/context-compress-interactive.test.ts
+index 348d984c310..c7e04c6c239 100644
+--- a/integration-tests/context-compress-interactive.test.ts
++++ b/integration-tests/context-compress-interactive.test.ts
+@@ -19,7 +19,7 @@ describe('Interactive Mode', () => {
+     await rig.cleanup();
+   });
+ 
+-  it.skip('should trigger chat compression with /compress command', async () => {
++  it('should trigger chat compression with /compress command', async () => {
+     await rig.setup('interactive-compress-success', {
+       fakeResponsesPath: join(
+         import.meta.dirname,
+diff --git a/packages/core/src/core/client.test.ts b/packages/core/src/core/client.test.ts
+index 033b674cb5e..584ae5412ce 100644
+--- a/packages/core/src/core/client.test.ts
++++ b/packages/core/src/core/client.test.ts
+@@ -2157,48 +2157,6 @@ ${JSON.stringify(
+       expect(mockTurnRunFn).toHaveBeenCalledTimes(1);
+     });
+ 
+-    it('should not retry with "Please continue." when InvalidStream event is received for non-Gemini-2 models', async () => {
+-      vi.spyOn(client['config'], 'getContinueOnFailedApiCall').mockReturnValue(
+-        true,
+-      );
+-      // Arrange - router returns a non-Gemini-2 model
+-      mockRouterService.route.mockResolvedValue({
+-        model: 'gemini-3.0-pro',
+-        reason: 'test',
+-      });
+-
+-      const mockStream1 = (async function* () {
+-        yield { type: GeminiEventType.InvalidStream };
+-      })();
+-
+-      mockTurnRunFn.mockReturnValueOnce(mockStream1);
+-
+-      const mockChat: Partial<GeminiChat> = {
+-        addHistory: vi.fn(),
+-        setTools: vi.fn(),
+-        getHistory: vi.fn().mockReturnValue([]),
+-        getLastPromptTokenCount: vi.fn(),
+-      };
+-      client['chat'] = mockChat as GeminiChat;
+-
+-      const initialRequest = [{ text: 'Hi' }];
+-      const promptId = 'prompt-id-invalid-stream-non-g2';
+-      const signal = new AbortController().signal;
+-
+-      // Act
+-      const stream = client.sendMessageStream(initialRequest, signal, promptId);
+-      const events = await fromAsync(stream);
+-
+-      // Assert
+-      expect(events).toEqual([
+-        { type: GeminiEventType.ModelInfo, value: 'gemini-3.0-pro' },
+-        { type: GeminiEventType.InvalidStream },
+-      ]);
+-
+-      // Verify that turn.run was called only once (no retry)
+-      expect(mockTurnRunFn).toHaveBeenCalledTimes(1);
+-    });
+-
+     it('should stop recursing after one retry when InvalidStream events are repeatedly received', async () => {
+       vi.spyOn(client['config'], 'getContinueOnFailedApiCall').mockReturnValue(
+         true,
+diff --git a/packages/core/src/core/client.ts b/packages/core/src/core/client.ts
+index 765ea6df451..4863c7aa2e9 100644
+--- a/packages/core/src/core/client.ts
++++ b/packages/core/src/core/client.ts
+@@ -71,11 +71,7 @@ import {
+   applyModelSelection,
+   createAvailabilityContextProvider,
+ } from '../availability/policyHelpers.js';
+-import {
+-  getDisplayString,
+-  resolveModel,
+-  isGemini2Model,
+-} from '../config/models.js';
++import { getDisplayString, resolveModel } from '../config/models.js';
+ import { partToString } from '../utils/partUtils.js';
+ import { coreEvents, CoreEvent } from '../utils/events.js';
+ 
+@@ -820,10 +816,7 @@ export class GeminiClient {
+     }
+ 
+     if (isInvalidStream) {
+-      if (
+-        this.config.getContinueOnFailedApiCall() &&
+-        isGemini2Model(modelToUse)
+-      ) {
++      if (this.config.getContinueOnFailedApiCall()) {
+         if (isInvalidStreamRetry) {
+           logContentRetryFailure(
+             this.config,
+diff --git a/packages/core/src/core/geminiChat.test.ts b/packages/core/src/core/geminiChat.test.ts
+index adc50d59795..aad2054ad07 100644
+--- a/packages/core/src/core/geminiChat.test.ts
++++ b/packages/core/src/core/geminiChat.test.ts
+@@ -1140,41 +1140,6 @@ describe('GeminiChat', () => {
+   });
+ 
+   describe('sendMessageStream with retries', () => {
+-    it('should not retry on invalid content if model does not start with gemini-2', async () => {
+-      // Mock the stream to fail.
+-      vi.mocked(mockContentGenerator.generateContentStream).mockImplementation(
+-        async () =>
+-          (async function* () {
+-            yield {
+-              candidates: [{ content: { parts: [{ text: '' }] } }],
+-            } as unknown as GenerateContentResponse;
+-          })(),
+-      );
+-
+-      const stream = await chat.sendMessageStream(
+-        { model: 'gemini-1.5-pro' },
+-        'test',
+-        'prompt-id-no-retry',
+-        new AbortController().signal,
+-        LlmRole.MAIN,
+-      );
+-
+-      await expect(
+-        (async () => {
+-          for await (const _ of stream) {
+-            // Must loop to trigger the internal logic that throws.
+-          }
+-        })(),
+-      ).rejects.toThrow(InvalidStreamError);
+-
+-      // Should be called only 1 time (no retry)
+-      expect(mockContentGenerator.generateContentStream).toHaveBeenCalledTimes(
+-        1,
+-      );
+-      expect(mockLogContentRetry).not.toHaveBeenCalled();
+-      expect(mockLogContentRetryFailure).toHaveBeenCalledTimes(1);
+-    });
+-
+     it('should yield a RETRY event when an invalid stream is encountered', async () => {
+       // ARRANGE: Mock the stream to fail once, then succeed.
+       vi.mocked(mockContentGenerator.generateContentStream)
+diff --git a/packages/core/src/core/geminiChat.ts b/packages/core/src/core/geminiChat.ts
+index 00ff64a398b..b96baa1c6a9 100644
+--- a/packages/core/src/core/geminiChat.ts
++++ b/packages/core/src/core/geminiChat.ts
+@@ -25,11 +25,7 @@ import {
+   getRetryErrorType,
+ } from '../utils/retry.js';
+ import type { ValidationRequiredError } from '../utils/googleQuotaErrors.js';
+-import {
+-  resolveModel,
+-  isGemini2Model,
+-  supportsModernFeatures,
+-} from '../config/models.js';
++import { resolveModel, supportsModernFeatures } from '../config/models.js';
+ import { hasCycleInSchema } from '../tools/tools.js';
+ import type { StructuredError } from './turn.js';
+ import type { CompletedToolCall } from '../scheduler/types.js';
+@@ -423,10 +419,7 @@ export class GeminiChat {
+               ? error.type
+               : getRetryErrorType(error);
+ 
+-            if (
+-              (isContentError && isGemini2Model(model)) ||
+-              (isRetryable && !signal.aborted)
+-            ) {
++            if (isContentError || (isRetryable && !signal.aborted)) {
+               // The issue requests exactly 3 retries (4 attempts) for API errors during stream iteration.
+               // Regardless of the global maxAttempts (e.g. 10), we only want to retry these mid-stream API errors
+               // up to 3 times before finally throwing the error to the user.

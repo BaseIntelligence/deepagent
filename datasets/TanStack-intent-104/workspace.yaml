@@ -1,0 +1,18 @@
+task_id: TanStack-intent-104
+repo:
+  url: https://github.com/TanStack/intent.git
+  base_commit: 2f29aa293934a633e0e60df579039fe7845bfc3e
+  merge_commit: 6b4b8f5e9925881b7c7deb0b6ebea8b4d4468081
+language: typescript
+difficulty_score: 1
+prompt: Prefer local package version for staleness
+environment:
+  image: platformnetwork/swe-forge:TanStack-intent-104
+  language_version: unknown
+install:
+  commands:
+  - pnpm install
+tests:
+  fail_to_pass:
+  - pnpm exec vitest run tests/staleness-local-version.test.ts
+  pass_to_pass: []

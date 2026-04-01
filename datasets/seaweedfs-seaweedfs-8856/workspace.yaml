@@ -1,0 +1,16 @@
+task_id: seaweedfs-seaweedfs-8856
+repo:
+  url: https://github.com/seaweedfs/seaweedfs.git
+  base_commit: d5068b3ee6f7a1d84705ff48d0537cc2c634a5c7
+  merge_commit: 489385940d9ed986e6b6e25829f57a30bbedf862
+language: go
+difficulty_score: 1
+prompt: Use Unix sockets for gRPC in mini mode
+environment:
+  image: platformnetwork/swe-forge:seaweedfs-seaweedfs-8856
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

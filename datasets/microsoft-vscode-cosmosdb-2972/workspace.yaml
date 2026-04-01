@@ -1,0 +1,18 @@
+task_id: microsoft-vscode-cosmosdb-2972
+repo:
+  url: https://github.com/microsoft/vscode-cosmosdb.git
+  base_commit: 4be671f97c0ce6ae499cfcbe4d36c401a3b2a559
+  merge_commit: 631a4febf75ccf0670c7cd2533476457f270278a
+language: typescript
+difficulty_score: 3
+prompt: Enforce stable telemetry provider names
+environment:
+  image: platformnetwork/swe-forge:microsoft-vscode-cosmosdb-2972
+  language_version: unknown
+install:
+  commands:
+  - cd /repo && ls node_modules >/dev/null 2>&1 || true; echo ok
+tests:
+  fail_to_pass:
+  - jest tests/baseCachedBranchDataProvider.telemetry.test.ts
+  pass_to_pass: []

@@ -1,0 +1,18 @@
+task_id: mercurjs-mercur-832
+repo:
+  url: https://github.com/mercurjs/mercur.git
+  base_commit: 2d6f62eae9676a87ef08bd7dbf6a46aae66c5052
+  merge_commit: c4569098876364e01229b768e22e99d551f9ce81
+language: typescript
+difficulty_score: 3
+prompt: Test team management and member invite flow
+environment:
+  image: platformnetwork/swe-forge:mercurjs-mercur-832
+  language_version: unknown
+install:
+  commands:
+  - echo 'No install needed'
+tests:
+  fail_to_pass:
+  - python -m pytest tests/test_vendor_team_management.patch_check.py -q
+  pass_to_pass: []

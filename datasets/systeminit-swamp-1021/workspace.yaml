@@ -1,0 +1,19 @@
+task_id: systeminit-swamp-1021
+repo:
+  url: https://github.com/systeminit/swamp.git
+  base_commit: ca03554a09dcf7a297ee2f6fa62e04c35840b98f
+  merge_commit: fa2bf2059ee370d3b1c9c2e59e9ad67c27af1d16
+language: typescript
+difficulty_score: 3
+prompt: Honor datastore cache path in model commands
+environment:
+  image: platformnetwork/swe-forge:systeminit-swamp-1021
+  language_version: unknown
+install:
+  commands:
+  - 'true'
+tests:
+  fail_to_pass:
+  - cd /repo && deno test tests/model_datastore_cache_path_test.ts --allow-read --allow-write
+    --allow-env --allow-run --allow-net --allow-sys
+  pass_to_pass: []

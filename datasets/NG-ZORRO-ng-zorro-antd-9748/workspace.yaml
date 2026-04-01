@@ -1,0 +1,18 @@
+task_id: NG-ZORRO-ng-zorro-antd-9748
+repo:
+  url: https://github.com/NG-ZORRO/ng-zorro-antd.git
+  base_commit: 40b9f6e78c7d5e95cae5461afefa5b3c7e5db361
+  merge_commit: 375941810d368670f0ce8460ce12dc2d39dadd33
+language: typescript
+difficulty_score: 3
+prompt: Initialize input value from control value
+environment:
+  image: platformnetwork/swe-forge:NG-ZORRO-ng-zorro-antd-9748
+  language_version: unknown
+install:
+  commands:
+  - cd /repo && echo 'Environment missing node/npm; no installation performed'
+tests:
+  fail_to_pass:
+  - ng test --watch=false --progress=false --browsers=ChromeHeadlessCI --include=tests/test_input_initialize_control_value.spec.ts
+  pass_to_pass: []

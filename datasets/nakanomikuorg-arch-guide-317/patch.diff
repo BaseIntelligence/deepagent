@@ -1,0 +1,60 @@
+diff --git a/docs/.vitepress/config/nav.ts b/docs/.vitepress/config/nav.ts
+index 04ffdd1a6..a69141bee 100644
+--- a/docs/.vitepress/config/nav.ts
++++ b/docs/.vitepress/config/nav.ts
+@@ -23,6 +23,15 @@ const navConfig: DefaultTheme.NavItem[] = [
+           { text: "🌸 系统美化", link: "/guide/advanced/beauty-1" },
+           { text: "🧰 系统管理", link: "/guide/advanced/system-ctl" }
+         ]
++      },
++      {
++        text: "🛡️ 安全强化",
++        items: [
++          { text: "📄 写在前面", link: "/guide/security/summary" },
++          { text: "🔐 数据加密", link: "/guide/security/encryption" },
++          { text: "🪪 安全启动", link: "/guide/security/secureboot" },
++          { text: "🧱 LSM", link: "/guide/security/apparmor" }
++        ]
+       }
+     ]
+   },
+diff --git a/docs/.vitepress/config/sidebar.ts b/docs/.vitepress/config/sidebar.ts
+index 1dbee061b..c85c6560b 100644
+--- a/docs/.vitepress/config/sidebar.ts
++++ b/docs/.vitepress/config/sidebar.ts
+@@ -97,6 +97,35 @@ const sidebarConfig:DefaultTheme.Sidebar = {
+           ]
+         }
+       ]
++    },
++    {
++      text: "🛡️ 安全",
++      items: [
++        {
++          text: "📄 写在前面",
++          items: [
++            { text: "概览", link: "/guide/security/summary" }
++          ]
++        },
++        {
++          text: "🔐 数据加密",
++          items: [
++            { text: "磁盘加密", link: "/guide/security/encryption" }
++          ]
++        },
++        {
++          text: "🪪 安全启动",
++          items: [
++            { text: "安全启动", link: "/guide/security/secureboot" }
++          ]
++        },
++        {
++          text: "🧱 LSM",
++          items: [
++            { text: "AppArmor 配置和使用", link: "/guide/security/apparmor" }
++          ]
++        }
++      ]
+     }
+   ],
+   "/app/": [

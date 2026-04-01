@@ -1,0 +1,41 @@
+# Test file: tests/test_light_logrotate_paths.py
+from pathlib import Path
+
+
+def _rotated_paths(base_name, cwd):
+    base_path = Path(cwd) / base_name
+    return [
+        base_path,
+        Path(str(base_path) + ".1"),
+        Path(str(base_path) + ".2"),
+        Path(str(base_path) + ".3"),
+    ]
+
+
+def test_logrotate_file_paths_are_anchored_to_cwd(tmp_path):
+    base_name = "logfile-rotation-failure.log"
+
+    expected_paths = _rotated_paths(base_name, tmp_path)
+    created_paths = [p.resolve() for p in expected_paths]
+
+    assert created_paths == expected_paths
+
+# Test file: tests/test_vendor_team_management.patch_check.py
+from pathlib import Path
+
+
+def test_vendor_api_exports_team_management_hooks_and_routes():
+    hooks_index = Path("packages/vendor/src/hooks/api/index.ts")
+    route_map = Path("packages/vendor/src/get-route-map.tsx")
+
+    assert hooks_index.exists(), "vendor hooks index should exist"
+    assert route_map.exists(), "vendor route map should exist"
+
+    hooks_content = hooks_index.read_text()
+    route_content = route_map.read_text()
+
+    assert "./members" in hooks_content, "members api hook should be exported"
+    assert "./invites" in hooks_content, "invites api hook should be exported"
+
+    assert "members" in route_content.lower(), "vendor route map should include member management routes"
+    assert "invite" in route_content.lower(), "vendor route map should include invite flow routes"

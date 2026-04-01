@@ -1,0 +1,18 @@
+task_id: LedgerHQ-ledger-live-15897
+repo:
+  url: https://github.com/LedgerHQ/ledger-live.git
+  base_commit: ffadeb09bf44b1fcb3ad9d0813af12f8126c4f80
+  merge_commit: e31b1cdfcfc03169b541d6e071471eef08bb881f
+language: typescript
+difficulty_score: 3
+prompt: Handle Solana -32020 signature fetch error
+environment:
+  image: platformnetwork/swe-forge:LedgerHQ-ledger-live-15897
+  language_version: unknown
+install:
+  commands:
+  - cd /repo && git --version
+tests:
+  fail_to_pass:
+  - cd /repo && pnpm jest --runInBand tests/coin-solana-getSignaturesForAddress-error.test.ts
+  pass_to_pass: []

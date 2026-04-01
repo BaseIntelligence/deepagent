@@ -1,0 +1,16 @@
+task_id: msys2-MINGW-packages-28720
+repo:
+  url: https://github.com/msys2/MINGW-packages.git
+  base_commit: c87650abf00208fb8e8c5276003198162a70ffa1
+  merge_commit: 93175ea625f239cd3a7b1c624e34cd753864e9b2
+language: unknown
+difficulty_score: 1
+prompt: 'sbcl: update to 2.6.3'
+environment:
+  image: platformnetwork/swe-forge:msys2-MINGW-packages-28720
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

@@ -1,0 +1,3645 @@
+diff --git a/frontend/src/components/actors/workflow/workflow-example-data.ts b/frontend/src/components/actors/workflow/workflow-example-data.ts
+index 53710cda70..88da299695 100644
+--- a/frontend/src/components/actors/workflow/workflow-example-data.ts
++++ b/frontend/src/components/actors/workflow/workflow-example-data.ts
+@@ -1178,6 +1178,133 @@ export const inProgressWorkflow: WorkflowHistory = {
+ 	],
+ };
+ 
++// Workflow with tryStep and try block recovery
++export const tryWorkflow: WorkflowHistory = {
++	workflowId: "try-workflow-001",
++	state: "completed",
++	nameRegistry: [
++		"prepare",
++		"charge-card",
++		"payment-flow",
++		"parallel-verification",
++		"fraud",
++		"score-order",
++		"inventory",
++		"reserve-stock",
++		"finalize",
++	],
++	input: { orderId: "ord_123", amount: 4200 },
++	output: { status: "manual-review", recovered: true },
++	history: [
++		{
++			key: "prepare",
++			entry: {
++				id: "1",
++				location: [0],
++				kind: {
++					type: "step",
++					data: { output: { ready: true } },
++				},
++				dirty: false,
++				status: "completed",
++				startedAt: 1700000450000,
++				completedAt: 1700000450045,
++			},
++		},
++		{
++			key: "charge-card",
++			entry: {
++				id: "2",
++				location: [1],
++				kind: {
++					type: "step",
++					data: { error: "card declined" },
++				},
++				dirty: false,
++				status: "failed",
++				startedAt: 1700000450100,
++				completedAt: 1700000450280,
++				retryCount: 0,
++				error: "card declined",
++			},
++		},
++		{
++			key: "payment-flow/parallel-verification",
++			entry: {
++				id: "3",
++				location: [2, 3],
++				kind: {
++					type: "join",
++					data: {
++						branches: {
++							fraud: {
++								status: "completed",
++								output: { risk: "low" },
++							},
++							inventory: {
++								status: "failed",
++								error: "inventory mismatch",
++							},
++						},
++					},
++				},
++				dirty: false,
++				status: "failed",
++				startedAt: 1700000450400,
++				completedAt: 1700000450850,
++				error: "join failed",
++			},
++		},
++		{
++			key: "payment-flow/parallel-verification/fraud/score-order",
++			entry: {
++				id: "4",
++				location: [2, 3, 4, 5],
++				kind: {
++					type: "step",
++					data: { output: { score: 0.08 } },
++				},
++				dirty: false,
++				status: "completed",
++				startedAt: 1700000450410,
++				completedAt: 1700000450620,
++			},
++		},
++		{
++			key: "payment-flow/parallel-verification/inventory/reserve-stock",
++			entry: {
++				id: "5",
++				location: [2, 3, 6, 7],
++				kind: {
++					type: "step",
++					data: { error: "inventory mismatch" },
++				},
++				dirty: false,
++				status: "failed",
++				startedAt: 1700000450415,
++				completedAt: 1700000450790,
++				retryCount: 1,
++				error: "inventory mismatch",
++			},
++		},
++		{
++			key: "finalize",
++			entry: {
++				id: "6",
++				location: [8],
++				kind: {
++					type: "step",
++					data: { output: { queuedManualReview: true } },
++				},
++				dirty: false,
++				status: "completed",
++				startedAt: 1700000450960,
++				completedAt: 1700000451010,
++			},
++		},
++	],
++};
++
+ // Workflow with retrying step
+ export const retryWorkflow: WorkflowHistory = {
+ 	workflowId: "retry-workflow-001",
+diff --git a/frontend/src/components/actors/workflow/workflow-to-xyflow.test.ts b/frontend/src/components/actors/workflow/workflow-to-xyflow.test.ts
+new file mode 100644
+index 0000000000..7ae11d2374
+--- /dev/null
++++ b/frontend/src/components/actors/workflow/workflow-to-xyflow.test.ts
+@@ -0,0 +1,42 @@
++import { describe, expect, it } from "vitest";
++import { tryWorkflow } from "./workflow-example-data";
++import { workflowHistoryToXYFlow } from "./workflow-to-xyflow";
++
++describe("workflowHistoryToXYFlow", () => {
++	it("renders synthetic try scopes instead of dropping nested try entries", () => {
++		const { nodes } = workflowHistoryToXYFlow(tryWorkflow);
++
++		expect(
++			nodes.some(
++				(node) =>
++					node.type === "tryGroup" &&
++					node.data?.label === "payment-flow",
++			),
++		).toBe(true);
++
++		expect(
++			nodes.some(
++				(node) =>
++					node.type === "workflow" &&
++					node.data?.label === "parallel-verification",
++			),
++		).toBe(true);
++	});
++
++	it("marks handled step failures so tryStep is visually distinct", () => {
++		const { nodes } = workflowHistoryToXYFlow(tryWorkflow);
++		const chargeCardNode = nodes.find(
++			(node) =>
++				node.type === "workflow" && node.data?.label === "charge-card",
++		);
++		const reserveStockNode = nodes.find(
++			(node) =>
++				node.type === "workflow" &&
++				node.data?.label === "reserve-stock",
++		);
++
++		expect(chargeCardNode?.data?.handledFailure).toBe(true);
++		expect(chargeCardNode?.data?.summary).toBe("handled error");
++		expect(reserveStockNode?.data?.handledFailure).toBe(true);
++	});
++});
+diff --git a/frontend/src/components/actors/workflow/workflow-to-xyflow.ts b/frontend/src/components/actors/workflow/workflow-to-xyflow.ts
+index 334eb48c4c..6abe4883a7 100644
+--- a/frontend/src/components/actors/workflow/workflow-to-xyflow.ts
++++ b/frontend/src/components/actors/workflow/workflow-to-xyflow.ts
+@@ -5,9 +5,9 @@ import type {
+ 	ExtendedEntryType,
+ 	HistoryItem,
+ 	JoinEntry,
+-	LoopEntry,
+-	LoopIterationMarker,
++	Location,
+ 	MessageEntry,
++	PathSegment,
+ 	RaceEntry,
+ 	RemovedEntry,
+ 	SleepEntry,
+@@ -25,24 +25,24 @@ import {
+ 	NODE_WIDTH,
+ 	TERMINATION_NODE_SIZE,
+ 	type TerminationNodeData,
++	type TryGroupNodeData,
+ 	type WorkflowNodeData,
+ } from "./xyflow-nodes";
+ 
+-// ─── Constants ───────────────────────────────────────────────
+-
+ const NODE_GAP_Y = 48;
+ const BRANCH_GAP_X = 60;
+ const GROUP_WIDTH = NODE_WIDTH + 2 * LOOP_PADDING_X;
+-
+-// ─── Node types ──────────────────────────────────────────────
++const TERMINATION_GAP = 24;
+ 
+ type XYNode = Node<WorkflowNodeData, "workflow">;
+ type XYLoopGroupNode = Node<LoopGroupNodeData, "loopGroup">;
++type XYTryGroupNode = Node<TryGroupNodeData, "tryGroup">;
+ type XYBranchGroupNode = Node<BranchGroupNodeData, "branchGroup">;
+ type XYTerminationNode = Node<TerminationNodeData, "termination">;
+ type AnyXYNode =
+ 	| XYNode
+ 	| XYLoopGroupNode
++	| XYTryGroupNode
+ 	| XYBranchGroupNode
+ 	| XYTerminationNode;
+ 
+@@ -62,6 +62,7 @@ type WorkflowNodeInput = {
+ 	summary?: string;
+ 	entryType: EntryKindType | "input" | "output";
+ 	status: EntryStatus;
++	handledFailure?: boolean;
+ 	duration?: number;
+ 	retryCount?: number;
+ 	error?: string;
+@@ -74,17 +75,68 @@ type WorkflowNodeInput = {
+ 	onReplayStep?: (entryId: string) => void;
+ };
+ 
+-// ─── Helpers ─────────────────────────────────────────────────
++type Bounds = {
++	minX: number;
++	minY: number;
++	maxX: number;
++	maxY: number;
++};
++
++interface LayoutFragment {
++	nodes: AnyXYNode[];
++	edges: Edge[];
++	bounds: Bounds | null;
++	firstTargetId?: string;
++	firstStartedAt?: number;
++	outgoingSources: string[];
++	lastCompletedAt?: number;
++}
++
++interface RenderTreeBase {
++	id: string;
++	key: string;
++	name: string;
++	location: Location;
++	children: RenderTreeNode[];
++}
++
++interface RenderTreeEntryNode extends RenderTreeBase {
++	kind: "entry";
++	item: HistoryItem;
++}
++
++interface RenderTreeTryNode extends RenderTreeBase {
++	kind: "try";
++}
++
++type RenderTreeNode = RenderTreeEntryNode | RenderTreeTryNode;
++
++interface LayoutContext {
++	workflow: WorkflowHistory;
++	hasTryAncestor: boolean;
++}
++
++interface TreeStats {
++	handledFailureNames: string[];
++	unhandledFailureNames: string[];
++	hasRunning: boolean;
++	hasPending: boolean;
++}
+ 
+ function getDisplayName(key: string): string {
+ 	const parts = key.split("/");
+-	return parts[parts.length - 1].replace(/^~\d+\//, "");
++	return parts[parts.length - 1]?.replace(/^~\d+\//, "") ?? key;
+ }
+ 
+-function getEntrySummary(type: ExtendedEntryType, data: unknown): string {
++function getEntrySummary(
++	type: ExtendedEntryType,
++	data: unknown,
++	options?: { handledFailure?: boolean },
++): string {
+ 	switch (type) {
+ 		case "step": {
+ 			const d = data as StepEntry;
++			if (options?.handledFailure) return "handled error";
+ 			if (d.error) return "error";
+ 			if (d.output === true) return "success";
+ 			if (typeof d.output === "number") return String(d.output);
+@@ -95,13 +147,13 @@ function getEntrySummary(type: ExtendedEntryType, data: unknown): string {
+ 		case "message":
+ 			return (data as MessageEntry).name.split(":").pop() || "received";
+ 		case "loop":
+-			return `${(data as LoopEntry).iteration} iterations`;
++			return `${(data as { iteration: number }).iteration} iterations`;
+ 		case "rollback_checkpoint":
+ 			return "checkpoint";
+ 		case "join": {
+ 			const d = data as JoinEntry;
+ 			const done = Object.values(d.branches).filter(
+-				(b) => b.status === "completed",
++				(branch) => branch.status === "completed",
+ 			).length;
+ 			return `${done}/${Object.keys(d.branches).length} done`;
+ 		}
+@@ -120,35 +172,53 @@ function getEntrySummary(type: ExtendedEntryType, data: unknown): string {
+ 			}
+ 			return String(d.value);
+ 		}
++		case "try":
++			return "protected scope";
+ 		default:
+ 			return "";
+ 	}
+ }
+ 
+-/** Extract common node properties from a HistoryItem. */
++function deriveEntryStatus(item: HistoryItem): EntryStatus {
++	const rawStatus = item.entry.status;
++	if (rawStatus) {
++		return rawStatus;
++	}
++	if (item.entry.completedAt != null) {
++		return "completed";
++	}
++	if (item.entry.startedAt != null) {
++		return "running";
++	}
++	return "pending";
++}
++
+ function itemToNodeData(
+ 	item: HistoryItem,
+-	options: WorkflowLayoutOptions = {},
++	_workflow: WorkflowHistory,
++	options: {
++		handledFailure?: boolean;
++		onReplayStep?: (entryId: string) => void;
++	} = {},
+ ) {
+-	const {
+-		id,
+-		startedAt,
+-		completedAt,
+-		kind,
+-		status: rawStatus,
+-		retryCount,
+-		error,
+-	} = item.entry;
++	const { id, startedAt, completedAt, kind, retryCount, error } =
++		item.entry;
+ 	const duration =
+-		startedAt && completedAt ? completedAt - startedAt : undefined;
+-	const status: EntryStatus =
+-		rawStatus ||
+-		(completedAt ? "completed" : startedAt ? "running" : "completed");
++		startedAt != null && completedAt != null
++			? completedAt - startedAt
++			: undefined;
++	const handledFailure =
++		options?.handledFailure &&
++		(kind.type === "step" || deriveEntryStatus(item) === "failed");
++
+ 	return {
+ 		name: getDisplayName(item.key),
+-		summary: getEntrySummary(kind.type, kind.data),
++		summary: getEntrySummary(kind.type, kind.data, {
++			handledFailure,
++		}),
+ 		entryType: kind.type,
+-		status,
++		status: deriveEntryStatus(item),
++		handledFailure,
+ 		duration,
+ 		startedAt,
+ 		completedAt,
+@@ -161,27 +231,58 @@ function itemToNodeData(
+ 	};
+ }
+ 
+-/** Sort history items by their last location segment. */
+-function sortByLocation(items: HistoryItem[]) {
+-	items.sort((a, b) => {
+-		const aLoc = a.entry.location[a.entry.location.length - 1] as number;
+-		const bLoc = b.entry.location[b.entry.location.length - 1] as number;
+-		return aLoc - bLoc;
+-	});
++function comparePathSegments(a: PathSegment, b: PathSegment): number {
++	if (typeof a === "number" && typeof b === "number") {
++		return a - b;
++	}
++	if (typeof a === "number") {
++		return -1;
++	}
++	if (typeof b === "number") {
++		return 1;
++	}
++	if (a.loop !== b.loop) {
++		return a.loop - b.loop;
++	}
++	return a.iteration - b.iteration;
+ }
+ 
+-/** Calculate the height of a group container given a child count. */
+-function groupHeight(childCount: number): number {
+-	if (childCount <= 0) return LOOP_HEADER_HEIGHT + LOOP_PADDING_BOTTOM;
+-	return (
+-		LOOP_HEADER_HEIGHT +
+-		childCount * NODE_HEIGHT +
+-		(childCount - 1) * NODE_GAP_Y +
+-		LOOP_PADDING_BOTTOM
+-	);
++function compareLocations(a: Location, b: Location): number {
++	const shared = Math.min(a.length, b.length);
++	for (let i = 0; i < shared; i++) {
++		const diff = comparePathSegments(a[i], b[i]);
++		if (diff !== 0) {
++			return diff;
++		}
++	}
++	return a.length - b.length;
++}
++
++function serializePathSegment(segment: PathSegment): string {
++	if (typeof segment === "number") {
++		return `n${segment}`;
++	}
++	return `l${segment.loop}:${segment.iteration}`;
++}
++
++function serializeLocation(location: Location): string {
++	return location.map(serializePathSegment).join("|");
++}
++
++function buildSyntheticKey(
++	location: Location,
++	nameRegistry: readonly string[],
++): string {
++	return location
++		.map((segment) => {
++			if (typeof segment === "number") {
++				return nameRegistry[segment] ?? `unknown-${segment}`;
++			}
++			return `~${segment.iteration}`;
++		})
++		.join("/");
+ }
+ 
+-/** Create a workflow node at the given position. */
+ function makeNode(
+ 	id: string,
+ 	x: number,
+@@ -198,6 +299,7 @@ function makeNode(
+ 			summary: data.summary ?? "",
+ 			entryType: data.entryType,
+ 			status: data.status,
++			handledFailure: data.handledFailure,
+ 			duration: data.duration,
+ 			retryCount: data.retryCount,
+ 			error: data.error,
+@@ -211,329 +313,752 @@ function makeNode(
+ 	};
+ }
+ 
+-/** Create a child node inside a parent group. */
+-function makeChildNode(
+-	id: string,
+-	parentId: string,
+-	y: number,
+-	data: Parameters<typeof makeNode>[3],
+-): XYNode {
+-	const node = makeNode(id, LOOP_PADDING_X, y, data);
+-	(node as XYNode & { parentId: string }).parentId = parentId;
+-	(node as XYNode & { extent: string }).extent = "parent";
+-	return node;
++function measureNode(node: AnyXYNode): { width: number; height: number } {
++	const measuredWidth = node.measured?.width;
++	const measuredHeight = node.measured?.height;
++	const styleWidth =
++		typeof node.style?.width === "number" ? node.style.width : undefined;
++	const styleHeight =
++		typeof node.style?.height === "number" ? node.style.height : undefined;
++
++	return {
++		width: measuredWidth ?? styleWidth ?? NODE_WIDTH,
++		height: measuredHeight ?? styleHeight ?? NODE_HEIGHT,
++	};
+ }
+ 
+-// ─── Main transform ──────────────────────────────────────────
++function getNodeBounds(node: AnyXYNode): Bounds {
++	const { width, height } = measureNode(node);
++	return {
++		minX: node.position.x,
++		minY: node.position.y,
++		maxX: node.position.x + width,
++		maxY: node.position.y + height,
++	};
++}
+ 
+-export function workflowHistoryToXYFlow(
+-	history: WorkflowHistory,
+-	options: WorkflowLayoutOptions = {},
+-): LayoutResult {
+-	const nodes: AnyXYNode[] = [];
+-	const edges: Edge[] = [];
++function mergeBounds(a: Bounds | null, b: Bounds | null): Bounds | null {
++	if (!a) return b;
++	if (!b) return a;
++	return {
++		minX: Math.min(a.minX, b.minX),
++		minY: Math.min(a.minY, b.minY),
++		maxX: Math.max(a.maxX, b.maxX),
++		maxY: Math.max(a.maxY, b.maxY),
++	};
++}
++
++function translateBounds(
++	bounds: Bounds | null,
++	dx: number,
++	dy: number,
++): Bounds | null {
++	if (!bounds) {
++		return null;
++	}
++	return {
++		minX: bounds.minX + dx,
++		minY: bounds.minY + dy,
++		maxX: bounds.maxX + dx,
++		maxY: bounds.maxY + dy,
++	};
++}
++
++function translateFragment(
++	fragment: LayoutFragment,
++	dx: number,
++	dy: number,
++): LayoutFragment {
++	return {
++		...fragment,
++		nodes: fragment.nodes.map((node) => ({
++			...node,
++			position: {
++				x: node.position.x + dx,
++				y: node.position.y + dy,
++			},
++		})),
++		bounds: translateBounds(fragment.bounds, dx, dy),
++	};
++}
++
++function gapLabel(
++	completedAt: number | undefined,
++	startedAt: number | undefined,
++): Pick<Edge, "label" | "style" | "labelStyle" | "labelBgStyle"> | undefined {
++	if (completedAt == null || startedAt == null || startedAt <= completedAt) {
++		return undefined;
++	}
++
++	return {
++		label: formatDuration(startedAt - completedAt),
++		style: { stroke: "hsl(var(--muted-foreground))" },
++		labelStyle: {
++			fill: "hsl(var(--muted-foreground))",
++			fontSize: 10,
++		},
++		labelBgStyle: {
++			fill: "hsl(var(--background))",
++			fillOpacity: 0.8,
++		},
++	};
++}
++
++function isTerminalFailureStatus(status: EntryStatus): boolean {
++	return status === "failed" || status === "retrying";
++}
++
++function shouldMarkHandledFailure(
++	node: RenderTreeEntryNode,
++	context: LayoutContext,
++): boolean {
++	if (node.item.entry.kind.type !== "step") {
++		return false;
++	}
++
++	return (
++		isTerminalFailureStatus(deriveEntryStatus(node.item)) &&
++		(context.hasTryAncestor || context.workflow.state !== "failed")
++	);
++}
++
++function collectTreeStats(
++	nodes: readonly RenderTreeNode[],
++	workflow: WorkflowHistory,
++	hasTryAncestor: boolean,
++): TreeStats {
++	const stats: TreeStats = {
++		handledFailureNames: [],
++		unhandledFailureNames: [],
++		hasRunning: false,
++		hasPending: false,
++	};
++
++	for (const node of nodes) {
++		if (node.kind === "try") {
++			const childStats = collectTreeStats(node.children, workflow, true);
++			stats.handledFailureNames.push(...childStats.handledFailureNames);
++			stats.unhandledFailureNames.push(
++				...childStats.unhandledFailureNames,
++			);
++			stats.hasRunning ||= childStats.hasRunning;
++			stats.hasPending ||= childStats.hasPending;
++			continue;
++		}
++
++		const status = deriveEntryStatus(node.item);
++		if (status === "running") {
++			stats.hasRunning = true;
++		}
++		if (status === "pending") {
++			stats.hasPending = true;
++		}
++		if (isTerminalFailureStatus(status)) {
++			const isHandled = hasTryAncestor || workflow.state !== "failed";
++			if (isHandled) {
++				stats.handledFailureNames.push(node.name);
++			} else {
++				stats.unhandledFailureNames.push(node.name);
++			}
++		}
++
++		const childStats = collectTreeStats(
++			node.children,
++			workflow,
++			hasTryAncestor,
++		);
++		stats.handledFailureNames.push(...childStats.handledFailureNames);
++		stats.unhandledFailureNames.push(...childStats.unhandledFailureNames);
++		stats.hasRunning ||= childStats.hasRunning;
++		stats.hasPending ||= childStats.hasPending;
++	}
++
++	return stats;
++}
++
++function summarizeTryGroup(
++	node: RenderTreeTryNode,
++	workflow: WorkflowHistory,
++): { summary: string; handledFailureCount: number } {
++	const stats = collectTreeStats(node.children, workflow, true);
++	if (stats.handledFailureNames.length === 1) {
++		return {
++			summary: `caught ${stats.handledFailureNames[0]}`,
++			handledFailureCount: 1,
++		};
++	}
++	if (stats.handledFailureNames.length > 1) {
++		return {
++			summary: `caught ${stats.handledFailureNames.length} failures`,
++			handledFailureCount: stats.handledFailureNames.length,
++		};
++	}
++	if (stats.unhandledFailureNames.length > 0) {
++		return {
++			summary:
++				stats.unhandledFailureNames.length === 1
++					? `failed at ${stats.unhandledFailureNames[0]}`
++					: `${stats.unhandledFailureNames.length} failures`,
++			handledFailureCount: 0,
++		};
++	}
++	if (stats.hasRunning) {
++		return { summary: "running", handledFailureCount: 0 };
++	}
++	if (stats.hasPending) {
++		return { summary: "pending", handledFailureCount: 0 };
++	}
++	return { summary: "completed", handledFailureCount: 0 };
++}
++
++function findBranchName(
++	location: Location,
++	containerLocation: Location,
++	nameRegistry: readonly string[],
++): string | null {
++	const segment = location[containerLocation.length];
++	if (typeof segment !== "number") {
++		return null;
++	}
++	return nameRegistry[segment] ?? `unknown-${segment}`;
++}
++
++function buildRenderTree(workflow: WorkflowHistory): RenderTreeNode[] {
++	const concreteNodes = new Map<string, RenderTreeEntryNode>();
++	for (const item of workflow.history) {
++		concreteNodes.set(serializeLocation(item.entry.location), {
++			id: `entry:${item.entry.id}`,
++			kind: "entry",
++			item,
++			key: item.key,
++			name: getDisplayName(item.key),
++			location: item.entry.location,
++			children: [],
++		});
++	}
++
++	const renderNodes = new Map<string, RenderTreeNode>(concreteNodes);
++
++	for (const item of workflow.history) {
++		for (let i = 1; i < item.entry.location.length; i++) {
++			const prefix = item.entry.location.slice(0, i);
++			const prefixKey = serializeLocation(prefix);
++			if (renderNodes.has(prefixKey)) {
++				continue;
++			}
++
++			const last = prefix[prefix.length - 1];
++			if (typeof last !== "number") {
++				continue;
++			}
++
++			const parentPrefix = prefix.slice(0, -1);
++			const parentConcrete = concreteNodes.get(
++				serializeLocation(parentPrefix),
++			);
++			if (
++				parentConcrete &&
++				(parentConcrete.item.entry.kind.type === "join" ||
++					parentConcrete.item.entry.kind.type === "race")
++			) {
++				continue;
++			}
++
++			renderNodes.set(prefixKey, {
++				id: `try:${prefixKey}`,
++				kind: "try",
++				key: buildSyntheticKey(prefix, workflow.nameRegistry),
++				name: workflow.nameRegistry[last] ?? `unknown-${last}`,
++				location: prefix,
++				children: [],
++			});
++		}
++	}
+ 
+-	// Partition items into top-level and nested (grouped by parent key).
+-	const topLevel: HistoryItem[] = [];
+-	const nestedByParent = new Map<string, HistoryItem[]>();
++	const rootChildren: RenderTreeNode[] = [];
++	const orderedNodes = Array.from(renderNodes.values()).sort((a, b) => {
++		if (a.location.length !== b.location.length) {
++			return a.location.length - b.location.length;
++		}
++		return compareLocations(a.location, b.location);
++	});
+ 
+-	for (const item of history.history) {
+-		const loc = item.entry.location;
+-		if (loc.length === 1 && typeof loc[0] === "number") {
+-			topLevel.push(item);
++	for (const node of orderedNodes) {
++		let parentNode: RenderTreeNode | undefined;
++		for (let i = node.location.length - 1; i > 0; i--) {
++			parentNode = renderNodes.get(
++				serializeLocation(node.location.slice(0, i)),
++			);
++			if (parentNode) {
++				break;
++			}
++		}
++
++		if (parentNode) {
++			parentNode.children.push(node);
+ 		} else {
+-			const parentKey = item.key.split("/")[0];
+-			const siblings = nestedByParent.get(parentKey) ?? [];
+-			siblings.push(item);
+-			nestedByParent.set(parentKey, siblings);
++			rootChildren.push(node);
+ 		}
+ 	}
+ 
+-	sortByLocation(topLevel);
++	const sortTree = (nodes: RenderTreeNode[]) => {
++		nodes.sort((a, b) => compareLocations(a.location, b.location));
++		for (const node of nodes) {
++			sortTree(node.children);
++		}
++	};
++	sortTree(rootChildren);
+ 
+-	// Cursor state for sequential layout.
++	return rootChildren;
++}
++
++function layoutSequence(
++	items: readonly RenderTreeNode[],
++	context: LayoutContext,
++): LayoutFragment {
++	const nodes: AnyXYNode[] = [];
++	const edges: Edge[] = [];
++	let bounds: Bounds | null = null;
+ 	let currentY = 0;
++	let firstTargetId: string | undefined;
++	let firstStartedAt: number | undefined;
+ 	let prevNodeId: string | null = null;
+ 	let prevCompletedAt: number | undefined;
+ 	let pendingBranchSources: string[] = [];
++	let outgoingSources: string[] = [];
++	let lastCompletedAt: number | undefined;
+ 
+-	/** Connect one or more predecessors to a target node, with optional gap labels. */
+-	function connectTo(targetId: string, targetStartedAt?: number) {
++	const connectTo = (targetId: string, targetStartedAt?: number) => {
++		if (!firstTargetId) {
++			firstTargetId = targetId;
++			firstStartedAt = targetStartedAt;
++		}
+ 		if (prevNodeId) {
+-			const gap =
+-				prevCompletedAt &&
+-				targetStartedAt &&
+-				targetStartedAt > prevCompletedAt
+-					? formatDuration(targetStartedAt - prevCompletedAt)
+-					: undefined;
+ 			edges.push({
+ 				id: `e-${prevNodeId}-${targetId}`,
+ 				source: prevNodeId,
+ 				target: targetId,
+-				...(gap && {
+-					label: gap,
+-					style: { stroke: "hsl(var(--muted-foreground))" },
+-					labelStyle: {
+-						fill: "hsl(var(--muted-foreground))",
+-						fontSize: 10,
+-					},
+-					labelBgStyle: {
+-						fill: "hsl(var(--background))",
+-						fillOpacity: 0.8,
+-					},
+-				}),
++				...gapLabel(prevCompletedAt, targetStartedAt),
+ 			});
+ 		}
+-		for (const srcId of pendingBranchSources) {
++		for (const source of pendingBranchSources) {
+ 			edges.push({
+-				id: `e-${srcId}-${targetId}`,
+-				source: srcId,
++				id: `e-${source}-${targetId}`,
++				source,
+ 				target: targetId,
+ 			});
+ 		}
+ 		pendingBranchSources = [];
+-	}
+-
+-	/** Place a sequential node, connect it, and advance the cursor. */
+-	function addSequentialNode(
+-		id: string,
+-		data: Parameters<typeof makeNode>[3],
+-		startedAt?: number,
+-	) {
+-		nodes.push(makeNode(id, 0, currentY, data));
+-		connectTo(id, startedAt);
+-		prevNodeId = id;
+-		prevCompletedAt = data.completedAt;
+-		currentY += NODE_HEIGHT + NODE_GAP_Y;
+-	}
++	};
+ 
+-	/** Chain a list of child nodes inside a parent group, connecting them sequentially. Returns the last child id. */
+-	function addChildChain(
+-		items: HistoryItem[],
+-		parentId: string,
+-		startY: number,
+-	): { lastChildId: string | null; endY: number } {
+-		let y = startY;
+-		let lastId: string | null = null;
+-
+-		for (const item of items) {
+-			const d = itemToNodeData(item, options);
+-			const id = `child-${item.entry.id}`;
+-			nodes.push(makeChildNode(id, parentId, y, { ...d, label: d.name }));
+-
+-			if (lastId) {
+-				edges.push({
+-					id: `e-${lastId}-${id}`,
+-					source: lastId,
+-					target: id,
+-				});
+-			}
+-			lastId = id;
+-			y += NODE_HEIGHT + NODE_GAP_Y;
++	const applyContinuation = (
++		nextSources: string[],
++		completedAt: number | undefined,
++	) => {
++		if (nextSources.length === 1) {
++			[prevNodeId] = nextSources;
++			pendingBranchSources = [];
++		} else if (nextSources.length > 1) {
++			prevNodeId = null;
++			pendingBranchSources = [...nextSources];
++		} else {
++			prevNodeId = null;
++			pendingBranchSources = [];
+ 		}
++		outgoingSources = [...nextSources];
++		prevCompletedAt = completedAt;
++		lastCompletedAt = completedAt;
++	};
+ 
+-		return { lastChildId: lastId, endY: y };
+-	}
++	for (const item of items) {
++		if (item.kind === "try") {
++			const childFragment = layoutSequence(item.children, {
++				...context,
++				hasTryAncestor: true,
++			});
++			const childWidth = childFragment.bounds
++				? childFragment.bounds.maxX - childFragment.bounds.minX
++				: NODE_WIDTH;
++			const groupWidth = Math.max(
++				GROUP_WIDTH,
++				childWidth + 2 * LOOP_PADDING_X,
++			);
++			const groupX = NODE_WIDTH / 2 - groupWidth / 2;
++			const translatedChildren = translateFragment(
++				childFragment,
++				groupX + LOOP_PADDING_X - (childFragment.bounds?.minX ?? 0),
++				currentY +
++					LOOP_HEADER_HEIGHT -
++					(childFragment.bounds?.minY ?? 0),
++			);
++			const groupHeight = translatedChildren.bounds
++				? translatedChildren.bounds.maxY -
++					currentY +
++					LOOP_PADDING_BOTTOM
++				: LOOP_HEADER_HEIGHT + LOOP_PADDING_BOTTOM;
++			const summary = summarizeTryGroup(item, context.workflow);
++			const groupNode: XYTryGroupNode = {
++				id: item.id,
++				type: "tryGroup",
++				position: { x: groupX, y: currentY },
++				measured: { width: groupWidth, height: groupHeight },
++				style: { width: groupWidth, height: groupHeight },
++				data: {
++					label: item.name,
++					summary: summary.summary,
++					handledFailureCount: summary.handledFailureCount,
++				},
++			};
+ 
+-	// ── Input meta node ──
++			connectTo(item.id, translatedChildren.firstStartedAt);
++			nodes.push(groupNode, ...translatedChildren.nodes);
++			edges.push(...translatedChildren.edges);
++			bounds = mergeBounds(bounds, getNodeBounds(groupNode));
++			bounds = mergeBounds(bounds, translatedChildren.bounds);
+ 
+-	if (history.input !== undefined) {
+-		addSequentialNode("meta-input", {
+-			label: "Input",
+-			summary: getEntrySummary("input", { value: history.input }),
+-			entryType: "input",
+-			status: "completed",
+-			nodeKey: "input",
+-			rawData: { value: history.input },
+-		});
+-	}
+-
+-	// ── Main loop over top-level items ──
++			currentY += groupHeight + NODE_GAP_Y;
++			applyContinuation(
++				translatedChildren.outgoingSources.length > 0
++					? translatedChildren.outgoingSources
++					: [item.id],
++				translatedChildren.lastCompletedAt,
++			);
++			continue;
++		}
+ 
+-	for (const item of topLevel) {
+-		const entryType = item.entry.kind.type;
+-		const d = itemToNodeData(item, options);
++		const entry = item.item.entry;
++		const nodeData = itemToNodeData(item.item, context.workflow, {
++			handledFailure: shouldMarkHandledFailure(item, context),
++		});
+ 
+-		if (entryType === "loop") {
+-			const loopId = `loop-${item.entry.id}`;
+-			const children = collectLoopChildren(
+-				nestedByParent.get(item.key) ?? [],
++		if (entry.kind.type === "loop") {
++			const childFragment = layoutSequence(item.children, context);
++			const childWidth = childFragment.bounds
++				? childFragment.bounds.maxX - childFragment.bounds.minX
++				: NODE_WIDTH;
++			const groupWidth = Math.max(
++				GROUP_WIDTH,
++				childWidth + 2 * LOOP_PADDING_X,
+ 			);
+-			const height = groupHeight(children.length);
+-
+-			nodes.push({
+-				id: loopId,
+-				type: "loopGroup",
+-				position: { x: -LOOP_PADDING_X, y: currentY },
+-				measured: { width: GROUP_WIDTH, height },
+-				style: { width: GROUP_WIDTH, height },
+-				data: { label: d.name, summary: d.summary },
+-			} as XYLoopGroupNode);
+-
+-			connectTo(loopId, d.startedAt);
+-
+-			const { lastChildId } = addChildChain(
+-				children,
+-				loopId,
+-				LOOP_HEADER_HEIGHT,
++			const groupX = NODE_WIDTH / 2 - groupWidth / 2;
++			const translatedChildren = translateFragment(
++				childFragment,
++				groupX + LOOP_PADDING_X - (childFragment.bounds?.minX ?? 0),
++				currentY +
++					LOOP_HEADER_HEIGHT -
++					(childFragment.bounds?.minY ?? 0),
+ 			);
++			const groupHeight = translatedChildren.bounds
++				? translatedChildren.bounds.maxY -
++					currentY +
++					LOOP_PADDING_BOTTOM
++				: LOOP_HEADER_HEIGHT + LOOP_PADDING_BOTTOM;
++			const groupId = `loop-${entry.id}`;
++			const groupNode: XYLoopGroupNode = {
++				id: groupId,
++				type: "loopGroup",
++				position: { x: groupX, y: currentY },
++				measured: { width: groupWidth, height: groupHeight },
++				style: { width: groupWidth, height: groupHeight },
++				data: {
++					label: item.name,
++					summary: nodeData.summary,
++				},
++			};
+ 
+-			currentY += height + NODE_GAP_Y;
+-			prevNodeId = lastChildId ?? loopId;
+-			prevCompletedAt = d.completedAt;
+-		} else if (entryType === "join" || entryType === "race") {
+-			// Header node for the join/race.
+-			const headerId = `header-${item.entry.id}`;
+-			addSequentialNode(headerId, { ...d, label: d.name });
++			connectTo(groupId, nodeData.startedAt);
++			nodes.push(groupNode, ...translatedChildren.nodes);
++			edges.push(...translatedChildren.edges);
++			bounds = mergeBounds(bounds, getNodeBounds(groupNode));
++			bounds = mergeBounds(bounds, translatedChildren.bounds);
+ 
+-			const branchData = item.entry.kind.data as JoinEntry | RaceEntry;
+-			const branchNames = Object.keys(branchData.branches);
+-			const nested = nestedByParent.get(item.key) ?? [];
++			currentY += groupHeight + NODE_GAP_Y;
++			applyContinuation(
++				translatedChildren.outgoingSources.length > 0
++					? translatedChildren.outgoingSources
++					: [groupId],
++				nodeData.completedAt ?? translatedChildren.lastCompletedAt,
++			);
++			continue;
++		}
+ 
+-			// Build per-branch info.
+-			const TERMINATION_GAP = 24;
++		if (entry.kind.type === "join" || entry.kind.type === "race") {
++			const headerId = `header-${entry.id}`;
++			const headerNode = makeNode(headerId, 0, currentY, {
++				...nodeData,
++				label: item.name,
++			});
++			connectTo(headerId, nodeData.startedAt);
++			nodes.push(headerNode);
++			bounds = mergeBounds(bounds, getNodeBounds(headerNode));
+ 
+-			const branches = branchNames.map((name) => {
+-				const branchItems = nested.filter((ni) =>
+-					ni.key.includes(`/${name}/`),
++			const branchData = entry.kind.data as JoinEntry | RaceEntry;
++			const branchNames = Object.keys(branchData.branches);
++			const branchStartY = currentY + NODE_HEIGHT + NODE_GAP_Y;
++			const branchLayouts = branchNames.map((name) => {
++				const branchItems = item.children.filter(
++					(child) =>
++						findBranchName(
++							child.location,
++							entry.location,
++							context.workflow.nameRegistry,
++						) === name,
+ 				);
+-				sortByLocation(branchItems);
+-				const status = branchData.branches[name].status;
+-				const isFailed = status === "failed" || status === "cancelled";
++				const fragment = layoutSequence(branchItems, context);
++				const fragmentWidth = fragment.bounds
++					? fragment.bounds.maxX - fragment.bounds.minX
++					: NODE_WIDTH;
++				const requiredWidth = Math.max(
++					GROUP_WIDTH,
++					fragmentWidth + 2 * LOOP_PADDING_X,
++				);
++				const requiredHeight = fragment.bounds
++					? fragment.bounds.maxY -
++						fragment.bounds.minY +
++						LOOP_HEADER_HEIGHT +
++						LOOP_PADDING_BOTTOM
++					: LOOP_HEADER_HEIGHT + LOOP_PADDING_BOTTOM;
++
+ 				return {
+ 					name,
+-					items: branchItems,
+-					status,
+-					isFailed,
+-					height: groupHeight(branchItems.length),
++					fragment,
++					status: branchData.branches[name]?.status ?? "pending",
++					isFailed:
++						branchData.branches[name]?.status === "failed" ||
++						branchData.branches[name]?.status === "cancelled",
++					requiredWidth,
++					requiredHeight,
+ 				};
+ 			});
+ 
+-			const maxHeight = Math.max(...branches.map((b) => b.height));
++			const branchWidth = Math.max(
++				GROUP_WIDTH,
++				...branchLayouts.map((layout) => layout.requiredWidth),
++			);
++			const branchHeight = Math.max(
++				LOOP_HEADER_HEIGHT + LOOP_PADDING_BOTTOM,
++				...branchLayouts.map((layout) => layout.requiredHeight),
++			);
+ 			const totalWidth =
+-				branches.length * GROUP_WIDTH +
+-				(branches.length - 1) * BRANCH_GAP_X;
+-			const startX = -totalWidth / 2 + GROUP_WIDTH / 2 - LOOP_PADDING_X;
+-			const branchStartY = currentY;
+-			const branchGroupIds: string[] = [];
+-
+-			for (let i = 0; i < branches.length; i++) {
+-				const branch = branches[i];
+-				const branchX = startX + i * (GROUP_WIDTH + BRANCH_GAP_X);
+-				const groupId = `branchgroup-${item.entry.id}-${branch.name}`;
+-
+-				nodes.push({
++				branchLayouts.length * branchWidth +
++				Math.max(0, branchLayouts.length - 1) * BRANCH_GAP_X;
++			const startX = NODE_WIDTH / 2 - totalWidth / 2;
++			const nextSources: string[] = [];
++
++			for (let i = 0; i < branchLayouts.length; i++) {
++				const branch = branchLayouts[i];
++				const branchX = startX + i * (branchWidth + BRANCH_GAP_X);
++				const groupId = `branchgroup-${entry.id}-${branch.name}`;
++				const translatedChildren = translateFragment(
++					branch.fragment,
++					branchX +
++						LOOP_PADDING_X -
++						(branch.fragment.bounds?.minX ?? 0),
++					branchStartY +
++						LOOP_HEADER_HEIGHT -
++						(branch.fragment.bounds?.minY ?? 0),
++				);
++				const groupNode: XYBranchGroupNode = {
+ 					id: groupId,
+ 					type: "branchGroup",
+ 					position: { x: branchX, y: branchStartY },
+-					measured: { width: GROUP_WIDTH, height: maxHeight },
+-					style: { width: GROUP_WIDTH, height: maxHeight },
++					measured: { width: branchWidth, height: branchHeight },
++					style: { width: branchWidth, height: branchHeight },
+ 					data: {
+ 						label: branch.name,
+-						entryType: entryType as "join" | "race",
++						entryType: entry.kind.type,
+ 						branchStatus: branch.status,
+ 					},
+-				} as XYBranchGroupNode);
++				};
+ 
++				nodes.push(groupNode, ...translatedChildren.nodes);
+ 				edges.push({
+ 					id: `e-${headerId}-${groupId}`,
+ 					source: headerId,
+ 					target: groupId,
+ 				});
+-
+-				addChildChain(branch.items, groupId, LOOP_HEADER_HEIGHT);
++				edges.push(...translatedChildren.edges);
++				bounds = mergeBounds(bounds, getNodeBounds(groupNode));
++				bounds = mergeBounds(bounds, translatedChildren.bounds);
+ 
+ 				if (!branch.isFailed) {
+-					branchGroupIds.push(groupId);
++					nextSources.push(groupId);
+ 				}
+ 			}
+ 
+-			// Place termination nodes below failed/cancelled branch groups.
+-			const hasTerminations = branches.some((b) => b.isFailed);
+-			const termY = branchStartY + maxHeight + TERMINATION_GAP;
+-
+-			for (let i = 0; i < branches.length; i++) {
+-				const branch = branches[i];
+-				if (!branch.isFailed) continue;
+-
+-				const branchX = startX + i * (GROUP_WIDTH + BRANCH_GAP_X);
+-				const groupId = `branchgroup-${item.entry.id}-${branch.name}`;
+-				const termId = `term-${item.entry.id}-${branch.name}`;
+-				const termX =
+-					branchX + GROUP_WIDTH / 2 - TERMINATION_NODE_SIZE / 2;
+-
+-				nodes.push({
+-					id: termId,
+-					type: "termination",
+-					position: { x: termX, y: termY },
+-					measured: {
+-						width: TERMINATION_NODE_SIZE,
+-						height: TERMINATION_NODE_SIZE,
+-					},
+-					data: {},
+-				} as XYTerminationNode);
++			const hasTerminations = branchLayouts.some(
++				(branch) => branch.isFailed,
++			);
++			const terminationY = branchStartY + branchHeight + TERMINATION_GAP;
+ 
+-				edges.push({
+-					id: `e-${groupId}-${termId}`,
+-					source: groupId,
+-					target: termId,
+-				});
++			if (hasTerminations) {
++				for (let i = 0; i < branchLayouts.length; i++) {
++					const branch = branchLayouts[i];
++					if (!branch.isFailed) {
++						continue;
++					}
++
++					const branchX = startX + i * (branchWidth + BRANCH_GAP_X);
++					const termId = `term-${entry.id}-${branch.name}`;
++					const termNode: XYTerminationNode = {
++						id: termId,
++						type: "termination",
++						position: {
++							x:
++								branchX +
++								branchWidth / 2 -
++								TERMINATION_NODE_SIZE / 2,
++							y: terminationY,
++						},
++						measured: {
++							width: TERMINATION_NODE_SIZE,
++							height: TERMINATION_NODE_SIZE,
++						},
++						data: {},
++					};
++
++					nodes.push(termNode);
++					edges.push({
++						id: `e-branchgroup-${entry.id}-${branch.name}-${termId}`,
++						source: `branchgroup-${entry.id}-${branch.name}`,
++						target: termId,
++					});
++					bounds = mergeBounds(bounds, getNodeBounds(termNode));
++				}
+ 			}
+ 
+-			currentY = hasTerminations
+-				? termY + TERMINATION_NODE_SIZE + NODE_GAP_Y
+-				: branchStartY + maxHeight + NODE_GAP_Y;
+-			prevNodeId = null;
+-			prevCompletedAt = d.completedAt;
+-			pendingBranchSources = branchGroupIds;
+-		} else {
+-			addSequentialNode(`node-${item.entry.id}`, { ...d, label: d.name });
++			currentY =
++				(hasTerminations
++					? terminationY + TERMINATION_NODE_SIZE
++					: branchStartY + branchHeight) + NODE_GAP_Y;
++			applyContinuation(nextSources, nodeData.completedAt);
++			continue;
+ 		}
+-	}
+ 
+-	// ── Output meta node ──
++		const nodeId = `node-${entry.id}`;
++		const node = makeNode(nodeId, 0, currentY, {
++			...nodeData,
++			label: item.name,
++		});
+ 
+-	if (history.output !== undefined && history.state === "completed") {
+-		const id = "meta-output";
+-		nodes.push(
+-			makeNode(id, 0, currentY, {
+-				label: "Output",
+-				summary: getEntrySummary("output", { value: history.output }),
+-				entryType: "output",
+-				status: "completed",
+-				nodeKey: "output",
+-				rawData: { value: history.output },
+-			}),
+-		);
+-		connectTo(id);
++		connectTo(nodeId, nodeData.startedAt);
++		nodes.push(node);
++		bounds = mergeBounds(bounds, getNodeBounds(node));
++		currentY += NODE_HEIGHT + NODE_GAP_Y;
++		applyContinuation([nodeId], nodeData.completedAt);
+ 	}
+ 
+-	return { nodes, edges };
++	return {
++		nodes,
++		edges,
++		bounds,
++		firstTargetId,
++		firstStartedAt,
++		outgoingSources,
++		lastCompletedAt,
++	};
+ }
+ 
+-// ─── Loop child collection ───────────────────────────────────
++export function workflowHistoryToXYFlow(
++	history: WorkflowHistory,
++	options: WorkflowLayoutOptions = {},
++): LayoutResult {
++	const rootItems = buildRenderTree(history);
++	const rootFragment = layoutSequence(rootItems, {
++		workflow: history,
++		hasTryAncestor: false,
++	});
+ 
+-/** Collect loop children from nested items, flattened across iterations and sorted. */
+-function collectLoopChildren(items: HistoryItem[]): HistoryItem[] {
+-	const iterationMap = new Map<number, HistoryItem[]>();
+-	for (const item of items) {
+-		const marker = item.entry.location.find(
+-			(s): s is LoopIterationMarker =>
+-				typeof s === "object" && "iteration" in s,
+-		);
+-		if (marker) {
+-			const list = iterationMap.get(marker.iteration) ?? [];
+-			list.push(item);
+-			iterationMap.set(marker.iteration, list);
++	const nodes: AnyXYNode[] = [];
++	const edges: Edge[] = [];
++	let currentY = 0;
++	let prevNodeId: string | null = null;
++	let prevCompletedAt: number | undefined;
++	let pendingBranchSources: string[] = [];
++
++	const connectTo = (targetId: string, targetStartedAt?: number) => {
++		if (prevNodeId) {
++			edges.push({
++				id: `e-${prevNodeId}-${targetId}`,
++				source: prevNodeId,
++				target: targetId,
++				...gapLabel(prevCompletedAt, targetStartedAt),
++			});
+ 		}
++		for (const source of pendingBranchSources) {
++			edges.push({
++				id: `e-${source}-${targetId}`,
++				source,
++				target: targetId,
++			});
++		}
++		pendingBranchSources = [];
++	};
++
++	const applyContinuation = (
++		nextSources: string[],
++		completedAt: number | undefined,
++	) => {
++		if (nextSources.length === 1) {
++			[prevNodeId] = nextSources;
++			pendingBranchSources = [];
++		} else if (nextSources.length > 1) {
++			prevNodeId = null;
++			pendingBranchSources = [...nextSources];
++		} else {
++			prevNodeId = null;
++			pendingBranchSources = [];
++		}
++		prevCompletedAt = completedAt;
++	};
++
++	if (history.input !== undefined) {
++		const inputNode = makeNode("meta-input", 0, currentY, {
++			label: "Input",
++			summary: getEntrySummary("input", { value: history.input }),
++			entryType: "input",
++			status: "completed",
++			nodeKey: "input",
++			rawData: { value: history.input },
++		});
++		nodes.push(inputNode);
++		currentY += NODE_HEIGHT + NODE_GAP_Y;
++		applyContinuation(["meta-input"], undefined);
++	}
++
++	if (rootFragment.nodes.length > 0) {
++		const translatedRoot = translateFragment(rootFragment, 0, currentY);
++		if (translatedRoot.firstTargetId) {
++			connectTo(
++				translatedRoot.firstTargetId,
++				translatedRoot.firstStartedAt,
++			);
++		}
++		nodes.push(...translatedRoot.nodes);
++		edges.push(...translatedRoot.edges);
++		currentY += translatedRoot.bounds
++			? translatedRoot.bounds.maxY -
++				translatedRoot.bounds.minY +
++				NODE_GAP_Y
++			: 0;
++		applyContinuation(
++			translatedRoot.outgoingSources,
++			translatedRoot.lastCompletedAt,
++		);
+ 	}
+ 
+-	const result: HistoryItem[] = [];
+-	const sortedKeys = Array.from(iterationMap.keys()).sort((a, b) => a - b);
+-	for (const key of sortedKeys) {
+-		const iterItems = iterationMap.get(key) ?? [];
+-		sortByLocation(iterItems);
+-		result.push(...iterItems);
++	if (history.output !== undefined && history.state === "completed") {
++		const outputNode = makeNode("meta-output", 0, currentY, {
++			label: "Output",
++			summary: getEntrySummary("output", { value: history.output }),
++			entryType: "output",
++			status: "completed",
++			nodeKey: "output",
++			rawData: { value: history.output },
++		});
++		connectTo("meta-output");
++		nodes.push(outputNode);
+ 	}
+-	return result;
++
++	return { nodes, edges };
+ }
+diff --git a/frontend/src/components/actors/workflow/workflow-types.ts b/frontend/src/components/actors/workflow/workflow-types.ts
+index 95ade7c026..70f60531fa 100644
+--- a/frontend/src/components/actors/workflow/workflow-types.ts
++++ b/frontend/src/components/actors/workflow/workflow-types.ts
+@@ -100,8 +100,8 @@ export type EntryStatus =
+ 	| "failed"
+ 	| "retrying";
+ 
+-// Extended type for visualization (includes meta nodes)
+-export type ExtendedEntryType = EntryKindType | "input" | "output";
++// Extended type for visualization (includes meta nodes and synthetic groups)
++export type ExtendedEntryType = EntryKindType | "input" | "output" | "try";
+ 
+ export interface Entry {
+ 	id: string;
+diff --git a/frontend/src/components/actors/workflow/workflow-visualizer.tsx b/frontend/src/components/actors/workflow/workflow-visualizer.tsx
+index bbdf449de3..99177131ad 100644
+--- a/frontend/src/components/actors/workflow/workflow-visualizer.tsx
++++ b/frontend/src/components/actors/workflow/workflow-visualizer.tsx
+@@ -42,6 +42,7 @@ type MetaExtendedEntryType =
+ 	| "rollback_checkpoint"
+ 	| "join"
+ 	| "race"
++	| "try"
+ 	| "removed"
+ 	| "input"
+ 	| "output";
+@@ -264,6 +265,11 @@ export function WorkflowVisualizer({
+ 										{selectedNode.retryCount} retry(s)
+ 									</div>
+ 								)}
++							{selectedNode.handledFailure && (
++								<div className="rounded bg-amber-500/10 px-2 py-0.5 font-mono-console text-xs text-amber-500">
++									handled
++								</div>
++							)}
+ 						</div>
+ 						<button
+ 							type="button"
+diff --git a/frontend/src/components/actors/workflow/xyflow-nodes.stories.tsx b/frontend/src/components/actors/workflow/xyflow-nodes.stories.tsx
+index f849efc1b9..f3abef0cce 100644
+--- a/frontend/src/components/actors/workflow/xyflow-nodes.stories.tsx
++++ b/frontend/src/components/actors/workflow/xyflow-nodes.stories.tsx
+@@ -20,6 +20,7 @@ import {
+ 	retryWorkflow,
+ 	sampleWorkflowHistory,
+ 	simpleLinearWorkflow,
++	tryWorkflow,
+ } from "./workflow-example-data";
+ import { workflowHistoryToXYFlow } from "./workflow-to-xyflow";
+ import {
+@@ -135,6 +136,20 @@ export const StepFailed: Story = () => (
+ );
+ StepFailed.storyName = "Nodes / Step Failed";
+ 
++export const StepHandled: Story = () => (
++	<StoryCanvas
++		nodes={singleNode({
++			label: "charge-card",
++			summary: "handled error",
++			entryType: "step",
++			status: "failed",
++			handledFailure: true,
++			error: "card declined",
++		})}
++	/>
++);
++StepHandled.storyName = "Nodes / Step Handled";
++
+ export const StepRetrying: Story = () => (
+ 	<StoryCanvas
+ 		nodes={singleNode({
+@@ -432,3 +447,9 @@ export const Failed: Story = () => {
+ 	return <StoryCanvas nodes={nodes} edges={edges} />;
+ };
+ Failed.storyName = "Examples / Failed";
++
++export const TryControlFlow: Story = () => {
++	const { nodes, edges } = workflowHistoryToXYFlow(tryWorkflow);
++	return <StoryCanvas nodes={nodes} edges={edges} />;
++};
++TryControlFlow.storyName = "Examples / Try Control Flow";
+diff --git a/frontend/src/components/actors/workflow/xyflow-nodes.tsx b/frontend/src/components/actors/workflow/xyflow-nodes.tsx
+index 0b7df27f6c..981c35fa01 100644
+--- a/frontend/src/components/actors/workflow/xyflow-nodes.tsx
++++ b/frontend/src/components/actors/workflow/xyflow-nodes.tsx
+@@ -9,6 +9,7 @@ import {
+ 	faCodeMerge,
+ 	faEnvelope,
+ 	faFlag,
++	faLayerGroup,
+ 	faPlay,
+ 	faRefresh,
+ 	faSpinnerThird,
+@@ -23,11 +24,11 @@ import {
+ 	Position,
+ } from "@xyflow/react";
+ import { useState } from "react";
+-import { cn } from "@/components";
++import { cn } from "../../lib/utils";
+ import type { EntryKindType, EntryStatus } from "./workflow-types";
+ 
+ // Extended type for meta nodes
+-type MetaExtendedEntryType = EntryKindType | "input" | "output";
++type MetaExtendedEntryType = EntryKindType | "input" | "output" | "try";
+ 
+ // Type colors - matching the SVG workflow visualizer design
+ export const TYPE_COLORS: Record<
+@@ -76,6 +77,12 @@ export const TYPE_COLORS: Record<
+ 		icon: "#ec4899",
+ 		iconBg: "#ec489915",
+ 	},
++	try: {
++		bg: "hsl(var(--card))",
++		border: "hsl(var(--border))",
++		icon: "#14b8a6",
++		iconBg: "#14b8a615",
++	},
+ 	removed: {
+ 		bg: "hsl(var(--card))",
+ 		border: "hsl(var(--border))",
+@@ -122,6 +129,10 @@ export function TypeIcon({
+ 			);
+ 		case "race":
+ 			return <Icon icon={faBolt} style={{ color, fontSize: size }} />;
++		case "try":
++			return (
++				<Icon icon={faLayerGroup} style={{ color, fontSize: size }} />
++			);
+ 		case "removed":
+ 			return <Icon icon={faTrash} style={{ color, fontSize: size }} />;
+ 		case "input":
+@@ -165,6 +176,7 @@ export interface WorkflowNodeData {
+ 	summary: string;
+ 	entryType: MetaExtendedEntryType;
+ 	status: EntryStatus;
++	handledFailure?: boolean;
+ 	duration?: number;
+ 	retryCount?: number;
+ 	error?: string;
+@@ -191,6 +203,7 @@ export const LOOP_PADDING_BOTTOM = 16;
+ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
+ 	const colors = TYPE_COLORS[data.entryType];
+ 	const isFailed = data.status === "failed";
++	const isHandledFailure = Boolean(data.handledFailure);
+ 	const [hovered, setHovered] = useState(false);
+ 
+ 	return (
+@@ -211,9 +224,11 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
+ 					backgroundColor: colors.bg,
+ 					borderColor: selected
+ 						? "#52525b"
+-						: isFailed
+-							? "#ef4444"
+-							: colors.border,
++						: isHandledFailure
++							? "#f59e0b"
++							: isFailed
++								? "#ef4444"
++								: colors.border,
+ 				}}
+ 			>
+ 				<NodeToolbar
+@@ -241,6 +256,11 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
+ 								{data.status}
+ 							</span>
+ 						</div>
++						{isHandledFailure && (
++							<div style={{ color: "#f59e0b" }}>
++								Handled failure
++							</div>
++						)}
+ 						{data.duration !== undefined && (
+ 							<div
+ 								style={{
+@@ -270,18 +290,48 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
+ 						style={{
+ 							height: 16,
+ 							background: "#18181b",
+-							border: `1px solid ${isFailed ? "#ef4444" : "#f59e0b"}`,
++							border: `1px solid ${
++								isHandledFailure
++									? "#f59e0b"
++									: isFailed
++										? "#ef4444"
++										: "#f59e0b"
++							}`,
+ 						}}
+ 					>
+ 						<span
+ 							className="text-[9px] font-medium"
+-							style={{ color: isFailed ? "#ef4444" : "#f59e0b" }}
++							style={{
++								color: isHandledFailure
++									? "#f59e0b"
++									: isFailed
++										? "#ef4444"
++										: "#f59e0b",
++							}}
+ 						>
+ 							x{data.retryCount + 1}
+ 						</span>
+ 					</div>
+ 				)}
+ 
++				{isHandledFailure && (
++					<div
++						className="absolute -top-2 left-1 flex items-center justify-center rounded px-1.5"
++						style={{
++							height: 16,
++							background: "#18181b",
++							border: "1px solid #f59e0b",
++						}}
++					>
++						<span
++							className="text-[9px] font-medium uppercase leading-none"
++							style={{ color: "#f59e0b" }}
++						>
++							handled
++						</span>
++					</div>
++				)}
++
+ 				{/* Icon box */}
+ 				<div
+ 					className="ml-2.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+@@ -318,7 +368,10 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeType>) {
+ 					data.status !== "retrying" && (
+ 						<span
+ 							className="absolute bottom-1.5 right-3 text-[10px]"
+-							style={{ color: "#71717a" }}
++							style={{
++								color: "#71717a",
++								right: isFailed ? 44 : 12,
++							}}
+ 						>
+ 							{formatDuration(data.duration)}
+ 						</span>
+@@ -424,6 +477,75 @@ export function LoopGroupNode({ data }: NodeProps<LoopGroupNodeType>) {
+ 	);
+ }
+ 
++export interface TryGroupNodeData {
++	[key: string]: unknown;
++	label: string;
++	summary: string;
++	handledFailureCount?: number;
++}
++
++export type TryGroupNodeType = Node<TryGroupNodeData, "tryGroup">;
++
++export function TryGroupNode({ data }: NodeProps<TryGroupNodeType>) {
++	const colors = TYPE_COLORS.try;
++	const accentColor =
++		data.handledFailureCount && data.handledFailureCount > 0
++			? "#f59e0b"
++			: colors.icon;
++
++	return (
++		<div
++			className="relative rounded-xl"
++			style={{
++				width: "100%",
++				height: "100%",
++				border: `1px dashed ${accentColor}66`,
++				backgroundColor: `${accentColor}08`,
++			}}
++		>
++			<div
++				className="flex items-start gap-2 px-3 pt-2"
++				style={{ height: LOOP_HEADER_HEIGHT }}
++			>
++				<div
++					className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
++					style={{
++						backgroundColor: `${accentColor}15`,
++						border: `1px solid ${accentColor}4d`,
++					}}
++				>
++					<TypeIcon type="try" size={11} />
++				</div>
++				<div className="min-w-0 space-y-0.5">
++					<div
++						className="truncate text-xs font-medium"
++						style={{ color: "hsl(var(--foreground))" }}
++					>
++						{data.label}
++					</div>
++					<div
++						className="truncate text-[10px]"
++						style={{ color: "hsl(var(--muted-foreground))" }}
++					>
++						{data.summary}
++					</div>
++				</div>
++			</div>
++
++			<Handle
++				type="target"
++				position={Position.Top}
++				className="!bg-transparent !border-0 !w-0 !h-0"
++			/>
++			<Handle
++				type="source"
++				position={Position.Bottom}
++				className="!bg-transparent !border-0 !w-0 !h-0"
++			/>
++		</div>
++	);
++}
++
+ export interface BranchGroupNodeData {
+ 	[key: string]: unknown;
+ 	label: string;
+@@ -530,6 +652,7 @@ export function TerminationNode(_props: NodeProps<TerminationNodeType>) {
+ export const workflowNodeTypes = {
+ 	workflow: WorkflowNode,
+ 	loopGroup: LoopGroupNode,
++	tryGroup: TryGroupNode,
+ 	branchGroup: BranchGroupNode,
+ 	termination: TerminationNode,
+ };
+diff --git a/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/registry.ts b/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/registry.ts
+index 806c71648a..652bd1a4a5 100644
+--- a/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/registry.ts
++++ b/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/registry.ts
+@@ -132,6 +132,7 @@ import {
+ 	workflowSpawnChildActor,
+ 	workflowSpawnParentActor,
+ 	workflowStopTeardownActor,
++	workflowTryActor,
+ } from "./workflow";
+ 
+ // Consolidated setup with all actors
+@@ -258,6 +259,7 @@ export const registry = setup({
+ 		workflowRunningStepActor,
+ 		workflowReplayActor,
+ 		workflowSleepActor,
++		workflowTryActor,
+ 		workflowStopTeardownActor,
+ 		workflowErrorHookActor,
+ 		workflowErrorHookEffectsActor,
+diff --git a/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/workflow.ts b/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/workflow.ts
+index 5ee109dd6f..54be4941b4 100644
+--- a/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/workflow.ts
++++ b/rivetkit-typescript/packages/rivetkit/fixtures/driver-test-suite/workflow.ts
+@@ -429,6 +429,62 @@ export const workflowSleepActor = actor({
+ 	},
+ });
+ 
++export const workflowTryActor = actor({
++	state: {
++		innerWrites: 0,
++		tryStepFailure: null as
++			| {
++					kind: string;
++					message: string;
++					attempts: number;
++			  }
++			| null,
++		tryJoinFailure: null as string | null,
++	},
++	run: workflow(async (ctx) => {
++		const stepResult = await ctx.tryStep({
++			name: "charge-card",
++			maxRetries: 0,
++			run: async () => {
++				ctx.state.innerWrites += 1;
++				throw new Error("card declined");
++			},
++		});
++
++		const joinResult = await ctx.try("parallel-flow", async (blockCtx) => {
++			return await blockCtx.join("parallel", {
++				ok: {
++					run: async () => "ok",
++				},
++				bad: {
++					run: async () => {
++						throw new Error("join failed");
++					},
++				},
++			});
++		});
++
++		await ctx.step("store-try-results", async () => {
++			if (!stepResult.ok) {
++				ctx.state.tryStepFailure = {
++					kind: stepResult.failure.kind,
++					message: stepResult.failure.error.message,
++					attempts: stepResult.failure.attempts,
++				};
++			}
++			if (!joinResult.ok) {
++				ctx.state.tryJoinFailure = `${joinResult.failure.source}:${joinResult.failure.name}`;
++			}
++		});
++	}),
++	actions: {
++		getState: (c) => c.state,
++	},
++	options: {
++		sleepTimeout: 50,
++	},
++});
++
+ export const workflowStopTeardownActor = actor({
+ 	state: {
+ 		wakeAts: [] as number[],
+diff --git a/rivetkit-typescript/packages/rivetkit/src/driver-test-suite/tests/actor-workflow.ts b/rivetkit-typescript/packages/rivetkit/src/driver-test-suite/tests/actor-workflow.ts
+index fedd16d327..fa0cca1400 100644
+--- a/rivetkit-typescript/packages/rivetkit/src/driver-test-suite/tests/actor-workflow.ts
++++ b/rivetkit-typescript/packages/rivetkit/src/driver-test-suite/tests/actor-workflow.ts
+@@ -203,6 +203,30 @@ export function runActorWorkflowTests(driverTestConfig: DriverTestConfig) {
+ 			expect(state.insideClientAvailable).toBe(true);
+ 		});
+ 
++		test("tryStep and try recover terminal workflow failures", async (c) => {
++			const { client } = await setupDriverTest(c, driverTestConfig);
++			const actor = client.workflowTryActor.getOrCreate(["workflow-try"]);
++
++			let state = await actor.getState();
++			for (
++				let i = 0;
++				i < 40 &&
++				(state.tryStepFailure === null || state.tryJoinFailure === null);
++				i++
++			) {
++				await waitFor(driverTestConfig, 50);
++				state = await actor.getState();
++			}
++
++			expect(state.innerWrites).toBe(1);
++			expect(state.tryStepFailure).toEqual({
++				kind: "exhausted",
++				message: "card declined",
++				attempts: 1,
++			});
++			expect(state.tryJoinFailure).toBe("join:parallel");
++		});
++
+ 		test("sleeps and resumes between ticks", async (c) => {
+ 			const { client } = await setupDriverTest(c, driverTestConfig);
+ 			const actor = client.workflowSleepActor.getOrCreate([
+diff --git a/rivetkit-typescript/packages/rivetkit/src/workflow/context.ts b/rivetkit-typescript/packages/rivetkit/src/workflow/context.ts
+index 9a913a172a..6d3bc000a3 100644
+--- a/rivetkit-typescript/packages/rivetkit/src/workflow/context.ts
++++ b/rivetkit-typescript/packages/rivetkit/src/workflow/context.ts
+@@ -26,6 +26,10 @@ import type {
+ 	LoopConfig,
+ 	LoopResult,
+ 	StepConfig,
++	TryBlockConfig,
++	TryBlockResult,
++	TryStepConfig,
++	TryStepResult,
+ 	WorkflowQueueMessage,
+ } from "@rivetkit/workflow-engine";
+ import { WORKFLOW_GUARD_KV_KEY } from "./constants";
+@@ -251,6 +255,63 @@ export class ActorWorkflowContext<
+ 		return await this.#wrapActive(() => this.#inner.step(config));
+ 	}
+ 
++	async tryStep<T>(
++		nameOrConfig:
++			| string
++			| Parameters<WorkflowContextInterface["tryStep"]>[0],
++		run?: () => Promise<T>,
++	): Promise<TryStepResult<T>> {
++		if (typeof nameOrConfig === "string") {
++			if (!run) {
++				throw new Error("Step run function missing");
++			}
++			return await this.#wrapActive(() =>
++				this.#inner.tryStep(nameOrConfig, () =>
++					this.#withActorAccess(run),
++				),
++			);
++		}
++		const stepConfig = nameOrConfig as TryStepConfig<T>;
++		const config: TryStepConfig<T> = {
++			...stepConfig,
++			run: () => this.#withActorAccess(stepConfig.run),
++		};
++		return await this.#wrapActive(() => this.#inner.tryStep(config));
++	}
++
++	async try<T>(
++		nameOrConfig: string | Parameters<WorkflowContextInterface["try"]>[0],
++		run?: (
++			ctx: ActorWorkflowContext<
++				TState,
++				TConnParams,
++				TConnState,
++				TVars,
++				TInput,
++				TDatabase,
++				TEvents,
++				TQueues
++			>,
++		) => Promise<T>,
++	): Promise<TryBlockResult<T>> {
++		if (typeof nameOrConfig === "string") {
++			if (!run) {
++				throw new Error("Try run function missing");
++			}
++			return await this.#wrapActive(() =>
++				this.#inner.try(nameOrConfig, async (ctx) =>
++					run(this.#createChildContext(ctx)),
++				),
++			);
++		}
++		const tryConfig = nameOrConfig as TryBlockConfig<T>;
++		const config: TryBlockConfig<T> = {
++			...tryConfig,
++			run: async (ctx) => tryConfig.run(this.#createChildContext(ctx)),
++		};
++		return await this.#wrapActive(() => this.#inner.try(config));
++	}
++
+ 	async loop<T>(
+ 		name: string,
+ 		run: (
+diff --git a/rivetkit-typescript/packages/rivetkit/src/workflow/mod.ts b/rivetkit-typescript/packages/rivetkit/src/workflow/mod.ts
+index 419eccf5ac..4b2bd98a27 100644
+--- a/rivetkit-typescript/packages/rivetkit/src/workflow/mod.ts
++++ b/rivetkit-typescript/packages/rivetkit/src/workflow/mod.ts
+@@ -25,6 +25,14 @@ import { createWorkflowInspectorAdapter } from "./inspector";
+ 
+ export { Loop } from "@rivetkit/workflow-engine";
+ export type {
++	TryBlockCatchKind,
++	TryBlockConfig,
++	TryBlockFailure,
++	TryBlockResult,
++	TryStepCatchKind,
++	TryStepConfig,
++	TryStepFailure,
++	TryStepResult,
+ 	WorkflowError,
+ 	WorkflowErrorEvent,
+ } from "@rivetkit/workflow-engine";
+diff --git a/rivetkit-typescript/packages/workflow-engine/QUICKSTART.md b/rivetkit-typescript/packages/workflow-engine/QUICKSTART.md
+index b6410ff530..5864e50f1c 100644
+--- a/rivetkit-typescript/packages/workflow-engine/QUICKSTART.md
++++ b/rivetkit-typescript/packages/workflow-engine/QUICKSTART.md
+@@ -143,6 +143,36 @@ await ctx.step("halt", async () => {
+ });
+ ```
+ 
++Use `ctx.tryStep()` when you want to keep terminal step failures as data:
++
++```typescript
++const charge = await ctx.tryStep({
++  name: "charge-card",
++  maxRetries: 3,
++  run: async () => await chargeCard(orderId),
++});
++
++if (!charge.ok) {
++  return {
++    status: "manual-review",
++    reason: charge.failure.error.message,
++  };
++}
++```
++
++Use `ctx.try()` for a named block that can recover from terminal `step`, `join`, or `race` failures:
++
++```typescript
++const payment = await ctx.try("payment-flow", async (blockCtx) => {
++  const auth = await blockCtx.step("authorize", () => authorize(orderId));
++  const capture = await blockCtx.step("capture", () => captureFunds(orderId));
++  return { auth, capture };
++});
++```
++
++- Both helpers still rethrow retry backoff, sleeps, queue waits, eviction, and history divergence.
++- `RollbackError` is opt-in. Pass `catch: ["rollback"]` if you want it returned as data.
++
+ ### Rollback
+ 
+ Rollback handlers run only for steps that completed successfully and registered
+diff --git a/rivetkit-typescript/packages/workflow-engine/docs/control-flow.md b/rivetkit-typescript/packages/workflow-engine/docs/control-flow.md
+index 8071a65eb0..d40c8a7b6b 100644
+--- a/rivetkit-typescript/packages/workflow-engine/docs/control-flow.md
++++ b/rivetkit-typescript/packages/workflow-engine/docs/control-flow.md
+@@ -70,6 +70,39 @@ const { winner, value } = await ctx.race("timeout", [
+ - Losing branches receive `ctx.abortSignal` and typically throw `CancelledError`.
+ - If all branches fail, `RaceError` is thrown.
+ 
++## Handling Terminal Failures as Data
++
++Use `ctx.tryStep()` when a single step failure should become a value instead of failing the workflow:
++
++```ts
++const charge = await ctx.tryStep({
++  name: "charge-card",
++  maxRetries: 3,
++  run: async () => chargeCard(orderId),
++});
++
++if (!charge.ok) {
++  return {
++    status: "manual-review",
++    reason: charge.failure.error.message,
++  };
++}
++```
++
++Use `ctx.try()` when you want a named scope that can recover from terminal `step`, `join`, or `race` failures:
++
++```ts
++const payment = await ctx.try("payment-flow", async (blockCtx) => {
++  const auth = await blockCtx.step("authorize", () => authorize(orderId));
++  const capture = await blockCtx.step("capture", () => captureFunds(orderId));
++  return { auth, capture };
++});
++```
++
++- `ctx.tryStep()` and `ctx.try()` only catch terminal failures. Retry backoff, sleeps, queue waits, eviction, and history divergence still rethrow.
++- `RollbackError` is not caught by default. Opt in with `catch: ["rollback"]` when you want rollback failures returned as data.
++- `ctx.try()` still needs a stable name because the enclosed control-flow history is nested under that block.
++
+ ## Messages in Control Flow
+ 
+ `ctx.queue.next()` pauses for one required message. `ctx.queue.nextBatch()` supports optional / batch waits. Queue wait names are part of history, so keep them stable and unique.
+diff --git a/rivetkit-typescript/packages/workflow-engine/src/context.ts b/rivetkit-typescript/packages/workflow-engine/src/context.ts
+index dc3808202e..77c76b57de 100644
+--- a/rivetkit-typescript/packages/workflow-engine/src/context.ts
++++ b/rivetkit-typescript/packages/workflow-engine/src/context.ts
+@@ -54,7 +54,16 @@ import type {
+ 	RollbackContextInterface,
+ 	StepConfig,
+ 	Storage,
++	TryBlockCatchKind,
++	TryBlockConfig,
++	TryBlockFailure,
++	TryBlockResult,
++	TryStepCatchKind,
++	TryStepConfig,
++	TryStepFailure,
++	TryStepResult,
+ 	WorkflowContextInterface,
++	WorkflowError,
+ 	WorkflowErrorEvent,
+ 	WorkflowErrorHandler,
+ 	WorkflowQueue,
+@@ -74,8 +83,20 @@ export const DEFAULT_RETRY_BACKOFF_BASE = 100;
+ export const DEFAULT_RETRY_BACKOFF_MAX = 30000;
+ export const DEFAULT_LOOP_HISTORY_PRUNE_INTERVAL = 20;
+ export const DEFAULT_STEP_TIMEOUT = 30000; // 30 seconds
++const DEFAULT_TRY_STEP_CATCH: readonly TryStepCatchKind[] = [
++	"critical",
++	"timeout",
++	"exhausted",
++];
++const DEFAULT_TRY_BLOCK_CATCH: readonly TryBlockCatchKind[] = [
++	"step",
++	"join",
++	"race",
++];
+ 
+ const QUEUE_HISTORY_MESSAGE_MARKER = "__rivetWorkflowQueueMessage";
++const TRY_STEP_FAILURE_SYMBOL = Symbol("workflow.try-step.failure");
++const TRY_BLOCK_FAILURE_SYMBOL = Symbol("workflow.try-block.failure");
+ 
+ /**
+  * Calculate backoff delay with exponential backoff.
+@@ -99,6 +120,215 @@ export class StepTimeoutError extends Error {
+ 	}
+ }
+ 
++type SchedulerYieldState = {
++	deadline?: number;
++	messageNames: Set<string>;
++};
++
++type TryBlockFailureInfo = Pick<TryBlockFailure, "source" | "name">;
++
++function attachTryStepFailure<T extends Error>(
++	error: T,
++	failure: TryStepFailure,
++): T {
++	(
++		error as T & {
++			[TRY_STEP_FAILURE_SYMBOL]?: TryStepFailure;
++		}
++	)[TRY_STEP_FAILURE_SYMBOL] = failure;
++	return error;
++}
++
++function readTryStepFailure(error: unknown): TryStepFailure | undefined {
++	if (!(error instanceof Error)) {
++		return undefined;
++	}
++
++	return (
++		error as Error & {
++			[TRY_STEP_FAILURE_SYMBOL]?: TryStepFailure;
++		}
++	)[TRY_STEP_FAILURE_SYMBOL];
++}
++
++function attachTryBlockFailure<T extends Error>(
++	error: T,
++	failure: TryBlockFailureInfo,
++): T {
++	(
++		error as T & {
++			[TRY_BLOCK_FAILURE_SYMBOL]?: TryBlockFailureInfo;
++		}
++	)[TRY_BLOCK_FAILURE_SYMBOL] = failure;
++	return error;
++}
++
++function readTryBlockFailure(error: unknown): TryBlockFailureInfo | undefined {
++	if (!(error instanceof Error)) {
++		return undefined;
++	}
++
++	return (
++		error as Error & {
++			[TRY_BLOCK_FAILURE_SYMBOL]?: TryBlockFailureInfo;
++		}
++	)[TRY_BLOCK_FAILURE_SYMBOL];
++}
++
++function shouldRethrowTryError(error: unknown): boolean {
++	return (
++		error instanceof StepFailedError ||
++		error instanceof SleepError ||
++		error instanceof MessageWaitError ||
++		error instanceof EvictedError ||
++		error instanceof HistoryDivergedError ||
++		error instanceof EntryInProgressError ||
++		error instanceof RollbackCheckpointError ||
++		error instanceof RollbackStopError
++	);
++}
++
++function shouldCatchTryStepFailure(
++	failure: TryStepFailure,
++	catchKinds?: readonly TryStepCatchKind[],
++): boolean {
++	const effectiveCatch = catchKinds ?? DEFAULT_TRY_STEP_CATCH;
++	return effectiveCatch.includes(failure.kind);
++}
++
++function shouldCatchTryBlockFailure(
++	failure: TryBlockFailure,
++	catchKinds?: readonly TryBlockCatchKind[],
++): boolean {
++	const effectiveCatch = catchKinds ?? DEFAULT_TRY_BLOCK_CATCH;
++
++	if (failure.source === "step") {
++		return failure.step?.kind === "rollback"
++			? effectiveCatch.includes("rollback")
++			: effectiveCatch.includes("step");
++	}
++	if (failure.source === "join") {
++		return effectiveCatch.includes("join");
++	}
++	if (failure.source === "race") {
++		return effectiveCatch.includes("race");
++	}
++	return effectiveCatch.includes("rollback");
++}
++
++function parseStoredWorkflowError(message: string | undefined): WorkflowError {
++	if (!message) {
++		return {
++			name: "Error",
++			message: "unknown error",
++		};
++	}
++
++	const match = /^([^:]+):\s*(.*)$/s.exec(message);
++	if (!match) {
++		return {
++			name: "Error",
++			message,
++		};
++	}
++
++	return {
++		name: match[1],
++		message: match[2],
++	};
++}
++
++function getTryStepFailureFromExhaustedError(
++	stepName: string,
++	attempts: number,
++	error: StepExhaustedError,
++): TryStepFailure {
++	return {
++		kind: "exhausted",
++		stepName,
++		attempts,
++		error: parseStoredWorkflowError(error.lastError),
++	};
++}
++
++function mergeSchedulerYield(
++	state: SchedulerYieldState | undefined,
++	error: SleepError | MessageWaitError | StepFailedError,
++): SchedulerYieldState {
++	const nextState: SchedulerYieldState = state ?? {
++		messageNames: new Set<string>(),
++	};
++
++	if (error instanceof SleepError) {
++		nextState.deadline =
++			nextState.deadline === undefined
++				? error.deadline
++				: Math.min(nextState.deadline, error.deadline);
++		for (const messageName of error.messageNames ?? []) {
++			nextState.messageNames.add(messageName);
++		}
++		return nextState;
++	}
++
++	if (error instanceof MessageWaitError) {
++		for (const messageName of error.messageNames) {
++			nextState.messageNames.add(messageName);
++		}
++		return nextState;
++	}
++
++	nextState.deadline =
++		nextState.deadline === undefined
++			? error.retryAt
++			: Math.min(nextState.deadline, error.retryAt);
++	return nextState;
++}
++
++function buildSchedulerYieldError(
++	state: SchedulerYieldState,
++): SleepError | MessageWaitError {
++	const messageNames = [...state.messageNames];
++	if (state.deadline !== undefined) {
++		return new SleepError(
++			state.deadline,
++			messageNames.length > 0 ? messageNames : undefined,
++		);
++	}
++	return new MessageWaitError(messageNames);
++}
++
++function controlFlowErrorPriority(error: Error): number {
++	if (error instanceof EvictedError) {
++		return 0;
++	}
++	if (error instanceof HistoryDivergedError) {
++		return 1;
++	}
++	if (error instanceof EntryInProgressError) {
++		return 2;
++	}
++	if (error instanceof RollbackCheckpointError) {
++		return 3;
++	}
++	if (error instanceof RollbackStopError) {
++		return 4;
++	}
++	return 5;
++}
++
++function selectControlFlowError(
++	current: Error | undefined,
++	candidate: Error,
++): Error {
++	if (!current) {
++		return candidate;
++	}
++	return controlFlowErrorPriority(candidate) <
++		controlFlowErrorPriority(current)
++		? candidate
++		: current;
++}
++
+ /**
+  * Internal representation of a rollback handler.
+  */
+@@ -416,6 +646,138 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 		}
+ 	}
+ 
++	async tryStep<T>(
++		nameOrConfig: string | TryStepConfig<T>,
++		run?: () => Promise<T>,
++	): Promise<TryStepResult<T>> {
++		const config =
++			typeof nameOrConfig === "string"
++				? ({
++						name: nameOrConfig,
++						run: run!,
++					} satisfies TryStepConfig<T>)
++				: nameOrConfig;
++
++		try {
++			return {
++				ok: true,
++				value: await this.step(config),
++			};
++		} catch (error) {
++			if (shouldRethrowTryError(error)) {
++				throw error;
++			}
++
++			const failure = readTryStepFailure(error);
++			if (!failure || !shouldCatchTryStepFailure(failure, config.catch)) {
++				throw error;
++			}
++
++			return {
++				ok: false,
++				failure,
++			};
++		}
++	}
++
++	async try<T>(
++		nameOrConfig: string | TryBlockConfig<T>,
++		run?: (ctx: WorkflowContextInterface) => Promise<T>,
++	): Promise<TryBlockResult<T>> {
++		this.assertNotInProgress();
++		this.checkEvicted();
++
++		const config =
++			typeof nameOrConfig === "string"
++				? ({
++						name: nameOrConfig,
++						run: run!,
++					} satisfies TryBlockConfig<T>)
++				: nameOrConfig;
++
++		this.entryInProgress = true;
++		try {
++			return await this.executeTry(config);
++		} finally {
++			this.entryInProgress = false;
++		}
++	}
++
++	private async executeTry<T>(
++		config: TryBlockConfig<T>,
++	): Promise<TryBlockResult<T>> {
++		this.checkDuplicateName(config.name);
++
++		const location = appendName(
++			this.storage,
++			this.currentLocation,
++			config.name,
++		);
++		const blockCtx = this.createBranch(location);
++
++		try {
++			const value = await config.run(blockCtx);
++			blockCtx.validateComplete();
++			return {
++				ok: true,
++				value,
++			};
++		} catch (error) {
++			if (shouldRethrowTryError(error)) {
++				throw error;
++			}
++
++			const stepFailure = readTryStepFailure(error);
++			if (stepFailure) {
++				const failure: TryBlockFailure = {
++					source: "step",
++					name: stepFailure.stepName,
++					error: stepFailure.error,
++					step: stepFailure,
++				};
++				if (!shouldCatchTryBlockFailure(failure, config.catch)) {
++					throw error;
++				}
++				return {
++					ok: false,
++					failure,
++				};
++			}
++
++			const operationFailure = readTryBlockFailure(error);
++			if (operationFailure) {
++				const failure: TryBlockFailure = {
++					...operationFailure,
++					error: extractErrorInfo(error),
++				};
++				if (!shouldCatchTryBlockFailure(failure, config.catch)) {
++					throw error;
++				}
++				return {
++					ok: false,
++					failure,
++				};
++			}
++
++			if (error instanceof RollbackError) {
++				const failure: TryBlockFailure = {
++					source: "block",
++					name: config.name,
++					error: extractErrorInfo(error),
++				};
++				if (!shouldCatchTryBlockFailure(failure, config.catch)) {
++					throw error;
++				}
++				return {
++					ok: false,
++					failure,
++				};
++			}
++
++			throw error;
++		}
++	}
++
+ 	private async executeStep<T>(config: StepConfig<T>): Promise<T> {
+ 		this.ensureRollbackCheckpoint(config);
+ 		if (this.mode === "rollback") {
+@@ -467,9 +829,19 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 				// driver implementations may persist metadata without the history
+ 				// entry error (e.g. partial writes/crashes between attempts).
+ 				const lastError = stepData.error ?? metadata.error;
+-				const exhaustedError = markErrorReported(
+-					new StepExhaustedError(config.name, lastError),
++				const exhaustedError = new StepExhaustedError(
++					config.name,
++					lastError,
++				);
++				attachTryStepFailure(
++					exhaustedError,
++					getTryStepFailureFromExhaustedError(
++						config.name,
++						metadata.attempts,
++						exhaustedError,
++					),
+ 				);
++				markErrorReported(exhaustedError);
+ 				if (metadata.status !== "exhausted") {
+ 					metadata.status = "exhausted";
+ 					metadata.dirty = true;
+@@ -581,7 +953,17 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 				await this.notifyStepError(config, metadata.attempts, error, {
+ 					willRetry: false,
+ 				});
+-				throw markErrorReported(new CriticalError(error.message));
++				throw markErrorReported(
++					attachTryStepFailure(
++						new CriticalError(error.message),
++						{
++							kind: "timeout",
++							stepName: config.name,
++							attempts: metadata.attempts,
++							error: extractErrorInfo(error),
++						},
++					),
++				);
+ 			}
+ 
+ 			if (
+@@ -598,7 +980,17 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 				await this.notifyStepError(config, metadata.attempts, error, {
+ 					willRetry: false,
+ 				});
+-				throw markErrorReported(error);
++				throw markErrorReported(
++					attachTryStepFailure(error, {
++						kind:
++							error instanceof RollbackError
++								? "rollback"
++								: "critical",
++						stepName: config.name,
++						attempts: metadata.attempts,
++						error: extractErrorInfo(error),
++					}),
++				);
+ 			}
+ 
+ 			if (entry.kind.type === "step") {
+@@ -631,7 +1023,15 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 			}
+ 
+ 			const exhaustedError = markErrorReported(
+-				new StepExhaustedError(config.name, String(error)),
++				attachTryStepFailure(
++					new StepExhaustedError(config.name, String(error)),
++					{
++						kind: "exhausted",
++						stepName: config.name,
++						attempts: metadata.attempts,
++						error: extractErrorInfo(error),
++					},
++				),
+ 			);
+ 			await this.notifyStepError(config, metadata.attempts, error, {
+ 				willRetry: false,
+@@ -1657,11 +2057,33 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 		const joinData = entry.kind.data;
+ 		const results: Record<string, unknown> = {};
+ 		const errors: Record<string, Error> = {};
++		let schedulerYieldState: SchedulerYieldState | undefined;
++		let propagatedError: Error | undefined;
++
++		for (const [branchName, branchStatus] of Object.entries(
++			joinData.branches,
++		)) {
++			if (branchStatus.status === "completed") {
++				results[branchName] = branchStatus.output;
++				continue;
++			}
++
++			if (branchStatus.status === "failed") {
++				errors[branchName] = new Error(
++					branchStatus.error ?? "branch failed",
++				);
++			}
++		}
+ 
+ 		// Execute all branches in parallel
+ 		const branchPromises = Object.entries(branches).map(
+ 			async ([branchName, config]) => {
+ 				const branchStatus = joinData.branches[branchName];
++				if (!branchStatus) {
++					throw new HistoryDivergedError(
++						`Expected join branch "${branchName}" in "${name}"`,
++					);
++				}
+ 
+ 				// Already completed
+ 				if (branchStatus.status === "completed") {
+@@ -1684,6 +2106,7 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 				const branchCtx = this.createBranch(branchLocation);
+ 
+ 				branchStatus.status = "running";
++				branchStatus.error = undefined;
+ 				entry.dirty = true;
+ 
+ 				try {
+@@ -1692,9 +2115,43 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 
+ 					branchStatus.status = "completed";
+ 					branchStatus.output = output;
++					branchStatus.error = undefined;
+ 					results[branchName] = output;
+ 				} catch (error) {
++					if (
++						error instanceof SleepError ||
++						error instanceof MessageWaitError ||
++						error instanceof StepFailedError
++					) {
++						schedulerYieldState = mergeSchedulerYield(
++							schedulerYieldState,
++							error,
++						);
++						branchStatus.status = "running";
++						branchStatus.error = undefined;
++						entry.dirty = true;
++						return;
++					}
++
++					if (
++						error instanceof EvictedError ||
++						error instanceof HistoryDivergedError ||
++						error instanceof EntryInProgressError ||
++						error instanceof RollbackCheckpointError ||
++						error instanceof RollbackStopError
++					) {
++						propagatedError = selectControlFlowError(
++							propagatedError,
++							error,
++						);
++						branchStatus.status = "running";
++						branchStatus.error = undefined;
++						entry.dirty = true;
++						return;
++					}
++
+ 					branchStatus.status = "failed";
++					branchStatus.output = undefined;
+ 					branchStatus.error = String(error);
+ 					errors[branchName] = error as Error;
+ 				}
+@@ -1707,9 +2164,30 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 		await Promise.allSettled(branchPromises);
+ 		await this.flushStorage();
+ 
++		if (propagatedError) {
++			throw propagatedError;
++		}
++
++		if (
++			Object.values(joinData.branches).some(
++				(branch) =>
++					branch.status === "pending" || branch.status === "running",
++			)
++		) {
++			if (!schedulerYieldState) {
++				throw new Error(
++					`Join "${name}" has pending branches without a scheduler yield`,
++				);
++			}
++			throw buildSchedulerYieldError(schedulerYieldState);
++		}
++
+ 		// Throw if any branches failed
+ 		if (Object.keys(errors).length > 0) {
+-			throw new JoinError(errors);
++			throw attachTryBlockFailure(new JoinError(errors), {
++				source: "join",
++				name,
++			});
+ 		}
+ 
+ 		return results as { [K in keyof T]: BranchOutput<T[K]> };
+@@ -1809,24 +2287,32 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 
+ 		// Track winner info
+ 		let winnerName: string | null = null;
+-		let winnerValue: T | null = null;
+-		let settled = false;
+-		let pendingCount = branches.length;
++		let winnerValue: T | undefined;
++		let hasWinner = false;
+ 		const errors: Record<string, Error> = {};
+ 		const lateErrors: Array<{ name: string; error: string }> = [];
+-		// Track scheduler yield errors - we need to propagate these after allSettled
+-		let yieldError: SleepError | MessageWaitError | null = null;
++		let schedulerYieldState: SchedulerYieldState | undefined;
++		let propagatedError: Error | undefined;
+ 
+ 		// Check for replay winners first
+ 		for (const branch of branches) {
+ 			const branchStatus = raceData.branches[branch.name];
++			if (!branchStatus) {
++				throw new HistoryDivergedError(
++					`Expected race branch "${branch.name}" in "${name}"`,
++				);
++			}
+ 			if (
+ 				branchStatus.status !== "pending" &&
+ 				branchStatus.status !== "running"
+ 			) {
+-				pendingCount--;
+-				if (branchStatus.status === "completed" && !settled) {
+-					settled = true;
++				if (branchStatus.status === "failed") {
++					errors[branch.name] = new Error(
++						branchStatus.error ?? "branch failed",
++					);
++				}
++				if (branchStatus.status === "completed" && !hasWinner) {
++					hasWinner = true;
+ 					winnerName = branch.name;
+ 					winnerValue = branchStatus.output as T;
+ 				}
+@@ -1834,13 +2320,18 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 		}
+ 
+ 		// If we found a replay winner, return immediately
+-		if (settled && winnerName !== null && winnerValue !== null) {
+-			return { winner: winnerName, value: winnerValue };
++		if (hasWinner && winnerName !== null) {
++			return { winner: winnerName, value: winnerValue as T };
+ 		}
+ 
+ 		// Execute branches that need to run
+ 		for (const branch of branches) {
+ 			const branchStatus = raceData.branches[branch.name];
++			if (!branchStatus) {
++				throw new HistoryDivergedError(
++					`Expected race branch "${branch.name}" in "${name}"`,
++				);
++			}
+ 
+ 			// Skip already completed/cancelled
+ 			if (
+@@ -1861,19 +2352,30 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 			);
+ 
+ 			branchStatus.status = "running";
++			branchStatus.error = undefined;
+ 			entry.dirty = true;
+ 
+ 			const branchPromise = branch.run(branchCtx).then(
+ 				async (output) => {
+-					if (settled) {
++					if (hasWinner) {
+ 						// This branch completed after a winner was determined
+ 						// Still record the completion for observability
+ 						branchStatus.status = "completed";
+ 						branchStatus.output = output;
++						branchStatus.error = undefined;
++						entry.dirty = true;
++						return;
++					}
++
++					if (propagatedError) {
++						branchStatus.status = "completed";
++						branchStatus.output = output;
++						branchStatus.error = undefined;
+ 						entry.dirty = true;
+ 						return;
+ 					}
+-					settled = true;
++
++					hasWinner = true;
+ 					winnerName = branch.name;
+ 					winnerValue = output;
+ 
+@@ -1881,6 +2383,7 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 
+ 					branchStatus.status = "completed";
+ 					branchStatus.output = output;
++					branchStatus.error = undefined;
+ 					raceData.winner = branch.name;
+ 					entry.dirty = true;
+ 
+@@ -1888,69 +2391,63 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 					raceAbortController.abort();
+ 				},
+ 				(error) => {
+-					pendingCount--;
+-
+-					// Track sleep/message errors - they need to bubble up to the scheduler
+-					// We'll re-throw after allSettled to allow cleanup
+-					if (error instanceof SleepError) {
+-						// Track the earliest deadline
++					if (hasWinner) {
+ 						if (
+-							!yieldError ||
+-							!(yieldError instanceof SleepError) ||
+-							error.deadline < yieldError.deadline
++							error instanceof CancelledError ||
++							error instanceof EvictedError
+ 						) {
+-							yieldError = error;
++							branchStatus.status = "cancelled";
++						} else {
++							lateErrors.push({
++								name: branch.name,
++								error: String(error),
++							});
+ 						}
+-						branchStatus.status = "running"; // Keep as running since we'll resume
+ 						entry.dirty = true;
+ 						return;
+ 					}
+-					if (error instanceof MessageWaitError) {
+-						// Track message wait errors, prefer sleep errors with deadlines
+-						if (
+-							!yieldError ||
+-							!(yieldError instanceof SleepError)
+-						) {
+-							if (!yieldError) {
+-								yieldError = error;
+-							} else if (yieldError instanceof MessageWaitError) {
+-								// Merge message names
+-								yieldError = new MessageWaitError([
+-									...yieldError.messageNames,
+-									...error.messageNames,
+-								]);
+-							}
+-						}
+-						branchStatus.status = "running"; // Keep as running since we'll resume
++
++					if (
++						error instanceof SleepError ||
++						error instanceof MessageWaitError ||
++						error instanceof StepFailedError
++					) {
++						schedulerYieldState = mergeSchedulerYield(
++							schedulerYieldState,
++							error,
++						);
++						branchStatus.status = "running";
++						branchStatus.error = undefined;
+ 						entry.dirty = true;
+ 						return;
+ 					}
+ 
+ 					if (
+-						error instanceof CancelledError ||
+-						error instanceof EvictedError
++						error instanceof EvictedError ||
++						error instanceof HistoryDivergedError ||
++						error instanceof EntryInProgressError ||
++						error instanceof RollbackCheckpointError ||
++						error instanceof RollbackStopError
+ 					) {
++						propagatedError = selectControlFlowError(
++							propagatedError,
++							error,
++						);
++						branchStatus.status = "running";
++						branchStatus.error = undefined;
++						entry.dirty = true;
++						return;
++					}
++
++					if (error instanceof CancelledError) {
+ 						branchStatus.status = "cancelled";
+ 					} else {
+ 						branchStatus.status = "failed";
++						branchStatus.output = undefined;
+ 						branchStatus.error = String(error);
+-
+-						if (settled) {
+-							// Track late errors for observability
+-							lateErrors.push({
+-								name: branch.name,
+-								error: String(error),
+-							});
+-						} else {
+-							errors[branch.name] = error;
+-						}
++						errors[branch.name] = error as Error;
+ 					}
+ 					entry.dirty = true;
+-
+-					// All branches failed (only if no winner yet)
+-					if (pendingCount === 0 && !settled) {
+-						settled = true;
+-					}
+ 				},
+ 			);
+ 
+@@ -1960,15 +2457,29 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 		// Wait for all branches to complete or be cancelled
+ 		await Promise.allSettled(branchPromises);
+ 
+-		// If any branch needs to yield to the scheduler (sleep/message wait),
+-		// save state and re-throw the error to exit the workflow execution
+-		if (yieldError && !settled) {
++		if (propagatedError) {
+ 			await this.flushStorage();
+-			throw yieldError;
++			throw propagatedError;
++		}
++
++		if (
++			!hasWinner &&
++			Object.values(raceData.branches).some(
++				(branch) =>
++					branch.status === "pending" || branch.status === "running",
++			)
++		) {
++			await this.flushStorage();
++			if (!schedulerYieldState) {
++				throw new Error(
++					`Race "${name}" has pending branches without a scheduler yield`,
++				);
++			}
++			throw buildSchedulerYieldError(schedulerYieldState);
+ 		}
+ 
+ 		// Clean up entries from non-winning branches
+-		if (winnerName !== null) {
++		if (hasWinner && winnerName !== null) {
+ 			for (const branch of branches) {
+ 				if (branch.name !== winnerName) {
+ 					const branchLocation = appendName(
+@@ -1998,17 +2509,23 @@ export class WorkflowContextImpl implements WorkflowContextInterface {
+ 		}
+ 
+ 		// Return result or throw error
+-		if (winnerName !== null && winnerValue !== null) {
+-			return { winner: winnerName, value: winnerValue };
++		if (hasWinner && winnerName !== null) {
++			return { winner: winnerName, value: winnerValue as T };
+ 		}
+ 
+ 		// All branches failed
+-		throw new RaceError(
+-			"All branches failed",
+-			Object.entries(errors).map(([name, error]) => ({
++		throw attachTryBlockFailure(
++			new RaceError(
++				"All branches failed",
++				Object.entries(errors).map(([branchName, error]) => ({
++					name: branchName,
++					error: String(error),
++				})),
++			),
++			{
++				source: "race",
+ 				name,
+-				error: String(error),
+-			})),
++			},
+ 		);
+ 	}
+ 
+diff --git a/rivetkit-typescript/packages/workflow-engine/src/index.ts b/rivetkit-typescript/packages/workflow-engine/src/index.ts
+index d87ee9846d..719fec127a 100644
+--- a/rivetkit-typescript/packages/workflow-engine/src/index.ts
++++ b/rivetkit-typescript/packages/workflow-engine/src/index.ts
+@@ -93,6 +93,14 @@ export type {
+ 	StepConfig,
+ 	StepEntry,
+ 	Storage,
++	TryBlockCatchKind,
++	TryBlockConfig,
++	TryBlockFailure,
++	TryBlockResult,
++	TryStepCatchKind,
++	TryStepConfig,
++	TryStepFailure,
++	TryStepResult,
+ 	WorkflowContextInterface,
+ 	WorkflowError,
+ 	WorkflowErrorEvent,
+diff --git a/rivetkit-typescript/packages/workflow-engine/src/types.ts b/rivetkit-typescript/packages/workflow-engine/src/types.ts
+index 07c2785fc4..076b465300 100644
+--- a/rivetkit-typescript/packages/workflow-engine/src/types.ts
++++ b/rivetkit-typescript/packages/workflow-engine/src/types.ts
+@@ -401,6 +401,50 @@ export interface StepConfig<T> {
+ 	timeout?: number;
+ }
+ 
++export type TryStepCatchKind =
++	| "critical"
++	| "timeout"
++	| "exhausted"
++	| "rollback";
++
++export interface TryStepFailure {
++	kind: TryStepCatchKind;
++	stepName: string;
++	attempts: number;
++	error: WorkflowError;
++}
++
++export type TryStepResult<T> =
++	| { ok: true; value: T }
++	| { ok: false; failure: TryStepFailure };
++
++export interface TryStepConfig<T> extends StepConfig<T> {
++	catch?: readonly TryStepCatchKind[];
++}
++
++export type TryBlockCatchKind =
++	| "step"
++	| "join"
++	| "race"
++	| "rollback";
++
++export interface TryBlockFailure {
++	source: "step" | "join" | "race" | "block";
++	name: string;
++	error: WorkflowError;
++	step?: TryStepFailure;
++}
++
++export type TryBlockResult<T> =
++	| { ok: true; value: T }
++	| { ok: false; failure: TryBlockFailure };
++
++export interface TryBlockConfig<T> {
++	name: string;
++	run: (ctx: WorkflowContextInterface) => Promise<T>;
++	catch?: readonly TryBlockCatchKind[];
++}
++
+ /**
+  * Result from a loop iteration.
+  */
+@@ -454,6 +498,15 @@ export interface WorkflowContextInterface {
+ 	step<T>(name: string, run: () => Promise<T>): Promise<T>;
+ 	step<T>(config: StepConfig<T>): Promise<T>;
+ 
++	tryStep<T>(name: string, run: () => Promise<T>): Promise<TryStepResult<T>>;
++	tryStep<T>(config: TryStepConfig<T>): Promise<TryStepResult<T>>;
++
++	try<T>(
++		name: string,
++		run: (ctx: WorkflowContextInterface) => Promise<T>,
++	): Promise<TryBlockResult<T>>;
++	try<T>(config: TryBlockConfig<T>): Promise<TryBlockResult<T>>;
++
+ 	loop<T>(
+ 		name: string,
+ 		run: (
+diff --git a/rivetkit-typescript/packages/workflow-engine/tests/join.test.ts b/rivetkit-typescript/packages/workflow-engine/tests/join.test.ts
+index 5d76dc8956..e9d3b0a3ad 100644
+--- a/rivetkit-typescript/packages/workflow-engine/tests/join.test.ts
++++ b/rivetkit-typescript/packages/workflow-engine/tests/join.test.ts
+@@ -248,5 +248,65 @@ for (const mode of modes) {
+ 			expect(result.state).toBe("completed");
+ 			expect(result.output).toBe("winner:plain");
+ 		});
++
++		it("should preserve branch retries instead of failing the join", async () => {
++			let attempts = 0;
++
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				const result = await ctx.join("retrying-join", {
++					flaky: {
++						run: async (branchCtx) => {
++							return await branchCtx.step({
++								name: "flaky-step",
++								maxRetries: 1,
++								retryBackoffBase: 5,
++								retryBackoffMax: 5,
++								run: async () => {
++									attempts += 1;
++									if (attempts === 1) {
++										throw new Error("retry");
++									}
++									return "a";
++								},
++							});
++						},
++					},
++					stable: {
++						run: async () => "b",
++					},
++				});
++
++				return result.flaky + result.stable;
++			};
++
++			const firstResult = await runWorkflow(
++				"wf-join-retry",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			if (mode === "yield") {
++				expect(firstResult.state).toBe("sleeping");
++				await new Promise((resolve) => setTimeout(resolve, 10));
++
++				const secondResult = await runWorkflow(
++					"wf-join-retry",
++					workflow,
++					undefined,
++					driver,
++					{ mode },
++				).result;
++
++				expect(secondResult.state).toBe("completed");
++				expect(secondResult.output).toBe("ab");
++			} else {
++				expect(firstResult.state).toBe("completed");
++				expect(firstResult.output).toBe("ab");
++			}
++
++			expect(attempts).toBe(2);
++		});
+ 	});
+ }
+diff --git a/rivetkit-typescript/packages/workflow-engine/tests/race.test.ts b/rivetkit-typescript/packages/workflow-engine/tests/race.test.ts
+index 2417c0f2ba..76fac991b9 100644
+--- a/rivetkit-typescript/packages/workflow-engine/tests/race.test.ts
++++ b/rivetkit-typescript/packages/workflow-engine/tests/race.test.ts
+@@ -284,5 +284,74 @@ for (const mode of modes) {
+ 				value: "nested-fast",
+ 			});
+ 		});
++
++		it("should preserve branch retries instead of failing the race", async () => {
++			let attempts = 0;
++
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.race("retrying-race", [
++					{
++						name: "flaky",
++						run: async (branchCtx) => {
++							return await branchCtx.step({
++								name: "flaky-step",
++								maxRetries: 1,
++								retryBackoffBase: 5,
++								retryBackoffMax: 5,
++								run: async () => {
++									attempts += 1;
++									if (attempts === 1) {
++										throw new Error("retry");
++									}
++									return "winner";
++								},
++							});
++						},
++					},
++					{
++						name: "slow",
++						run: async (branchCtx) => {
++							await branchCtx.sleep("slow-wait", 200);
++							return "slow";
++						},
++					},
++				]);
++			};
++
++			const firstResult = await runWorkflow(
++				"wf-race-retry",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			if (mode === "yield") {
++				expect(firstResult.state).toBe("sleeping");
++				await new Promise((resolve) => setTimeout(resolve, 10));
++
++				const secondResult = await runWorkflow(
++					"wf-race-retry",
++					workflow,
++					undefined,
++					driver,
++					{ mode },
++				).result;
++
++				expect(secondResult.state).toBe("completed");
++				expect(secondResult.output).toEqual({
++					winner: "flaky",
++					value: "winner",
++				});
++			} else {
++				expect(firstResult.state).toBe("completed");
++				expect(firstResult.output).toEqual({
++					winner: "flaky",
++					value: "winner",
++				});
++			}
++
++			expect(attempts).toBe(2);
++		});
+ 	});
+ }
+diff --git a/rivetkit-typescript/packages/workflow-engine/tests/try.test.ts b/rivetkit-typescript/packages/workflow-engine/tests/try.test.ts
+new file mode 100644
+index 0000000000..a910d205b9
+--- /dev/null
++++ b/rivetkit-typescript/packages/workflow-engine/tests/try.test.ts
+@@ -0,0 +1,342 @@
++import { beforeEach, describe, expect, it } from "vitest";
++import {
++	CriticalError,
++	InMemoryDriver,
++	RollbackError,
++	runWorkflow,
++	type WorkflowContextInterface,
++} from "../src/testing.js";
++
++const modes = ["yield", "live"] as const;
++
++for (const mode of modes) {
++	describe(`Workflow Engine Try (${mode})`, { sequential: true }, () => {
++		let driver: InMemoryDriver;
++
++		beforeEach(() => {
++			driver = new InMemoryDriver();
++			driver.latency = 0;
++		});
++
++		it("should return handled critical failures from tryStep", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.tryStep("critical-step", async () => {
++					throw new CriticalError("stop");
++				});
++			};
++
++			const result = await runWorkflow(
++				"wf-try-step-critical",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			expect(result.state).toBe("completed");
++			expect(result.output).toMatchObject({
++				ok: false,
++				failure: {
++					kind: "critical",
++					stepName: "critical-step",
++					attempts: 1,
++					error: {
++						name: "CriticalError",
++						message: "stop",
++					},
++				},
++			});
++		});
++
++		it("should preserve retries before returning exhausted tryStep failures", async () => {
++			let attempts = 0;
++
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.tryStep({
++					name: "flaky-step",
++					maxRetries: 1,
++					retryBackoffBase: 5,
++					retryBackoffMax: 5,
++					run: async () => {
++						attempts += 1;
++						throw new Error("boom");
++					},
++				});
++			};
++
++			const firstResult = await runWorkflow(
++				"wf-try-step-exhausted",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			if (mode === "yield") {
++				expect(firstResult.state).toBe("sleeping");
++				await new Promise((resolve) => setTimeout(resolve, 10));
++
++				const secondResult = await runWorkflow(
++					"wf-try-step-exhausted",
++					workflow,
++					undefined,
++					driver,
++					{ mode },
++				).result;
++
++				expect(secondResult.state).toBe("completed");
++				expect(secondResult.output).toMatchObject({
++					ok: false,
++					failure: {
++						kind: "exhausted",
++						stepName: "flaky-step",
++						attempts: 2,
++						error: {
++							message: "boom",
++						},
++					},
++				});
++			} else {
++				expect(firstResult.state).toBe("completed");
++				expect(firstResult.output).toMatchObject({
++					ok: false,
++					failure: {
++						kind: "exhausted",
++						stepName: "flaky-step",
++						attempts: 2,
++						error: {
++							message: "boom",
++						},
++					},
++				});
++			}
++
++			expect(attempts).toBe(2);
++		});
++
++		it("should not catch rollback in tryStep by default", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.tryStep("rollback-step", async () => {
++					throw new RollbackError("rollback");
++				});
++			};
++
++			await expect(
++				runWorkflow(
++					"wf-try-step-rollback-default",
++					workflow,
++					undefined,
++					driver,
++					{ mode },
++				).result,
++			).rejects.toThrow(RollbackError);
++		});
++
++		it("should catch rollback in tryStep when configured", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.tryStep({
++					name: "rollback-step",
++					catch: ["rollback"],
++					run: async () => {
++						throw new RollbackError("rollback");
++					},
++				});
++			};
++
++			const result = await runWorkflow(
++				"wf-try-step-rollback-caught",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			expect(result.state).toBe("completed");
++			expect(result.output).toMatchObject({
++				ok: false,
++				failure: {
++					kind: "rollback",
++					stepName: "rollback-step",
++					attempts: 1,
++					error: {
++						name: "RollbackError",
++						message: "rollback",
++					},
++				},
++			});
++		});
++
++		it("should catch terminal step failures inside try blocks", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.try("payment-flow", async (blockCtx) => {
++					return await blockCtx.step({
++						name: "charge",
++						maxRetries: 0,
++						run: async () => {
++							throw new CriticalError("declined");
++						},
++					});
++				});
++			};
++
++			const result = await runWorkflow(
++				"wf-try-block-step",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			expect(result.state).toBe("completed");
++			expect(result.output).toMatchObject({
++				ok: false,
++				failure: {
++					source: "step",
++					name: "charge",
++					error: {
++						name: "CriticalError",
++						message: "declined",
++					},
++					step: {
++						kind: "critical",
++						stepName: "charge",
++						attempts: 1,
++						error: {
++							name: "CriticalError",
++							message: "declined",
++						},
++					},
++				},
++			});
++		});
++
++		it("should catch join failures inside try blocks", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.try("parallel-flow", async (blockCtx) => {
++					return await blockCtx.join("parallel", {
++						good: {
++							run: async () => "ok",
++						},
++						bad: {
++							run: async () => {
++								throw new Error("boom");
++							},
++						},
++					});
++				});
++			};
++
++			const result = await runWorkflow(
++				"wf-try-block-join",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			expect(result.state).toBe("completed");
++			expect(result.output).toMatchObject({
++				ok: false,
++				failure: {
++					source: "join",
++					name: "parallel",
++					error: {
++						name: "JoinError",
++					},
++				},
++			});
++		});
++
++		it("should catch race failures inside try blocks", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.try("race-flow", async (blockCtx) => {
++					return await blockCtx.race("contest", [
++						{
++							name: "one",
++							run: async () => {
++								throw new Error("one failed");
++							},
++						},
++						{
++							name: "two",
++							run: async () => {
++								throw new Error("two failed");
++							},
++						},
++					]);
++				});
++			};
++
++			const result = await runWorkflow(
++				"wf-try-block-race",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			expect(result.state).toBe("completed");
++			expect(result.output).toMatchObject({
++				ok: false,
++				failure: {
++					source: "race",
++					name: "contest",
++					error: {
++						name: "RaceError",
++					},
++				},
++			});
++		});
++
++		it("should not catch rollback in try blocks by default", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.try("rollback-flow", async () => {
++					throw new RollbackError("rollback");
++				});
++			};
++
++			await expect(
++				runWorkflow(
++					"wf-try-block-rollback-default",
++					workflow,
++					undefined,
++					driver,
++					{ mode },
++				).result,
++			).rejects.toThrow(RollbackError);
++		});
++
++		it("should catch direct rollback in try blocks when configured", async () => {
++			const workflow = async (ctx: WorkflowContextInterface) => {
++				return await ctx.try({
++					name: "rollback-flow",
++					catch: ["rollback"],
++					run: async () => {
++						throw new RollbackError("rollback");
++					},
++				});
++			};
++
++			const result = await runWorkflow(
++				"wf-try-block-rollback-caught",
++				workflow,
++				undefined,
++				driver,
++				{ mode },
++			).result;
++
++			expect(result.state).toBe("completed");
++			expect(result.output).toMatchObject({
++				ok: false,
++				failure: {
++					source: "block",
++					name: "rollback-flow",
++					error: {
++						name: "RollbackError",
++						message: "rollback",
++					},
++				},
++			});
++		});
++	});
++}
+diff --git a/website/src/content/docs/actors/workflows.mdx b/website/src/content/docs/actors/workflows.mdx
+index f60b683dc0..164b81e8a6 100644
+--- a/website/src/content/docs/actors/workflows.mdx
++++ b/website/src/content/docs/actors/workflows.mdx
+@@ -637,6 +637,76 @@ export const timeoutActor = actor({
+ export const registry = setup({ use: { timeoutActor } });
+ ```
+ 
++### Handling terminal failures as data
++
++Use `tryStep` when a step failure should produce data instead of failing the whole workflow.
++
++```ts
++import { actor, setup } from "rivetkit";
++import { workflow } from "rivetkit/workflow";
++
++export const paymentActor = actor({
++  state: {
++    status: "pending" as "pending" | "manual-review" | "paid",
++    reason: null as string | null,
++  },
++  run: workflow(async (ctx) => {
++    const charge = await ctx.tryStep({
++      name: "charge-card",
++      maxRetries: 3,
++      run: async () => await chargeCard("order-123"),
++    });
++
++    await ctx.step("store-charge-result", async () => {
++      if (!charge.ok) {
++        ctx.state.status = "manual-review";
++        ctx.state.reason = charge.failure.error.message;
++        return;
++      }
++
++      ctx.state.status = "paid";
++      ctx.state.reason = null;
++    });
++  }),
++  actions: {
++    getState: (c) => c.state,
++  },
++});
++
++async function chargeCard(orderId: string): Promise<string> {
++  return `charge-${orderId}`;
++}
++
++export const registry = setup({ use: { paymentActor } });
++```
++
++Use `try` when you want to recover from terminal `step`, `join`, or `race` failures inside a named block.
++
++```ts
++async function runPaymentFlow(ctx: any) {
++  return await ctx.try("payment-flow", async (blockCtx: any) => {
++    const auth = await blockCtx.step("authorize", async () =>
++      authorizeOrder("order-123"),
++    );
++    const capture = await blockCtx.step("capture", async () =>
++      captureOrder("order-123"),
++    );
++    return { auth, capture };
++  });
++}
++
++async function authorizeOrder(orderId: string): Promise<string> {
++  return `auth-${orderId}`;
++}
++
++async function captureOrder(orderId: string): Promise<string> {
++  return `capture-${orderId}`;
++}
++```
++
++- `tryStep` and `try` only catch terminal failures. Retry backoff, sleeps, queue waits, eviction, and history divergence still rethrow.
++- `RollbackError` is not caught by default. Pass `catch: ["rollback"]` when you want rollback failures returned as data.
++
+ ### Error hooks
+ 
+ Use `onError` when you want a best-effort notification for workflow failures.

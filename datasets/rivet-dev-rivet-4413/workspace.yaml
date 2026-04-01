@@ -1,0 +1,16 @@
+task_id: rivet-dev-rivet-4413
+repo:
+  url: https://github.com/rivet-dev/rivet.git
+  base_commit: ba155ee12ee671b12ae86414a80dd624c50c8ca1
+  merge_commit: fe2bd86ab2df8c1a742fa64906e768efd12257ef
+language: typescript
+difficulty_score: 1
+prompt: 'feat: workflow try helpers & visualizer support'
+environment:
+  image: platformnetwork/swe-forge:rivet-dev-rivet-4413
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

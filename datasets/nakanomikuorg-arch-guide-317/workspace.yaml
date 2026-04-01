@@ -1,0 +1,16 @@
+task_id: nakanomikuorg-arch-guide-317
+repo:
+  url: https://github.com/nakanomikuorg/arch-guide.git
+  base_commit: 0614ee9b403c5fc2e6005c0771b316487941cf48
+  merge_commit: a351c0d7f9630661aff7722e1fe6c1924eb540c6
+language: typescript
+difficulty_score: 1
+prompt: 'fix: security guides not integrated into site''s entry points'
+environment:
+  image: platformnetwork/swe-forge:nakanomikuorg-arch-guide-317
+  language_version: unknown
+install:
+  commands: []
+tests:
+  fail_to_pass: []
+  pass_to_pass: []

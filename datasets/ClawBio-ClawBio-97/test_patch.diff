@@ -1,0 +1,25 @@
+# Test file: tests/test_pharmgx_reporter_missing_warfarin_data.py
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SKILL_DIR = REPO_ROOT / "skills" / "pharmgx-reporter"
+if str(SKILL_DIR) not in sys.path:
+    sys.path.insert(0, str(SKILL_DIR))
+
+from pharmgx_reporter import lookup_drugs
+
+
+def test_lookup_drugs_puts_warfarin_in_indeterminate_when_vkorc1_missing():
+    profiles = {
+        "CYP2C9": {"phenotype": "Normal Metabolizer"},
+        "VKORC1": {"phenotype": "Not genotyped"},
+    }
+
+    results = lookup_drugs(profiles)
+
+    warfarin = [drug for drug in results["indeterminate"] if drug["drug"] == "Warfarin"]
+    assert len(warfarin) == 1
+    assert warfarin[0]["classification"] == "indeterminate"
+    assert warfarin[0]["gene"] == "CYP2C9+VKORC1"

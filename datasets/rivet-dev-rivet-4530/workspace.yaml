@@ -1,0 +1,20 @@
+task_id: rivet-dev-rivet-4530
+repo:
+  url: https://github.com/rivet-dev/rivet.git
+  base_commit: b1a2d559b1bebb1f3801815cc777f5ed22a1f633
+  merge_commit: 6ea161409109d45092789f270be0c6d02552ede3
+language: typescript
+difficulty_score: 3
+prompt: Fix disk I/O error when destroying VFS
+environment:
+  image: platformnetwork/swe-forge:rivet-dev-rivet-4530
+  language_version: unknown
+install:
+  commands:
+  - apt-get update
+  - apt-get install -y nodejs npm
+  - cd /repo && npm install -g corepack && corepack enable && corepack pnpm -v
+tests:
+  fail_to_pass:
+  - cd /repo && corepack pnpm --filter @rivetkit/sqlite-vfs-test exec vitest run ../../tests/test_destroy_vfs_disk_io_error.test.ts
+  pass_to_pass: []

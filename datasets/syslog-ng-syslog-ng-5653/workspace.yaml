@@ -1,0 +1,18 @@
+task_id: syslog-ng-syslog-ng-5653
+repo:
+  url: https://github.com/syslog-ng/syslog-ng.git
+  base_commit: af395ccfd8237be99fd1f48fcad19c2d80a76238
+  merge_commit: b8a5c2a5e5feabbac64bb846cdea8ce5f8706f33
+language: python
+difficulty_score: 3
+prompt: Fix light logrotate test path handling
+environment:
+  image: platformnetwork/swe-forge:syslog-ng-syslog-ng-5653
+  language_version: '3.12'
+install:
+  commands:
+  - cd /repo && true
+tests:
+  fail_to_pass:
+  - python3 -m pytest -q tests/test_light_logrotate_paths.py
+  pass_to_pass: []

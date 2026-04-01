@@ -1,0 +1,18 @@
+task_id: commonwarexyz-monorepo-3508
+repo:
+  url: https://github.com/commonwarexyz/monorepo.git
+  base_commit: 1def64dd2ef39489f32744582d47a1508b56f3a3
+  merge_commit: 41385692738607a5bd3569c1d08303a471ce902e
+language: rust
+difficulty_score: 1
+prompt: Tighten fixed-size handshake frame allocation
+environment:
+  image: platformnetwork/swe-forge:commonwarexyz-monorepo-3508
+  language_version: unknown
+install:
+  commands:
+  - cargo test -p commonware-stream --test handshake_fixed_size_frames --no-run
+tests:
+  fail_to_pass:
+  - cargo test -p commonware-stream --test handshake_fixed_size_frames
+  pass_to_pass: []
