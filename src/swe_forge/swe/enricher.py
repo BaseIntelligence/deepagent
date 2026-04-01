@@ -9,7 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from .gharchive import GhArchiveEvent
-from .github_api import GitHubClient
+from .github_api import DiffTooLargeError, GitHubClient
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +248,18 @@ async def enrich_pr(
 
     try:
         diff = await github_client.get_pr_diff(owner, repo_name, event.pull_number)
+    except DiffTooLargeError:
+        logger.info(
+            f"Diff too large for {event.repository}#{event.pull_number}, using git clone fallback"
+        )
+        try:
+            diff = await github_client.get_pr_diff_via_git(
+                owner, repo_name, event.pull_number
+            )
+        except Exception as git_err:
+            logger.warning(
+                f"Git clone fallback also failed for {event.repository}#{event.pull_number}: {git_err}"
+            )
     except Exception as e:
         logger.warning(
             f"GitHub API failed for {event.repository}#{event.pull_number}: {e}"

@@ -64,6 +64,13 @@ class ServerError(GitHubApiError):
         super().__init__(message, status_code)
 
 
+class DiffTooLargeError(GitHubApiError):
+    """Raised when diff is too large (406 - diff exceeded limits)."""
+
+    def __init__(self, message: str = "Diff too large") -> None:
+        super().__init__(message, 406)
+
+
 class PRState(str, Enum):
     """PR state enumeration."""
 
@@ -281,6 +288,9 @@ class GitHubClient:
                 await self._handle_rate_limit(response_headers)
                 raise ForbiddenError(f"Forbidden: {url}")
 
+            if response.status == 406:
+                raise DiffTooLargeError(f"Diff too large: {text}")
+
             if response.status >= 500:
                 raise ServerError(response.status, f"Server error: {text}")
 
@@ -402,6 +412,97 @@ class GitHubClient:
 
         _, _, text = await self._request("GET", url, headers=headers)
         return text
+
+    async def get_pr_diff_via_git(
+        self,
+        owner: str,
+        repo: str,
+        number: int,
+    ) -> str:
+        """Fetch PR diff using git clone (fallback for large diffs).
+
+        Used when GitHub API returns 406 "diff too large".
+        Performs a shallow clone and fetches the PR as a branch.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            number: Pull request number.
+
+        Returns:
+            Unified diff as a string.
+        """
+        import shutil
+        import subprocess
+        import tempfile
+
+        repo_url = f"https://github.com/{owner}/{repo}.git"
+        tmpdir = tempfile.mkdtemp(prefix=f"swe-forge-{owner}-{repo}-{number}-")
+
+        try:
+            logger.info(
+                "git_clone_fallback_started",
+                owner=owner,
+                repo=repo,
+                pr_number=number,
+                tmpdir=tmpdir,
+            )
+
+            subprocess.run(
+                ["git", "clone", "--depth=1", repo_url, tmpdir],
+                capture_output=True,
+                check=True,
+                timeout=120,
+            )
+
+            subprocess.run(
+                ["git", "fetch", "origin", f"pull/{number}/head:pr-{number}"],
+                capture_output=True,
+                check=True,
+                timeout=60,
+                cwd=tmpdir,
+            )
+
+            result = subprocess.run(
+                ["git", "diff", f"HEAD...pr-{number}"],
+                capture_output=True,
+                check=True,
+                timeout=30,
+                cwd=tmpdir,
+            )
+
+            diff = result.stdout.decode("utf-8", errors="replace")
+            logger.info(
+                "git_clone_fallback_success",
+                owner=owner,
+                repo=repo,
+                pr_number=number,
+                diff_size=len(diff),
+            )
+            return diff
+
+        except subprocess.TimeoutExpired as e:
+            logger.error(
+                "git_clone_fallback_timeout",
+                owner=owner,
+                repo=repo,
+                pr_number=number,
+                error=str(e),
+            )
+            raise GitHubApiError(f"Git clone timeout: {e}") from e
+        except subprocess.CalledProcessError as e:
+            logger.error(
+                "git_clone_fallback_failed",
+                owner=owner,
+                repo=repo,
+                pr_number=number,
+                stderr=e.stderr.decode("utf-8", errors="replace") if e.stderr else "",
+            )
+            raise GitHubApiError(
+                f"Git clone failed: {e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)}"
+            ) from e
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True, timeout=30)
 
     @retry(
         retry=retry_if_exception_type(

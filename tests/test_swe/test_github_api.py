@@ -7,6 +7,7 @@ import aiohttp
 import pytest
 
 from swe_forge.swe.github_api import (
+    DiffTooLargeError,
     ForbiddenError,
     GitHubApiError,
     GitHubClient,
@@ -339,6 +340,19 @@ class TestGitHubClient:
             await client.get_pr_diff("owner", "repo", 999)
 
     @pytest.mark.asyncio
+    async def test_get_pr_diff_too_large(self) -> None:
+        mock_response = MockResponse(
+            status=406, text_data='{"message": "diff exceeded 300 files"}'
+        )
+        mock_session = create_mock_session([mock_response])
+
+        client = GitHubClient(token="test-token")
+        client._session = mock_session
+
+        with pytest.raises(DiffTooLargeError):
+            await client.get_pr_diff("owner", "repo", 123)
+
+    @pytest.mark.asyncio
     async def test_get_rate_limit(self) -> None:
         rate_data = {
             "resources": {
@@ -476,6 +490,18 @@ class TestExceptions:
         err = ServerError(502, "Bad Gateway")
 
         assert err.status_code == 502
+
+    def test_diff_too_large_error(self) -> None:
+        err = DiffTooLargeError("Diff exceeded 300 files")
+
+        assert "diff" in str(err).lower()
+        assert err.status_code == 406
+
+    def test_diff_too_large_error_default_message(self) -> None:
+        err = DiffTooLargeError()
+
+        assert "too large" in str(err).lower()
+        assert err.status_code == 406
 
 
 class TestPRState:
