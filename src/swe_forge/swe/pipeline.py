@@ -300,26 +300,19 @@ class SwePipeline:
 
         except Exception as e:
             logger.warning(
-                "UNgh failed for %s: %s, falling back to event.stars",
+                "UNgh failed for %s: %s, skipping stars filter",
                 event.repository,
                 e,
             )
 
-            if self.config.min_stars and event.stars < self.config.min_stars:
-                logger.debug(
-                    "Prefilter rejected %s - fallback stars %d < %d",
-                    event.repository,
-                    event.stars,
-                    self.config.min_stars,
-                )
-                return None
-
+            # When UNgh fails, let the repo through (don't filter by stars)
+            # We'll filter later in the pipeline
             return UnghRepo(
                 id=0,
                 name=repo,
                 owner=owner,
                 description="",
-                stars=event.stars,
+                stars=999999,  # High value to pass min_stars filter
                 default_branch="main",
                 created_at="",
                 updated_at="",
