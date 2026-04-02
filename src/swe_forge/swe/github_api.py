@@ -9,6 +9,10 @@ Includes rate limit handling with automatic wait and retry logic.
 """
 
 import asyncio
+import os
+import shutil
+import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -125,6 +129,37 @@ class PullRequest:
 
 
 @dataclass
+class RepoInfo:
+    """Repository info from GitHub API."""
+
+    id: int
+    name: str
+    owner: str
+    full_name: str
+    description: str
+    stars: int
+    language: str | None
+    default_branch: str
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_api_response(cls, data: dict[str, Any]) -> "RepoInfo":
+        return cls(
+            id=data.get("id", 0),
+            name=data.get("name", ""),
+            owner=data.get("owner", {}).get("login", ""),
+            full_name=data.get("full_name", ""),
+            description=data.get("description", "") or "",
+            stars=data.get("stargazers_count", 0),
+            language=data.get("language"),
+            default_branch=data.get("default_branch", "main"),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+        )
+
+
+@dataclass
 class PRFile:
     """Changed file in a pull request."""
 
@@ -195,6 +230,7 @@ class GitHubClient:
         self.timeout = timeout
         self._session: aiohttp.ClientSession | None = None
         self._rate_limit_info: RateLimitInfo | None = None
+        self._rate_limit_remaining: int = 5000  # Track remaining API calls
 
     def _headers(
         self, accept: str = "application/vnd.github.v3+json"
@@ -413,6 +449,220 @@ class GitHubClient:
         _, _, text = await self._request("GET", url, headers=headers)
         return text
 
+    async def get_pr_diff_via_sparse_fetch(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        base_sha: str,
+    ) -> str:
+        """Fetch PR diff using sparse git fetch (downloads only needed commits).
+
+        Uses git's partial clone feature to fetch only the PR head and base commits,
+        not the entire repository history. This is much faster for large repos.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            pr_number: Pull request number.
+            base_sha: Base commit SHA to diff against.
+
+        Returns:
+            Unified diff as a string.
+        """
+        repo_url = f"https://github.com/{owner}/{repo}.git"
+        tmpdir = tempfile.mkdtemp(prefix=f"swe-sparse-{owner}-{repo}-{pr_number}-")
+
+        try:
+            logger.info(
+                "sparse_fetch_started",
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                tmpdir=tmpdir,
+            )
+
+            # Set git config for faster operations
+            env = {
+                **os.environ,
+                "GIT_HTTP_LOW_SPEED_LIMIT": "1000",
+                "GIT_HTTP_LOW_SPEED_TIME": "30",
+            }
+
+            # Init empty repo
+            subprocess.run(
+                ["git", "init"],
+                cwd=tmpdir,
+                check=True,
+                timeout=10,
+                capture_output=True,
+            )
+
+            # Add remote
+            subprocess.run(
+                ["git", "remote", "add", "origin", repo_url],
+                cwd=tmpdir,
+                check=True,
+                timeout=10,
+                capture_output=True,
+            )
+
+            # Fetch PR head (shallow, no blobs initially)
+            subprocess.run(
+                [
+                    "git",
+                    "fetch",
+                    "--depth=1",
+                    "--filter=blob:none",
+                    "origin",
+                    f"refs/pull/{pr_number}/head:pr-head",
+                ],
+                cwd=tmpdir,
+                check=True,
+                timeout=30,
+                capture_output=True,
+                env=env,
+            )
+
+            # Fetch base commit (shallow, no blobs initially)
+            subprocess.run(
+                [
+                    "git",
+                    "fetch",
+                    "--depth=1",
+                    "--filter=blob:none",
+                    "origin",
+                    f"{base_sha}:base",
+                ],
+                cwd=tmpdir,
+                check=True,
+                timeout=30,
+                capture_output=True,
+                env=env,
+            )
+
+            # Get diff (blobs are fetched lazily only for changed files)
+            result = subprocess.run(
+                ["git", "diff", "base", "pr-head"],
+                cwd=tmpdir,
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )
+
+            diff = result.stdout.decode("utf-8", errors="replace")
+
+            logger.info(
+                "sparse_fetch_success",
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                diff_size=len(diff),
+            )
+
+            return diff
+
+        except subprocess.TimeoutExpired as e:
+            logger.warning(
+                "sparse_fetch_timeout",
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                error=str(e),
+            )
+            raise GitHubApiError(f"Sparse fetch timeout: {e}") from e
+        except subprocess.CalledProcessError as e:
+            logger.warning(
+                "sparse_fetch_failed",
+                owner=owner,
+                repo=repo,
+                pr_number=pr_number,
+                stderr=e.stderr.decode("utf-8", errors="replace") if e.stderr else "",
+            )
+            raise GitHubApiError(
+                f"Sparse fetch failed: {e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)}"
+            ) from e
+        finally:
+            try:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass
+
+    async def get_pr_diff_via_api_compare(
+        self,
+        owner: str,
+        repo: str,
+        base_sha: str,
+        head_sha: str,
+    ) -> str | None:
+        """Get diff using GitHub's compare API (fallback).
+
+        Uses GitHub's REST API compare endpoint. Consumes rate limit.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+            base_sha: Base commit SHA.
+            head_sha: Head commit SHA.
+
+        Returns:
+            Unified diff string, or None if rate limited or error.
+        """
+        # Check rate limit
+        if self._rate_limit_remaining < 100:
+            logger.warning("rate_limit_low", remaining=self._rate_limit_remaining)
+            return None
+
+        url = f"{self.BASE_URL}/repos/{owner}/{repo}/compare/{base_sha}...{head_sha}"
+        headers = self._headers()
+
+        try:
+            import json
+
+            async with self._session.get(url, headers=headers) as resp:
+                if resp.status == 403:
+                    logger.warning("api_rate_limited", owner=owner, repo=repo)
+                    return None
+
+                if resp.status != 200:
+                    logger.warning(
+                        "api_compare_error",
+                        owner=owner,
+                        repo=repo,
+                        status=resp.status,
+                    )
+                    return None
+
+                text = await resp.text()
+                data = json.loads(text)
+
+                # Build unified diff from files array
+                diff_lines = []
+                for file in data.get("files", []):
+                    filename = file.get("filename", "")
+                    diff_lines.append(f"diff --git a/{filename} b/{filename}")
+
+                    if "patch" in file:
+                        diff_lines.append(file["patch"])
+
+                diff = "\n".join(diff_lines)
+
+                logger.info(
+                    "api_compare_success",
+                    owner=owner,
+                    repo=repo,
+                    diff_size=len(diff),
+                )
+
+                # Update rate limit counter
+                self._rate_limit_remaining -= 1
+
+                return diff
+
+        except Exception as e:
+            logger.warning("api_compare_failed", owner=owner, repo=repo, error=str(e))
+            return None
+
     async def get_pr_diff_via_git(
         self,
         owner: str,
@@ -432,10 +682,6 @@ class GitHubClient:
         Returns:
             Unified diff as a string.
         """
-        import shutil
-        import subprocess
-        import tempfile
-
         repo_url = f"https://github.com/{owner}/{repo}.git"
         tmpdir = tempfile.mkdtemp(prefix=f"swe-forge-{owner}-{repo}-{number}-")
 
@@ -449,25 +695,25 @@ class GitHubClient:
             )
 
             subprocess.run(
-                ["git", "clone", "--depth=1", repo_url, tmpdir],
+                ["git", "clone", "--depth=1", "--filter=blob:none", repo_url, tmpdir],
                 capture_output=True,
                 check=True,
-                timeout=120,
+                timeout=180,
             )
 
             subprocess.run(
                 ["git", "fetch", "origin", f"pull/{number}/head:pr-{number}"],
                 capture_output=True,
                 check=True,
-                timeout=60,
+                timeout=180,
                 cwd=tmpdir,
             )
 
             result = subprocess.run(
-                ["git", "diff", f"HEAD...pr-{number}"],
+                ["git", "diff", "HEAD", f"pr-{number}"],
                 capture_output=True,
                 check=True,
-                timeout=30,
+                timeout=180,
                 cwd=tmpdir,
             )
 
@@ -670,6 +916,46 @@ class GitHubClient:
     def rate_limit_info(self) -> RateLimitInfo | None:
         """Get cached rate limit info from last request."""
         return self._rate_limit_info
+
+    async def get_repo(self, owner: str, repo: str) -> RepoInfo:
+        """Fetch repository information.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+
+        Returns:
+            RepoInfo object with repository details.
+
+        Raises:
+            NotFoundError: If repo doesn't exist.
+            GitHubApiError: For other API errors.
+        """
+        import json
+
+        url = f"{self.BASE_URL}/repos/{owner}/{repo}"
+        _, _, text = await self._request("GET", url)
+        data = json.loads(text)
+        return RepoInfo.from_api_response(data)
+
+    async def get_repo_stars(self, owner: str, repo: str) -> int:
+        """Fetch repository star count.
+
+        Convenience method that calls get_repo and extracts star count.
+
+        Args:
+            owner: Repository owner.
+            repo: Repository name.
+
+        Returns:
+            Number of stargazers (0 if error).
+        """
+        try:
+            repo_info = await self.get_repo(owner, repo)
+            return repo_info.stars
+        except Exception as e:
+            logger.warning(f"Failed to get stars for {owner}/{repo}: {e}")
+            return 0
 
 
 async def create_client(token: str | None = None) -> GitHubClient:

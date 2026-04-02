@@ -6,6 +6,8 @@ GH Archive -> Enricher -> Filter -> LLM Classify -> Extract -> Export
 Uses aggressive parallelism with semaphores controlling concurrency at each stage.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
@@ -27,12 +29,12 @@ from .gharchive import GhArchiveClient, GhArchiveEvent
 from .github_api import GitHubClient
 from .models import SweTask, SweTaskStatus
 from .test_generator import GeneratedTests
-from .ungh_client import UnghClient, UnghRepo
+from .github_api import RepoInfo
 
 from swe_forge.execution.docker_client import DockerClient
-from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
 
 if TYPE_CHECKING:
+    from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
     from swe_forge.llm.client import LLMClient
 
     from .dedup import DedupManager
@@ -188,7 +190,6 @@ class SwePipeline:
         self._filter_config = self._build_filter_config()
         self._active = False
         self._classifier: DifficultyClassifier | None = None
-        self.ungh_client = UnghClient()
 
     def _build_filter_config(self) -> FilterConfig:
         """Build filter config from pipeline config."""
@@ -221,7 +222,6 @@ class SwePipeline:
         """Enter async context manager."""
         if self.gh_archive_client._session is None:
             await self.gh_archive_client._ensure_session()
-        await self.ungh_client.__aenter__()
         self._active = True
         return self
 
@@ -229,7 +229,6 @@ class SwePipeline:
         """Exit async context manager."""
         self._active = False
         await self.gh_archive_client.close()
-        await self.ungh_client.__aexit__(exc_type, exc_val, exc_tb)
 
     async def _create_sandbox(
         self,
@@ -249,6 +248,8 @@ class SwePipeline:
             DockerSandbox instance configured with ubuntu:24.04 image.
             The sandbox is not yet started - caller must use async context manager.
         """
+        from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
+
         client = DockerClient()
         config = SandboxConfig(image="ubuntu:24.04")
         return DockerSandbox(client, config)
@@ -267,26 +268,31 @@ class SwePipeline:
         self,
         event: GhArchiveEvent,
         metrics: BenchmarkMetrics,
-    ) -> UnghRepo | None:
-        """Prefilter repository using UNgh before expensive GitHub API calls.
+    ) -> RepoInfo | None:
+        """Prefilter repository using GitHub API for reliable star data.
 
-        Uses UNgh (no rate limit) to check repository stars/language,
-        filtering out low-quality repos before making any GitHub API calls.
+        Uses GitHub API to check repository stars, ensuring accurate
+        star counts for quality filtering before expensive processing.
 
         Args:
             event: GH Archive event with repository info.
             metrics: Benchmark metrics to update.
 
         Returns:
-            UnghRepo if repo passes filters, None if rejected.
+            RepoInfo if repo passes filters, None if rejected or on error.
         """
-        parts = event.repository.split("/", 1)
-        owner = parts[0]
-        repo = parts[1] if len(parts) > 1 else ""
-
         try:
-            repo_info = await self.ungh_client.get_repo(owner, repo)
+            parts = event.repository.split("/", 1)
+            owner = parts[0]
+            repo = parts[1] if len(parts) > 1 else ""
 
+            # Use GitHub API for reliable star data
+            repo_info = await self.gh_client.get_repo(owner, repo)
+
+            # Update event stars from API response
+            event.stars = repo_info.stars
+
+            # Check star requirement
             if self.config.min_stars and repo_info.stars < self.config.min_stars:
                 logger.debug(
                     "Prefilter rejected %s - stars %d < %d",
@@ -299,24 +305,9 @@ class SwePipeline:
             return repo_info
 
         except Exception as e:
-            logger.warning(
-                "UNgh failed for %s: %s, skipping stars filter",
-                event.repository,
-                e,
-            )
-
-            # When UNgh fails, let the repo through (don't filter by stars)
-            # We'll filter later in the pipeline
-            return UnghRepo(
-                id=0,
-                name=repo,
-                owner=owner,
-                description="",
-                stars=999999,  # High value to pass min_stars filter
-                default_branch="main",
-                created_at="",
-                updated_at="",
-            )
+            logger.warning("GitHub API failed for %s: %s", event.repository, e)
+            # Return None on error (reject the repo)
+            return None
 
     async def _enrich_stage(
         self,
@@ -328,6 +319,9 @@ class SwePipeline:
         async with semaphore:
             try:
                 enriched = await enrich_pr(event, self.gh_client)
+                if enriched is None:
+                    metrics.enrichment_failed += 1
+                    return None
                 metrics.enriched_count += 1
                 return enriched
             except Exception as e:
@@ -348,8 +342,10 @@ class SwePipeline:
         """Stage 2: Apply local filters (pure Python, fast)."""
         passed = apply_filters(enriched, self._filter_config)
         if passed:
+            logger.info(f"Filter passed: {enriched.repo}#{enriched.number}")
             metrics.filter_passed += 1
         else:
+            logger.info(f"Filter rejected: {enriched.repo}#{enriched.number}")
             metrics.filter_rejected += 1
         return passed
 
@@ -411,11 +407,9 @@ class SwePipeline:
         Returns:
             Difficulty string ("easy", "medium", "hard") or None on skip/error.
         """
-        # Conservative: skip if missing title or body
-        if not event.title or not event.body:
-            metrics.early_triage_skip_count += 1
+        if not event.title or event.title == "Untitled change":
             logger.debug(
-                "Skipping early triage for %s#%d - missing title/body",
+                "No title for %s#%d, skipping early triage (processing at enrichment)",
                 event.repository,
                 event.pull_number,
             )
