@@ -65,48 +65,36 @@ LANGUAGE: {language}
 REPO: {repo_url}
 """
 
-TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "shell",
-            "description": "Execute a shell command in the Docker container. Returns stdout+stderr and exit code.",
-            "parameters": {
+def _get_tools():
+    from swe_forge.llm.client import ToolDefinition
+    return [
+        ToolDefinition.create(
+            "shell",
+            "Execute a shell command in the Docker container. Returns stdout+stderr and exit code.",
+            {
                 "type": "object",
                 "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "The shell command to execute",
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "Timeout in seconds (default 300)",
-                    },
+                    "command": {"type": "string", "description": "The shell command to execute"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds (default 300)"},
                 },
                 "required": ["command"],
             },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read a file from the container.",
-            "parameters": {
+        ),
+        ToolDefinition.create(
+            "read_file",
+            "Read a file from the container.",
+            {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Absolute path in the container"},
                 },
                 "required": ["path"],
             },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "done",
-            "description": "Signal that setup is complete. Call with success=true when fail_to_pass FAIL on base AND PASS after patch.",
-            "parameters": {
+        ),
+        ToolDefinition.create(
+            "done",
+            "Signal that setup is complete. Call with success=true when fail_to_pass FAIL on base AND PASS after patch.",
+            {
                 "type": "object",
                 "properties": {
                     "success": {"type": "boolean"},
@@ -114,9 +102,8 @@ TOOLS = [
                 },
                 "required": ["success"],
             },
-        },
-    },
-]
+        ),
+    ]
 
 
 def _docker_exec(container: str, cmd: str, timeout: int = SHELL_TIMEOUT) -> tuple[int, str]:
@@ -259,7 +246,7 @@ class DockerSetupAgent:
         install_commands: list[str],
     ) -> bool:
         """Run the LLM agent loop to set up the environment."""
-        from swe_forge.llm import Message
+        from swe_forge.llm.client import GenerationRequest, Message
 
         system = SYSTEM_PROMPT.format(
             max_turns=self._max_turns,
@@ -269,30 +256,33 @@ class DockerSetupAgent:
             repo_url=repo_url,
         )
 
-        messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
-        messages.append({"role": "user", "content": (
-            f"Set up this repo and validate the tests. Start by exploring the repo structure "
-            f"to understand what language/framework is used, then install dependencies."
-        )})
+        tools = _get_tools()
+        messages: list[Message] = [
+            Message.system(system),
+            Message.user(
+                "Set up this repo and validate the tests. Start by exploring the repo structure "
+                "to understand what language/framework is used, then install dependencies."
+            ),
+        ]
 
         for turn in range(self._max_turns):
-            response = await self._llm.chat(
-                messages=messages,
+            request = GenerationRequest(
                 model=self._model,
-                tools=TOOLS,
+                messages=messages,
+                tools=tools,
                 temperature=0.2,
                 max_tokens=4096,
             )
+            response = await self._llm.complete_with_tools(request)
 
             msg = response.choices[0].message
-            messages.append(msg.model_dump(exclude_none=True))
+            messages.append(msg)
 
             if not msg.tool_calls:
-                # Model responded with text, no tool call -- nudge it
                 if msg.content and ("done" in msg.content.lower() or "success" in msg.content.lower()):
-                    messages.append({"role": "user", "content": "You must call the done() tool to finish."})
+                    messages.append(Message.user("You must call the done() tool to finish."))
                 else:
-                    messages.append({"role": "user", "content": "Continue. Use tools to make progress."})
+                    messages.append(Message.user("Continue. Use tools to make progress."))
                 continue
 
             for tc in msg.tool_calls:
@@ -326,11 +316,7 @@ class DockerSetupAgent:
                 else:
                     tool_result = f"Unknown tool: {fn}"
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": tool_result[:8000],
-                })
+                messages.append(Message(role="tool", content=tool_result[:8000], tool_call_id=tc.id))
 
         logger.warning("[%s] Agent exhausted %d turns", task_id, self._max_turns)
         return False

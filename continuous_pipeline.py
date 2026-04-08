@@ -80,7 +80,7 @@ def build_and_push_docker(task_dir: Path) -> bool:
     try:
         sys.path.insert(0, "src")
         from swe_forge.agents.docker_setup_agent import DockerSetupAgent
-        from swe_forge.llm import OpenRouterClient
+        from swe_forge.llm.openrouter import OpenRouterClient
 
         openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
         if not openrouter_key:
