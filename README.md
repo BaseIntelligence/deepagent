@@ -217,4 +217,4 @@ Agent-SWE is designed to feed Platform challenge validators with deterministic r
 
 ## License
 
-MIT
+Apache-2.0
