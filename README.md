@@ -2,7 +2,7 @@
 
 # αgεηt SWE
 
-**Synthetic software engineering benchmark generator for Platform agents**
+**Real-code software engineering benchmarks for Platform agents**
 
 [![License](https://img.shields.io/github/license/PlatformNetwork/Agent-SWE)](https://github.com/PlatformNetwork/Agent-SWE/blob/main/LICENSE)
 [![Platform SDK](https://img.shields.io/badge/Platform-SDK-black)](https://github.com/PlatformNetwork/platform)
@@ -13,45 +13,55 @@
 
 </div>
 
-Agent SWE is a Platform benchmark toolkit for building, exporting, and evaluating software engineering agent tasks. It extends SWE-Forge with a Cursor-style synthetic task pipeline: start from a real repository, delete a testable feature, then ask an agent to restore the behavior using tests as the reward signal.
+Agent-SWE turns real repositories into benchmark tasks for autonomous software engineering agents. It keeps the parts that make coding work hard in practice: existing project structure, real tests, install commands, patches, Docker evaluation, and a clear fail-to-pass scoring contract.
 
-The project can mine real GitHub pull requests, generate synthetic feature-deletion tasks, export benchmark workspaces, and run Docker-based evaluation against gold or model-generated patches.
+The synthetic task pipeline is inspired by Cursor's public writing on Composer, Composer 2, and Composer 2.5. Cursor described training coding agents on tasks grounded in real codebases, including a feature-deletion style setup: remove a testable behavior, ask the agent to restore it, and use tests as the reward signal. Agent-SWE adapts that idea into an open benchmark-generation workflow for Platform agents.
 
-## What Agent SWE Does
+This project is not affiliated with Cursor. It is an implementation inspired by the public methodology described in their posts and reports.
 
-Agent SWE creates reproducible benchmark tasks for autonomous coding agents:
+## Why Agent-SWE Exists
 
-1. Select a real repository or pull request.
-2. Discover install and test commands.
-3. Generate or select fail-to-pass and pass-to-pass tests.
-4. Export a task workspace with hidden solution artifacts.
-5. Evaluate a gold patch or model patch in an isolated environment.
-6. Produce task scores that can be consumed by Platform challenge validators.
+Most coding benchmarks are either real but scarce, or synthetic but too detached from real development. Agent-SWE aims for the middle ground: tasks are synthetic enough to scale, but grounded enough that agents still need to inspect a real repository, understand context, edit code, and run tests.
 
-## Key Features
+A good Agent-SWE task should answer three questions:
 
-- Real PR mining from GH Archive and GitHub metadata.
-- Synthetic Cursor-style feature deletion tasks.
-- Docker verification for fail-to-pass and pass-to-pass tests.
-- Workspace export with `workspace.yaml`, `patch.diff`, tests, and optional `deletion_patch.diff`.
-- JSONL and Parquet exports for benchmark datasets.
-- Simple CLI commands for mining, synthetic generation, and evaluation.
+1. Can the agent understand the existing codebase?
+2. Can it restore the intended behavior without seeing the oracle patch?
+3. Can the result pass both targeted reward tests and regression tests?
 
-## Evaluation Flow
+## Inspired by Cursor Composer
+
+Cursor's Composer work is the main public inspiration for the synthetic path in Agent-SWE:
+
+- [Composer: Building a fast frontier model with RL](https://cursor.com/blog/composer)
+- [Introducing Composer 2](https://cursor.com/blog/composer-2)
+- [A technical report on Composer 2](https://cursor.com/blog/composer-2-technical-report)
+- [Composer 2 Technical Report PDF](https://cursor.com/resources/Composer2.pdf)
+- [Introducing Composer 2.5](https://cursor.com/blog/composer-2-5)
+
+The important idea is simple: instead of only collecting issues and pull requests, generate new tasks from real repositories. In the feature-deletion variant, a known behavior is removed from the codebase, the inverse patch becomes the oracle solution, and tests define whether the agent recovered the behavior.
+
+Agent-SWE currently implements this idea for Python functions and methods. It keeps the public signature, replaces the body with a synthetic failure, writes that mutation to `deletion_patch.diff`, and stores the inverse repair as `patch.diff`.
+
+## What Agent-SWE Does
+
+Agent-SWE supports two sources of benchmark tasks:
+
+1. **Real pull requests** mined from GitHub and converted into SWE-style workspaces.
+2. **Synthetic feature-deletion tasks** generated from real repositories, inspired by the public Composer 2.5 training method.
+
+Both flows export a workspace that can be evaluated in Docker. The agent being tested should never see the oracle patch or hidden benchmark files.
 
 ```mermaid
 flowchart LR
-    Repo[Real repo or PR] --> Task[Task generation]
-    Task --> Tests[Test discovery]
-    Tests --> Export[Workspace export]
-    Export --> Eval[Docker evaluation]
-    Eval --> Score[Task score]
-    Score --> Platform[Platform weights]
+    Repo[Real repo] --> Build[Build task]
+    Build --> Export[Export workspace]
+    Export --> Run[Docker eval]
+    Run --> Score[Task score]
+    Score --> Plat[Platform]
 ```
 
-For synthetic tasks, Agent SWE applies `deletion_patch.diff` first, verifies that reward tests fail, applies the candidate or oracle patch, and then verifies that reward and regression tests pass.
-
-## Installation
+## Install
 
 ```bash
 git clone https://github.com/PlatformNetwork/Agent-SWE.git
@@ -59,18 +69,18 @@ cd Agent-SWE
 pip install -e ".[dev]"
 ```
 
-## Environment
+Set the tokens used by the mining and LLM-assisted parts of the pipeline:
 
 ```bash
 export GITHUB_TOKEN="ghp_..."
 export OPENROUTER_API_KEY="************"
 ```
 
-`GITHUB_TOKEN` is used for GitHub enrichment. `OPENROUTER_API_KEY` is used for LLM-backed classification and test generation.
-
 ## Commands
 
-### Mine Real PR Tasks
+### Mine real PR tasks
+
+Use this when you want SWE-bench style tasks from GitHub pull requests.
 
 ```bash
 swe-forge mine mine \
@@ -80,7 +90,9 @@ swe-forge mine mine \
   --parallel 8
 ```
 
-### Verify One Pull Request
+### Verify one pull request end-to-end
+
+Use this for a known repository and PR number.
 
 ```bash
 swe-forge mine complete \
@@ -90,7 +102,9 @@ swe-forge mine complete \
   --model openai/gpt-5.4
 ```
 
-### Generate a Synthetic Feature-Deletion Task
+### Generate a synthetic feature-deletion task
+
+Use this when you already have a local checkout and know which Python function or method should be removed.
 
 ```bash
 git clone https://github.com/owner/repo.git ./target-repo
@@ -108,7 +122,9 @@ swe-forge synthetic generate \
   --overwrite
 ```
 
-### Evaluate Gold Patches
+### Evaluate the oracle patch
+
+Use this to confirm that a generated task is valid with its gold solution.
 
 ```bash
 python3 scripts/run_evaluation.py \
@@ -117,7 +133,9 @@ python3 scripts/run_evaluation.py \
   --max_workers 4
 ```
 
-### Evaluate Model Predictions
+### Evaluate model predictions
+
+Use this after an agent has produced patches.
 
 ```bash
 python3 scripts/run_evaluation.py \
@@ -125,7 +143,7 @@ python3 scripts/run_evaluation.py \
   --max_workers 4
 ```
 
-`predictions.jsonl` must contain one prediction per line:
+`predictions.jsonl` contains one prediction per line:
 
 ```json
 {"instance_id": "owner-repo-1234", "model_patch": "diff --git a/..."}
@@ -133,7 +151,7 @@ python3 scripts/run_evaluation.py \
 
 ## Workspace Format
 
-When `--output-folder` is used, tasks are exported as directories:
+A task workspace is the portable benchmark unit:
 
 ```text
 tasks/
@@ -147,44 +165,24 @@ tasks/
     └── evaluate.sh
 ```
 
-`patch.diff` is the oracle solution and must be hidden from agents. `deletion_patch.diff` exists only for synthetic feature-deletion tasks and is applied before evaluation.
+The files have different audiences:
 
-Example `workspace.yaml`:
+- `workspace.yaml` describes the task, repo, install commands, tests, and synthetic metadata.
+- `patch.diff` is the oracle solution and must be hidden from the evaluated agent.
+- `deletion_patch.diff` is the synthetic mutation applied before evaluation.
+- `tests/` contains generated or extracted benchmark tests.
+- `evaluate.sh` is a simple local scoring script.
 
-```yaml
-task_id: owner-repo-1234
-repo:
-  url: https://github.com/owner/repo.git
-  base_commit: abc123def456
-  merge_commit: abc123def456
-language: python
-prompt: Restore the deleted behavior for `target_function`.
-install:
-  commands:
-    - pip install -e .
-tests:
-  fail_to_pass:
-    - pytest tests/test_target.py -v
-  pass_to_pass:
-    - pytest tests/ -v
-synthetic:
-  source_type: synthetic_feature_deletion
-  deletion_patch_file: deletion_patch.diff
-  strategy: feature_deletion
-```
+For details, read [docs/architecture/workspace-format.md](docs/architecture/workspace-format.md).
 
-## Synthetic Task Method
+## Documentation
 
-The synthetic pipeline follows the public Cursor Composer 2.5-style feature-deletion method:
+The architecture docs explain how the pieces fit together:
 
-1. Start from a real repository with tests.
-2. Replace a target Python function or method body with a synthetic failure.
-3. Store the mutation as `deletion_patch.diff`.
-4. Store the inverse patch as `patch.diff`.
-5. Use supplied tests as the reward contract.
-6. Export the task for isolated evaluation.
-
-This makes the benchmark grounded in real code while preserving an objective fail-to-pass signal.
+- [Architecture overview](docs/architecture/README.md)
+- [Synthetic feature deletion](docs/architecture/synthetic-feature-deletion.md)
+- [Workspace format](docs/architecture/workspace-format.md)
+- [Evaluation flow](docs/architecture/evaluation.md)
 
 ## Development
 
@@ -201,6 +199,8 @@ pytest tests/ -v
 Agent-SWE/
 ├── assets/
 ├── datasets/
+├── docs/
+│   └── architecture/
 ├── scripts/
 ├── src/swe_forge/
 │   ├── cli/
@@ -213,7 +213,7 @@ Agent-SWE/
 
 ## Platform Integration
 
-Agent SWE is designed to feed Platform challenge validators with deterministic repository-repair tasks. Validators can use exported workspaces or JSONL predictions to run isolated evaluations and convert task completion rates into raw challenge scores.
+Agent-SWE is designed to feed Platform challenge validators with deterministic repository-repair tasks. Validators can sample tasks, run agent patches in isolated workspaces, and turn task completion rates into raw challenge scores for Platform.
 
 ## License
 
