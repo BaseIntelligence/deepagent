@@ -117,6 +117,8 @@ class TestSweTask:
     def test_default_values(self):
         task = SweTask(id="test", repo="owner/repo")
         assert task.language == "unknown"
+        assert task.source_type == "github_pr"
+        assert task.deletion_patch == ""
         assert task.difficulty_score == 1
         assert task.quality_passed is False
         assert task.docker_passed is False

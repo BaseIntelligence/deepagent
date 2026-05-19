@@ -33,7 +33,7 @@ swe-forge connects to [GH Archive](https://www.gharchive.org/) to discover recen
 | 📦 **Docker Verification** | Verifies tests in Docker before export |
 | ⚡ **Full Parallelism** | GH Archive 8x, enrichment 20x, Docker 8x concurrent |
 | 🧠 **Smart Compaction** | 200k context limit with structured summary templates |
-| 📊 **Complete Export** | workspace.yaml + patch.diff + tests/ directory |
+| 📊 **Complete Export** | workspace.yaml + patch.diff + optional deletion_patch.diff + tests/ directory |
 
 ---
 
@@ -71,38 +71,42 @@ export GITHUB_TOKEN="ghp_..."           # GitHub PAT for PR enrichment
 export OPENROUTER_API_KEY="sk-or-v1-..." # OpenRouter API key for LLM
 ```
 
-### Mine Tasks from GH Archive
+### Mine PR Tasks
 
 ```bash
-# Mine 10 tasks with workspace export
 swe-forge mine mine \
-  --limit 10 \
+  --target 10 \
   --output ./tasks.jsonl \
   --output-folder ./tasks \
-  --docker-username myuser \
   --parallel 8
-
-# Mine with difficulty filter
-swe-forge mine mine \
-  --limit 5 \
-  --difficulty hard \
-  --min-stars 100
-
-# Mine specific repository
-swe-forge mine mine \
-  --repo python/cpython \
-  --limit 3
 ```
 
-### Complete Mining with Docker Verification
+### Verify One Pull Request End-to-End
 
 ```bash
-# Full A-Z pipeline with test verification
 swe-forge mine complete \
   --repo owner/repo \
   --pr 12345 \
   --output ./tasks.jsonl \
   --model openai/gpt-5.4
+```
+
+### Generate a Synthetic Feature-Deletion Benchmark Task
+
+```bash
+git clone https://github.com/owner/repo.git ./target-repo
+
+swe-forge synthetic generate \
+  --repo-path ./target-repo \
+  --repo owner/repo \
+  --source-file src/package/module.py \
+  --symbol target_function \
+  --fail-to-pass "pytest tests/test_target.py -v" \
+  --pass-to-pass "pytest tests/ -v" \
+  --install-command "pip install -e ." \
+  --output-folder ./synthetic_tasks \
+  --output-jsonl ./synthetic_tasks.jsonl \
+  --overwrite
 ```
 
 ---
@@ -116,6 +120,7 @@ tasks/
 ├── owner-repo-1234/
 │   ├── workspace.yaml      # Complete task configuration
 │   ├── patch.diff          # PR patch to apply
+│   ├── deletion_patch.diff # Synthetic mutation patch, when source_type is synthetic
 │   ├── test_patch.diff     # Test file changes
 │   └── tests/              # Extracted test files
 │       ├── test_feature.py
@@ -148,49 +153,14 @@ tests:
     - pytest tests/test_another.py::test_case -v
   pass_to_pass:
     - pytest tests/ -v --ignore=tests/test_feature.py
+synthetic:
+  source_type: synthetic_feature_deletion
+  deletion_patch_file: deletion_patch.diff
+  strategy: feature_deletion
 docker:
   image: myuser/swe-forge-tasks:owner-repo-1234
   build: true
 ```
-
----
-
-## CLI Reference
-
-### `swe-forge mine mine` - Mine from GH Archive
-
-```bash
-swe-forge mine mine [OPTIONS]
-```
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--repo` | `-r` | All | Target repository (owner/repo format) |
-| `--limit` | `-l` | 10 | Maximum tasks to mine |
-| `--output` | `-o` | ./tasks.jsonl | Output JSONL file |
-| `--output-folder` | `-O` | None | Output folder for workspace format |
-| `--docker-username` | `-D` | None | Docker Hub username for image names |
-| `--parallel` | `-p` | 8 | Concurrent Docker containers |
-| `--difficulty` | `-d` | All | Filter: easy, medium, hard |
-| `--model` | `-m` | moonshotai/kimi-k2.5 | LLM model for classification |
-| `--min-stars` | | 100 | Minimum repository stars |
-| `--language` | | python | Filter by language |
-| `--filter` | `-f` | {"easy":10,"medium":10,"hard":10} | JSON max tasks per difficulty |
-| `--verbose` | `-v` | False | Enable verbose logging |
-
-### `swe-forge mine complete` - Full Pipeline with Verification
-
-```bash
-swe-forge mine complete [OPTIONS]
-```
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--repo` | `-r` | Required | Target repository (owner/repo) |
-| `--pr` | `-p` | Required | Pull request number |
-| `--output` | `-o` | ./tasks.jsonl | Output file |
-| `--model` | `-m` | openai/gpt-5.4 | LLM model |
-| `--verbose` | `-v` | False | Verbose logging |
 
 ---
 
@@ -342,39 +312,23 @@ This preserves critical context across long agentic sessions.
 ### Setup
 
 ```bash
-# Clone and install dev dependencies
 git clone https://github.com/CortexLM/swe-forge.git
 cd swe-forge
 pip install -e ".[dev]"
-
-# Install pre-commit hooks
-pre-commit install
 ```
 
 ### Testing
 
 ```bash
-# Run all tests
 pytest tests/ -v
-
-# Run specific test module
-pytest tests/test_swe/test_pipeline.py -v
-
-# Run with coverage
-pytest tests/ --cov=src/swe_forge --cov-report=html
 ```
 
 ### Code Quality
 
 ```bash
-# Format
-ruff format src/
-
-# Lint
-ruff check src/
-
-# Type check
-pyright src/
+ruff format src/ tests/
+ruff check src/ tests/
+mypy src/
 ```
 
 ---
@@ -473,23 +427,7 @@ The published dataset `CortexLM/swe-forge` on HuggingFace contains task instance
 #### CLI Usage
 
 ```bash
-# Test a specific task by ID
-python scripts/test_task.py --task-id pydantic-pydantic-12985
-
-# Test 5 random tasks
-python scripts/test_task.py --random 5
-
-# Test all tasks and save results
-python scripts/test_task.py --all --output results.json
-
-# With verbose output
-python scripts/test_task.py --task-id pydantic-pydantic-12985 -v
-```
-
-Or use the shell wrapper:
-
-```bash
-./scripts/test_task.sh --random 5
+python scripts/test_task.py --task-id pydantic-pydantic-12985 --output results.json -v
 ```
 
 #### Docker Sandbox
@@ -527,20 +465,16 @@ SWE-Forge provides a Docker-based evaluation harness for benchmarking model-gene
 ### Installation
 
 ```bash
-pip install datasets  # For HuggingFace dataset loading
+pip install datasets
 ```
 
 ### Quick Start
 
 ```bash
-# Evaluate gold patches (ground truth) on a specific task
-python3 scripts/run_evaluation.py --predictions_path gold --instance_ids pydantic-pydantic-12985
-
-# Evaluate on 5 random tasks
-python3 scripts/run_evaluation.py --predictions_path gold --random 5
-
-# Evaluate all tasks
-python3 scripts/run_evaluation.py --predictions_path gold --max_workers 8
+python3 scripts/run_evaluation.py \
+  --predictions_path gold \
+  --instance_ids pydantic-pydantic-12985 \
+  --max_workers 4
 ```
 
 ### Prediction Format
@@ -555,7 +489,9 @@ Create a JSONL file with model predictions:
 Then evaluate:
 
 ```bash
-python3 scripts/run_evaluation.py --predictions_path predictions.jsonl --max_workers 4
+python3 scripts/run_evaluation.py \
+  --predictions_path predictions.jsonl \
+  --max_workers 4
 ```
 
 ### Evaluation Flow
@@ -677,20 +613,12 @@ Each task is verified in an isolated Docker container:
 ### CLI Options
 
 ```bash
-# Mining with quality control (default)
-swe-forge mine mine --limit 100
-
-# Adjust minimum complexity
-swe-forge mine mine --min-complexity 0.30
-
-# Skip Docker verification (faster, less reliable)
-swe-forge mine mine --no-verify
-
-# Skip complexity check (faster, accepts trivial tasks)
-swe-forge mine mine --skip-complexity
-
-# Use different model for evaluation
-swe-forge mine mine --complexity-model openai/gpt-4
+swe-forge mine mine \
+  --target 100 \
+  --min-complexity 0.30 \
+  --complexity-model openai/gpt-4 \
+  --output ./tasks.jsonl \
+  --output-folder ./tasks
 ```
 
 ### Revalidation Script
@@ -698,20 +626,11 @@ swe-forge mine mine --complexity-model openai/gpt-4
 Revalidate existing tasks to filter out invalid ones:
 
 ```bash
-# Revalidate all tasks
-python scripts/revalidate_tasks.py --tasks-dir ./tasks
-
-# Skip Docker verification (complexity only)
-python scripts/revalidate_tasks.py --tasks-dir ./tasks --no-verification
-
-# Limit to N tasks
-python scripts/revalidate_tasks.py --tasks-dir ./tasks --limit 10
-
-# Custom threshold
-python scripts/revalidate_tasks.py --tasks-dir ./tasks --min-complexity 0.30
-
-# Output report
-python scripts/revalidate_tasks.py --tasks-dir ./tasks --report report.json
+python scripts/revalidate_tasks.py \
+  --tasks-dir ./tasks \
+  --limit 10 \
+  --min-complexity 0.30 \
+  --report report.json
 ```
 
 ### Expected Results

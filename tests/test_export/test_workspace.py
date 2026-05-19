@@ -1,9 +1,6 @@
 """Tests for workspace export dedup functionality."""
 
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from swe_forge.swe.models import SweTask
 from swe_forge.export.workspace import export_task_to_workspace
@@ -71,3 +68,29 @@ class TestWorkspaceExportDedup:
         assert result == tmp_path / task.id
         assert (result / "workspace.yaml").exists()
         assert (result / "patch.diff").exists()
+
+    def test_export_writes_synthetic_deletion_patch(self, tmp_path: Path):
+        task = SweTask(
+            id="owner-repo-synth",
+            repo="owner/repo",
+            base_commit="abc123",
+            merge_commit="abc123",
+            language="python",
+            source_type="synthetic_feature_deletion",
+            prompt="Restore deleted feature",
+            patch="diff --git a/pkg.py b/pkg.py\n--- a/pkg.py\n+++ b/pkg.py\n",
+            deletion_patch="diff --git a/pkg.py b/pkg.py\n--- a/pkg.py\n+++ b/pkg.py\n",
+            fail_to_pass=["pytest tests/test_pkg.py -v"],
+            meta={"strategy": "feature_deletion"},
+        )
+
+        result = export_task_to_workspace(task, tmp_path)
+
+        assert result is not None
+        assert (result / "deletion_patch.diff").exists()
+        workspace = (result / "workspace.yaml").read_text()
+        assert "synthetic_feature_deletion" in workspace
+        assert "deletion_patch.diff" in workspace
+        assert (
+            "Applying synthetic deletion patch" in (result / "evaluate.sh").read_text()
+        )

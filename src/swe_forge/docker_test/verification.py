@@ -97,6 +97,7 @@ async def verify_patch_fixes_issue(
     patch: str,
     fail_to_pass: Sequence[str],
     pass_to_pass: Sequence[str] | None = None,
+    deletion_patch: str = "",
     install_commands: Sequence[str] | None = None,
     test_files: Sequence[TestFile] | None = None,
     *,
@@ -110,10 +111,11 @@ async def verify_patch_fixes_issue(
     The verification logic:
     1. Clone repo at base commit
     2. Write test files (if provided)
-    3. Run fail_to_pass tests - they MUST FAIL (proves bug exists)
-    4. Apply patch
-    5. Run fail_to_pass tests - they MUST PASS (proves fix works)
-    6. Run pass_to_pass tests - they MUST PASS (no regression)
+    3. Apply deletion_patch for synthetic tasks (if provided)
+    4. Run fail_to_pass tests - they MUST FAIL (proves bug exists)
+    5. Apply patch
+    6. Run fail_to_pass tests - they MUST PASS (proves fix works)
+    7. Run pass_to_pass tests - they MUST PASS (no regression)
 
     This function supports pre-built Docker images. If workspace_config is
     provided and contains docker.prebuilt=True, the pre-built image is used
@@ -124,6 +126,7 @@ async def verify_patch_fixes_issue(
         repo_url: Repository URL
         base_commit: Base commit SHA
         patch: Unified diff patch to apply
+        deletion_patch: Optional synthetic mutation patch to apply before tests
         fail_to_pass: Tests that should fail before, pass after
         pass_to_pass: Tests that should pass both before and after
         install_commands: Commands to install dependencies
@@ -217,6 +220,19 @@ async def verify_patch_fixes_issue(
                 for tf in test_files:
                     await sandbox.write_file(tf.path, tf.content)
                     logger.debug(f"Wrote test file: {tf.path}")
+
+            if deletion_patch:
+                logger.info("Applying synthetic deletion patch")
+                deletion_applied = await harness.apply_patch(sandbox, deletion_patch)
+                if not deletion_applied:
+                    return VerificationResult(
+                        passed=False,
+                        before_passed=False,
+                        after_passed=False,
+                        before_output="",
+                        after_output="",
+                        error="Failed to apply deletion patch",
+                    )
 
             before_result = await _run_fail_to_pass_tests(
                 sandbox, fail_to_pass, test_timeout
@@ -452,9 +468,13 @@ async def verify_workspace(
 
     # Load patch
     patch_path = workspace_path / "patch.diff"
+    deletion_patch_path = workspace_path / "deletion_patch.diff"
     patch = ""
     if patch_path.exists():
         patch = patch_path.read_text()
+    deletion_patch = ""
+    if deletion_patch_path.exists():
+        deletion_patch = deletion_patch_path.read_text()
 
     if not patch:
         return VerificationResult(
@@ -471,6 +491,7 @@ async def verify_workspace(
         repo_url=repo_url,
         base_commit=base_commit,
         patch=patch,
+        deletion_patch=deletion_patch,
         fail_to_pass=fail_to_pass,
         pass_to_pass=pass_to_pass,
         install_commands=install_commands,

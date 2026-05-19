@@ -144,16 +144,26 @@ def generate_evaluate_script(
     install_commands: list[str],
     base_commit: str,
     repo_url: str,
+    deletion_patch: str = "",
 ) -> Path:
     """Generate evaluate.sh that scores a task 0 or 1.
 
     Phases:
       1. Clone repo at base_commit, install deps, copy test files
-      2. BEFORE PATCH: fail_to_pass must FAIL, pass_to_pass must PASS
-      3. AFTER PATCH (git apply patch.diff): all tests must PASS
-      4. Output {"score": 1} if everything matches, {"score": 0} otherwise
+      2. Apply deletion_patch.diff when present for synthetic tasks
+      3. BEFORE PATCH: fail_to_pass must FAIL, pass_to_pass must PASS
+      4. AFTER PATCH (git apply patch.diff): all tests must PASS
+      5. Output {"score": 1} if everything matches, {"score": 0} otherwise
     """
     script_path = task_dir / "evaluate.sh"
+    if deletion_patch:
+        deletion_patch_path = task_dir / "deletion_patch.diff"
+        if not deletion_patch_path.exists():
+            deletion_patch_path.write_text(
+                deletion_patch
+                if deletion_patch.endswith("\n")
+                else deletion_patch + "\n"
+            )
 
     def _sh_escape(s: str) -> str:
         return s.replace("'", "'\\''")
@@ -227,6 +237,17 @@ cd "$REPO_PATH"
 git checkout {base_commit} --force 2>/dev/null
 git clean -fdx 2>/dev/null
 
+if [ -s "$FORGE_PATH/deletion_patch.diff" ]; then
+  echo "Applying synthetic deletion patch..."
+  if ! git apply "$FORGE_PATH/deletion_patch.diff" 2>/dev/null; then
+    if ! git apply --3way "$FORGE_PATH/deletion_patch.diff" 2>/dev/null; then
+      echo "ERROR: Could not apply deletion patch"
+      echo '{{"score": 0}}'
+      exit 0
+    fi
+  fi
+fi
+
 # Copy test files into repo if needed
 if [ -d "$FORGE_PATH/tests" ]; then
   mkdir -p "$REPO_PATH/forge_tests"
@@ -293,7 +314,6 @@ fi
 
 
 def verify_task_in_docker(task_dir: Path, timeout: int = 300) -> dict:
-    import tempfile
     import yaml
 
     workspace_path = task_dir / "workspace.yaml"

@@ -97,6 +97,10 @@ class SweTask(BaseModel):
     difficulty_score: int = Field(default=1, ge=0, le=255)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     patch: str = ""
+    deletion_patch: str = Field(
+        default="",
+        description="Synthetic mutation patch applied before candidate solutions.",
+    )
     test_patch: str = ""
     fail_to_pass: list[str] = Field(default_factory=list)
     pass_to_pass: list[str] = Field(default_factory=list)
@@ -108,31 +112,33 @@ class SweTask(BaseModel):
         default_factory=dict, description="Agentic-detected install configuration"
     )
     meta: dict[str, str] = Field(default_factory=dict)
+    source_type: str = Field(
+        default="github_pr",
+        description="Task provenance, e.g. github_pr or synthetic_feature_deletion",
+    )
     prompt: str = ""
     dataset_prompt: str = ""
     original_pr_body: str = ""
-    
+
     # Quality control fields
     quality_score: float | None = None
     quality_passed: bool = False
     docker_passed: bool = False
-    
+
     # Complexity evaluation fields
     complexity_score: float = Field(
-        default=0.0, 
-        ge=0.0, 
+        default=0.0,
+        ge=0.0,
         le=1.0,
-        description="Complexity score from 0.0 (trivial) to 1.0 (very complex)"
+        description="Complexity score from 0.0 (trivial) to 1.0 (very complex)",
     )
     complexity_difficulty: str = Field(
-        default="",
-        description="Difficulty category: easy, medium, or hard"
+        default="", description="Difficulty category: easy, medium, or hard"
     )
     verified: bool = Field(
-        default=False,
-        description="Whether Docker verification passed"
+        default=False, description="Whether Docker verification passed"
     )
-    
+
     workspace_path: str | None = None
     status: SweTaskStatus = SweTaskStatus.CANDIDATE
 
@@ -159,13 +165,13 @@ class SweTask(BaseModel):
 
     def has_tests(self) -> bool:
         return bool(self.fail_to_pass or self.pass_to_pass)
-    
+
     def is_quality_acceptable(self, min_complexity: float = 0.25) -> bool:
         """Check if task meets quality thresholds.
-        
+
         Args:
             min_complexity: Minimum complexity score to accept
-            
+
         Returns:
             True if task passes all quality checks
         """
