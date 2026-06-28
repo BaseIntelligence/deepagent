@@ -45,15 +45,23 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle import (
     DEFAULT_KILL_THRESHOLD,
+    DEFAULT_MAX_STRENGTHEN_ROUNDS,
     DEFAULT_MAX_SYNTHESIS_ROUNDS,
+    DEFAULT_NUM_VARIANTS,
+    DifferentialError,
     EstablishError,
     FlakinessError,
     HiddenTest,
     HiddenTestFile,
     MutationError,
+    run_differential_gate,
     run_establish_gate,
     run_flakiness_gate,
     run_mutation_gate,
+)
+from swe_forge.forge.oracle.differential_synth import (
+    DifferentialKillSynthesizer,
+    TeacherVariantGenerator,
 )
 from swe_forge.forge.oracle.mutation_synth import MutationKillSynthesizer
 from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
@@ -1709,6 +1717,132 @@ def oracle_mutation(
         console.print(
             f"  mutants        : {result.mutants_killed}/{result.mutants_total} "
             f"killed (tool={tool})"
+        )
+        console.print(f"  test_files     : {[tf.path for tf in result.test_files]}")
+        if result.reasons:
+            console.print(f"  reasons        : {result.reasons}")
+
+    if not result.is_pass:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="oracle-differential")
+def oracle_differential(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the prior-gate OracleReport JSON (mutation; its F2P/P2P set).",
+    ),
+    num_variants: int = typer.Option(
+        DEFAULT_NUM_VARIANTS,
+        "--num-variants",
+        help="Plausible-but-wrong variants the teacher proposes per candidate.",
+    ),
+    max_rounds: int = typer.Option(
+        DEFAULT_MAX_STRENGTHEN_ROUNDS,
+        "--max-rounds",
+        help="Bounded test-strengthening rounds before rejecting a survivor.",
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the updated OracleReport JSON here (file or dir)."
+    ),
+    synthesize: bool = typer.Option(
+        True,
+        "--synthesize/--no-synthesize",
+        help="Auto-strengthen with separating tests when a wrong variant survives.",
+    ),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Never call the LLM (no variants/strengthening); gold-only sanity run.",
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Differential gate: only gold passes; every plausible-wrong variant fails.
+
+    Generates plausible-but-wrong variants (PatchDiff-style) and runs the
+    established F2P+P2P suite against each in throwaway DockerSandboxes. Gold must
+    pass while every behaviorally-divergent variant fails >=1 test
+    (``differential_pass=true``). A wrong variant that survives drives bounded
+    test-strengthening (teacher proposes a separating test; execution confirms it
+    fails the variant and passes gold) before the gate passes; an unresolvable
+    survivor rejects (``differential_pass=false``, non-zero exit).
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    prior_report = _load_oracle_report(report)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    variant_generator = TeacherVariantGenerator() if not offline else None
+    synthesizer = (
+        DifferentialKillSynthesizer() if (synthesize and not offline) else None
+    )
+
+    try:
+        result = asyncio.run(
+            run_differential_gate(
+                candidate_obj,
+                env_image,
+                prior_report,
+                variant_generator=variant_generator,
+                synthesizer=synthesizer,
+                num_variants=num_variants,
+                max_rounds=max_rounds,
+                adapter=adapter,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle differential: {exc}")
+    except (
+        DifferentialError,
+        MutationError,
+        FlakinessError,
+        EstablishError,
+        DockerError,
+    ) as exc:
+        _fail(f"oracle differential: {exc}")
+
+    if out:
+        _write_oracle_report(out, result)
+
+    if json_out:
+        typer.echo(json.dumps({"report": result.to_dict()}))
+    else:
+        colour = "green" if result.is_pass else "red"
+        console.print(
+            f"[{colour}]differential {result.verdict}[/{colour}] "
+            f"{result.generator} [{result.language}]"
+        )
+        diff = result.details.get("differential", {})
+        total = diff.get("variants_total", 0) if isinstance(diff, dict) else 0
+        killed = (
+            diff.get("final", {}).get("variants_killed", 0)
+            if isinstance(diff, dict) and isinstance(diff.get("final"), dict)
+            else 0
+        )
+        console.print(
+            f"  variants       : {killed}/{total} separated from gold "
+            f"(differential_pass={result.differential_pass})"
         )
         console.print(f"  test_files     : {[tf.path for tf in result.test_files]}")
         if result.reasons:
