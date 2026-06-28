@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import NoReturn
 
 import typer
 from rich.console import Console
@@ -19,6 +20,7 @@ from rich.console import Console
 from swe_forge.forge.adapters import (
     LanguageAdapter,
     NoAdapterFoundError,
+    ParseError,
     build_default_registry,
 )
 from swe_forge.forge.config import ForgeSettings
@@ -70,7 +72,7 @@ def _redact(text: str, secret: str) -> str:
     return text
 
 
-def _fail(message: str, secret: str = "") -> None:
+def _fail(message: str, secret: str = "") -> NoReturn:
     console.print(f"[red]error:[/red] {_redact(message, secret)}")
     raise typer.Exit(code=1)
 
@@ -286,6 +288,91 @@ def adapter_info(
     else:
         for record in records:
             console.print(record)
+
+
+_EXTENSION_LANGUAGE = {
+    ".py": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "javascript",
+    ".tsx": "javascript",
+    ".mts": "javascript",
+    ".cts": "javascript",
+    ".go": "go",
+}
+
+
+@app.command(name="parse-symbols")
+def parse_symbols_cmd(
+    file_path: str = typer.Argument(..., help="Path to the source file to parse."),
+    language: str | None = typer.Option(
+        None,
+        "--language",
+        help="Force an adapter (python|javascript|go); default: infer by extension.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Parse a source file's function/method symbols via its language adapter.
+
+    Returns each symbol's name, kind, file, and 1-based inclusive line span. A
+    file with no declarations yields an empty list; malformed source exits
+    non-zero with a clean parse-error reason (never a traceback).
+    """
+    path = Path(file_path)
+    if not path.is_file():
+        _fail(f"file does not exist: {file_path}")
+
+    registry = build_default_registry()
+    lang = language or _EXTENSION_LANGUAGE.get(path.suffix.lower())
+    if lang is None:
+        _fail(
+            f"cannot infer language from extension {path.suffix!r}; "
+            f"pass --language ({', '.join(registry.names())})"
+        )
+    try:
+        adapter = registry.get(lang)
+    except NoAdapterFoundError:
+        _fail(f"no adapter for language {lang!r}; known: {', '.join(registry.names())}")
+
+    try:
+        symbols = adapter.parse_symbols(path)
+    except ParseError as exc:
+        payload: dict[str, object] = {
+            "file": str(path),
+            "language": adapter.name,
+            "parse_error": True,
+            "reason": str(exc),
+        }
+        if json_out:
+            typer.echo(json.dumps(payload))
+        else:
+            console.print(f"[red]parse error:[/red] {exc}")
+        raise typer.Exit(code=1)
+
+    records = [
+        {
+            "name": s.name,
+            "kind": s.kind,
+            "file": s.file,
+            "start_line": s.start_line,
+            "end_line": s.end_line,
+            "signature": s.signature,
+        }
+        for s in symbols
+    ]
+    result = {"file": str(path), "language": adapter.name, "symbols": records}
+    if json_out:
+        typer.echo(json.dumps(result))
+        return
+    console.print(f"[bold]{adapter.name}[/bold] symbols in {path} ({len(records)}):")
+    for s in symbols:
+        console.print(
+            f"  {s.kind:8} {s.name}  L{s.start_line}-{s.end_line}"
+            + (f"  {s.signature}" if s.signature else "")
+        )
 
 
 @app.command(name="llm-check")

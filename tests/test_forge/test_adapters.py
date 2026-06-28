@@ -75,11 +75,11 @@ class FakeAdapter(LanguageAdapter):
 
 
 STUB_ADAPTERS = (PythonAdapter, JavaScriptAdapter, GoAdapter)
-# Behavior still pending later milestones (AST parse/mutate, in-Docker mutation
-# run). The build-time methods (detect/base_image/install_commands/test_command/
-# is_test_file) are implemented and covered in test_adapters_concrete.py.
+# Behavior still pending later milestones (AST mutate, in-Docker mutation run).
+# The build-time methods (detect/base_image/install_commands/test_command/
+# is_test_file) are implemented and covered in test_adapters_concrete.py;
+# parse_symbols is implemented and covered in test_adapters_parse_symbols.py.
 UNIMPLEMENTED_METHODS = (
-    "parse_symbols",
     "mutate_ast",
     "mutation_tool_run",
 )
@@ -203,9 +203,7 @@ class TestStubAdapters:
     ) -> None:
         adapter = adapter_cls()
         args: tuple[object, ...]
-        if method == "parse_symbols":
-            args = ("/repo",)
-        elif method == "mutate_ast":
+        if method == "mutate_ast":
             symbol = Symbol(
                 name="f", kind="function", file="a.py", start_line=1, end_line=2
             )

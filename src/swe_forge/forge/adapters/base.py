@@ -86,6 +86,15 @@ class AdapterError(RuntimeError):
     """Base error for the language-adapter layer."""
 
 
+class ParseError(AdapterError):
+    """Raised when an adapter cannot parse malformed source.
+
+    Distinguishes a genuine syntax error in the target file from a programming
+    error in the adapter, so callers can surface a clean "parse error" instead
+    of crashing. The message names the offending file and the underlying reason.
+    """
+
+
 class DuplicateAdapterError(AdapterError):
     """Raised when registering a second adapter under an existing name."""
 

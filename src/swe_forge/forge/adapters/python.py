@@ -11,6 +11,7 @@ raise :class:`NotImplementedError`.
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -20,6 +21,7 @@ from swe_forge.forge.adapters.base import (
     LanguageAdapter,
     MutantStats,
     MutationOp,
+    ParseError,
     Patch,
     PathLike,
     Symbol,
@@ -47,6 +49,64 @@ _REQUIREMENT_FILES = (
 )
 _BUILD_MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg")
 _TEST_FILE_RE = re.compile(r"(?:test_.*|.*_test)\.py$")
+
+_FuncDef = ast.FunctionDef | ast.AsyncFunctionDef
+
+
+def _signature(node: _FuncDef) -> str:
+    """Render ``def name(args)`` for a function/method, async-aware, no body."""
+    prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+    args = ast.unparse(node.args)
+    return f"{prefix} {node.name}({args})"
+
+
+class _SymbolCollector(ast.NodeVisitor):
+    """Collect every function/method declaration with its location.
+
+    A function is classified ``"method"`` when its nearest enclosing scope is a
+    class body and ``"function"`` otherwise; nested functions are included so
+    every mutable definition in the file is locatable. Line spans are 1-based
+    and inclusive, taken from the ``def`` line (decorators excluded) through the
+    function's last line.
+    """
+
+    def __init__(self, file: str) -> None:
+        self.file = file
+        self.symbols: list[Symbol] = []
+        self._class_depth = 0
+
+    def _add(self, node: _FuncDef) -> None:
+        self.symbols.append(
+            Symbol(
+                name=node.name,
+                kind="method" if self._class_depth > 0 else "function",
+                file=self.file,
+                start_line=node.lineno,
+                end_line=node.end_lineno or node.lineno,
+                signature=_signature(node),
+            )
+        )
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_function(node)
+
+    def _visit_function(self, node: _FuncDef) -> None:
+        self._add(node)
+        # A function body is not a class scope: its nested defs are functions.
+        saved = self._class_depth
+        self._class_depth = 0
+        for child in node.body:
+            self.visit(child)
+        self._class_depth = saved
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._class_depth += 1
+        for child in node.body:
+            self.visit(child)
+        self._class_depth -= 1
 
 
 class PythonAdapter(LanguageAdapter):
@@ -86,7 +146,18 @@ class PythonAdapter(LanguageAdapter):
         return bool(_TEST_FILE_RE.fullmatch(Path(path).name))
 
     def parse_symbols(self, file: PathLike) -> list[Symbol]:
-        raise NotImplementedError(_TODO.format(method="parse_symbols"))
+        path = Path(file)
+        source = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source, filename=str(path))
+        except SyntaxError as exc:
+            location = f"{path}:{exc.lineno or 0}"
+            raise ParseError(
+                f"failed to parse Python source {location}: {exc.msg}"
+            ) from exc
+        collector = _SymbolCollector(str(path))
+        collector.visit(tree)
+        return collector.symbols
 
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         raise NotImplementedError(_TODO.format(method="mutate_ast"))

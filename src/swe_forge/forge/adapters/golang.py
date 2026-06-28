@@ -14,6 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from swe_forge.forge.adapters._fsdetect import has_root_marker, has_source_file
+from swe_forge.forge.adapters._goast import parse_go_symbols
 from swe_forge.forge.adapters.base import (
     LanguageAdapter,
     MutantStats,
@@ -72,7 +73,7 @@ class GoAdapter(LanguageAdapter):
         return Path(path).name.endswith("_test.go")
 
     def parse_symbols(self, file: PathLike) -> list[Symbol]:
-        raise NotImplementedError(_TODO.format(method="parse_symbols"))
+        return parse_go_symbols(file)
 
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         raise NotImplementedError(_TODO.format(method="mutate_ast"))
