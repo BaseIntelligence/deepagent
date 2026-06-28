@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 _GIT_TIMEOUT = 30.0
@@ -103,3 +104,47 @@ def apply_patch(original: bytes, diff: str, rel_path: str) -> bytes:
         patch_file.write_text(diff, encoding="utf-8")
         _git(root, "apply", "--whitespace=nowarn", "--", str(patch_file))
         return target.read_bytes()
+
+
+def make_multi_patch(changes: Sequence[tuple[str, bytes, bytes]]) -> str:
+    """Return one ``git apply``-compatible diff spanning several files.
+
+    ``changes`` is a sequence of ``(rel_path, original, modified)`` triples. The
+    per-file diffs are emitted in a stable order (sorted by repo-relative path)
+    so the combined patch is byte-identical for identical inputs; files whose two
+    byte strings are equal contribute nothing. Returns ``""`` when nothing
+    changed.
+    """
+    sections: list[str] = []
+    for rel_path, original, modified in sorted(
+        changes, key=lambda change: _normalize_rel(change[0])
+    ):
+        section = make_patch(rel_path, original, modified)
+        if section:
+            sections.append(section)
+    return "".join(sections)
+
+
+def apply_multi_patch(originals: Mapping[str, bytes], diff: str) -> dict[str, bytes]:
+    """Apply a multi-file ``diff`` over ``originals`` (rel_path -> bytes).
+
+    Lays every original file down in one throwaway git repo, applies the combined
+    diff once (so cross-file patches are validated together exactly as a
+    validator's ``git apply`` would), and returns the resulting bytes for each
+    input path. Raises :class:`PatchError` if the patch does not apply cleanly.
+    """
+    rels = {rel: _normalize_rel(rel) for rel in originals}
+    with tempfile.TemporaryDirectory(prefix="forge-apply-multi-") as tmp:
+        root = Path(tmp)
+        _git(root, "init", "-q")
+        for rel, normalized in sorted(rels.items()):
+            target = root / normalized
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(originals[rel])
+            _git(root, "add", "--", normalized)
+        patch_file = root / "_forge.patch"
+        patch_file.write_text(diff, encoding="utf-8")
+        _git(root, "apply", "--whitespace=nowarn", "--", str(patch_file))
+        return {
+            rel: (root / normalized).read_bytes() for rel, normalized in rels.items()
+        }

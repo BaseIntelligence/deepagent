@@ -176,6 +176,19 @@ class LanguageAdapter(ABC):
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         """Apply mutation ``op`` to ``symbol`` in ``file`` and return the patch."""
 
+    def remove_function_body(self, file: PathLike, symbol: Symbol) -> Patch:
+        """Remove ``symbol``'s body (keeping its signature) and return the patch.
+
+        Replaces the function/method body with a language-appropriate stub that
+        keeps the file parseable; the inverse gold patch re-inserts the original
+        body exactly. Returns an empty :class:`Patch` when ``symbol`` has no
+        removable/meaningful body. Language-agnostic by delegating the excision
+        to the shared tree-sitter driver keyed on :attr:`name`.
+        """
+        from swe_forge.forge.adapters._removal import remove_body
+
+        return remove_body(self.name, file, symbol)
+
     @abstractmethod
     def mutation_tool_run(
         self,

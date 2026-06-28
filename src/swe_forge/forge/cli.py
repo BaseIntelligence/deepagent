@@ -1097,7 +1097,11 @@ def generate(
         f"-> {out_dir}"
     )
     console.print(f"  target   : {candidate.target.to_dict()}")
-    console.print(f"  operator : {candidate.provenance.details.get('operator')}")
+    details = candidate.provenance.details
+    operation = (
+        details.get("operator") or details.get("operation") or candidate.generator
+    )
+    console.print(f"  operation: {operation}")
     console.print(f"  seed     : {seed}")
     console.print(
         f"  patches  : mutation.patch={mutation_sha[:12]} oracle.patch={oracle_sha[:12]}"

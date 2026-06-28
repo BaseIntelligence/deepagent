@@ -15,20 +15,29 @@ from swe_forge.forge.generators.base import (
     GenerationRequest,
     GeneratorRegistry,
 )
+from swe_forge.forge.generators.bug_combination import BugCombinationGenerator
+from swe_forge.forge.generators.function_removal import FunctionRemovalGenerator
+from swe_forge.forge.generators.multi_file import MultiFileGenerator
 
 
 def build_default_generator_registry() -> GeneratorRegistry:
     """Return a registry holding the available bug generators."""
     registry = GeneratorRegistry()
     registry.register(AstMutationGenerator())
+    registry.register(FunctionRemovalGenerator())
+    registry.register(MultiFileGenerator())
+    registry.register(BugCombinationGenerator())
     return registry
 
 
 __all__ = [
     "AstMutationGenerator",
+    "BugCombinationGenerator",
     "BugGenerator",
+    "FunctionRemovalGenerator",
     "GenerationError",
     "GenerationRequest",
     "GeneratorRegistry",
+    "MultiFileGenerator",
     "build_default_generator_registry",
 ]
