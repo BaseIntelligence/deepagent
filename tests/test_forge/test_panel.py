@@ -38,6 +38,7 @@ from swe_forge.forge.panel import (
     validate_model,
     validate_models,
 )
+from swe_forge.forge.secrets import key_fingerprint
 
 runner = CliRunner()
 
@@ -112,10 +113,20 @@ class TestPanelModel:
         data = _model().to_dict()
         assert "api_key" not in data
         assert data["model_string"] == "anthropic/claude-x"
+        # exposes a non-reversible fingerprint instead of the raw key
+        assert data["key_fingerprint"] == key_fingerprint(SECRET)
+        assert SECRET not in data["key_fingerprint"]
 
     def test_to_dict_includes_api_key_when_requested(self) -> None:
         data = _model().to_dict(include_api_key=True)
         assert data["api_key"] == SECRET
+        # the fingerprint is still present alongside the in-process raw key
+        assert data["key_fingerprint"] == key_fingerprint(SECRET)
+
+    def test_key_fingerprint_property_is_non_reversible(self) -> None:
+        m = _model()
+        assert m.key_fingerprint == key_fingerprint(SECRET)
+        assert SECRET not in m.key_fingerprint
 
     def test_repr_never_leaks_api_key(self) -> None:
         assert SECRET not in repr(_model())
@@ -351,7 +362,10 @@ class TestPanelInfoCli:
         assert len({m["model_string"] for m in models}) == len(models)
         assert all(m["tier"] in VALID_TIERS for m in models)
         assert all(m["base_url"] == "https://teacher.example" for m in models)
-        assert all(m["api_key"] == "sk-teacher" for m in models)
+        # raw key is NEVER emitted; inheritance is proven via base_url + fingerprint
+        assert all("api_key" not in m for m in models)
+        teacher_fp = key_fingerprint("sk-teacher")
+        assert all(m["key_fingerprint"] == teacher_fp for m in models)
 
     def test_panel_override_is_honored(self) -> None:
         with (
@@ -362,10 +376,14 @@ class TestPanelInfoCli:
         assert result.exit_code == 0, result.output
         models = json.loads(result.output)
         assert all(m["base_url"] == "https://panel.example" for m in models)
-        assert all(m["api_key"] == "sk-panel" for m in models)
+        # raw key never emitted; override divergence proven via base_url + fingerprint
+        assert all("api_key" not in m for m in models)
+        panel_fp = key_fingerprint("sk-panel")
+        teacher_fp = key_fingerprint("sk-teacher")
+        assert all(m["key_fingerprint"] == panel_fp for m in models)
         # diverges from the teacher endpoint
         assert all(m["base_url"] != "https://teacher.example" for m in models)
-        assert all(m["api_key"] != "sk-teacher" for m in models)
+        assert all(m["key_fingerprint"] != teacher_fp for m in models)
 
     def test_human_view_does_not_echo_secret(self) -> None:
         env = {
@@ -493,3 +511,157 @@ class TestPanelRolloutsCli:
             result = runner.invoke(forge_app, ["panel-rollouts", "--k", "2"])
         assert result.exit_code != 0
         assert "TEACHER_LLM_BASE_URL" in result.output
+
+
+# --------------------------------------------------------------------------- #
+# Secret hardening: no CLI path leaks the raw key; inheritance via fingerprint
+# --------------------------------------------------------------------------- #
+
+_LIVE_ENV = {
+    "TEACHER_LLM_BASE_URL": "https://teacher.example",
+    "TEACHER_LLM_API_KEY": SECRET,
+    "TEACHER_LLM_MODEL": "anthropic/claude-x",
+    "TEACHER_LLM_PROVIDER": "anthropic",
+}
+
+
+class TestSecretHardeningNoLeak:
+    """No panel/teacher CLI path may emit the raw TEACHER_LLM_API_KEY value."""
+
+    def test_panel_info_json_does_not_leak_key(self) -> None:
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+        ):
+            result = runner.invoke(forge_app, ["panel-info", "--json"])
+        assert result.exit_code == 0, result.output
+        assert SECRET not in result.output
+
+    def test_panel_info_human_does_not_leak_key(self) -> None:
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+        ):
+            result = runner.invoke(forge_app, ["panel-info"])
+        assert result.exit_code == 0, result.output
+        assert SECRET not in result.output
+
+    def test_panel_validate_json_does_not_leak_key(self) -> None:
+        mock = AsyncMock(return_value=_fake_response())
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(
+                forge_app, ["panel-validate", "--models", "anthropic/a", "--json"]
+            )
+        assert result.exit_code == 0, result.output
+        assert SECRET not in result.output
+
+    def test_panel_validate_error_path_does_not_leak_key(self) -> None:
+        # The endpoint error message itself echoes the key; it must be redacted.
+        mock = AsyncMock(side_effect=RuntimeError(f"auth failed for key={SECRET}"))
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(
+                forge_app, ["panel-validate", "--models", "anthropic/a", "--json"]
+            )
+        # an invalid probe exits non-zero but must never print the raw key
+        assert SECRET not in result.output
+
+    def test_panel_rollouts_json_does_not_leak_key(self) -> None:
+        mock = AsyncMock(return_value=_fake_response())
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(forge_app, ["panel-rollouts", "--k", "1", "--json"])
+        assert result.exit_code == 0, result.output
+        assert SECRET not in result.output
+
+    def test_panel_rollouts_error_path_does_not_leak_key(self) -> None:
+        mock = AsyncMock(side_effect=RuntimeError(f"boom key={SECRET}"))
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(
+                forge_app, ["panel-rollouts", "--k", "1", "--no-validate", "--json"]
+            )
+        assert SECRET not in result.output
+
+    def test_teacher_info_does_not_leak_key(self) -> None:
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+        ):
+            result = runner.invoke(forge_app, ["info"])
+        assert result.exit_code == 0, result.output
+        assert SECRET not in result.output
+
+    def test_teacher_llm_check_dry_run_does_not_leak_key(self) -> None:
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+        ):
+            result = runner.invoke(forge_app, ["llm-check", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        assert SECRET not in result.output
+
+    def test_teacher_llm_check_error_path_does_not_leak_key(self) -> None:
+        mock = AsyncMock(side_effect=RuntimeError(f"upstream rejected key={SECRET}"))
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(forge_app, ["llm-check"])
+        assert result.exit_code != 0
+        assert SECRET not in result.output
+
+
+class TestSecretHardeningFingerprint:
+    """Fingerprint proves inheritance/override without exposing the key."""
+
+    def test_panel_fingerprint_equals_teacher_when_inherited(self) -> None:
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _LIVE_ENV, clear=True),
+        ):
+            result = runner.invoke(forge_app, ["panel-info", "--json"])
+        assert result.exit_code == 0, result.output
+        models = json.loads(result.output)
+        teacher_fp = key_fingerprint(SECRET)
+        assert teacher_fp != ""
+        # every inherited panel model matches the teacher base_url + fingerprint
+        assert all(m["base_url"] == "https://teacher.example" for m in models)
+        assert all(m["key_fingerprint"] == teacher_fp for m in models)
+
+    def test_panel_fingerprint_differs_under_override(self) -> None:
+        override_env = {
+            **_LIVE_ENV,
+            "PANEL_LLM_BASE_URL": "https://panel.example",
+            "PANEL_LLM_API_KEY": "sk-panel-override",
+        }
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, override_env, clear=True),
+        ):
+            result = runner.invoke(forge_app, ["panel-info", "--json"])
+        assert result.exit_code == 0, result.output
+        models = json.loads(result.output)
+        teacher_fp = key_fingerprint(SECRET)
+        override_fp = key_fingerprint("sk-panel-override")
+        assert all(m["base_url"] == "https://panel.example" for m in models)
+        assert all(m["key_fingerprint"] == override_fp for m in models)
+        # the override diverges from the teacher endpoint + key
+        assert override_fp != teacher_fp
+        assert all(m["key_fingerprint"] != teacher_fp for m in models)
+        # and the override secret value is never printed
+        assert "sk-panel-override" not in result.output

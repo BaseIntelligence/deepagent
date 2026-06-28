@@ -28,6 +28,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from swe_forge.forge.secrets import key_fingerprint
 from swe_forge.forge.teacher import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_NUM_RETRIES,
@@ -148,18 +149,26 @@ class PanelModel:
             api_key_var=TEACHER_API_KEY_VAR,
         )
 
+    @property
+    def key_fingerprint(self) -> str:
+        """Non-reversible, stable fingerprint of the configured key (never the key)."""
+        return key_fingerprint(self.api_key)
+
     def to_dict(self, *, include_api_key: bool = False) -> dict[str, str]:
         """Serialize the model.
 
-        ``include_api_key`` exposes the configured key value (used by
-        ``panel-info --json`` so endpoint inheritance/override can be verified);
-        it is omitted everywhere else.
+        The default serialization exposes ``base_url`` plus a non-reversible
+        ``key_fingerprint`` so endpoint inheritance/override can be verified
+        without leaking the secret; this is what the CLI emits. ``include_api_key``
+        additionally exposes the raw key value and is for in-process tests ONLY -
+        it must never reach any CLI output path.
         """
         data: dict[str, str] = {
             "id": self.id,
             "model_string": self.model_string,
             "tier": self.tier,
             "base_url": self.base_url,
+            "key_fingerprint": self.key_fingerprint,
         }
         if include_api_key:
             data["api_key"] = self.api_key

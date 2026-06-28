@@ -30,6 +30,7 @@ from swe_forge.forge.panel import (
     validate_model,
     validate_models,
 )
+from swe_forge.forge.secrets import key_fingerprint
 from swe_forge.forge.teacher import (
     AgenticResult,
     LLMResult,
@@ -106,6 +107,9 @@ def info() -> None:
     console.print(f"  teacher base url : {settings.teacher_llm_base_url or '(unset)'}")
     console.print(
         f"  teacher api key  : {'set' if settings.teacher_llm_api_key else 'unset'}"
+    )
+    console.print(
+        f"  teacher key fp   : {key_fingerprint(settings.teacher_llm_api_key) or '(unset)'}"
     )
     console.print(
         f"  panel override   : {'set' if settings.panel_llm_base_url or settings.panel_llm_api_key else 'inherits teacher'}"
@@ -304,9 +308,9 @@ def panel_info(
     base_url, api_key = resolve_panel_endpoint()
     panel = build_panel_from_env()
     if json_out:
-        # The api_key value is included so endpoint inheritance/override can be
-        # verified; the human view below never prints it.
-        typer.echo(json.dumps([m.to_dict(include_api_key=True) for m in panel]))
+        # Emit base_url + a non-reversible key fingerprint per model so endpoint
+        # inheritance/override stays verifiable WITHOUT ever printing the raw key.
+        typer.echo(json.dumps([m.to_dict() for m in panel]))
         return
     override = bool(
         os.environ.get(PANEL_BASE_URL_VAR) or os.environ.get(PANEL_API_KEY_VAR)
@@ -314,6 +318,7 @@ def panel_info(
     console.print("[bold]forge panel[/bold]")
     console.print(f"  endpoint   : {base_url or '(unset)'}")
     console.print(f"  api key    : {'set' if api_key else 'unset'}")
+    console.print(f"  key fp     : {key_fingerprint(api_key) or '(unset)'}")
     console.print(
         f"  source     : {'PANEL_LLM_* override' if override else 'inherits teacher'}"
     )
