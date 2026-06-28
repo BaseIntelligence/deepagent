@@ -7,5 +7,27 @@ hostname or brand string is hardcoded anywhere in this package.
 """
 
 from swe_forge.forge.config import ForgeSettings
+from swe_forge.forge.models import (
+    SUPPORTED_LANGUAGES,
+    InstanceGrant,
+    ModelError,
+    RepoSpec,
+)
+from swe_forge.forge.sources import (
+    SourceError,
+    SourceRegistry,
+    UnknownRepoError,
+    build_source_registry,
+)
 
-__all__ = ["ForgeSettings"]
+__all__ = [
+    "SUPPORTED_LANGUAGES",
+    "ForgeSettings",
+    "InstanceGrant",
+    "ModelError",
+    "RepoSpec",
+    "SourceError",
+    "SourceRegistry",
+    "UnknownRepoError",
+    "build_source_registry",
+]

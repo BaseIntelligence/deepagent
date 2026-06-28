@@ -40,6 +40,10 @@ from swe_forge.forge.panel import (
     validate_models,
 )
 from swe_forge.forge.secrets import key_fingerprint
+from swe_forge.forge.sources import (
+    UnknownRepoError,
+    build_source_registry,
+)
 from swe_forge.forge.teacher import (
     AgenticResult,
     LLMResult,
@@ -373,6 +377,109 @@ def parse_symbols_cmd(
             f"  {s.kind:8} {s.name}  L{s.start_line}-{s.end_line}"
             + (f"  {s.signature}" if s.signature else "")
         )
+
+
+@app.command(name="sources-list")
+def sources_list(
+    language: str | None = typer.Option(
+        None, "--language", help="Restrict to one language (python|javascript|go)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """List the curated Stage-0 seed repos and their contamination metadata."""
+    registry = build_source_registry()
+    if language is not None:
+        specs = registry.by_language(language)
+        if not specs:
+            _fail(
+                f"no curated repo for language {language!r}; "
+                f"known: {', '.join(registry.languages())}"
+            )
+    else:
+        specs = list(registry)
+
+    records = [spec.to_dict() for spec in specs]
+    if json_out:
+        typer.echo(json.dumps(records))
+        return
+
+    console.print(
+        f"[bold]source registry[/bold] ({len(records)} repos; "
+        f"languages: {', '.join(registry.languages())})"
+    )
+    for spec in specs:
+        console.print(
+            f"  - {spec.repo_id} [{spec.language}] {spec.license} "
+            f"@ {spec.commit[:12]} ({spec.commit_date}) "
+            f"cap={spec.instance_cap} used={spec.used} remaining={spec.remaining}"
+        )
+
+
+@app.command(name="sources-acquire")
+def sources_acquire(
+    repo: str = typer.Option(..., "--repo", help="Repo id to acquire instances from."),
+    count: int = typer.Option(
+        1, "--count", help="Number of instance requests to issue (one process)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Request task instances from a repo, enforcing its per-repo cap.
+
+    Issues ``--count`` requests against the repo within a single process so the
+    cap is observable: once ``instance_cap`` is reached every further request is
+    rejected with a clear reason and usage never exceeds the cap.
+    """
+    if count < 1:
+        _fail(f"--count must be >= 1, got {count}")
+
+    registry = build_source_registry()
+    try:
+        spec = registry.get(repo)
+    except UnknownRepoError as exc:
+        _fail(str(exc))
+
+    attempts: list[dict[str, object]] = []
+    accepted = 0
+    rejected = 0
+    for request_index in range(1, count + 1):
+        grant = registry.acquire(repo)
+        record = grant.to_dict()
+        record["request"] = request_index
+        attempts.append(record)
+        if grant.accepted:
+            accepted += 1
+        else:
+            rejected += 1
+
+    payload: dict[str, object] = {
+        "repo_id": spec.repo_id,
+        "cap": spec.instance_cap,
+        "requested": count,
+        "accepted": accepted,
+        "rejected": rejected,
+        "used": spec.used,
+        "remaining": spec.remaining,
+        "attempts": attempts,
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+
+    console.print(
+        f"[bold]{spec.repo_id}[/bold] cap={spec.instance_cap} "
+        f"requested={count} accepted={accepted} rejected={rejected} "
+        f"used={spec.used} remaining={spec.remaining}"
+    )
+    for record in attempts:
+        if record["accepted"]:
+            console.print(
+                f"  #{record['request']} [green]accepted[/green] "
+                f"instance={record['instance_index']} remaining={record['remaining']}"
+            )
+        else:
+            console.print(
+                f"  #{record['request']} [red]rejected[/red]: {record['reason']}"
+            )
 
 
 @app.command(name="llm-check")
