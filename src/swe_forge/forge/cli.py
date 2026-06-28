@@ -56,11 +56,13 @@ from swe_forge.forge.oracle import (
     FlakinessError,
     HiddenTest,
     HiddenTestFile,
+    LeakError,
     MutationError,
     run_alt_correct_gate,
     run_differential_gate,
     run_establish_gate,
     run_flakiness_gate,
+    run_leak_gate,
     run_mutation_gate,
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
@@ -1989,6 +1991,107 @@ def oracle_alt_correct(
             f"(alt_correct_accepted={result.alt_correct_accepted}, relaxed={relaxed})"
         )
         console.print(f"  test_files     : {[tf.path for tf in result.test_files]}")
+        if result.reasons:
+            console.print(f"  reasons        : {result.reasons}")
+
+    if not result.is_pass:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="oracle-leak")
+def oracle_leak(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the prior-gate OracleReport JSON (alt-correct; its F2P/test set).",
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the updated OracleReport JSON here (file or dir)."
+    ),
+    no_sanitize: bool = typer.Option(
+        False,
+        "--no-sanitize",
+        help="Detect only; never strip a removable leak (a finding then rejects).",
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Leak gate: the agent-facing tree must carry NO oracle/solution content.
+
+    Materializes the broken (mutation-applied) tree from the candidate's EnvImage
+    in a throwaway DockerSandbox, strips build/cache artifacts, then runs the leak
+    auditor over it (oracle-snippet + forbidden-artifact scan) and confirms no
+    hidden F2P/P2P test path/body is present. A clean tree passes
+    (``leak_audit=clean``). A detected leak is stripped when it is a safely-
+    removable standalone artifact (``leak_audit=sanitized: ...``, exit 0); an
+    unremovable embedded leak rejects (``leak_audit=leak: ...``, non-zero exit)
+    citing the marker.
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    prior_report = _load_oracle_report(report)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    try:
+        result = asyncio.run(
+            run_leak_gate(
+                candidate_obj,
+                env_image,
+                prior_report,
+                adapter=adapter,
+                sanitize=not no_sanitize,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle leak: {exc}")
+    except (
+        LeakError,
+        AltCorrectError,
+        DifferentialError,
+        MutationError,
+        FlakinessError,
+        EstablishError,
+        DockerError,
+    ) as exc:
+        _fail(f"oracle leak: {exc}")
+
+    if out:
+        _write_oracle_report(out, result)
+
+    if json_out:
+        typer.echo(json.dumps({"report": result.to_dict()}))
+    else:
+        colour = "green" if result.is_pass else "red"
+        console.print(
+            f"[{colour}]leak {result.verdict}[/{colour}] "
+            f"{result.generator} [{result.language}]"
+        )
+        console.print(f"  leak_audit     : {result.leak_audit}")
+        leak = result.details.get("leak", {})
+        if isinstance(leak, dict):
+            removed = leak.get("removed", [])
+            normalized = leak.get("normalized", [])
+            console.print(f"  sanitized      : {removed}")
+            console.print(f"  normalized     : {normalized}")
         if result.reasons:
             console.print(f"  reasons        : {result.reasons}")
 
