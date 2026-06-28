@@ -9,9 +9,12 @@ hostname or brand string is hardcoded anywhere in this package.
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.models import (
     SUPPORTED_LANGUAGES,
+    BaselineNotGreenError,
+    EnvImage,
     InstanceGrant,
     ModelError,
     RepoSpec,
+    require_green_baseline,
 )
 from swe_forge.forge.sources import (
     SourceError,
@@ -22,6 +25,8 @@ from swe_forge.forge.sources import (
 
 __all__ = [
     "SUPPORTED_LANGUAGES",
+    "BaselineNotGreenError",
+    "EnvImage",
     "ForgeSettings",
     "InstanceGrant",
     "ModelError",
@@ -30,4 +35,5 @@ __all__ = [
     "SourceRegistry",
     "UnknownRepoError",
     "build_source_registry",
+    "require_green_baseline",
 ]

@@ -138,7 +138,35 @@ class LanguageAdapter(ABC):
 
     @abstractmethod
     def test_command(self, selection: Sequence[str] | None = None) -> str:
-        """Return the test runner command, narrowed to ``selection`` when given."""
+        """Return the test runner command, narrowed to ``selection`` when given.
+
+        This is the *adapter standard runner* (pytest / ``node --test`` /
+        ``go test``) used to execute the synthesized hidden F2P tests added in
+        later stages. It is distinct from the *baseline* capability below, which
+        runs the repository's own configured suite.
+        """
+
+    def baseline_install_commands(self, repo_path: PathLike) -> list[str]:
+        """Return the install commands for a green *baseline* of the repo's suite.
+
+        Unlike :meth:`install_commands` (the bare runtime install), this includes
+        the repository's TEST/DEV dependencies so its own test suite can run.
+        The default is :meth:`install_commands`; adapters whose ecosystems split
+        test deps out of the runtime install (e.g. Python) override this.
+        """
+        return self.install_commands(repo_path)
+
+    def baseline_test_command(self, repo_path: PathLike) -> str:
+        """Return the command that runs the repository's OWN configured suite.
+
+        This is the command proven green at build time and recorded in
+        ``EnvImage.baseline_test_command`` (used for baseline + P2P regression).
+        It is distinct from the selection-aware :meth:`test_command` standard
+        runner. The default delegates to :meth:`test_command` (no selection);
+        adapters whose configured suite differs from the standard runner (e.g.
+        JS/TS running ``npm test``) override this.
+        """
+        return self.test_command()
 
     @abstractmethod
     def parse_symbols(self, file: PathLike) -> list[Symbol]:

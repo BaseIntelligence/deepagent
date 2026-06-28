@@ -24,6 +24,11 @@ from swe_forge.forge.adapters import (
     build_default_registry,
 )
 from swe_forge.forge.config import ForgeSettings
+from swe_forge.forge.envbuild import EnvBuilder
+from swe_forge.forge.models import (
+    BaselineNotGreenError,
+    require_green_baseline,
+)
 from swe_forge.forge.panel import (
     PANEL_BASE_URL_VAR,
     PANEL_API_KEY_VAR,
@@ -480,6 +485,121 @@ def sources_acquire(
             console.print(
                 f"  #{record['request']} [red]rejected[/red]: {record['reason']}"
             )
+
+
+@app.command(name="build-env")
+def build_env(
+    repo: str | None = typer.Option(
+        None, "--repo", help="Seed repo id from the Stage-0 source registry."
+    ),
+    path: str | None = typer.Option(
+        None, "--path", help="Local repo checkout to build instead of a registry repo."
+    ),
+    repo_id: str | None = typer.Option(
+        None,
+        "--repo-id",
+        help="Repo id to record for a --path build (default: dir name).",
+    ),
+    commit: str | None = typer.Option(
+        None,
+        "--commit",
+        help="Commit to record for a --path build (default: git HEAD).",
+    ),
+    emit: str | None = typer.Option(
+        None, "--emit", help="Write the EnvImage JSON here on a green build."
+    ),
+    advance: bool = typer.Option(
+        False,
+        "--advance",
+        help="Gate the downstream stage on a green baseline (blocks a non-green repo).",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Env-first build: one green-baseline Docker image per repo.
+
+    Detects the repo's language, builds ONE image off the language-correct base,
+    installs the repo's deps (incl. test deps), runs the repo's baseline suite and
+    requires it GREEN, then persists an EnvImage with the proven baseline command
+    and re-runs it in a fresh container to prove reproducibility. A RED baseline
+    (or an install/build failure, reported distinctly) is rejected with cleanup
+    and emits no green EnvImage. With --advance, a non-green repo is blocked from
+    advancing past Stage 1.
+    """
+    if repo and path:
+        _fail("pass exactly one of --repo or --path, not both")
+    if not repo and not path:
+        _fail("provide --repo <id> (registry) or --path <local repo>")
+
+    builder = EnvBuilder()
+    if repo:
+        registry = build_source_registry()
+        try:
+            spec = registry.get(repo)
+        except UnknownRepoError as exc:
+            _fail(str(exc))
+        result = builder.build(spec)
+    else:
+        assert path is not None
+        target = Path(path)
+        if not target.is_dir():
+            _fail(f"path does not exist or is not a directory: {path}")
+        result = builder.build_from_path(
+            target,
+            repo_id=repo_id or target.resolve().name,
+            commit=commit or "",
+        )
+
+    if result.success and emit and result.env_image is not None:
+        Path(emit).write_text(
+            json.dumps(result.env_image.to_dict(), indent=2), encoding="utf-8"
+        )
+
+    advance_status: dict[str, object] | None = None
+    if advance:
+        try:
+            require_green_baseline(result.env_image)
+        except BaselineNotGreenError as exc:
+            advance_status = {"advanced": False, "reason": str(exc)}
+        else:
+            advance_status = {
+                "advanced": True,
+                "reason": "stage-1 precondition satisfied: green baseline present",
+            }
+
+    payload = result.to_dict()
+    if advance_status is not None:
+        payload["advance"] = advance_status
+
+    if json_out:
+        typer.echo(json.dumps(payload))
+    else:
+        if result.success:
+            console.print(
+                f"[green]baseline green[/green] {result.repo_id} "
+                f"[{result.language}] -> image {result.image_tag}"
+            )
+            if result.env_image is not None:
+                console.print(
+                    f"  baseline cmd : {result.env_image.baseline_test_command}"
+                )
+                console.print(f"  proof        : {result.env_image.baseline_summary}")
+        else:
+            console.print(
+                f"[red]rejected[/red] {result.repo_id} [{result.language}] "
+                f"at stage {result.stage} ({result.failure_kind}): {result.reason}"
+            )
+        if advance_status is not None:
+            colour = "green" if advance_status["advanced"] else "red"
+            console.print(
+                f"  advance      : [{colour}]{advance_status['reason']}[/{colour}]"
+            )
+
+    # Exit non-zero when the build was rejected OR when --advance was blocked, so
+    # callers/CI can gate on a green baseline.
+    if not result.success or (
+        advance_status is not None and not advance_status["advanced"]
+    ):
+        raise typer.Exit(code=1)
 
 
 @app.command(name="llm-check")

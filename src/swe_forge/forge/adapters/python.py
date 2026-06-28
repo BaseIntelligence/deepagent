@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import ast
 import re
+import shlex
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -50,6 +52,18 @@ _REQUIREMENT_FILES = (
 _BUILD_MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg")
 _TEST_FILE_RE = re.compile(r"(?:test_.*|.*_test)\.py$")
 
+# Optional-dependency extras / dependency-group names that typically carry the
+# repo's test dependencies, in priority order.
+_TEST_GROUP_NAMES = ("test", "tests", "testing", "dev", "develop", "development")
+# Dev/test requirement files preferred (and installed) before the runtime one.
+_BASELINE_REQUIREMENT_FILES = (
+    "requirements-dev.txt",
+    "dev-requirements.txt",
+    "requirements-test.txt",
+    "test-requirements.txt",
+    "requirements.txt",
+)
+
 _FuncDef = ast.FunctionDef | ast.AsyncFunctionDef
 
 
@@ -58,6 +72,44 @@ def _signature(node: _FuncDef) -> str:
     prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
     args = ast.unparse(node.args)
     return f"{prefix} {node.name}({args})"
+
+
+def _load_pyproject(root: Path) -> dict[str, object]:
+    """Parse ``pyproject.toml`` to a dict; return ``{}`` if absent/unreadable."""
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, OSError, UnicodeDecodeError):
+        return {}
+
+
+def _test_extra(root: Path) -> str | None:
+    """Return the first PEP 621 optional-dependency extra that carries tests."""
+    project = _load_pyproject(root).get("project")
+    if not isinstance(project, dict):
+        return None
+    optional = project.get("optional-dependencies")
+    if not isinstance(optional, dict):
+        return None
+    for name in _TEST_GROUP_NAMES:
+        if name in optional:
+            return name
+    return None
+
+
+def _test_group_packages(root: Path) -> list[str]:
+    """Return the package specs from the first PEP 735 test/dev dependency group."""
+    groups = _load_pyproject(root).get("dependency-groups")
+    if not isinstance(groups, dict):
+        return []
+    for name in _TEST_GROUP_NAMES:
+        entries = groups.get(name)
+        if isinstance(entries, list):
+            # Skip non-string entries (e.g. {include-group = "..."}).
+            return [entry for entry in entries if isinstance(entry, str)]
+    return []
 
 
 class _SymbolCollector(ast.NodeVisitor):
@@ -141,6 +193,41 @@ class PythonAdapter(LanguageAdapter):
         if selection:
             return f"{base} {' '.join(selection)}"
         return base
+
+    def baseline_install_commands(self, repo_path: PathLike) -> list[str]:
+        """Install the package plus its TEST/DEV dependencies for a green baseline.
+
+        ``install_commands`` installs only the runtime package; a Python repo's
+        test suite additionally needs its test dependencies, which live in PEP
+        621 optional-dependency extras, PEP 735 ``[dependency-groups]``, or
+        dev/test requirement files. This resolves whichever the repo uses and
+        always guarantees ``pytest`` (the adapter standard runner) is present.
+        """
+        root = Path(repo_path)
+        commands: list[str] = []
+
+        for req in _BASELINE_REQUIREMENT_FILES:
+            if (root / req).is_file():
+                commands.append(f"pip install -r {req}")
+
+        extra = _test_extra(root)
+        has_manifest = any((root / m).is_file() for m in _BUILD_MANIFESTS)
+        if has_manifest:
+            if extra:
+                commands.append(f"pip install -e '.[{extra}]'")
+            else:
+                commands.append("pip install -e .")
+
+        if not extra:
+            group_pkgs = _test_group_packages(root)
+            if group_pkgs:
+                commands.append(
+                    "pip install " + " ".join(shlex.quote(p) for p in group_pkgs)
+                )
+
+        if not any("pytest" in cmd for cmd in commands):
+            commands.append("pip install pytest")
+        return commands
 
     def is_test_file(self, path: PathLike) -> bool:
         return bool(_TEST_FILE_RE.fullmatch(Path(path).name))

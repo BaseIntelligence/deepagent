@@ -14,7 +14,7 @@ GeneratedSpec, OracleReport, CalibrationReport, ForgeTask, Provenance).
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 #: Languages the forge pipeline supports end to end.
@@ -200,3 +200,107 @@ class RepoSpec:
             "default_branch": self.default_branch,
             "description": self.description,
         }
+
+
+class BaselineNotGreenError(RuntimeError):
+    """Raised when a downstream stage is asked to advance without a green baseline.
+
+    Stage 1 (env build) establishes a green baseline as a *hard precondition* for
+    every env-dependent downstream stage: no Candidate/mutation artifact may be
+    produced from a repo that lacks a green :class:`EnvImage`. Downstream code
+    enforces this by calling :func:`require_green_baseline`.
+    """
+
+
+@dataclass
+class EnvImage:
+    """Stage 1 artifact: one built Docker image per repo with a green baseline.
+
+    Records the persisted image tag, the base image it was built from, the
+    checked-out ``commit``, the install commands run so the repo's deps are
+    present, the EXACT baseline test command proven green, and the baseline-green
+    proof (``baseline_green`` + ``baseline_exit_code`` + a short ``baseline_summary``).
+    A downstream stage may only proceed when ``baseline_green`` is ``True`` (see
+    :func:`require_green_baseline`).
+    """
+
+    repo_id: str
+    language: str
+    image_tag: str
+    base_image: str
+    commit: str
+    workspace_dir: str
+    install_commands: list[str]
+    baseline_test_command: str
+    baseline_green: bool
+    baseline_exit_code: int
+    baseline_summary: str = ""
+    prep_commands: list[str] = field(default_factory=list)
+    built_at: str = ""
+    provenance: dict[str, object] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "repo_id": self.repo_id,
+            "language": self.language,
+            "image_tag": self.image_tag,
+            "base_image": self.base_image,
+            "commit": self.commit,
+            "workspace_dir": self.workspace_dir,
+            "install_commands": list(self.install_commands),
+            "baseline_test_command": self.baseline_test_command,
+            "baseline_green": self.baseline_green,
+            "baseline_exit_code": self.baseline_exit_code,
+            "baseline_summary": self.baseline_summary,
+            "prep_commands": list(self.prep_commands),
+            "built_at": self.built_at,
+            "provenance": dict(self.provenance),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> EnvImage:
+        """Reconstruct an :class:`EnvImage` from its :meth:`to_dict` form."""
+        install = data.get("install_commands", [])
+        prep = data.get("prep_commands", [])
+        provenance = data.get("provenance", {})
+        exit_code = data.get("baseline_exit_code", -1)
+        return cls(
+            repo_id=str(data["repo_id"]),
+            language=str(data["language"]),
+            image_tag=str(data["image_tag"]),
+            base_image=str(data["base_image"]),
+            commit=str(data.get("commit", "")),
+            workspace_dir=str(data.get("workspace_dir", "")),
+            install_commands=[str(c) for c in install]
+            if isinstance(install, list)
+            else [],
+            baseline_test_command=str(data["baseline_test_command"]),
+            baseline_green=bool(data.get("baseline_green", False)),
+            baseline_exit_code=int(exit_code)
+            if isinstance(exit_code, (int, str))
+            else -1,
+            baseline_summary=str(data.get("baseline_summary", "")),
+            prep_commands=[str(c) for c in prep] if isinstance(prep, list) else [],
+            built_at=str(data.get("built_at", "")),
+            provenance=dict(provenance) if isinstance(provenance, dict) else {},
+        )
+
+
+def require_green_baseline(env_image: EnvImage | None) -> EnvImage:
+    """Return ``env_image`` iff it proves a green baseline, else raise.
+
+    The hard Stage-1 precondition: a downstream env-dependent stage calls this
+    before producing any artifact, so a repo lacking a green :class:`EnvImage`
+    can never advance past Stage 1. Raises :class:`BaselineNotGreenError` when
+    the image is missing or its ``baseline_green`` proof is not set.
+    """
+    if env_image is None:
+        raise BaselineNotGreenError(
+            "no green baseline: env image is missing; cannot advance past Stage 1"
+        )
+    if not env_image.baseline_green:
+        raise BaselineNotGreenError(
+            f"no green baseline for {env_image.repo_id!r}: baseline_green is false "
+            f"(exit {env_image.baseline_exit_code}); cannot advance past Stage 1"
+        )
+    return env_image

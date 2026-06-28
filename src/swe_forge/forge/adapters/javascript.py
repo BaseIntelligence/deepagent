@@ -87,6 +87,17 @@ class JavaScriptAdapter(LanguageAdapter):
             return f"{base} {' '.join(selection)}"
         return base
 
+    def baseline_test_command(self, repo_path: PathLike) -> str:
+        """Run the repo's configured suite via its ``test`` npm script.
+
+        A JS/TS repo's real suite is whatever ``npm test`` invokes (e.g.
+        ``ava && tsd``), which is generally NOT the ``node --test`` standard
+        runner. ``baseline_install_commands`` (the default lockfile-aware
+        ``npm ci``/``npm install``) brings in the devDependencies that script
+        needs, and ``node --test`` remains available for synthesized F2P tests.
+        """
+        return "npm test"
+
     def is_test_file(self, path: PathLike) -> bool:
         p = Path(path)
         if "__tests__" in p.parts:
