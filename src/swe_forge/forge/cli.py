@@ -40,13 +40,16 @@ from swe_forge.forge.models import (
     Candidate,
     EnvImage,
     ModelError,
+    OracleReport,
     require_green_baseline,
 )
 from swe_forge.forge.oracle import (
     EstablishError,
+    FlakinessError,
     HiddenTest,
     HiddenTestFile,
     run_establish_gate,
+    run_flakiness_gate,
 )
 from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
 from swe_forge.forge.panel import (
@@ -1485,4 +1488,115 @@ def oracle_establish(
             console.print(f"  reasons      : {report.reasons}")
 
     if not report.is_pass:
+        raise typer.Exit(code=1)
+
+
+def _load_oracle_report(report_file: str) -> OracleReport:
+    """Load and validate a prior-gate ``OracleReport`` from disk, or fail cleanly."""
+    path = Path(report_file)
+    if not path.is_file():
+        _fail(f"oracle report file not found: {report_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return OracleReport.from_dict(data)
+    except (json.JSONDecodeError, KeyError, ModelError) as exc:
+        _fail(f"invalid oracle report JSON: {exc}")
+
+
+def _write_oracle_report(out: str, report: OracleReport) -> None:
+    """Write an ``OracleReport`` JSON to a file path or a directory."""
+    out_path = Path(out)
+    if out_path.suffix == ".json":
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path = out_path
+    else:
+        out_path.mkdir(parents=True, exist_ok=True)
+        report_path = out_path / "oracle_report.json"
+    report_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+
+
+@app.command(name="oracle-flakiness")
+def oracle_flakiness(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the establish-gate OracleReport JSON (its F2P/P2P set).",
+    ),
+    runs: int = typer.Option(
+        3, "--runs", help="Validation repeats in fresh containers (clamped up to 3)."
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the updated OracleReport JSON here (file or dir)."
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Flakiness gate: re-run the established F2P+P2P validation >=3x for determinism.
+
+    Each repeat runs in a FRESH throwaway DockerSandbox on the candidate's
+    EnvImage. A deterministic suite yields identical per-test verdicts and passes
+    with ``flakiness_runs`` recorded (>=3). A non-deterministic F2P test is dropped
+    from ``fail_to_pass``/``test_files``; if dropping removes the last F2P, or the
+    P2P/regression suite itself is non-deterministic, the candidate is rejected
+    with an attributable flakiness reason (non-zero exit).
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    establish_report = _load_oracle_report(report)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    try:
+        result = asyncio.run(
+            run_flakiness_gate(
+                candidate_obj,
+                env_image,
+                establish_report,
+                runs=runs,
+                adapter=adapter,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle flakiness: {exc}")
+    except (FlakinessError, EstablishError, DockerError) as exc:
+        _fail(f"oracle flakiness: {exc}")
+
+    if out:
+        _write_oracle_report(out, result)
+
+    if json_out:
+        typer.echo(json.dumps({"report": result.to_dict()}))
+    else:
+        colour = "green" if result.is_pass else "red"
+        console.print(
+            f"[{colour}]flakiness {result.verdict}[/{colour}] "
+            f"{result.generator} [{result.language}]"
+        )
+        console.print(f"  flakiness_runs : {result.flakiness_runs}")
+        console.print(f"  fail_to_pass   : {result.fail_to_pass}")
+        flak = result.details.get("flakiness", {})
+        dropped = flak.get("dropped", []) if isinstance(flak, dict) else []
+        console.print(f"  dropped (flaky): {dropped}")
+        if result.reasons:
+            console.print(f"  reasons        : {result.reasons}")
+
+    if not result.is_pass:
         raise typer.Exit(code=1)
