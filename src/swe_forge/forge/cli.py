@@ -39,6 +39,7 @@ from swe_forge.forge.models import (
     BaselineNotGreenError,
     Candidate,
     EnvImage,
+    GeneratedSpec,
     ModelError,
     OracleReport,
     require_green_baseline,
@@ -47,18 +48,22 @@ from swe_forge.forge.oracle import (
     DEFAULT_KILL_THRESHOLD,
     DEFAULT_MAX_STRENGTHEN_ROUNDS,
     DEFAULT_MAX_SYNTHESIS_ROUNDS,
+    DEFAULT_NUM_ALTERNATIVES,
     DEFAULT_NUM_VARIANTS,
+    AltCorrectError,
     DifferentialError,
     EstablishError,
     FlakinessError,
     HiddenTest,
     HiddenTestFile,
     MutationError,
+    run_alt_correct_gate,
     run_differential_gate,
     run_establish_gate,
     run_flakiness_gate,
     run_mutation_gate,
 )
+from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.differential_synth import (
     DifferentialKillSynthesizer,
     TeacherVariantGenerator,
@@ -1843,6 +1848,145 @@ def oracle_differential(
         console.print(
             f"  variants       : {killed}/{total} separated from gold "
             f"(differential_pass={result.differential_pass})"
+        )
+        console.print(f"  test_files     : {[tf.path for tf in result.test_files]}")
+        if result.reasons:
+            console.print(f"  reasons        : {result.reasons}")
+
+    if not result.is_pass:
+        raise typer.Exit(code=1)
+
+
+def _load_spec(spec_file: str | None) -> GeneratedSpec | None:
+    """Load a ``spec.json`` (Stage 2 GeneratedSpec) from disk, or ``None``."""
+    if not spec_file:
+        return None
+    path = Path(spec_file)
+    if not path.is_file():
+        _fail(f"spec file not found: {spec_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return GeneratedSpec.from_dict(data)
+    except (json.JSONDecodeError, KeyError, ModelError) as exc:
+        _fail(f"invalid spec.json: {exc}")
+
+
+@app.command(name="oracle-alt-correct")
+def oracle_alt_correct(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the prior-gate OracleReport JSON (differential; its F2P/P2P set).",
+    ),
+    spec: str | None = typer.Option(
+        None,
+        "--spec",
+        help="Optional spec.json; its interface_block pins the public signatures.",
+    ),
+    num_alternatives: int = typer.Option(
+        DEFAULT_NUM_ALTERNATIVES,
+        "--num-alternatives",
+        help="Genuinely-correct alternatives the teacher proposes per candidate.",
+    ),
+    relax: bool = typer.Option(
+        False,
+        "--relax/--no-relax",
+        help="On over-fit, drop the offending hidden test(s) when safe (else reject).",
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the updated OracleReport JSON here (file or dir)."
+    ),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Never call the LLM (no alternatives); gold-only sanity run.",
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Alt-correct gate: the suite must ACCEPT a genuinely-correct alternative.
+
+    The teacher writes 1-2 genuinely-correct alternative implementations (same
+    public Interface, different internals/symbol names) and the established
+    F2P+P2P suite is run against each in throwaway DockerSandboxes. Each must pass
+    (``alt_correct_accepted=true``); the Interface pinning prevents naming
+    false-negatives. If a correct alternative is FAILED the suite is over-fit: the
+    default rejects (``alt_correct_accepted=false``, non-zero exit) citing
+    over-fit; ``--relax`` drops the offending hidden test(s) when that is safe
+    (recording the relax action) else rejects.
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    prior_report = _load_oracle_report(report)
+    spec_obj = _load_spec(spec)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    alt_generator = TeacherAltCorrectGenerator() if not offline else None
+
+    try:
+        result = asyncio.run(
+            run_alt_correct_gate(
+                candidate_obj,
+                env_image,
+                prior_report,
+                spec=spec_obj,
+                alt_generator=alt_generator,
+                num_alternatives=num_alternatives,
+                relax=relax,
+                adapter=adapter,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle alt-correct: {exc}")
+    except (
+        AltCorrectError,
+        DifferentialError,
+        MutationError,
+        FlakinessError,
+        EstablishError,
+        DockerError,
+    ) as exc:
+        _fail(f"oracle alt-correct: {exc}")
+
+    if out:
+        _write_oracle_report(out, result)
+
+    if json_out:
+        typer.echo(json.dumps({"report": result.to_dict()}))
+    else:
+        colour = "green" if result.is_pass else "red"
+        console.print(
+            f"[{colour}]alt-correct {result.verdict}[/{colour}] "
+            f"{result.generator} [{result.language}]"
+        )
+        alt = result.details.get("alt_correct", {})
+        total = alt.get("alternatives_total", 0) if isinstance(alt, dict) else 0
+        relax_info = alt.get("relax", {}) if isinstance(alt, dict) else {}
+        relaxed = (
+            bool(relax_info.get("succeeded")) if isinstance(relax_info, dict) else False
+        )
+        console.print(
+            f"  alternatives   : {total} proposed "
+            f"(alt_correct_accepted={result.alt_correct_accepted}, relaxed={relaxed})"
         )
         console.print(f"  test_files     : {[tf.path for tf in result.test_files]}")
         if result.reasons:
