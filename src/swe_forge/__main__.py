@@ -7,6 +7,7 @@ from swe_forge.cli.export import app as export_app
 from swe_forge.cli.benchmark import benchmark
 from swe_forge.cli.publish import publish
 from swe_forge.cli.synthetic import app as synthetic_app
+from swe_forge.forge.cli import app as forge_app
 
 app = typer.Typer(name="swe-forge", help="SWE-bench dataset generator")
 
@@ -25,6 +26,7 @@ app.add_typer(mine_app, name="mine")
 app.add_typer(validate_app, name="validate")
 app.add_typer(export_app, name="export")
 app.add_typer(synthetic_app, name="synthetic")
+app.add_typer(forge_app, name="forge")
 
 
 def main():

@@ -17,3 +17,6 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "integration: tests that hit Docker or the live LLM endpoint (deselected from the milestone gate)",
+]
