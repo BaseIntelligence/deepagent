@@ -34,6 +34,7 @@ from swe_forge.forge.adapters.base import (
     Patch,
     Symbol,
 )
+from swe_forge.forge.generators._normalize import is_behavior_changing
 
 # Source extensions considered per language when auto-discovering targets.
 SOURCE_EXTENSIONS: dict[str, frozenset[str]] = {
@@ -169,6 +170,12 @@ def _verify_single_file_fault(
     try:
         mutated = apply_patch(original, forward.diff, rel)
         if mutated == original:
+            return None
+        # Behavior gate: a whitespace/comment/import-only edit changes no
+        # behavior and must never become a Candidate (VAL-GEN-002).
+        if not is_behavior_changing(
+            original.decode("utf-8", "replace"), mutated.decode("utf-8", "replace")
+        ):
             return None
         oracle = make_patch(rel, mutated, original)
         if not oracle.strip():

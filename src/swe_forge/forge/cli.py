@@ -12,6 +12,8 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import NoReturn
 
@@ -30,6 +32,7 @@ from swe_forge.forge.generators import (
     GenerationError,
     GenerationRequest,
     build_default_generator_registry,
+    run_menu_selfcheck,
 )
 from swe_forge.forge.models import (
     BaselineNotGreenError,
@@ -1125,3 +1128,82 @@ def generate(
     console.print(
         f"  patches  : mutation.patch={mutation_sha[:12]} oracle.patch={oracle_sha[:12]}"
     )
+
+
+def _write_menu_candidates(out_dir: Path, report) -> None:
+    """Write per-cell Candidate JSON + mutation/oracle patches for a passing menu."""
+    candidates_dir = out_dir / "candidates"
+    candidates_dir.mkdir(parents=True, exist_ok=True)
+    for cell in report.cells:
+        if cell.candidate is None:
+            continue
+        cell_dir = candidates_dir / f"{cell.generator}__{cell.language}"
+        cell_dir.mkdir(parents=True, exist_ok=True)
+        (cell_dir / "candidate.json").write_text(
+            json.dumps(cell.candidate.to_dict(), indent=2), encoding="utf-8"
+        )
+        (cell_dir / "mutation.patch").write_text(
+            cell.candidate.mutation_patch, encoding="utf-8"
+        )
+        (cell_dir / "oracle.patch").write_text(
+            cell.candidate.oracle_patch, encoding="utf-8"
+        )
+
+
+@app.command(name="gen-menu")
+def gen_menu(
+    out: str = typer.Option(
+        ..., "--out", help="Output dir for coverage.json + per-cell candidates."
+    ),
+    seed: int = typer.Option(0, "--seed", help="Seed for deterministic selection."),
+    no_go: bool = typer.Option(
+        False, "--no-go", help="Skip Go cells even when the toolchain is available."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Run the cross-generator menu self-validation and record the coverage matrix.
+
+    Exercises all six generators behind the uniform interface on built-in
+    fixtures, independently re-verifies each Candidate's forward+inverse
+    round-trip (byte-for-byte restore) and that the forward mutation is
+    behavior-changing, checks the Candidate schema is complete, and writes a
+    ``coverage[generator][language]`` matrix (``coverage.json``) plus per-cell
+    Candidate artifacts. If any generator fails its self-validation the run
+    aborts non-zero with an attributable reason and writes NO artifact.
+    """
+    from swe_forge.forge.generators.menu import build_menu_cell_specs
+
+    specs = build_menu_cell_specs(include_go=False) if no_go else None
+    workdir = Path(tempfile.mkdtemp(prefix="forge-menu-"))
+    try:
+        report = run_menu_selfcheck(workdir, seed=seed, specs=specs)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+    if not report.ok:
+        # Fail cleanly and emit NO artifact (no coverage.json, no candidates).
+        reasons = "; ".join(report.reasons) or "menu self-validation failed"
+        _fail(f"gen-menu: {reasons}")
+
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    coverage_path = out_dir / "coverage.json"
+    coverage_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    _write_menu_candidates(out_dir, report)
+
+    if json_out:
+        typer.echo(json.dumps(report.to_dict()))
+        return
+    console.print(
+        f"[green]menu self-check passed[/green] {len(report.cells)} cells "
+        f"-> {coverage_path}"
+    )
+    for name in report.coverage:
+        langs = report.coverage[name]
+        cells = ", ".join(
+            f"{lang}{'*' if entry.get('llm_backed') else ''}"
+            f"={'ok' if entry.get('ok') else 'FAIL'}"
+            for lang, entry in sorted(langs.items())
+        )
+        console.print(f"  {name:16s}: {cells}")
+    console.print("  (* = llm-backed, offline-stubbed, non-Python exempt)")

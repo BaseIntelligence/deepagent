@@ -18,6 +18,19 @@ from swe_forge.forge.generators.base import (
 from swe_forge.forge.generators.bug_combination import BugCombinationGenerator
 from swe_forge.forge.generators.function_removal import FunctionRemovalGenerator
 from swe_forge.forge.generators.lm_authored import LmAuthoredGenerator
+from swe_forge.forge.generators.menu import (
+    CellResult,
+    MenuCellSpec,
+    MenuReport,
+    RoundTripResult,
+    build_coverage_matrix,
+    build_menu_cell_specs,
+    evaluate_cell,
+    evaluate_coverage,
+    run_menu_selfcheck,
+    schema_completeness,
+    verify_candidate_roundtrip,
+)
 from swe_forge.forge.generators.multi_file import MultiFileGenerator
 from swe_forge.forge.generators.pr_mirror import PrMirrorGenerator
 
@@ -38,12 +51,23 @@ __all__ = [
     "AstMutationGenerator",
     "BugCombinationGenerator",
     "BugGenerator",
+    "CellResult",
     "FunctionRemovalGenerator",
     "GenerationError",
     "GenerationRequest",
     "GeneratorRegistry",
     "LmAuthoredGenerator",
+    "MenuCellSpec",
+    "MenuReport",
     "MultiFileGenerator",
     "PrMirrorGenerator",
+    "RoundTripResult",
+    "build_coverage_matrix",
     "build_default_generator_registry",
+    "build_menu_cell_specs",
+    "evaluate_cell",
+    "evaluate_coverage",
+    "run_menu_selfcheck",
+    "schema_completeness",
+    "verify_candidate_roundtrip",
 ]

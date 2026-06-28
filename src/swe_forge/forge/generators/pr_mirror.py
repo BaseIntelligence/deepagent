@@ -41,6 +41,7 @@ from swe_forge.forge.generators._llm import (
     strip_trivia,
     teacher_usage_details,
 )
+from swe_forge.forge.generators._normalize import is_behavior_changing
 from swe_forge.forge.generators._targeting import SOURCE_EXTENSIONS, sha256_bytes
 from swe_forge.forge.generators.base import (
     BugGenerator,
@@ -374,6 +375,12 @@ class PrMirrorGenerator(BugGenerator):
             except PatchError:
                 continue
             if base == current:
+                continue
+            # Behavior gate: a PR whose revert only touches trivia/imports does
+            # not change behavior and must never become a Candidate.
+            if not is_behavior_changing(
+                current.decode("utf-8", "replace"), base.decode("utf-8", "replace")
+            ):
                 continue
             inverses.append((rel, current, base))
         return inverses
