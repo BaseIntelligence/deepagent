@@ -2,14 +2,13 @@
 
 Implements detection, the pinned base image, dependency download, the
 ``go test`` command (selection-aware via package paths and/or ``-run`` names),
-test-file classification, and the mutation-tool metadata hook. AST parsing and
-mutation (:meth:`parse_symbols`, :meth:`mutate_ast`) and the in-Docker mutation
-run (:meth:`mutation_tool_run`) are implemented by later milestones and still
-raise :class:`NotImplementedError`.
+test-file classification, AST parsing/mutation, and the in-Docker mutation run
+(:meth:`mutation_tool_run`, via go-mutesting) used by the mutation-adequacy gate.
 """
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -19,13 +18,12 @@ from swe_forge.forge.adapters._mutate import mutate_source
 from swe_forge.forge.adapters.base import (
     LanguageAdapter,
     MutantStats,
+    MutationExecutor,
     MutationOp,
     Patch,
     PathLike,
     Symbol,
 )
-
-_TODO = "GoAdapter.{method}() is not implemented yet (later milestone)."
 
 _GO_MARKERS = ("go.mod", "go.sum", "go.work")
 _GO_EXTENSIONS = (".go",)
@@ -79,12 +77,53 @@ class GoAdapter(LanguageAdapter):
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         return mutate_source(self.name, file, symbol, op)
 
-    def mutation_tool_run(
+    async def mutation_tool_run(
         self,
-        image: str,
-        repo_path: PathLike,
+        executor: MutationExecutor,
         *,
-        paths: Sequence[str] | None = None,
-        test_command: str | None = None,
+        target_files: Sequence[str],
+        timeout: float = 1200.0,
     ) -> MutantStats:
-        raise NotImplementedError(_TODO.format(method="mutation_tool_run"))
+        """Run go-mutesting against the target package(s) inside ``executor``.
+
+        go-mutesting is installed on demand (``go install``) and scoped to the
+        target files' packages to bound runtime; ``PASS`` mutants are killed and
+        ``FAIL`` mutants survive. Counts are aggregated across packages.
+        """
+        from swe_forge.forge.adapters._mutation_tools import (
+            GO_MUTESTING_SETUP,
+            MutationToolError,
+            gomutesting_command,
+            parse_gomutesting,
+        )
+
+        sources = [str(f) for f in target_files if not self.is_test_file(f)]
+        if not sources:
+            raise MutationToolError("no non-test target files to mutate (go)")
+
+        for cmd in GO_MUTESTING_SETUP:
+            res = await executor.run_command(cmd, timeout=timeout)
+            if res.exit_code != 0:
+                raise MutationToolError(
+                    f"go-mutesting install failed (exit {res.exit_code}): "
+                    f"{(res.stderr or res.stdout)[:400]}"
+                )
+
+        packages = sorted({posixpath.dirname(src) or "." for src in sources})
+        total = 0
+        killed = 0
+        survivors: list[str] = []
+        for pkg in packages:
+            res = await executor.run_command(gomutesting_command(pkg), timeout=timeout)
+            counts = parse_gomutesting(res.stdout + "\n" + res.stderr)
+            total += counts.total
+            killed += counts.killed
+            survivors.extend(counts.survivors)
+
+        return MutantStats(
+            total=total,
+            killed=killed,
+            survived=total - killed,
+            tool="go-mutesting",
+            survivors=tuple(survivors),
+        )

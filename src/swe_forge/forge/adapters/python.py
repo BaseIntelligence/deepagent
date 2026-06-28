@@ -3,10 +3,8 @@
 Implements the language-specific behavior the env-first build and downstream
 stages need for Python repositories: filesystem detection, the pinned base
 image, dependency-install commands, the pytest test command (selection-aware),
-test-file classification, and the mutation-tool metadata hook. AST parsing and
-mutation (:meth:`parse_symbols`, :meth:`mutate_ast`) and the in-Docker mutation
-run (:meth:`mutation_tool_run`) are implemented by later milestones and still
-raise :class:`NotImplementedError`.
+test-file classification, AST parsing/mutation, and the in-Docker mutation run
+(:meth:`mutation_tool_run`, via ``cosmic-ray``) used by the mutation-adequacy gate.
 """
 
 from __future__ import annotations
@@ -23,6 +21,7 @@ from swe_forge.forge.adapters._mutate import mutate_source
 from swe_forge.forge.adapters.base import (
     LanguageAdapter,
     MutantStats,
+    MutationExecutor,
     MutationOp,
     ParseError,
     Patch,
@@ -30,7 +29,6 @@ from swe_forge.forge.adapters.base import (
     Symbol,
 )
 
-_TODO = "PythonAdapter.{method}() is not implemented yet (later milestone)."
 
 # Root manifests that unambiguously mark a Python project.
 _PY_MARKERS = (
@@ -250,12 +248,75 @@ class PythonAdapter(LanguageAdapter):
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         return mutate_source(self.name, file, symbol, op)
 
-    def mutation_tool_run(
+    async def mutation_tool_run(
         self,
-        image: str,
-        repo_path: PathLike,
+        executor: MutationExecutor,
         *,
-        paths: Sequence[str] | None = None,
-        test_command: str | None = None,
+        target_files: Sequence[str],
+        timeout: float = 1200.0,
     ) -> MutantStats:
-        raise NotImplementedError(_TODO.format(method="mutation_tool_run"))
+        """Run cosmic-ray against the gold target file(s) inside ``executor``.
+
+        cosmic-ray (one of this adapter's ``mutation_tools``) gives structured,
+        per-mutant output: it mutates each target module, runs the established
+        suite (``pytest``, which collects the hidden test files the gate wrote)
+        and reports killed/surviving mutants. Counts are aggregated across target
+        files. The Python ``.pyc`` re-test determinism invariant is honored
+        (``PYTHONDONTWRITEBYTECODE=1`` + a ``__pycache__`` purge before each run).
+        """
+        from swe_forge.forge.adapters._mutation_tools import (
+            COSMIC_RAY_CONFIG,
+            COSMIC_RAY_SESSION,
+            COSMIC_RAY_SETUP,
+            MutationToolError,
+            cosmicray_config,
+            cosmicray_report_command,
+            cosmicray_run_commands,
+            parse_cosmicray_report,
+        )
+
+        sources = [str(f) for f in target_files if not self.is_test_file(f)]
+        if not sources:
+            raise MutationToolError("no non-test target files to mutate (python)")
+
+        for cmd in COSMIC_RAY_SETUP:
+            res = await executor.run_command(cmd, timeout=timeout)
+            if res.exit_code != 0:
+                raise MutationToolError(
+                    f"cosmic-ray install failed (exit {res.exit_code}): "
+                    f"{(res.stderr or res.stdout)[:400]}"
+                )
+
+        test_command = "python -m pytest -x -q -p no:cacheprovider"
+        env = {"PYTHONDONTWRITEBYTECODE": "1"}
+        total = 0
+        killed = 0
+        survivors: list[str] = []
+        for src in sources:
+            await executor.run_command(
+                "find . -name '__pycache__' -type d -prune -exec rm -rf {} + "
+                "2>/dev/null; find . -name '*.pyc' -delete 2>/dev/null; "
+                f"rm -f {COSMIC_RAY_CONFIG} {COSMIC_RAY_SESSION}; true",
+                timeout=timeout,
+            )
+            await executor.write_file(
+                COSMIC_RAY_CONFIG,
+                cosmicray_config(src, test_command, timeout=max(30.0, timeout / 6)),
+            )
+            for cmd in cosmicray_run_commands():
+                await executor.run_command(cmd, timeout=timeout, env=env)
+            report = await executor.run_command(
+                cosmicray_report_command(), timeout=timeout, env=env
+            )
+            counts = parse_cosmicray_report(report.stdout)
+            total += counts.total
+            killed += counts.killed
+            survivors.extend(counts.survivors)
+
+        return MutantStats(
+            total=total,
+            killed=killed,
+            survived=total - killed,
+            tool="cosmic-ray",
+            survivors=tuple(survivors),
+        )

@@ -18,10 +18,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TypeAlias
+from typing import Protocol, TypeAlias, runtime_checkable
 
 PathLike: TypeAlias = str | Path
 
@@ -69,12 +69,19 @@ class Patch:
 
 @dataclass(frozen=True)
 class MutantStats:
-    """Result of running a language mutation tool against the gold code."""
+    """Result of running a language mutation tool against the gold code.
+
+    ``survivors`` carries short human-readable descriptions of the mutants the
+    suite failed to kill (used to guide the mutation-adequacy gate's auto-test
+    synthesis); it is optional so existing callers that only need the counts are
+    unaffected.
+    """
 
     total: int
     killed: int
     survived: int = 0
     tool: str = ""
+    survivors: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def kill_ratio(self) -> float:
@@ -101,6 +108,45 @@ class DuplicateAdapterError(AdapterError):
 
 class NoAdapterFoundError(AdapterError):
     """Raised when no registered adapter matches a repository or name."""
+
+
+@runtime_checkable
+class MutationExecResult(Protocol):
+    """The exit code + captured output of a command run in a sandbox."""
+
+    @property
+    def exit_code(self) -> int: ...
+    @property
+    def stdout(self) -> str: ...
+    @property
+    def stderr(self) -> str: ...
+
+
+@runtime_checkable
+class MutationExecutor(Protocol):
+    """Minimal sandbox surface ``mutation_tool_run`` drives (DockerSandbox-compat).
+
+    A throwaway container whose image is the candidate's green ``EnvImage`` (the
+    gold repo already checked out at :attr:`workspace_dir`). The adapter installs
+    its mutation tool, writes a config, runs the tool, and reads any report file
+    through this surface, all language-agnostically from the gate's perspective.
+    """
+
+    @property
+    def workspace_dir(self) -> str: ...
+
+    async def run_command(
+        self,
+        cmd: str,
+        *,
+        cwd: str | None = ...,
+        timeout: float | None = ...,
+        env: dict[str, str] | None = ...,
+    ) -> MutationExecResult: ...
+
+    async def write_file(self, path: str, content: str) -> None: ...
+
+    async def read_file(self, path: str) -> str: ...
 
 
 class LanguageAdapter(ABC):
@@ -190,15 +236,22 @@ class LanguageAdapter(ABC):
         return remove_body(self.name, file, symbol)
 
     @abstractmethod
-    def mutation_tool_run(
+    async def mutation_tool_run(
         self,
-        image: str,
-        repo_path: PathLike,
+        executor: MutationExecutor,
         *,
-        paths: Sequence[str] | None = None,
-        test_command: str | None = None,
+        target_files: Sequence[str],
+        timeout: float = 1200.0,
     ) -> MutantStats:
-        """Run the language mutation tool in ``image`` and return mutant stats."""
+        """Run this language's mutation tool against the gold code in ``executor``.
+
+        Mutates the non-test ``target_files`` (the candidate's gold source) inside
+        the throwaway container, runs the established hidden suite against every
+        mutant, and returns the :class:`MutantStats` (``total``/``killed`` plus
+        survivor descriptions) for the mutation-adequacy gate. The gate writes the
+        hidden test files into the workspace before calling, so the tool's test
+        command collects them alongside the repo's own suite.
+        """
 
     @abstractmethod
     def is_test_file(self, path: PathLike) -> bool:

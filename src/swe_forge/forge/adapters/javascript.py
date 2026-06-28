@@ -3,10 +3,8 @@
 A single adapter covers both plain-JS and TS repositories (both resolve to
 ``"javascript"``). Implements detection, the pinned base image, dependency
 install (lockfile-aware), the ``node --test`` command (selection-aware),
-test-file classification, and the mutation-tool metadata hook. AST parsing and
-mutation (:meth:`parse_symbols`, :meth:`mutate_ast`) and the in-Docker mutation
-run (:meth:`mutation_tool_run`) are implemented by later milestones and still
-raise :class:`NotImplementedError`.
+test-file classification, AST parsing/mutation, and the in-Docker mutation run
+(:meth:`mutation_tool_run`, via Stryker) used by the mutation-adequacy gate.
 """
 
 from __future__ import annotations
@@ -20,13 +18,13 @@ from swe_forge.forge.adapters._treesitter import parse_js_symbols
 from swe_forge.forge.adapters.base import (
     LanguageAdapter,
     MutantStats,
+    MutationExecutor,
     MutationOp,
     Patch,
     PathLike,
     Symbol,
 )
 
-_TODO = "JavaScriptAdapter.{method}() is not implemented yet (later milestone)."
 
 # Root manifests/config that mark a JS or TS project (TS resolves here too).
 _JS_MARKERS = (
@@ -116,12 +114,48 @@ class JavaScriptAdapter(LanguageAdapter):
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         return mutate_source(self.name, file, symbol, op)
 
-    def mutation_tool_run(
+    async def mutation_tool_run(
         self,
-        image: str,
-        repo_path: PathLike,
+        executor: MutationExecutor,
         *,
-        paths: Sequence[str] | None = None,
-        test_command: str | None = None,
+        target_files: Sequence[str],
+        timeout: float = 1200.0,
     ) -> MutantStats:
-        raise NotImplementedError(_TODO.format(method="mutation_tool_run"))
+        """Run Stryker against the gold target file(s) inside ``executor``.
+
+        Uses Stryker's command test runner (a non-zero ``npm test`` exit = a kill)
+        so any JS/TS suite works without a framework plugin, fetched on demand via
+        ``npx``. Mutant statuses are read from Stryker's JSON report.
+        """
+        from swe_forge.forge.adapters._mutation_tools import (
+            STRYKER_CONFIG,
+            STRYKER_REPORT,
+            MutationToolError,
+            parse_stryker_json,
+            stryker_config,
+            stryker_run_command,
+        )
+
+        sources = [str(f) for f in target_files if not self.is_test_file(f)]
+        if not sources:
+            raise MutationToolError("no non-test target files to mutate (javascript)")
+
+        await executor.write_file(
+            STRYKER_CONFIG, stryker_config(sources, test_command="npm test")
+        )
+        run = await executor.run_command(stryker_run_command(), timeout=timeout)
+        try:
+            report = await executor.read_file(STRYKER_REPORT)
+        except Exception as exc:
+            raise MutationToolError(
+                f"Stryker produced no JSON report (exit {run.exit_code}): "
+                f"{(run.stderr or run.stdout)[:400]}"
+            ) from exc
+        counts = parse_stryker_json(report)
+        return MutantStats(
+            total=counts.total,
+            killed=counts.killed,
+            survived=counts.survived,
+            tool="stryker",
+            survivors=counts.survivors,
+        )

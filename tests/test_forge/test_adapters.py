@@ -60,13 +60,12 @@ class FakeAdapter(LanguageAdapter):
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
         return Patch(diff=f"--- {file}\n", files=(str(file),))
 
-    def mutation_tool_run(
+    async def mutation_tool_run(
         self,
-        image: str,
-        repo_path: PathLike,
+        executor: object,
         *,
-        paths: Sequence[str] | None = None,
-        test_command: str | None = None,
+        target_files: Sequence[str],
+        timeout: float = 1200.0,
     ) -> MutantStats:
         return MutantStats(total=4, killed=3, survived=1, tool=f"{self.name}-tool")
 
@@ -75,13 +74,16 @@ class FakeAdapter(LanguageAdapter):
 
 
 STUB_ADAPTERS = (PythonAdapter, JavaScriptAdapter, GoAdapter)
-# Behavior still pending later milestones (AST mutate, in-Docker mutation run).
-# The build-time methods (detect/base_image/install_commands/test_command/
-# is_test_file) are implemented and covered in test_adapters_concrete.py;
-# parse_symbols is implemented and covered in test_adapters_parse_symbols.py;
-# mutate_ast is implemented and covered in test_generators_ast.py. Only the
-# in-Docker mutation run remains pending (a later oracle milestone).
-UNIMPLEMENTED_METHODS = ("mutation_tool_run",)
+# All adapter behavior is now implemented: the build-time methods (detect/
+# base_image/install_commands/test_command/is_test_file) in test_adapters_concrete.py;
+# parse_symbols in test_adapters_parse_symbols.py; mutate_ast in test_generators_ast.py;
+# and the in-Docker mutation run (mutation_tool_run) by the mutation-adequacy gate
+# (test_oracle_mutation.py + this feature's real-Docker manual verification).
+
+
+class TestStubAdaptersRegistered:
+    def test_stub_adapters_are_the_default_three(self) -> None:
+        assert tuple(a.name for a in STUB_ADAPTERS) == ("python", "javascript", "go")
 
 
 class TestLanguageAdapterABC:
@@ -194,16 +196,6 @@ class TestStubAdapters:
     ) -> None:
         assert adapter_cls.name == expected_name
         assert adapter_cls().name == expected_name
-
-    @pytest.mark.parametrize("adapter_cls", STUB_ADAPTERS)
-    @pytest.mark.parametrize("method", UNIMPLEMENTED_METHODS)
-    def test_pending_methods_raise_not_implemented(
-        self, adapter_cls: type[LanguageAdapter], method: str
-    ) -> None:
-        adapter = adapter_cls()
-        args: tuple[object, ...] = ("image:tag", "/repo")
-        with pytest.raises(NotImplementedError):
-            getattr(adapter, method)(*args)
 
 
 class TestValueTypes:

@@ -44,13 +44,18 @@ from swe_forge.forge.models import (
     require_green_baseline,
 )
 from swe_forge.forge.oracle import (
+    DEFAULT_KILL_THRESHOLD,
+    DEFAULT_MAX_SYNTHESIS_ROUNDS,
     EstablishError,
     FlakinessError,
     HiddenTest,
     HiddenTestFile,
+    MutationError,
     run_establish_gate,
     run_flakiness_gate,
+    run_mutation_gate,
 )
+from swe_forge.forge.oracle.mutation_synth import MutationKillSynthesizer
 from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
 from swe_forge.forge.panel import (
     PANEL_BASE_URL_VAR,
@@ -1595,6 +1600,117 @@ def oracle_flakiness(
         flak = result.details.get("flakiness", {})
         dropped = flak.get("dropped", []) if isinstance(flak, dict) else []
         console.print(f"  dropped (flaky): {dropped}")
+        if result.reasons:
+            console.print(f"  reasons        : {result.reasons}")
+
+    if not result.is_pass:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="oracle-mutation")
+def oracle_mutation(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the prior-gate OracleReport JSON (flakiness; its F2P/P2P set).",
+    ),
+    threshold: float = typer.Option(
+        DEFAULT_KILL_THRESHOLD,
+        "--threshold",
+        help="Minimum mutant kill ratio required to pass (0 < t <= 1).",
+    ),
+    max_rounds: int = typer.Option(
+        DEFAULT_MAX_SYNTHESIS_ROUNDS,
+        "--max-rounds",
+        help="Bounded auto-synthesis rounds before rejecting an inadequate suite.",
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the updated OracleReport JSON here (file or dir)."
+    ),
+    synthesize: bool = typer.Option(
+        True,
+        "--synthesize/--no-synthesize",
+        help="Auto-synthesize survivor-killing tests when below threshold.",
+    ),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Never call the LLM (no synthesis); measure adequacy of the suite as-is.",
+    ),
+    timeout: float = typer.Option(
+        1200.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Mutation-adequacy gate: mutate the gold; require kill ratio >= threshold.
+
+    Runs the adapter's mutation tool (cosmic-ray | Stryker | go-mutesting) against
+    the gold target file(s) in throwaway DockerSandboxes with the established
+    hidden tests present, recording ``mutants_total``/``mutants_killed``. If the
+    kill ratio is below ``--threshold`` it auto-synthesizes survivor-killing tests
+    (teacher proposes; each is confirmed to reduce survivors by re-measuring) until
+    the threshold is met. Rejects (non-zero exit) when the bounded loop cannot
+    reach the threshold, citing the surviving mutants.
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    prior_report = _load_oracle_report(report)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    synthesizer = MutationKillSynthesizer() if (synthesize and not offline) else None
+
+    try:
+        result = asyncio.run(
+            run_mutation_gate(
+                candidate_obj,
+                env_image,
+                prior_report,
+                synthesizer=synthesizer,
+                threshold=threshold,
+                max_rounds=max_rounds,
+                adapter=adapter,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle mutation: {exc}")
+    except (MutationError, FlakinessError, EstablishError, DockerError) as exc:
+        _fail(f"oracle mutation: {exc}")
+
+    if out:
+        _write_oracle_report(out, result)
+
+    if json_out:
+        typer.echo(json.dumps({"report": result.to_dict()}))
+    else:
+        colour = "green" if result.is_pass else "red"
+        console.print(
+            f"[{colour}]mutation {result.verdict}[/{colour}] "
+            f"{result.generator} [{result.language}]"
+        )
+        mut = result.details.get("mutation", {})
+        tool = mut.get("tool", "") if isinstance(mut, dict) else ""
+        console.print(
+            f"  mutants        : {result.mutants_killed}/{result.mutants_total} "
+            f"killed (tool={tool})"
+        )
+        console.print(f"  test_files     : {[tf.path for tf in result.test_files]}")
         if result.reasons:
             console.print(f"  reasons        : {result.reasons}")
 
