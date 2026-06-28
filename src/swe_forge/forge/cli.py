@@ -22,6 +22,7 @@ from swe_forge.forge.panel import (
     TEACHER_API_KEY_VAR,
     TEACHER_BASE_URL_VAR,
     VALID_TIERS,
+    PanelError,
     PanelModel,
     build_panel_from_env,
     resolve_panel_endpoint,
@@ -48,8 +49,11 @@ app = typer.Typer(
 )
 console = Console()
 
-# Default model ids per check mode (model ids only; no provider host/brand).
-_OPENAI_CHECK_MODEL = "openai/gpt-4o-mini"
+# Generic fallback model ids per check mode (model ids only; no provider host or
+# brand). Used ONLY when the env-configured TEACHER_LLM_MODEL does not fit the
+# requested --mode; otherwise the default is derived from the env so it targets a
+# model the configured endpoint actually hosts.
+_OPENAI_FALLBACK_MODEL = "openai/gpt-4o-mini"
 _ANTHROPIC_FALLBACK_MODEL = "anthropic/claude-3-5-sonnet"
 
 
@@ -87,14 +91,42 @@ def _weather_tool() -> dict[str, object]:
     }
 
 
-def _resolve_model(mode: str, model: str | None, configured: str) -> str:
+def _env_model_for_mode(env_model: str, env_provider: str) -> tuple[str, str]:
+    """Derive ``(provider, full_model_id)`` from the configured env, or ``("", "")``.
+
+    A provider-prefixed ``TEACHER_LLM_MODEL`` (``anthropic/<id>``) yields its own
+    provider; an unprefixed id is paired with ``TEACHER_LLM_PROVIDER`` so the
+    derived model still routes correctly. Returns empty strings when neither a
+    model nor a usable provider is configured.
+    """
+    cleaned = (env_model or "").strip()
+    if not cleaned:
+        return "", ""
+    if "/" in cleaned:
+        provider = cleaned.partition("/")[0].strip().lower()
+        return provider, cleaned
+    provider = (env_provider or "").strip().lower()
+    if provider:
+        return provider, f"{provider}/{cleaned}"
+    return "", ""
+
+
+def _resolve_model(
+    mode: str, model: str | None, env_model: str, env_provider: str = ""
+) -> str:
+    """Pick the model id for a check.
+
+    An explicit ``--model`` always wins. Otherwise the default is derived from
+    ``TEACHER_LLM_MODEL``/``TEACHER_LLM_PROVIDER`` when that model fits the
+    requested ``--mode`` (so it targets a model the endpoint actually hosts); a
+    generic fallback id is used only when the env model does not fit the mode.
+    """
     if model:
         return model
-    if mode == "openai":
-        return configured if configured.startswith("openai/") else _OPENAI_CHECK_MODEL
-    return (
-        configured if configured.startswith("anthropic/") else _ANTHROPIC_FALLBACK_MODEL
-    )
+    provider, full = _env_model_for_mode(env_model, env_provider)
+    if full and provider == mode:
+        return full
+    return _OPENAI_FALLBACK_MODEL if mode == "openai" else _ANTHROPIC_FALLBACK_MODEL
 
 
 @app.command()
@@ -161,9 +193,10 @@ def llm_check(
     env_base_url = os.environ.get("TEACHER_LLM_BASE_URL", "")
     env_api_key = os.environ.get("TEACHER_LLM_API_KEY", "")
     env_model = os.environ.get("TEACHER_LLM_MODEL", "")
+    env_provider = os.environ.get("TEACHER_LLM_PROVIDER", "")
 
     effective_base_url = base_url if base_url is not None else env_base_url
-    effective_model = _resolve_model(mode, model, env_model)
+    effective_model = _resolve_model(mode, model, env_model, env_provider)
     secret = env_api_key
 
     # Dry-run: pure routing normalization, no credentials required, no call.
@@ -409,6 +442,11 @@ def panel_rollouts(
     json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
 ) -> None:
     """Issue k independent, uncached rollouts of a task on a panel model."""
+    if k < 0:
+        # Validate the arg up front so a negative k surfaces a clean, secret-free
+        # message instead of a PanelError traceback escaping from run_rollouts.
+        _fail(f"--k must be non-negative (>= 0), got {k}")
+
     base_url, api_key = resolve_panel_endpoint()
     _require_panel_creds(base_url, api_key)
 
@@ -461,6 +499,8 @@ def panel_rollouts(
     except MissingCredentialsError as exc:
         _fail(str(exc), api_key)
     except ModelRoutingError as exc:
+        _fail(str(exc), api_key)
+    except PanelError as exc:
         _fail(str(exc), api_key)
 
     payload = [r.to_dict() for r in results]

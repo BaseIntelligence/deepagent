@@ -29,6 +29,7 @@ from swe_forge.forge.panel import (
     DEFAULT_PANEL_SPECS,
     VALID_TIERS,
     InvalidTierError,
+    PanelError,
     PanelModel,
     build_panel,
     build_panel_from_env,
@@ -511,6 +512,40 @@ class TestPanelRolloutsCli:
             result = runner.invoke(forge_app, ["panel-rollouts", "--k", "2"])
         assert result.exit_code != 0
         assert "TEACHER_LLM_BASE_URL" in result.output
+
+    def test_negative_k_exits_cleanly_without_traceback(self) -> None:
+        # A negative --k must surface a clean, secret-free message (typer.Exit),
+        # never let a PanelError traceback escape, and make no LLM call.
+        mock = AsyncMock(return_value=_fake_response())
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(
+                os.environ, {**_TEACHER_ENV, "TEACHER_LLM_API_KEY": SECRET}, clear=True
+            ),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(
+                forge_app, ["panel-rollouts", "--k", "-1", "--no-validate"]
+            )
+        assert result.exit_code != 0
+        assert "non-negative" in result.output
+        assert not isinstance(result.exception, PanelError)
+        assert SECRET not in result.output
+        assert mock.call_count == 0  # no rollout/validation call before the error
+
+    def test_k_zero_is_allowed_and_emits_empty(self) -> None:
+        mock = AsyncMock(return_value=_fake_response())
+        with (
+            runner.isolated_filesystem(),
+            patch.dict(os.environ, _TEACHER_ENV, clear=True),
+            patch.object(teacher_mod.litellm, "acompletion", mock),
+        ):
+            result = runner.invoke(
+                forge_app, ["panel-rollouts", "--k", "0", "--no-validate", "--json"]
+            )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output) == []
+        assert mock.call_count == 0
 
 
 # --------------------------------------------------------------------------- #

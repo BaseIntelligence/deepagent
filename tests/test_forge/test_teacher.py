@@ -27,7 +27,9 @@ from typer.testing import CliRunner
 
 from swe_forge.forge import teacher as teacher_mod
 from swe_forge.forge.cli import app as forge_app
+from swe_forge.forge.cli import _resolve_model
 from swe_forge.forge.teacher import (
+    FORCED_TOOL_CHOICE,
     MissingCredentialsError,
     ModelRoutingError,
     NormalizedToolCall,
@@ -261,6 +263,84 @@ class TestStructuredAndTools:
             result = await _client().complete_with_tools("weather?", [])
         assert result.tool_calls[0].arguments == {"__unparsed__": "not-json"}
 
+    async def test_complete_with_tools_forces_tool_use_when_tools_supplied(
+        self,
+    ) -> None:
+        # With tools and no explicit tool_choice, the call forces tool use so the
+        # normalized tool_call is deterministic (not provider-dependent "auto").
+        tc = _tool_call("get_weather", '{"city": "Paris"}')
+        mock = AsyncMock(
+            return_value=_fake_response(
+                content="", tool_calls=[tc], finish_reason="tool_calls"
+            )
+        )
+        tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        with patch.object(teacher_mod.litellm, "acompletion", mock):
+            await _client().complete_with_tools("weather in Paris?", tools)
+        assert mock.call_args.kwargs["tool_choice"] == FORCED_TOOL_CHOICE
+        assert FORCED_TOOL_CHOICE != "auto"
+
+    async def test_complete_with_tools_no_tools_stays_auto(self) -> None:
+        # No tools supplied -> behavior unchanged (does not force tool use).
+        mock = AsyncMock(return_value=_fake_response(content="hi"))
+        with patch.object(teacher_mod.litellm, "acompletion", mock):
+            await _client().complete_with_tools("hi", [])
+        assert mock.call_args.kwargs["tool_choice"] == "auto"
+
+    async def test_complete_with_tools_explicit_tool_choice_wins(self) -> None:
+        tc = _tool_call("get_weather", '{"city": "Paris"}')
+        mock = AsyncMock(return_value=_fake_response(content="", tool_calls=[tc]))
+        tools = [{"type": "function", "function": {"name": "get_weather"}}]
+        with patch.object(teacher_mod.litellm, "acompletion", mock):
+            await _client().complete_with_tools("weather?", tools, tool_choice="auto")
+        assert mock.call_args.kwargs["tool_choice"] == "auto"
+
+
+class TestResolveDefaultModel:
+    """`forge llm-check` default model derives from TEACHER_LLM_MODEL/PROVIDER."""
+
+    def test_explicit_model_always_wins(self) -> None:
+        assert (
+            _resolve_model("anthropic", "openai/explicit", "anthropic/env", "anthropic")
+            == "openai/explicit"
+        )
+
+    def test_env_model_used_when_prefix_matches_mode(self) -> None:
+        # Default targets the env-configured model (a model the endpoint hosts),
+        # not a static fallback id.
+        assert (
+            _resolve_model("anthropic", None, "anthropic/claude-opus-4-8", "anthropic")
+            == "anthropic/claude-opus-4-8"
+        )
+        assert (
+            _resolve_model("openai", None, "openai/gpt-5.5", "openai")
+            == "openai/gpt-5.5"
+        )
+
+    def test_unprefixed_env_model_paired_with_provider(self) -> None:
+        assert (
+            _resolve_model("anthropic", None, "claude-opus-4-8", "anthropic")
+            == "anthropic/claude-opus-4-8"
+        )
+
+    def test_generic_fallback_only_when_env_model_does_not_fit_mode(self) -> None:
+        # env model is anthropic but the requested mode is openai -> generic id.
+        assert (
+            _resolve_model("openai", None, "anthropic/claude-opus-4-8", "anthropic")
+            == "openai/gpt-4o-mini"
+        )
+        # env model is openai but the requested mode is anthropic -> generic id.
+        assert (
+            _resolve_model("anthropic", None, "openai/gpt-5.5", "openai")
+            == "anthropic/claude-3-5-sonnet"
+        )
+
+    def test_generic_fallback_when_env_model_unset(self) -> None:
+        assert (
+            _resolve_model("anthropic", None, "", "") == "anthropic/claude-3-5-sonnet"
+        )
+        assert _resolve_model("openai", None, "", "") == "openai/gpt-4o-mini"
+
 
 class TestAgenticTurn:
     async def test_two_step_tool_exchange(self) -> None:
@@ -382,6 +462,39 @@ class TestLlmCheckCli:
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["api_base"] == "https://host/v1"
+
+    def test_dry_run_default_model_derived_from_env(self) -> None:
+        # With TEACHER_LLM_MODEL matching the mode, the default targets that
+        # env-configured model (not the generic fallback id).
+        env = {
+            "TEACHER_LLM_BASE_URL": "https://host",
+            "TEACHER_LLM_API_KEY": SECRET,
+            "TEACHER_LLM_MODEL": "anthropic/claude-opus-4-8",
+            "TEACHER_LLM_PROVIDER": "anthropic",
+        }
+        with runner.isolated_filesystem(), patch.dict(os.environ, env, clear=True):
+            result = runner.invoke(
+                forge_app, ["llm-check", "--mode", "anthropic", "--dry-run", "--json"]
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["model"] == "anthropic/claude-opus-4-8"
+
+    def test_dry_run_generic_fallback_when_env_model_mismatches_mode(self) -> None:
+        # env model is anthropic but the requested mode is openai -> generic id.
+        env = {
+            "TEACHER_LLM_BASE_URL": "https://host",
+            "TEACHER_LLM_API_KEY": SECRET,
+            "TEACHER_LLM_MODEL": "anthropic/claude-opus-4-8",
+            "TEACHER_LLM_PROVIDER": "anthropic",
+        }
+        with runner.isolated_filesystem(), patch.dict(os.environ, env, clear=True):
+            result = runner.invoke(
+                forge_app, ["llm-check", "--mode", "openai", "--dry-run", "--json"]
+            )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["model"] == "openai/gpt-4o-mini"
 
     def test_unprefixed_model_rejected(self) -> None:
         with runner.isolated_filesystem(), patch.dict(os.environ, {}, clear=True):

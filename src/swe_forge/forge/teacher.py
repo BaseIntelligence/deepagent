@@ -49,6 +49,12 @@ DEFAULT_NUM_RETRIES = 3
 DEFAULT_TIMEOUT = 120.0
 DEFAULT_AGENTIC_MAX_TURNS = 8
 
+# Provider-agnostic forcing choice: when tools are supplied to a one-shot
+# completion, require the model to emit a tool call so the normalized result is
+# deterministic. LiteLLM translates this per protocol (OpenAI "required" /
+# Anthropic ``{"type": "any"}``).
+FORCED_TOOL_CHOICE = "required"
+
 Message = dict[str, Any]
 
 
@@ -420,10 +426,19 @@ class TeacherClient:
         tools: list[dict[str, Any]],
         *,
         system: str | None = None,
-        tool_choice: str = "auto",
+        tool_choice: str | None = None,
         max_tokens: int | None = None,
     ) -> LLMResult:
-        """Complete with function tools; ``tool_calls`` are normalized."""
+        """Complete with function tools; ``tool_calls`` are normalized.
+
+        When one or more ``tools`` are supplied and no explicit ``tool_choice``
+        is given, the call forces tool use (:data:`FORCED_TOOL_CHOICE`) so the
+        normalized ``tool_calls`` are deterministic. With no tools supplied the
+        choice stays ``"auto"`` (behavior unchanged); an explicit ``tool_choice``
+        always wins.
+        """
+        if tool_choice is None:
+            tool_choice = FORCED_TOOL_CHOICE if tools else "auto"
         resp = await self._acompletion(
             self._as_messages(prompt, system),
             tools=tools,
