@@ -114,8 +114,32 @@ from swe_forge.forge.oracle.leak import (
     run_leak_gate,
     sanitize_leaks,
 )
+from swe_forge.forge.oracle.pipeline import (
+    GATE_ORDER,
+    REASON_PIPELINE_INCONSISTENT,
+    ExportRefusedError,
+    GateStep,
+    OraclePipelineError,
+    build_default_gates,
+    ensure_oracle_exportable,
+    is_oracle_exportable,
+    orchestrate_gates,
+    run_oracle_pipeline,
+    verify_pass_consistency,
+)
 
 __all__ = [
+    "GATE_ORDER",
+    "REASON_PIPELINE_INCONSISTENT",
+    "ExportRefusedError",
+    "GateStep",
+    "OraclePipelineError",
+    "build_default_gates",
+    "ensure_oracle_exportable",
+    "is_oracle_exportable",
+    "orchestrate_gates",
+    "run_oracle_pipeline",
+    "verify_pass_consistency",
     "DEFAULT_FORBIDDEN_FILENAMES",
     "DEFAULT_FLAKINESS_RUNS",
     "DEFAULT_KILL_THRESHOLD",

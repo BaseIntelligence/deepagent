@@ -158,6 +158,20 @@ def parse_cosmicray_report(text: str) -> ToolCounts:
 STRYKER_CONFIG = "stryker.conf.json"
 STRYKER_REPORT = "reports/mutation/mutation.json"
 
+# Stryker's command test runner manages the test process tree with the system
+# ``ps`` utility, which the official ``node:*-slim`` base images do NOT ship; its
+# absence crashes Stryker with ``spawn ps ENOENT`` AFTER a successful dry run. We
+# best-effort install ``procps`` (the same apt pattern the env builder uses for
+# git) and verify ``ps`` is present so the gate fails with a clear reason rather
+# than an opaque Node stack trace.
+STRYKER_SETUP: tuple[str, ...] = (
+    "set +e; export DEBIAN_FRONTEND=noninteractive; "
+    "if ! command -v ps >/dev/null 2>&1; then "
+    "apt-get update -qq >/dev/null 2>&1 && "
+    "apt-get install -y -qq procps >/dev/null 2>&1; fi; "
+    "command -v ps >/dev/null 2>&1",
+)
+
 # Stryker statuses that count as a kill / as a survivor / as out-of-scope.
 _STRYKER_KILLED = {"Killed", "Timeout"}
 _STRYKER_SURVIVED = {"Survived", "NoCoverage"}
@@ -231,8 +245,15 @@ def parse_stryker_json(report_text: str) -> ToolCounts:
 # --------------------------------------------------------------------------- #
 # Go: go-mutesting
 # --------------------------------------------------------------------------- #
+# go-mutesting's ``@latest`` tracks a fork whose newer commits raise the required
+# Go version (e.g. >= 1.25.5) past the ``golang:1.22`` base image. The base image
+# pins ``GOTOOLCHAIN=local``, so the install fails with a toolchain mismatch;
+# ``GOTOOLCHAIN=auto`` lets ``go install`` download the toolchain the module needs
+# (the Go module/toolchain registry is reachable) and keeps ``@latest`` working as
+# the fork evolves. Target tests still run under the module's own ``go`` directive.
 GO_MUTESTING_SETUP: tuple[str, ...] = (
-    "go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest",
+    "GOTOOLCHAIN=auto go install "
+    "github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest",
 )
 
 
@@ -279,6 +300,7 @@ __all__ = [
     "GO_MUTESTING_SETUP",
     "STRYKER_CONFIG",
     "STRYKER_REPORT",
+    "STRYKER_SETUP",
     "MutationToolError",
     "ToolCounts",
     "cosmicray_config",

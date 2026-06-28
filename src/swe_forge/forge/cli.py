@@ -45,6 +45,7 @@ from swe_forge.forge.models import (
     require_green_baseline,
 )
 from swe_forge.forge.oracle import (
+    DEFAULT_FLAKINESS_RUNS,
     DEFAULT_KILL_THRESHOLD,
     DEFAULT_MAX_STRENGTHEN_ROUNDS,
     DEFAULT_MAX_SYNTHESIS_ROUNDS,
@@ -58,12 +59,14 @@ from swe_forge.forge.oracle import (
     HiddenTestFile,
     LeakError,
     MutationError,
+    OraclePipelineError,
     run_alt_correct_gate,
     run_differential_gate,
     run_establish_gate,
     run_flakiness_gate,
     run_leak_gate,
     run_mutation_gate,
+    run_oracle_pipeline,
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.differential_synth import (
@@ -2096,4 +2099,188 @@ def oracle_leak(
             console.print(f"  reasons        : {result.reasons}")
 
     if not result.is_pass:
+        raise typer.Exit(code=1)
+
+
+@app.command(name="oracle")
+def oracle(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    spec: str | None = typer.Option(
+        None,
+        "--spec",
+        help="Optional spec.json; its interface_block pins the alt-correct signatures.",
+    ),
+    tests: str | None = typer.Option(
+        None,
+        "--tests",
+        help="Optional caller-declared hidden tests JSON ({'tests':[{test_id,files,origin}]}).",
+    ),
+    threshold: float = typer.Option(
+        DEFAULT_KILL_THRESHOLD,
+        "--threshold",
+        help="Minimum mutant kill ratio required by the mutation gate (0 < t <= 1).",
+    ),
+    flakiness_runs: int = typer.Option(
+        DEFAULT_FLAKINESS_RUNS,
+        "--flakiness-runs",
+        help="Determinism repeats in fresh containers (clamped up to 3).",
+    ),
+    num_variants: int = typer.Option(
+        DEFAULT_NUM_VARIANTS,
+        "--num-variants",
+        help="Plausible-but-wrong variants the differential gate proposes.",
+    ),
+    num_alternatives: int = typer.Option(
+        DEFAULT_NUM_ALTERNATIVES,
+        "--num-alternatives",
+        help="Genuinely-correct alternatives the alt-correct gate proposes.",
+    ),
+    max_mutation_rounds: int = typer.Option(
+        DEFAULT_MAX_SYNTHESIS_ROUNDS,
+        "--max-mutation-rounds",
+        help="Bounded mutation auto-synthesis rounds before rejecting.",
+    ),
+    max_differential_rounds: int = typer.Option(
+        DEFAULT_MAX_STRENGTHEN_ROUNDS,
+        "--max-differential-rounds",
+        help="Bounded differential test-strengthening rounds before rejecting.",
+    ),
+    relax: bool = typer.Option(
+        False,
+        "--relax/--no-relax",
+        help="On alt-correct over-fit, drop the offending test when safe (else reject).",
+    ),
+    synthesize: bool = typer.Option(
+        True,
+        "--synthesize/--no-synthesize",
+        help="Agentically synthesize tests/variants/alternatives via the teacher.",
+    ),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Never call the LLM (no synthesis/variants/alternatives).",
+    ),
+    no_sanitize: bool = typer.Option(
+        False,
+        "--no-sanitize",
+        help="Leak gate detects only; never strip a removable leak (a finding rejects).",
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    mutation_timeout: float = typer.Option(
+        1200.0, "--mutation-timeout", help="Mutation-gate Docker timeout (seconds)."
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the final OracleReport JSON here (file or dir)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Oracle pipeline: run every gate in order -> one OracleReport.
+
+    Orchestrates establish -> flakiness -> mutation -> differential -> alt-correct
+    -> leak in throwaway DockerSandboxes on the candidate's EnvImage. ``verdict``
+    is ``pass`` only when EVERY gate passes with consistent fields (empty reasons,
+    F2P non-empty, flakiness_runs>=3, kill ratio>=threshold, differential_pass,
+    alt_correct_accepted, clean leak_audit); a single gate failure stops the
+    pipeline and yields ``reject`` with attributable reasons citing the earliest
+    failed gate (later gate fields are never credited). A reject exits non-zero so
+    a rejected candidate is never advanced to export.
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    spec_obj = _load_spec(spec)
+    provided = _load_provided_tests(tests)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    use_llm = synthesize and not offline
+    establish_synth = AgenticTestSynthesizer() if use_llm else None
+    mutation_synth = MutationKillSynthesizer() if use_llm else None
+    variant_gen = TeacherVariantGenerator() if not offline else None
+    differential_synth = DifferentialKillSynthesizer() if use_llm else None
+    alt_gen = TeacherAltCorrectGenerator() if not offline else None
+
+    try:
+        report = asyncio.run(
+            run_oracle_pipeline(
+                candidate_obj,
+                env_image,
+                provided_tests=provided,
+                establish_synthesizer=establish_synth,
+                mutation_synthesizer=mutation_synth,
+                variant_generator=variant_gen,
+                differential_synthesizer=differential_synth,
+                alt_generator=alt_gen,
+                spec=spec_obj,
+                flakiness_runs=flakiness_runs,
+                kill_threshold=threshold,
+                max_mutation_rounds=max_mutation_rounds,
+                num_variants=num_variants,
+                max_differential_rounds=max_differential_rounds,
+                num_alternatives=num_alternatives,
+                relax_alt_correct=relax,
+                sanitize=not no_sanitize,
+                adapter=adapter,
+                command_timeout=timeout,
+                mutation_timeout=mutation_timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle pipeline: {exc}")
+    except (
+        OraclePipelineError,
+        LeakError,
+        AltCorrectError,
+        DifferentialError,
+        MutationError,
+        FlakinessError,
+        EstablishError,
+        DockerError,
+    ) as exc:
+        _fail(f"oracle pipeline: {exc}")
+
+    if out:
+        _write_oracle_report(out, report)
+
+    if json_out:
+        typer.echo(json.dumps({"report": report.to_dict()}))
+    else:
+        colour = "green" if report.is_pass else "red"
+        console.print(
+            f"[{colour}]oracle {report.verdict}[/{colour}] "
+            f"{report.generator} [{report.language}]"
+        )
+        pipeline = report.details.get("pipeline", {})
+        gates_run = pipeline.get("gates_run", []) if isinstance(pipeline, dict) else []
+        failed = pipeline.get("failed_gate") if isinstance(pipeline, dict) else None
+        console.print(f"  gates_run      : {gates_run}")
+        console.print(f"  fail_to_pass   : {report.fail_to_pass}")
+        console.print(f"  flakiness_runs : {report.flakiness_runs}")
+        console.print(
+            f"  mutants        : {report.mutants_killed}/{report.mutants_total} killed"
+        )
+        console.print(f"  differential   : {report.differential_pass}")
+        console.print(f"  alt_correct    : {report.alt_correct_accepted}")
+        console.print(f"  leak_audit     : {report.leak_audit}")
+        if failed:
+            console.print(f"  failed_gate    : {failed}")
+        if report.reasons:
+            console.print(f"  reasons        : {report.reasons}")
+
+    if not report.is_pass:
         raise typer.Exit(code=1)

@@ -24,6 +24,14 @@ from swe_forge.forge.models import (
     RepoSpec,
     require_green_baseline,
 )
+from swe_forge.forge.oracle.pipeline import (
+    GATE_ORDER,
+    ExportRefusedError,
+    OraclePipelineError,
+    ensure_oracle_exportable,
+    is_oracle_exportable,
+    run_oracle_pipeline,
+)
 from swe_forge.forge.sources import (
     SourceError,
     SourceRegistry,
@@ -32,6 +40,7 @@ from swe_forge.forge.sources import (
 )
 
 __all__ = [
+    "GATE_ORDER",
     "GENERATOR_NAMES",
     "ORACLE_VERDICTS",
     "SUPPORTED_LANGUAGES",
@@ -39,10 +48,12 @@ __all__ = [
     "Candidate",
     "CandidateTarget",
     "EnvImage",
+    "ExportRefusedError",
     "ForgeSettings",
     "GeneratedSpec",
     "InstanceGrant",
     "ModelError",
+    "OraclePipelineError",
     "OracleReport",
     "OracleTestFile",
     "Provenance",
@@ -51,5 +62,8 @@ __all__ = [
     "SourceRegistry",
     "UnknownRepoError",
     "build_source_registry",
+    "ensure_oracle_exportable",
+    "is_oracle_exportable",
     "require_green_baseline",
+    "run_oracle_pipeline",
 ]

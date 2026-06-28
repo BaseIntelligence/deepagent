@@ -130,6 +130,7 @@ class JavaScriptAdapter(LanguageAdapter):
         from swe_forge.forge.adapters._mutation_tools import (
             STRYKER_CONFIG,
             STRYKER_REPORT,
+            STRYKER_SETUP,
             MutationToolError,
             parse_stryker_json,
             stryker_config,
@@ -139,6 +140,15 @@ class JavaScriptAdapter(LanguageAdapter):
         sources = [str(f) for f in target_files if not self.is_test_file(f)]
         if not sources:
             raise MutationToolError("no non-test target files to mutate (javascript)")
+
+        for cmd in STRYKER_SETUP:
+            res = await executor.run_command(cmd, timeout=timeout)
+            if res.exit_code != 0:
+                raise MutationToolError(
+                    "Stryker requires the 'ps' utility (procps), which the "
+                    "node slim base image lacks and which could not be installed "
+                    f"(exit {res.exit_code}): {(res.stderr or res.stdout)[:300]}"
+                )
 
         await executor.write_file(
             STRYKER_CONFIG, stryker_config(sources, test_command="npm test")

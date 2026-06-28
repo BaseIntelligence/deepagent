@@ -200,6 +200,30 @@ def _significant_lines(text: str, *, min_len: int = _MIN_SNIPPET_LEN) -> list[st
     return out
 
 
+# Ubiquitous test-framework scaffolding / import lines carry no answer content
+# and appear verbatim in a repo's own shipped tests (e.g. every node:test file
+# opens with ``const test = require("node:test");``). Matching them would falsely
+# flag a legitimate baseline test as a hidden-test-body leak, so they are excluded
+# from the hidden-test body scan.
+_BOILERPLATE_LINE_RE = re.compile(
+    r"^(?:"
+    r"import\b"
+    r"|from\b.+\bimport\b"
+    r"|package\b"
+    r"|(?:const|let|var)\s+[\w{},*\s]+=\s*require\("
+    r"|require\("
+    r"|export\b"
+    r"|module\.exports\b"
+    r"|['\"]use strict['\"]"
+    r")"
+)
+
+
+def _is_boilerplate_line(line: str) -> bool:
+    """``True`` for import/require/package scaffolding that carries no answer."""
+    return bool(_BOILERPLATE_LINE_RE.match(line.strip()))
+
+
 def _scan_targets(root: Path) -> list[Path]:
     """Files worth scanning for embedded content (skip binary/oversized)."""
     targets: list[Path] = []
@@ -258,7 +282,11 @@ def _scan_hidden_tests(
             )
         lines = _significant_lines(tf.content)
         if lines:
-            body_lines[rel] = [_norm_ws(line) for line in lines]
+            body_lines[rel] = [
+                _norm_ws(line) for line in lines if not _is_boilerplate_line(line)
+            ]
+            if not body_lines[rel]:
+                del body_lines[rel]
 
     if not body_lines:
         return findings

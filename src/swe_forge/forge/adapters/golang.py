@@ -39,6 +39,22 @@ def _is_go_package(token: str) -> bool:
     return token == "." or token.startswith((".", "/")) or "/" in token
 
 
+def _is_go_test_file(token: str) -> bool:
+    """Return ``True`` iff ``token`` is a Go source FILE path (e.g. ``a/b_test.go``)."""
+    return token.endswith(_GO_EXTENSIONS)
+
+
+def _go_package_dir(token: str) -> str:
+    """Map a Go source file path to the package directory ``go test`` can run.
+
+    ``go test`` takes package import paths (directories or ``./...``), never a
+    bare ``*.go`` file, so a single ``foo/bar_test.go`` selection must run the
+    ``./foo`` package (which also compiles the package's other sources).
+    """
+    directory = posixpath.dirname(token).strip("/")
+    return f"./{directory}" if directory else "."
+
+
 class GoAdapter(LanguageAdapter):
     """Adapter for Go repositories (``go.mod`` / ``*.go``)."""
 
@@ -60,9 +76,20 @@ class GoAdapter(LanguageAdapter):
     def test_command(self, selection: Sequence[str] | None = None) -> str:
         if not selection:
             return "go test ./..."
-        packages = [token for token in selection if _is_go_package(token)]
-        names = [token for token in selection if not _is_go_package(token)]
-        scope = " ".join(packages) if packages else "./..."
+        packages: list[str] = []
+        names: list[str] = []
+        for token in selection:
+            if _is_go_test_file(token):
+                packages.append(_go_package_dir(token))
+            elif _is_go_package(token):
+                packages.append(token)
+            else:
+                names.append(token)
+        deduped: list[str] = []
+        for pkg in packages:
+            if pkg not in deduped:
+                deduped.append(pkg)
+        scope = " ".join(deduped) if deduped else "./..."
         if names:
             pattern = "|".join(names)
             return f"go test -run '^({pattern})$' {scope}"
