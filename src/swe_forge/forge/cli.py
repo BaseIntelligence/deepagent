@@ -42,6 +42,13 @@ from swe_forge.forge.models import (
     ModelError,
     require_green_baseline,
 )
+from swe_forge.forge.oracle import (
+    EstablishError,
+    HiddenTest,
+    HiddenTestFile,
+    run_establish_gate,
+)
+from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
 from swe_forge.forge.panel import (
     PANEL_BASE_URL_VAR,
     PANEL_API_KEY_VAR,
@@ -1333,3 +1340,149 @@ def spec(
     f2p_tests = details.get("f2p_tests", [])
     names = ", ".join(str(t) for t in f2p_tests) if isinstance(f2p_tests, list) else ""
     console.print(f"  f2p tests   : {names}")
+
+
+def _load_env_image(env_file: str) -> EnvImage:
+    """Load and validate an ``EnvImage`` (Stage 1 build) from disk, or fail."""
+    path = Path(env_file)
+    if not path.is_file():
+        _fail(f"env image file not found: {env_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return EnvImage.from_dict(data)
+    except (json.JSONDecodeError, KeyError, ModelError) as exc:
+        _fail(f"invalid env image JSON: {exc}")
+
+
+def _load_provided_tests(tests_file: str | None) -> list[HiddenTest]:
+    """Load caller-declared (intended) hidden F2P tests from disk, or ``[]``."""
+    if not tests_file:
+        return []
+    path = Path(tests_file)
+    if not path.is_file():
+        _fail(f"tests file not found: {tests_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _fail(f"invalid tests JSON: {exc}")
+    raw = data.get("tests", []) if isinstance(data, dict) else data
+    if not isinstance(raw, list):
+        _fail("tests JSON must be a list (or {'tests': [...]}) of hidden tests")
+    out: list[HiddenTest] = []
+    for item in raw:
+        if not isinstance(item, dict) or not str(item.get("test_id", "")).strip():
+            _fail("each hidden test needs a non-empty 'test_id'")
+        files = tuple(
+            HiddenTestFile(path=str(f["path"]), content=str(f.get("content", "")))
+            for f in item.get("files", [])
+            if isinstance(f, dict) and str(f.get("path", "")).strip()
+        )
+        out.append(
+            HiddenTest(
+                test_id=str(item["test_id"]),
+                files=files,
+                origin=str(item.get("origin", "provided")),
+            )
+        )
+    return out
+
+
+@app.command(name="oracle-establish")
+def oracle_establish(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    tests: str | None = typer.Option(
+        None,
+        "--tests",
+        help="Optional caller-declared hidden tests JSON ({'tests':[{test_id,files,origin}]}).",
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the OracleReport JSON here (file or dir)."
+    ),
+    synthesize: bool = typer.Option(
+        True,
+        "--synthesize/--no-synthesize",
+        help="Agentically synthesize hidden tests when none are provided/discriminate.",
+    ),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Never call the LLM (no synthesis); rely on provided tests only.",
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Establish gate: confirm broken FAILS F2P, gold PASSES F2P, suite green as P2P.
+
+    Runs in a throwaway DockerSandbox on the candidate's EnvImage. Confirms the
+    P2P/regression suite is green on the gold and broken trees, then establishes
+    discriminating hidden F2P tests (synthesized via the teacher when the fault is
+    uncovered; the teacher proposes and Docker execution disposes). Writes an
+    OracleReport and exits non-zero on a reject verdict (no F2P transition, gold
+    fails to fix an F2P, or P2P not green on broken).
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    provided = _load_provided_tests(tests)
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    synthesizer = AgenticTestSynthesizer() if (synthesize and not offline) else None
+
+    try:
+        report = asyncio.run(
+            run_establish_gate(
+                candidate_obj,
+                env_image,
+                provided_tests=provided,
+                synthesizer=synthesizer,
+                adapter=adapter,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"oracle establish: {exc}")
+    except (EstablishError, DockerError) as exc:
+        _fail(f"oracle establish: {exc}")
+
+    if out:
+        out_path = Path(out)
+        if out_path.suffix == ".json":
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path = out_path
+        else:
+            out_path.mkdir(parents=True, exist_ok=True)
+            report_path = out_path / "oracle_report.json"
+        report_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+
+    if json_out:
+        typer.echo(json.dumps({"report": report.to_dict()}))
+    else:
+        colour = "green" if report.is_pass else "red"
+        console.print(
+            f"[{colour}]establish {report.verdict}[/{colour}] "
+            f"{report.generator} [{report.language}]"
+        )
+        console.print(f"  fail_to_pass : {report.fail_to_pass}")
+        console.print(f"  pass_to_pass : {report.pass_to_pass}")
+        console.print(f"  test_files   : {[tf.path for tf in report.test_files]}")
+        if report.reasons:
+            console.print(f"  reasons      : {report.reasons}")
+
+    if not report.is_pass:
+        raise typer.Exit(code=1)

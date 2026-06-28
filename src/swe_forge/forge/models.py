@@ -31,6 +31,9 @@ GENERATOR_NAMES: tuple[str, ...] = (
     "multi_file",
 )
 
+#: The two terminal verdicts an oracle gate (and the whole pipeline) may reach.
+ORACLE_VERDICTS: tuple[str, ...] = ("pass", "reject")
+
 #: A pinned commit must be a full 40-hex git object name, never a branch/tag or
 #: an abbreviated ref, so the build checks out exactly one immutable commit.
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -322,6 +325,18 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _coerce_int(value: object, default: int = 0) -> int:
+    """Best-effort int coercion for ``from_dict`` loaders (tolerant of junk)."""
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, str)):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
 @dataclass(frozen=True)
 class CandidateTarget:
     """The file(s) and symbol(s) a :class:`Candidate` mutates.
@@ -539,4 +554,156 @@ class GeneratedSpec:
             provenance=Provenance.from_dict(provenance)
             if isinstance(provenance, dict)
             else Provenance(generator="", seed=0, language="python"),
+        )
+
+
+@dataclass
+class OracleTestFile:
+    """One hidden test file recorded on an :class:`OracleReport`.
+
+    ``path`` is the repo-relative path the test was written to (and selected by
+    its ``fail_to_pass`` command); ``origin`` is ``"synthesized"`` (authored by
+    the agentic generator) or ``"provided"`` (a caller-declared/intended test);
+    ``content`` is the test body, kept so the later leak-audit/sanitize gate and
+    any re-run have the source.
+    """
+
+    path: str
+    content: str = ""
+    origin: str = "synthesized"
+
+    def __post_init__(self) -> None:
+        if not str(self.path).strip():
+            raise ModelError("OracleTestFile.path must be non-empty")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"path": self.path, "content": self.content, "origin": self.origin}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> OracleTestFile:
+        return cls(
+            path=str(data["path"]),
+            content=str(data.get("content", "")),
+            origin=str(data.get("origin", "synthesized")),
+        )
+
+
+@dataclass
+class OracleReport:
+    """Stage 3 artifact: the oracle-hardening verdict + evidence for a Candidate.
+
+    A task ships only if its hidden test suite is *adequate*; the oracle gates
+    (establish -> flakiness -> mutation -> differential -> alt-correct -> leak)
+    each contribute evidence to this report and the pipeline sets the terminal
+    ``verdict``. The establish gate populates ``fail_to_pass`` (the hidden tests
+    that FAIL on the broken tree and PASS on the gold tree), ``pass_to_pass``
+    (the regression suite that stays green on both trees), and ``test_files``
+    (the synthesized/provided test bodies); later gates fill ``flakiness_runs``,
+    ``mutants_total``/``mutants_killed``, ``differential_pass``,
+    ``alt_correct_accepted``, and ``leak_audit``.
+
+    Invariant: a ``reject`` verdict always carries at least one attributable
+    ``reason``; a ``pass`` verdict carries none.
+    """
+
+    language: str
+    generator: str
+    verdict: str
+    reasons: list[str] = field(default_factory=list)
+    fail_to_pass: list[str] = field(default_factory=list)
+    pass_to_pass: list[str] = field(default_factory=list)
+    test_files: list[OracleTestFile] = field(default_factory=list)
+    flakiness_runs: int = 0
+    mutants_total: int = 0
+    mutants_killed: int = 0
+    differential_pass: bool = False
+    alt_correct_accepted: bool = False
+    leak_audit: str = ""
+    provenance: Provenance | None = None
+    details: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.language not in SUPPORTED_LANGUAGES:
+            raise ModelError(
+                f"OracleReport.language must be one of {SUPPORTED_LANGUAGES}; "
+                f"got {self.language!r}"
+            )
+        if self.verdict not in ORACLE_VERDICTS:
+            raise ModelError(
+                f"OracleReport.verdict must be one of {ORACLE_VERDICTS}; "
+                f"got {self.verdict!r}"
+            )
+        if self.verdict == "reject" and not self.reasons:
+            raise ModelError(
+                "OracleReport.verdict 'reject' requires at least one attributable "
+                "reason"
+            )
+        if self.verdict == "pass" and self.reasons:
+            raise ModelError(
+                "OracleReport.verdict 'pass' must carry no reasons; got "
+                f"{self.reasons!r}"
+            )
+        if not (
+            0 <= self.mutants_killed <= self.mutants_total or self.mutants_total == 0
+        ):
+            raise ModelError(
+                "OracleReport.mutants_killed must satisfy 0 <= killed <= total"
+            )
+
+    @property
+    def is_pass(self) -> bool:
+        """``True`` iff the terminal verdict is ``pass``."""
+        return self.verdict == "pass"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "language": self.language,
+            "generator": self.generator,
+            "verdict": self.verdict,
+            "reasons": list(self.reasons),
+            "fail_to_pass": list(self.fail_to_pass),
+            "pass_to_pass": list(self.pass_to_pass),
+            "test_files": [tf.to_dict() for tf in self.test_files],
+            "flakiness_runs": self.flakiness_runs,
+            "mutants_total": self.mutants_total,
+            "mutants_killed": self.mutants_killed,
+            "differential_pass": self.differential_pass,
+            "alt_correct_accepted": self.alt_correct_accepted,
+            "leak_audit": self.leak_audit,
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+            "details": dict(self.details),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> OracleReport:
+        test_files = data.get("test_files", [])
+        provenance = data.get("provenance")
+        reasons = data.get("reasons", [])
+        f2p = data.get("fail_to_pass", [])
+        p2p = data.get("pass_to_pass", [])
+        details = data.get("details", {})
+        return cls(
+            language=str(data["language"]),
+            generator=str(data.get("generator", "")),
+            verdict=str(data["verdict"]),
+            reasons=[str(r) for r in reasons] if isinstance(reasons, list) else [],
+            fail_to_pass=[str(c) for c in f2p] if isinstance(f2p, list) else [],
+            pass_to_pass=[str(c) for c in p2p] if isinstance(p2p, list) else [],
+            test_files=[
+                OracleTestFile.from_dict(tf)
+                for tf in test_files
+                if isinstance(tf, dict)
+            ]
+            if isinstance(test_files, list)
+            else [],
+            flakiness_runs=_coerce_int(data.get("flakiness_runs", 0)),
+            mutants_total=_coerce_int(data.get("mutants_total", 0)),
+            mutants_killed=_coerce_int(data.get("mutants_killed", 0)),
+            differential_pass=bool(data.get("differential_pass", False)),
+            alt_correct_accepted=bool(data.get("alt_correct_accepted", False)),
+            leak_audit=str(data.get("leak_audit", "")),
+            provenance=Provenance.from_dict(provenance)
+            if isinstance(provenance, dict)
+            else None,
+            details=dict(details) if isinstance(details, dict) else {},
         )

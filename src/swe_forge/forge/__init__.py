@@ -9,6 +9,7 @@ hostname or brand string is hardcoded anywhere in this package.
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.models import (
     GENERATOR_NAMES,
+    ORACLE_VERDICTS,
     SUPPORTED_LANGUAGES,
     BaselineNotGreenError,
     Candidate,
@@ -17,6 +18,8 @@ from swe_forge.forge.models import (
     GeneratedSpec,
     InstanceGrant,
     ModelError,
+    OracleReport,
+    OracleTestFile,
     Provenance,
     RepoSpec,
     require_green_baseline,
@@ -30,6 +33,7 @@ from swe_forge.forge.sources import (
 
 __all__ = [
     "GENERATOR_NAMES",
+    "ORACLE_VERDICTS",
     "SUPPORTED_LANGUAGES",
     "BaselineNotGreenError",
     "Candidate",
@@ -39,6 +43,8 @@ __all__ = [
     "GeneratedSpec",
     "InstanceGrant",
     "ModelError",
+    "OracleReport",
+    "OracleTestFile",
     "Provenance",
     "RepoSpec",
     "SourceError",
