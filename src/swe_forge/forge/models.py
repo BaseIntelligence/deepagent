@@ -480,3 +480,63 @@ class Candidate:
             if isinstance(provenance, dict)
             else Provenance(generator="", seed=0, language="python"),
         )
+
+
+@dataclass
+class GeneratedSpec:
+    """Stage 2 artifact: the agent-facing task description for a :class:`Candidate`.
+
+    Built by *test-conditioned backtranslation*: the ``problem_statement`` is
+    derived from the manufactured fault's FAIL->PASS (F2P) failure trace - the
+    observable broken behavior of the hidden failing tests - NOT from the
+    mutation/oracle diff. ``requirements`` is a non-empty list of expectations,
+    each grounded in (and traceable to) a named F2P test. ``interface_block``
+    enumerates the expected public symbol name(s)/signature(s) of the real target
+    API so a correct solution is never failed merely for a naming difference.
+
+    None of the three fields may leak the oracle/implementation body: the spec
+    describes *what* must hold (from the tests) and the *signatures* to implement,
+    never *how* (the gold code). A :class:`GeneratedSpec` is only ever emitted
+    alongside a Candidate that passed its forward+inverse self-validation.
+    """
+
+    problem_statement: str
+    requirements: list[str]
+    interface_block: str
+    provenance: Provenance
+
+    def __post_init__(self) -> None:
+        if not str(self.problem_statement).strip():
+            raise ModelError("GeneratedSpec.problem_statement must be non-empty")
+        if not self.requirements or any(
+            not str(item).strip() for item in self.requirements
+        ):
+            raise ModelError(
+                "GeneratedSpec.requirements must be a non-empty list of "
+                "non-empty strings"
+            )
+        if not str(self.interface_block).strip():
+            raise ModelError("GeneratedSpec.interface_block must be non-empty")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "problem_statement": self.problem_statement,
+            "requirements": list(self.requirements),
+            "interface_block": self.interface_block,
+            "provenance": self.provenance.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> GeneratedSpec:
+        requirements = data.get("requirements", [])
+        provenance = data.get("provenance", {})
+        return cls(
+            problem_statement=str(data["problem_statement"]),
+            requirements=[str(item) for item in requirements]
+            if isinstance(requirements, list)
+            else [],
+            interface_block=str(data["interface_block"]),
+            provenance=Provenance.from_dict(provenance)
+            if isinstance(provenance, dict)
+            else Provenance(generator="", seed=0, language="python"),
+        )

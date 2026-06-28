@@ -33,10 +33,13 @@ from swe_forge.forge.generators import (
     GenerationRequest,
     build_default_generator_registry,
     run_menu_selfcheck,
+    verify_candidate_roundtrip,
 )
 from swe_forge.forge.models import (
     BaselineNotGreenError,
+    Candidate,
     EnvImage,
+    ModelError,
     require_green_baseline,
 )
 from swe_forge.forge.panel import (
@@ -58,6 +61,12 @@ from swe_forge.forge.secrets import key_fingerprint
 from swe_forge.forge.sources import (
     UnknownRepoError,
     build_source_registry,
+)
+from swe_forge.forge.spec import (
+    F2PTrace,
+    SpecError,
+    TemplateSpecAuthor,
+    generate_spec,
 )
 from swe_forge.forge.teacher import (
     AgenticResult,
@@ -1207,3 +1216,120 @@ def gen_menu(
         )
         console.print(f"  {name:16s}: {cells}")
     console.print("  (* = llm-backed, offline-stubbed, non-Python exempt)")
+
+
+def _load_candidate(candidate_file: str) -> Candidate:
+    """Load and validate a ``candidate.json`` from disk, or fail cleanly."""
+    path = Path(candidate_file)
+    if not path.is_file():
+        _fail(f"candidate file not found: {candidate_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return Candidate.from_dict(data)
+    except (json.JSONDecodeError, KeyError, ModelError) as exc:
+        _fail(f"invalid candidate.json: {exc}")
+
+
+def _load_trace(trace_file: str) -> F2PTrace:
+    """Load an F2P failure trace JSON from disk, or fail cleanly."""
+    path = Path(trace_file)
+    if not path.is_file():
+        _fail(f"trace file not found: {trace_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _fail(f"invalid trace JSON: {exc}")
+    if not isinstance(data, dict):
+        _fail("trace JSON must be an object with a 'tests'/'fail_to_pass' list")
+    return F2PTrace.from_dict(data)
+
+
+@app.command(name="spec")
+def spec(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    path: str = typer.Option(
+        ..., "--path", help="Pristine repo checkout (the gold target source)."
+    ),
+    trace: str = typer.Option(
+        ...,
+        "--trace",
+        help="F2P failure-trace JSON ({'tests':[{name,message,expected,observed}]}).",
+    ),
+    out: str = typer.Option(..., "--out", help="Output dir for spec.json."),
+    offline: bool = typer.Option(
+        False,
+        "--offline",
+        help="Use the deterministic, trace-derived template author (no LLM).",
+    ),
+    language: str | None = typer.Option(
+        None, "--language", help="Force an adapter (default: the candidate's language)."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Build a GeneratedSpec by test-conditioned backtranslation of the F2P trace.
+
+    Loads a valid Candidate and confirms its forward+inverse round-trip against
+    the pristine checkout (a spec is only emitted alongside a valid Candidate),
+    derives the interface block from the real gold API, drafts the problem
+    statement + requirements from the F2P failure trace (never the diff), grounds
+    each requirement in a named F2P test, and runs a leak scan over all three
+    fields. On success it writes ``spec.json``; any failure exits non-zero and
+    writes NO artifact.
+    """
+    candidate_obj = _load_candidate(candidate)
+    f2p_trace = _load_trace(trace)
+
+    repo_root = Path(path)
+    if not repo_root.is_dir():
+        _fail(f"path does not exist or is not a directory: {path}")
+
+    registry = build_default_registry()
+    adapter_name = language or candidate_obj.language
+    try:
+        adapter = registry.get(adapter_name)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {adapter_name!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    # A spec is only ever produced for a Candidate that passes its
+    # forward+inverse self-validation (VAL-GEN-017).
+    rt = verify_candidate_roundtrip(repo_root, candidate_obj)
+    if not rt.ok:
+        _fail(f"candidate does not round-trip; emitting no spec: {rt.reason}")
+
+    spec_author = TemplateSpecAuthor() if offline else None
+    try:
+        generated = generate_spec(
+            candidate_obj, f2p_trace, repo_root, adapter, author=spec_author
+        )
+    except (SpecError, MissingCredentialsError, ModelRoutingError) as exc:
+        # Fail cleanly and emit NO spec artifact.
+        _fail(f"spec: {exc}")
+
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    spec_path = out_dir / "spec.json"
+    spec_path.write_text(json.dumps(generated.to_dict(), indent=2), encoding="utf-8")
+
+    payload: dict[str, object] = {
+        "out": str(out_dir),
+        "spec": generated.to_dict(),
+        "candidate_round_trip_ok": rt.ok,
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    console.print(
+        f"[green]spec[/green] {candidate_obj.generator} [{candidate_obj.language}] "
+        f"-> {spec_path}"
+    )
+    console.print(f"  requirements: {len(generated.requirements)}")
+    details = generated.provenance.details
+    console.print(f"  authoring   : {details.get('authoring_mode')}")
+    f2p_tests = details.get("f2p_tests", [])
+    names = ", ".join(str(t) for t in f2p_tests) if isinstance(f2p_tests, list) else ""
+    console.print(f"  f2p tests   : {names}")
