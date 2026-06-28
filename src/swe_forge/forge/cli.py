@@ -16,6 +16,20 @@ import typer
 from rich.console import Console
 
 from swe_forge.forge.config import ForgeSettings
+from swe_forge.forge.panel import (
+    PANEL_BASE_URL_VAR,
+    PANEL_API_KEY_VAR,
+    TEACHER_API_KEY_VAR,
+    TEACHER_BASE_URL_VAR,
+    VALID_TIERS,
+    PanelModel,
+    build_panel_from_env,
+    resolve_panel_endpoint,
+    run_rollouts,
+    select_default_model,
+    validate_model,
+    validate_models,
+)
 from swe_forge.forge.teacher import (
     AgenticResult,
     LLMResult,
@@ -32,9 +46,6 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
-
-# Panel subcommands belong to a later foundation feature; keep them discoverable.
-_STUB_COMMANDS = ("panel-info", "panel-validate", "panel-rollouts")
 
 # Default model ids per check mode (model ids only; no provider host/brand).
 _OPENAI_CHECK_MODEL = "openai/gpt-4o-mini"
@@ -270,14 +281,196 @@ def _run_repeat(
     _emit(payload, json_out=True)
 
 
-def _register_stub(name: str) -> None:
-    @app.command(
-        name=name, help=f"[stub] `forge {name}` is implemented in a later feature."
+def _require_panel_creds(base_url: str, api_key: str) -> None:
+    """Fail fast (naming the missing var) before any live panel call."""
+    if not base_url:
+        _fail(
+            f"no panel base URL configured; set {PANEL_BASE_URL_VAR} "
+            f"(or inherit it from {TEACHER_BASE_URL_VAR})"
+        )
+    if not api_key:
+        _fail(
+            f"no panel API key configured; set {PANEL_API_KEY_VAR} "
+            f"(or inherit it from {TEACHER_API_KEY_VAR})",
+            api_key,
+        )
+
+
+@app.command(name="panel-info")
+def panel_info(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """List the calibration panel (tiers, model ids, resolved endpoint)."""
+    base_url, api_key = resolve_panel_endpoint()
+    panel = build_panel_from_env()
+    if json_out:
+        # The api_key value is included so endpoint inheritance/override can be
+        # verified; the human view below never prints it.
+        typer.echo(json.dumps([m.to_dict(include_api_key=True) for m in panel]))
+        return
+    override = bool(
+        os.environ.get(PANEL_BASE_URL_VAR) or os.environ.get(PANEL_API_KEY_VAR)
     )
-    def _stub() -> None:
-        console.print(f"[yellow]`forge {name}` is not implemented yet (stub).[/yellow]")
+    console.print("[bold]forge panel[/bold]")
+    console.print(f"  endpoint   : {base_url or '(unset)'}")
+    console.print(f"  api key    : {'set' if api_key else 'unset'}")
+    console.print(
+        f"  source     : {'PANEL_LLM_* override' if override else 'inherits teacher'}"
+    )
+    for model in panel:
+        console.print(
+            f"  - {model.id} ({model.tier}) -> {model.model_string} "
+            f"@ {model.routing.api_base}"
+        )
+
+
+@app.command(name="panel-validate")
+def panel_validate(
+    models: str = typer.Option(
+        ...,
+        "--models",
+        help="Comma-separated provider-prefixed model ids to probe.",
+    ),
+    prompt: str = typer.Option("ping", help="Probe prompt for the validation call."),
+    max_tokens: int = typer.Option(8, help="Max tokens per validation probe."),
+    timeout: float = typer.Option(60.0, help="Per-probe timeout in seconds."),
+    num_retries: int = typer.Option(1, help="Bounded retries per probe."),
+    concurrency: int = typer.Option(4, help="Max concurrent probes."),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Validate model ids with one live probe each (no bulk rollouts)."""
+    base_url, api_key = resolve_panel_endpoint()
+    _require_panel_creds(base_url, api_key)
+
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    if not model_list:
+        _fail("no model ids supplied; pass --models a,b,c")
+
+    try:
+        results = asyncio.run(
+            validate_models(
+                model_list,
+                base_url=base_url,
+                api_key=api_key,
+                prompt=prompt,
+                concurrency=concurrency,
+                max_tokens=max_tokens,
+                num_retries=num_retries,
+                timeout=timeout,
+            )
+        )
+    except MissingCredentialsError as exc:
+        _fail(str(exc), api_key)
+
+    if json_out:
+        typer.echo(json.dumps([r.to_dict() for r in results]))
+    else:
+        for r in results:
+            status = "[green]valid[/green]" if r.valid else "[red]invalid[/red]"
+            suffix = "" if r.valid else f" ({r.error})"
+            console.print(f"  {status} {r.model}{suffix}")
+
+    if not all(r.valid for r in results):
         raise typer.Exit(code=1)
 
 
-for _name in _STUB_COMMANDS:
-    _register_stub(_name)
+@app.command(name="panel-rollouts")
+def panel_rollouts(
+    k: int = typer.Option(3, "--k", help="Number of independent rollouts to issue."),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="Provider-prefixed model id (default: a frontier panel model).",
+    ),
+    tier: str = typer.Option(
+        "frontier", help="Tier to pick a default model from when --model is unset."
+    ),
+    prompt: str = typer.Option(
+        "Reply with a random 6-digit number and nothing else.",
+        "--prompt",
+        help="The task prompt issued on every rollout.",
+    ),
+    concurrency: int = typer.Option(
+        4, "--concurrency", help="Max concurrent in-flight rollouts."
+    ),
+    max_tokens: int = typer.Option(64, help="Max tokens per rollout."),
+    timeout: float = typer.Option(120.0, help="Per-rollout timeout in seconds."),
+    num_retries: int = typer.Option(2, help="Bounded retries per rollout."),
+    validate: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Validate the model id with one probe before the k-burst.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Issue k independent, uncached rollouts of a task on a panel model."""
+    base_url, api_key = resolve_panel_endpoint()
+    _require_panel_creds(base_url, api_key)
+
+    if model is not None:
+        if tier not in VALID_TIERS:
+            _fail(f"--tier must be one of {VALID_TIERS}, got {tier!r}")
+        try:
+            target = PanelModel(
+                id=model,
+                model_string=model,
+                tier=tier,
+                base_url=base_url,
+                api_key=api_key,
+            )
+        except Exception as exc:
+            _fail(str(exc), api_key)
+    else:
+        target = select_default_model(build_panel_from_env(), tier=tier)
+
+    if validate:
+        try:
+            check = asyncio.run(
+                validate_model(
+                    target.model_string,
+                    base_url=base_url,
+                    api_key=api_key,
+                    timeout=timeout,
+                )
+            )
+        except MissingCredentialsError as exc:
+            _fail(str(exc), api_key)
+        if not check.valid:
+            _fail(
+                f"model {target.model_string!r} failed validation: {check.error}",
+                api_key,
+            )
+
+    try:
+        results = asyncio.run(
+            run_rollouts(
+                prompt,
+                target,
+                k,
+                concurrency=concurrency,
+                max_tokens=max_tokens,
+                num_retries=num_retries,
+                timeout=timeout,
+            )
+        )
+    except MissingCredentialsError as exc:
+        _fail(str(exc), api_key)
+    except ModelRoutingError as exc:
+        _fail(str(exc), api_key)
+
+    payload = [r.to_dict() for r in results]
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    console.print(
+        f"[bold]{len(results)} rollouts[/bold] on {target.model_string} "
+        f"({target.tier}) @ {target.routing.api_base}"
+    )
+    for r in results:
+        if r.error:
+            console.print(f"  #{r.index} [red]error[/red]: {r.error}")
+        else:
+            console.print(
+                f"  #{r.index} total_tokens={r.usage.total_tokens} cost={r.cost} "
+                f"text={r.text!r}"
+            )

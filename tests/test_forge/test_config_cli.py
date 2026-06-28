@@ -167,11 +167,20 @@ class TestForgeCli:
         assert "sk-super-secret-value" not in result.output
         assert "teacher" in result.output.lower()
 
-    def test_stub_subcommand_exits_nonzero(self) -> None:
+    def test_panel_info_is_implemented(self) -> None:
         from swe_forge.forge.cli import app as forge_app
 
-        result = runner.invoke(forge_app, ["panel-info"])
-        assert result.exit_code == 1
+        with patch.dict(
+            os.environ,
+            {
+                "TEACHER_LLM_BASE_URL": "https://teacher.example",
+                "TEACHER_LLM_API_KEY": "sk-teacher",
+            },
+            clear=True,
+        ):
+            result = runner.invoke(forge_app, ["panel-info"])
+        assert result.exit_code == 0
+        assert "panel" in result.output.lower()
 
     def test_forge_group_wired_into_main(self) -> None:
         from swe_forge.__main__ import app as root_app
