@@ -75,15 +75,13 @@ class FakeAdapter(LanguageAdapter):
 
 
 STUB_ADAPTERS = (PythonAdapter, JavaScriptAdapter, GoAdapter)
-STUB_METHODS = (
-    "detect",
-    "base_image",
-    "install_commands",
-    "test_command",
+# Behavior still pending later milestones (AST parse/mutate, in-Docker mutation
+# run). The build-time methods (detect/base_image/install_commands/test_command/
+# is_test_file) are implemented and covered in test_adapters_concrete.py.
+UNIMPLEMENTED_METHODS = (
     "parse_symbols",
     "mutate_ast",
     "mutation_tool_run",
-    "is_test_file",
 )
 
 
@@ -199,23 +197,21 @@ class TestStubAdapters:
         assert adapter_cls().name == expected_name
 
     @pytest.mark.parametrize("adapter_cls", STUB_ADAPTERS)
-    @pytest.mark.parametrize("method", STUB_METHODS)
-    def test_stub_methods_raise_not_implemented(
+    @pytest.mark.parametrize("method", UNIMPLEMENTED_METHODS)
+    def test_pending_methods_raise_not_implemented(
         self, adapter_cls: type[LanguageAdapter], method: str
     ) -> None:
         adapter = adapter_cls()
         args: tuple[object, ...]
-        if method in {"detect", "install_commands", "is_test_file", "parse_symbols"}:
+        if method == "parse_symbols":
             args = ("/repo",)
         elif method == "mutate_ast":
             symbol = Symbol(
                 name="f", kind="function", file="a.py", start_line=1, end_line=2
             )
             args = ("a.py", symbol, MutationOp.OPERATOR_SWAP)
-        elif method == "mutation_tool_run":
+        else:  # mutation_tool_run
             args = ("image:tag", "/repo")
-        else:  # base_image, test_command
-            args = ()
         with pytest.raises(NotImplementedError):
             getattr(adapter, method)(*args)
 

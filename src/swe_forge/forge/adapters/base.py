@@ -107,6 +107,14 @@ class LanguageAdapter(ABC):
     #: Concrete adapters must override this with a non-empty value.
     name: str = ""
 
+    #: Primary mutation tool this language uses (``mutmut`` | ``stryker`` |
+    #: ``go-mutesting``). Metadata only; the actual run is :meth:`mutation_tool_run`.
+    mutation_tool: str = ""
+
+    #: All mutation tools usable for this language, primary first (e.g. Python
+    #: accepts both ``mutmut`` and ``cosmic-ray``).
+    mutation_tools: tuple[str, ...] = ()
+
     @abstractmethod
     def detect(self, repo_path: PathLike) -> bool:
         """Return ``True`` iff this adapter's language is the repo's language."""

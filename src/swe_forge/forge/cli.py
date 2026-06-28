@@ -11,10 +11,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 
 import typer
 from rich.console import Console
 
+from swe_forge.forge.adapters import (
+    LanguageAdapter,
+    NoAdapterFoundError,
+    build_default_registry,
+)
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.panel import (
     PANEL_BASE_URL_VAR,
@@ -146,6 +152,140 @@ def info() -> None:
     console.print(
         f"  panel override   : {'set' if settings.panel_llm_base_url or settings.panel_llm_api_key else 'inherits teacher'}"
     )
+
+
+def _split_csv(value: str | None) -> list[str]:
+    """Split a comma-separated CLI option into a clean list (empty when unset)."""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _describe_adapter(
+    adapter: LanguageAdapter, *, selection: list[str], paths: list[str]
+) -> dict[str, object]:
+    """Build the JSON-serializable metadata record for one adapter."""
+    record: dict[str, object] = {
+        "language": adapter.name,
+        "base_image": adapter.base_image(),
+        "test_command": adapter.test_command(),
+        "mutation_tool": adapter.mutation_tool,
+        "mutation_tools": list(adapter.mutation_tools),
+    }
+    if selection:
+        record["test_command_selection"] = adapter.test_command(selection)
+    if paths:
+        record["classification"] = {path: adapter.is_test_file(path) for path in paths}
+    return record
+
+
+@app.command()
+def detect(
+    repo_path: str = typer.Argument(..., help="Path to the repository to inspect."),
+    select: str | None = typer.Option(
+        None, "--select", help="Comma-separated test selection for test_command."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Detect a repo's language adapter (mutually exclusive) and show build metadata."""
+    path = Path(repo_path)
+    if not path.exists():
+        _fail(f"path does not exist: {repo_path}")
+
+    registry = build_default_registry()
+    table = {adapter.name: adapter.detect(path) for adapter in registry}
+    matches = [name for name, matched in table.items() if matched]
+
+    if len(matches) != 1:
+        if not matches:
+            reason = f"unsupported language: no adapter matched the repository at {repo_path}"
+        else:
+            reason = (
+                f"ambiguous language: multiple adapters matched ({', '.join(matches)})"
+            )
+        payload: dict[str, object] = {
+            "repo": str(path),
+            "matched": False,
+            "reason": reason,
+            "detection": table,
+        }
+        if json_out:
+            typer.echo(json.dumps(payload))
+        else:
+            console.print(f"[red]{reason}[/red]")
+            console.print(f"detection: {table}")
+        raise typer.Exit(code=1)
+
+    adapter = registry.get(matches[0])
+    selection = _split_csv(select)
+    result: dict[str, object] = {
+        "repo": str(path),
+        "matched": True,
+        "language": adapter.name,
+        "base_image": adapter.base_image(),
+        "install_commands": adapter.install_commands(path),
+        "test_command": adapter.test_command(),
+        "mutation_tool": adapter.mutation_tool,
+        "detection": table,
+    }
+    if selection:
+        result["test_command_selection"] = adapter.test_command(selection)
+
+    if json_out:
+        typer.echo(json.dumps(result))
+        return
+    console.print(f"[bold]detected language:[/bold] {adapter.name}")
+    console.print(f"  base image       : {result['base_image']}")
+    console.print(f"  install commands : {result['install_commands']}")
+    console.print(f"  test command     : {result['test_command']}")
+    if selection:
+        console.print(f"  test (selection) : {result['test_command_selection']}")
+    console.print(f"  mutation tool    : {result['mutation_tool']}")
+    console.print(f"  detection table  : {table}")
+
+
+@app.command(name="adapter-info")
+def adapter_info(
+    language: str | None = typer.Option(
+        None, "--language", help="Restrict to one adapter (python|javascript|go)."
+    ),
+    select: str | None = typer.Option(
+        None, "--select", help="Comma-separated selection for test_command."
+    ),
+    classify: str | None = typer.Option(
+        None, "--classify", help="Comma-separated paths to classify via is_test_file."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Show static adapter metadata (base image, test command, mutation tool)."""
+    registry = build_default_registry()
+    selection = _split_csv(select)
+    paths = _split_csv(classify)
+
+    if language is not None:
+        try:
+            adapter = registry.get(language)
+        except NoAdapterFoundError:
+            _fail(
+                f"no adapter for language {language!r}; "
+                f"known: {', '.join(registry.names())}"
+            )
+        record = _describe_adapter(adapter, selection=selection, paths=paths)
+        if json_out:
+            typer.echo(json.dumps(record))
+        else:
+            console.print(record)
+        return
+
+    records = [
+        _describe_adapter(adapter, selection=selection, paths=paths)
+        for adapter in registry
+    ]
+    if json_out:
+        typer.echo(json.dumps(records))
+    else:
+        for record in records:
+            console.print(record)
 
 
 @app.command(name="llm-check")
