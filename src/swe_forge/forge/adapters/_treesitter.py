@@ -79,8 +79,15 @@ def _signature(node: Node, source: bytes, *, body_owner: Node | None = None) -> 
 
 
 def _name_of(node: Node) -> str | None:
-    """Return the declared name via the grammar's ``name`` field, if any."""
+    """Return the declared name from the grammar's ``name`` field, if any.
+
+    Falls back to ``property`` for the JavaScript grammar's ``field_definition``
+    (a class field), which names its member via ``property`` where the
+    TypeScript ``public_field_definition`` uses ``name``.
+    """
     name_node = node.child_by_field_name("name")
+    if name_node is None:
+        name_node = node.child_by_field_name("property")
     if name_node is None:
         return None
     return name_node.text.decode("utf-8", "replace") if name_node.text else None
@@ -113,7 +120,11 @@ class _Collector:
             handler = self._function_declaration
         elif node.type == "method_definition":
             handler = self._method_definition
-        elif node.type in ("variable_declarator", "public_field_definition"):
+        elif node.type in (
+            "variable_declarator",
+            "public_field_definition",
+            "field_definition",
+        ):
             handler = self._bound_value
         if handler is not None:
             handler(node)
@@ -142,10 +153,9 @@ class _Collector:
         if not name:
             return
         # A function bound to a class field is a method; anywhere else (const/
-        # let/var) it is a function.
-        in_class = node.type == "public_field_definition" or (
-            node.parent is not None and node.parent.type == "field_definition"
-        )
+        # let/var) it is a function. The class field is ``public_field_definition``
+        # in the TypeScript grammar and ``field_definition`` in JavaScript.
+        in_class = node.type in ("public_field_definition", "field_definition")
         kind = "method" if in_class else "function"
         self._emit(name, kind, value, node)
 

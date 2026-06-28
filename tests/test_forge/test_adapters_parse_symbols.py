@@ -160,6 +160,22 @@ class Animal {
 const obj = { skip() { return 1; } };
 """
 
+# A plain-.js class whose fields bind an arrow function and a function
+# expression. These use the JavaScript grammar's `field_definition` node (the
+# TypeScript path uses `public_field_definition`); both must be captured as
+# methods with a real, multi-line span.
+JS_CLASS_FIELD_SAMPLE = """\
+class Controller {
+  onClick = (event) => {
+    return event.id;
+  };
+  process = function (items) {
+    return items.length;
+  };
+  ready() { return true; }
+}
+"""
+
 
 class TestJavaScript:
     def test_returns_arrow_function_and_class_methods(self, tmp_path: Path) -> None:
@@ -198,6 +214,22 @@ class TestJavaScript:
     def test_empty_file_yields_empty_list(self, tmp_path: Path) -> None:
         f = _write(tmp_path, "empty.js", "// comment only\nconst x = 1;\n")
         assert JavaScriptAdapter().parse_symbols(f) == []
+
+    def test_class_field_arrow_and_function_captured_as_methods(
+        self, tmp_path: Path
+    ) -> None:
+        # Plain JavaScript class fields use the grammar's `field_definition`
+        # node (not TypeScript's `public_field_definition`); the arrow- and
+        # function-expression fields must be returned as kind='method'.
+        f = _write(tmp_path, "controller.js", JS_CLASS_FIELD_SAMPLE)
+        by = _by_name(JavaScriptAdapter().parse_symbols(f))
+        assert set(by) == {"onClick", "process", "ready"}
+        assert by["onClick"].kind == "method"
+        assert by["process"].kind == "method"
+        # Real, multi-line spans pointing at the bound value, not line 1.
+        assert by["onClick"].file == str(f)
+        assert (by["onClick"].start_line, by["onClick"].end_line) == (2, 4)
+        assert (by["process"].start_line, by["process"].end_line) == (5, 7)
 
     def test_malformed_raises_parse_error(self, tmp_path: Path) -> None:
         f = _write(tmp_path, "bad.js", "function broken( {\n")
