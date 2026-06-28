@@ -1,5 +1,8 @@
 import typer
 
+# Imported before the sibling CLI modules below (some call dotenv.load_dotenv()
+# at import time) so it can snapshot the real process environment first.
+from swe_forge.forge import runtime_env
 from swe_forge.cli.harness import harness
 from swe_forge.cli.mine import app as mine_app
 from swe_forge.cli.validate import app as validate_app
@@ -8,6 +11,10 @@ from swe_forge.cli.benchmark import benchmark
 from swe_forge.cli.publish import publish
 from swe_forge.cli.synthetic import app as synthetic_app
 from swe_forge.forge.cli import app as forge_app
+
+# Remove forge credentials that an implicit .env load injected during the imports
+# above, so `env -u TEACHER_LLM_API_KEY swe-forge forge llm-check` fails fast.
+runtime_env.scrub_injected_forge_env()
 
 app = typer.Typer(name="swe-forge", help="SWE-bench dataset generator")
 

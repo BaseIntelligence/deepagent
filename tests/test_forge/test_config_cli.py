@@ -170,7 +170,7 @@ class TestForgeCli:
     def test_stub_subcommand_exits_nonzero(self) -> None:
         from swe_forge.forge.cli import app as forge_app
 
-        result = runner.invoke(forge_app, ["llm-check"])
+        result = runner.invoke(forge_app, ["panel-info"])
         assert result.exit_code == 1
 
     def test_forge_group_wired_into_main(self) -> None:
