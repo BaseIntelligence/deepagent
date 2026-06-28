@@ -78,11 +78,10 @@ STUB_ADAPTERS = (PythonAdapter, JavaScriptAdapter, GoAdapter)
 # Behavior still pending later milestones (AST mutate, in-Docker mutation run).
 # The build-time methods (detect/base_image/install_commands/test_command/
 # is_test_file) are implemented and covered in test_adapters_concrete.py;
-# parse_symbols is implemented and covered in test_adapters_parse_symbols.py.
-UNIMPLEMENTED_METHODS = (
-    "mutate_ast",
-    "mutation_tool_run",
-)
+# parse_symbols is implemented and covered in test_adapters_parse_symbols.py;
+# mutate_ast is implemented and covered in test_generators_ast.py. Only the
+# in-Docker mutation run remains pending (a later oracle milestone).
+UNIMPLEMENTED_METHODS = ("mutation_tool_run",)
 
 
 class TestLanguageAdapterABC:
@@ -202,14 +201,7 @@ class TestStubAdapters:
         self, adapter_cls: type[LanguageAdapter], method: str
     ) -> None:
         adapter = adapter_cls()
-        args: tuple[object, ...]
-        if method == "mutate_ast":
-            symbol = Symbol(
-                name="f", kind="function", file="a.py", start_line=1, end_line=2
-            )
-            args = ("a.py", symbol, MutationOp.OPERATOR_SWAP)
-        else:  # mutation_tool_run
-            args = ("image:tag", "/repo")
+        args: tuple[object, ...] = ("image:tag", "/repo")
         with pytest.raises(NotImplementedError):
             getattr(adapter, method)(*args)
 

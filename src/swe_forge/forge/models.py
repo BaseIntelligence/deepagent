@@ -15,10 +15,21 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 #: Languages the forge pipeline supports end to end.
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("python", "javascript", "go")
+
+#: The complete bug-generator menu (Stage 2). Every :class:`Candidate` must name
+#: one of these; the concrete generators are added across the m3 milestone.
+GENERATOR_NAMES: tuple[str, ...] = (
+    "ast_mutation",
+    "lm_authored",
+    "pr_mirror",
+    "function_removal",
+    "bug_combination",
+    "multi_file",
+)
 
 #: A pinned commit must be a full 40-hex git object name, never a branch/tag or
 #: an abbreviated ref, so the build checks out exactly one immutable commit.
@@ -304,3 +315,168 @@ def require_green_baseline(env_image: EnvImage | None) -> EnvImage:
             f"(exit {env_image.baseline_exit_code}); cannot advance past Stage 1"
         )
     return env_image
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 string (seconds precision)."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+@dataclass(frozen=True)
+class CandidateTarget:
+    """The file(s) and symbol(s) a :class:`Candidate` mutates.
+
+    ``files`` is the non-empty set of repo-relative paths the mutation touches;
+    ``symbols`` names the targeted declarations (empty when a generator targets a
+    whole file). :attr:`symbol` exposes the primary (first) symbol for the common
+    single-symbol generators.
+    """
+
+    files: tuple[str, ...]
+    symbols: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.files or any(not str(f).strip() for f in self.files):
+            raise ModelError("CandidateTarget.files must be a non-empty path list")
+
+    @property
+    def symbol(self) -> str:
+        """The primary targeted symbol name (empty when none is set)."""
+        return self.symbols[0] if self.symbols else ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "files": list(self.files),
+            "symbols": list(self.symbols),
+            "symbol": self.symbol,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> CandidateTarget:
+        files = data.get("files", [])
+        symbols = data.get("symbols", [])
+        return cls(
+            files=tuple(str(f) for f in files) if isinstance(files, list) else (),
+            symbols=tuple(str(s) for s in symbols) if isinstance(symbols, list) else (),
+        )
+
+
+@dataclass
+class Provenance:
+    """Auditable record attached to every generated artifact.
+
+    Carries the fields the architecture mandates for reproducibility: the
+    ``generator`` that produced the artifact, the ``seed`` that made it
+    deterministic, the ``language``, a ``created_at`` timestamp, the
+    ``tool_versions`` used, and a generator-specific ``details`` map (e.g. the
+    mutation operator and the targeted span). Later stages extend ``details``
+    with mutation/IRT/panel evidence.
+    """
+
+    generator: str
+    seed: int
+    language: str
+    created_at: str = ""
+    tool_versions: dict[str, str] = field(default_factory=dict)
+    details: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not str(self.generator).strip():
+            raise ModelError("Provenance.generator must be non-empty")
+        if self.language not in SUPPORTED_LANGUAGES:
+            raise ModelError(
+                f"Provenance.language must be one of {SUPPORTED_LANGUAGES}; "
+                f"got {self.language!r}"
+            )
+        if not self.created_at:
+            self.created_at = _utc_now_iso()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "generator": self.generator,
+            "seed": self.seed,
+            "language": self.language,
+            "created_at": self.created_at,
+            "tool_versions": dict(self.tool_versions),
+            "details": dict(self.details),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> Provenance:
+        versions = data.get("tool_versions", {})
+        details = data.get("details", {})
+        return cls(
+            generator=str(data["generator"]),
+            seed=int(data["seed"]) if isinstance(data["seed"], (int, str)) else 0,
+            language=str(data["language"]),
+            created_at=str(data.get("created_at", "")),
+            tool_versions={str(k): str(v) for k, v in versions.items()}
+            if isinstance(versions, dict)
+            else {},
+            details=dict(details) if isinstance(details, dict) else {},
+        )
+
+
+@dataclass
+class Candidate:
+    """Stage 2 artifact: one manufactured bug with its by-construction gold fix.
+
+    A :class:`Candidate` pairs a forward ``mutation_patch`` (turns known-good code
+    broken) with the inverse ``oracle_patch`` (the gold fix). Applying the
+    mutation then the oracle to a pristine checkout restores every touched file
+    byte-for-byte: this is the gold-by-construction guarantee. ``target`` records
+    the touched file(s)/symbol(s), ``generator`` is one of :data:`GENERATOR_NAMES`,
+    and ``difficulty_hint`` is a coarse a-priori label.
+    """
+
+    language: str
+    generator: str
+    target: CandidateTarget
+    mutation_patch: str
+    oracle_patch: str
+    difficulty_hint: str
+    provenance: Provenance
+
+    def __post_init__(self) -> None:
+        if self.language not in SUPPORTED_LANGUAGES:
+            raise ModelError(
+                f"Candidate.language must be one of {SUPPORTED_LANGUAGES}; "
+                f"got {self.language!r}"
+            )
+        if self.generator not in GENERATOR_NAMES:
+            raise ModelError(
+                f"Candidate.generator must be one of {GENERATOR_NAMES}; "
+                f"got {self.generator!r}"
+            )
+        for field_name in ("mutation_patch", "oracle_patch", "difficulty_hint"):
+            if not str(getattr(self, field_name)).strip():
+                raise ModelError(f"Candidate.{field_name} must be non-empty")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "language": self.language,
+            "generator": self.generator,
+            "target": self.target.to_dict(),
+            "mutation_patch": self.mutation_patch,
+            "oracle_patch": self.oracle_patch,
+            "difficulty_hint": self.difficulty_hint,
+            "provenance": self.provenance.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> Candidate:
+        target = data["target"]
+        provenance = data["provenance"]
+        return cls(
+            language=str(data["language"]),
+            generator=str(data["generator"]),
+            target=CandidateTarget.from_dict(target)
+            if isinstance(target, dict)
+            else CandidateTarget(files=()),
+            mutation_patch=str(data["mutation_patch"]),
+            oracle_patch=str(data["oracle_patch"]),
+            difficulty_hint=str(data["difficulty_hint"]),
+            provenance=Provenance.from_dict(provenance)
+            if isinstance(provenance, dict)
+            else Provenance(generator="", seed=0, language="python"),
+        )

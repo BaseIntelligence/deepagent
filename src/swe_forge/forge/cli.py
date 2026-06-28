@@ -9,6 +9,7 @@ repository's bespoke LLM clients or response cache, and never prints secrets.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,8 +26,14 @@ from swe_forge.forge.adapters import (
 )
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.envbuild import EnvBuilder
+from swe_forge.forge.generators import (
+    GenerationError,
+    GenerationRequest,
+    build_default_generator_registry,
+)
 from swe_forge.forge.models import (
     BaselineNotGreenError,
+    EnvImage,
     require_green_baseline,
 )
 from swe_forge.forge.panel import (
@@ -973,3 +980,125 @@ def panel_rollouts(
                 f"  #{r.index} total_tokens={r.usage.total_tokens} cost={r.cost} "
                 f"text={r.text!r}"
             )
+
+
+@app.command(name="generate")
+def generate(
+    path: str = typer.Option(..., "--path", help="Local repo checkout to mutate."),
+    out: str = typer.Option(
+        ..., "--out", help="Output dir for candidate.json + mutation/oracle patches."
+    ),
+    generator: str = typer.Option(
+        "ast_mutation", "--generator", help="Bug generator to run."
+    ),
+    file: str | None = typer.Option(
+        None, "--file", help="Repo-relative target file (default: auto-discover)."
+    ),
+    symbol: str | None = typer.Option(
+        None, "--symbol", help="Target symbol name (default: auto-select)."
+    ),
+    op: str | None = typer.Option(
+        None,
+        "--op",
+        help="Operator: operator_swap | off_by_one | branch_removal (default: any).",
+    ),
+    seed: int = typer.Option(0, "--seed", help="Seed for deterministic selection."),
+    language: str | None = typer.Option(
+        None, "--language", help="Force an adapter (default: detect from the repo)."
+    ),
+    env: str | None = typer.Option(
+        None, "--env", help="EnvImage JSON to enforce the green-baseline precondition."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Generate a bug Candidate (forward mutation + inverse gold oracle).
+
+    Writes ``candidate.json`` plus ``mutation.patch`` and ``oracle.patch`` to the
+    output dir on success. The generator self-validates the round-trip (mutation
+    then oracle restores every touched file byte-for-byte) before emitting; an
+    invalid generation fails non-zero and writes NO candidate artifact. With the
+    same repo+target+seed, deterministic generators reproduce identical patches.
+    """
+    repo_root = Path(path)
+    if not repo_root.is_dir():
+        _fail(f"path does not exist or is not a directory: {path}")
+
+    registry = build_default_registry()
+    if language is not None:
+        try:
+            adapter = registry.get(language)
+        except NoAdapterFoundError:
+            _fail(
+                f"no adapter for language {language!r}; "
+                f"known: {', '.join(registry.names())}"
+            )
+    else:
+        try:
+            adapter = registry.detect(repo_root)
+        except NoAdapterFoundError as exc:
+            _fail(str(exc))
+
+    gen_registry = build_default_generator_registry()
+    try:
+        bug_generator = gen_registry.get(generator)
+    except KeyError as exc:
+        _fail(str(exc))
+
+    env_image: EnvImage | None = None
+    if env is not None:
+        env_path = Path(env)
+        if not env_path.is_file():
+            _fail(f"env image file not found: {env}")
+        env_image = EnvImage.from_dict(json.loads(env_path.read_text(encoding="utf-8")))
+
+    request = GenerationRequest(
+        repo_root=repo_root,
+        seed=seed,
+        file=file,
+        symbol=symbol,
+        op=op,
+        env_image=env_image,
+    )
+    try:
+        candidate = bug_generator.generate(request, adapter)
+    except (GenerationError, BaselineNotGreenError) as exc:
+        # Fail cleanly and emit NO candidate artifact.
+        _fail(f"{generator}: {exc}")
+
+    out_dir = Path(out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mutation_path = out_dir / "mutation.patch"
+    oracle_path = out_dir / "oracle.patch"
+    candidate_path = out_dir / "candidate.json"
+    mutation_path.write_text(candidate.mutation_patch, encoding="utf-8")
+    oracle_path.write_text(candidate.oracle_patch, encoding="utf-8")
+    candidate_path.write_text(
+        json.dumps(candidate.to_dict(), indent=2), encoding="utf-8"
+    )
+
+    mutation_sha = hashlib.sha256(candidate.mutation_patch.encode("utf-8")).hexdigest()
+    oracle_sha = hashlib.sha256(candidate.oracle_patch.encode("utf-8")).hexdigest()
+    payload: dict[str, object] = {
+        "generator": generator,
+        "language": candidate.language,
+        "seed": seed,
+        "out": str(out_dir),
+        "candidate": candidate.to_dict(),
+        "patch_sha256": {
+            "mutation.patch": mutation_sha,
+            "oracle.patch": oracle_sha,
+        },
+    }
+    if json_out:
+        typer.echo(json.dumps(payload))
+        return
+    console.print(
+        f"[green]candidate[/green] {candidate.generator} [{candidate.language}] "
+        f"-> {out_dir}"
+    )
+    console.print(f"  target   : {candidate.target.to_dict()}")
+    console.print(f"  operator : {candidate.provenance.details.get('operator')}")
+    console.print(f"  seed     : {seed}")
+    console.print(
+        f"  patches  : mutation.patch={mutation_sha[:12]} oracle.patch={oracle_sha[:12]}"
+    )

@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from swe_forge.forge.adapters._fsdetect import has_root_marker, has_source_file
+from swe_forge.forge.adapters._mutate import mutate_source
 from swe_forge.forge.adapters._treesitter import parse_js_symbols
 from swe_forge.forge.adapters.base import (
     LanguageAdapter,
@@ -113,7 +114,7 @@ class JavaScriptAdapter(LanguageAdapter):
         return parse_js_symbols(file)
 
     def mutate_ast(self, file: PathLike, symbol: Symbol, op: MutationOp) -> Patch:
-        raise NotImplementedError(_TODO.format(method="mutate_ast"))
+        return mutate_source(self.name, file, symbol, op)
 
     def mutation_tool_run(
         self,

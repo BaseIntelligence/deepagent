@@ -8,11 +8,15 @@ hostname or brand string is hardcoded anywhere in this package.
 
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.models import (
+    GENERATOR_NAMES,
     SUPPORTED_LANGUAGES,
     BaselineNotGreenError,
+    Candidate,
+    CandidateTarget,
     EnvImage,
     InstanceGrant,
     ModelError,
+    Provenance,
     RepoSpec,
     require_green_baseline,
 )
@@ -24,12 +28,16 @@ from swe_forge.forge.sources import (
 )
 
 __all__ = [
+    "GENERATOR_NAMES",
     "SUPPORTED_LANGUAGES",
     "BaselineNotGreenError",
+    "Candidate",
+    "CandidateTarget",
     "EnvImage",
     "ForgeSettings",
     "InstanceGrant",
     "ModelError",
+    "Provenance",
     "RepoSpec",
     "SourceError",
     "SourceRegistry",
