@@ -188,6 +188,20 @@ def _verify_single_file_fault(
     )
 
 
+def verify_forward_patch(
+    rel: str, symbol: Symbol, forward: Patch
+) -> SingleFileFault | None:
+    """Verify a teacher-proposed forward edit round-trips; build the fault or ``None``.
+
+    Reuses the shared single-file round-trip check (apply forward, derive the
+    inverse oracle, re-apply, sha256 must match the pristine original) so an
+    LLM-authored edit that does not apply or does not invert is disposed of here
+    and never shipped. Must run with cwd at the repo root (the original bytes are
+    re-read from ``rel`` on disk).
+    """
+    return _verify_single_file_fault(rel, symbol, None, forward)
+
+
 def try_fault(
     adapter: LanguageAdapter, rel: str, symbol: Symbol, op: MutationOp
 ) -> SingleFileFault | None:

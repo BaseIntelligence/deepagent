@@ -982,6 +982,16 @@ def panel_rollouts(
             )
 
 
+def _generate_params(pr_number: int | None, repo: str | None) -> dict[str, object]:
+    """Build the generator ``params`` map from the generate CLI options."""
+    params: dict[str, object] = {}
+    if pr_number is not None:
+        params["pr_number"] = pr_number
+    if repo is not None:
+        params["repo"] = repo
+    return params
+
+
 @app.command(name="generate")
 def generate(
     path: str = typer.Option(..., "--path", help="Local repo checkout to mutate."),
@@ -1005,6 +1015,14 @@ def generate(
     seed: int = typer.Option(0, "--seed", help="Seed for deterministic selection."),
     language: str | None = typer.Option(
         None, "--language", help="Force an adapter (default: detect from the repo)."
+    ),
+    pr_number: int | None = typer.Option(
+        None, "--pr-number", help="pr_mirror: the merged PR number to invert."
+    ),
+    repo: str | None = typer.Option(
+        None,
+        "--repo",
+        help="pr_mirror: 'owner/name' (default: detect from the origin remote).",
     ),
     env: str | None = typer.Option(
         None, "--env", help="EnvImage JSON to enforce the green-baseline precondition."
@@ -1058,6 +1076,7 @@ def generate(
         symbol=symbol,
         op=op,
         env_image=env_image,
+        params=_generate_params(pr_number, repo),
     )
     try:
         candidate = bug_generator.generate(request, adapter)

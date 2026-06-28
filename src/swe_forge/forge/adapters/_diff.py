@@ -87,8 +87,15 @@ def make_patch(rel_path: str, original: bytes, modified: bytes) -> str:
         return _git(root, "diff", "--no-color", "--no-ext-diff", "--", rel)
 
 
-def apply_patch(original: bytes, diff: str, rel_path: str) -> bytes:
+def apply_patch(
+    original: bytes, diff: str, rel_path: str, *, reverse: bool = False
+) -> bytes:
     """Apply ``diff`` to ``original`` (the content of ``rel_path``); return the result.
+
+    With ``reverse=True`` the patch is applied in reverse (``git apply -R``): the
+    file is expected to match the diff's post-image and the pre-image is produced.
+    This turns a ``base -> head`` diff into a ``head -> base`` revert, which the
+    PR-mirror generator uses to compute the pre-PR content from current code.
 
     Raises :class:`PatchError` if the patch does not apply cleanly, mirroring how
     a validator's ``git apply`` would reject it.
@@ -102,7 +109,11 @@ def apply_patch(original: bytes, diff: str, rel_path: str) -> bytes:
         target.write_bytes(original)
         patch_file = root / "_forge.patch"
         patch_file.write_text(diff, encoding="utf-8")
-        _git(root, "apply", "--whitespace=nowarn", "--", str(patch_file))
+        apply_args = ["apply", "--whitespace=nowarn"]
+        if reverse:
+            apply_args.append("-R")
+        apply_args += ["--", str(patch_file)]
+        _git(root, *apply_args)
         return target.read_bytes()
 
 
