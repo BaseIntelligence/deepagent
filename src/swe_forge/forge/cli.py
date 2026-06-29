@@ -26,6 +26,12 @@ from swe_forge.forge.adapters import (
     ParseError,
     build_default_registry,
 )
+from swe_forge.forge.calibrate.irt import (
+    DEFAULT_TIER_ABILITIES,
+    IrtError,
+    build_calibration_report,
+    pass_at_k,
+)
 from swe_forge.forge.calibrate.solver import (
     DEFAULT_MAX_TOKENS as SOLVER_DEFAULT_MAX_TOKENS,
 )
@@ -45,11 +51,13 @@ from swe_forge.forge.generators import (
     verify_candidate_roundtrip,
 )
 from swe_forge.forge.models import (
+    SUPPORTED_LANGUAGES,
     BaselineNotGreenError,
     Candidate,
     EnvImage,
     GeneratedSpec,
     ModelError,
+    ModelSolveRecord,
     OracleReport,
     require_green_baseline,
 )
@@ -2427,3 +2435,139 @@ def solver_rollout(
         console.print(f"  score        : {outcome.score.to_dict()}")
         if outcome.error:
             console.print(f"  error        : {outcome.error}")
+
+
+def _load_solve_matrix(matrix_file: str) -> tuple[list[ModelSolveRecord], int]:
+    """Load a per-model solve matrix and (recompute) the canonical pass@k.
+
+    Accepts either a bare list of ``{model, tier, solves, k}`` rows or a
+    ``CalibrationRun``-shaped object with a ``models`` list (the panel runner's
+    JSON). ``pass_at_k`` is always recomputed from ``solves``/``k`` so the records
+    carry the single-source estimator regardless of the input. Returns the
+    records plus the inferred rollout budget ``k`` (the max per-model ``k``).
+    """
+    path = Path(matrix_file)
+    if not path.is_file():
+        _fail(f"solve-matrix file not found: {matrix_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _fail(f"invalid solve-matrix JSON: {exc}")
+
+    if isinstance(data, dict) and "models" in data:
+        rows = data["models"]
+    elif isinstance(data, list):
+        rows = data
+    else:
+        _fail(
+            "solve-matrix JSON must be a list of {model,tier,solves,k} rows "
+            "or an object with a 'models' list"
+        )
+
+    if not isinstance(rows, list) or not rows:
+        _fail("solve-matrix has no model rows")
+
+    records: list[ModelSolveRecord] = []
+    inferred_k = 0
+    for raw in rows:
+        if not isinstance(raw, dict):
+            _fail(f"each solve-matrix row must be an object; got {type(raw).__name__}")
+        try:
+            solves = int(raw["solves"])
+            k = int(raw["k"])
+            records.append(
+                ModelSolveRecord(
+                    model=str(raw["model"]),
+                    tier=str(raw["tier"]),
+                    k=k,
+                    solves=solves,
+                    pass_at_k=pass_at_k(solves, k),
+                )
+            )
+            inferred_k = max(inferred_k, k)
+        except (KeyError, ValueError, ModelError) as exc:
+            _fail(f"invalid solve-matrix row {raw!r}: {exc}")
+    return records, inferred_k
+
+
+@app.command(name="calibrate-irt")
+def calibrate_irt(
+    matrix: str = typer.Option(
+        ...,
+        "--matrix",
+        help=(
+            "Path to the per-model solve matrix JSON (a list of "
+            "{model,tier,solves,k} rows or a CalibrationRun with a 'models' list)."
+        ),
+    ),
+    language: str = typer.Option(
+        "python", "--language", help="Task language for the CalibrationReport."
+    ),
+    difficulty_hint: str = typer.Option(
+        "", "--difficulty-hint", help="Optional a-priori difficulty label."
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the CalibrationReport JSON to this path."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Fit the 2-parameter IRT over a panel solve matrix -> CalibrationReport.
+
+    Pure offline math (no Docker, no LLM): turns the recorded per-model/per-rollout
+    solves into the canonical per-model ``pass_at_k`` plus ``irt_difficulty`` and
+    ``irt_discrimination`` (a steep, high-discrimination slope when only strong
+    tiers solve; a flat, low-discrimination slope when tiers do not separate;
+    well-defined sentinels for all-pass / all-fail). The ``band_verdict`` is left
+    ``pending`` -- the band filter assigns the terminal keep/drop.
+    """
+    if language not in SUPPORTED_LANGUAGES:
+        _fail(f"--language must be one of {SUPPORTED_LANGUAGES}; got {language!r}")
+
+    records, inferred_k = _load_solve_matrix(matrix)
+    try:
+        report = build_calibration_report(
+            language,
+            records,
+            k=inferred_k,
+            difficulty_hint=difficulty_hint,
+        )
+    except IrtError as exc:
+        _fail(f"IRT fit failed: {exc}")
+
+    if out:
+        out_path = Path(out)
+        if out_path.suffix == ".json":
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path = out_path
+        else:
+            out_path.mkdir(parents=True, exist_ok=True)
+            report_path = out_path / "calibration_report.json"
+        report_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+
+    if json_out:
+        typer.echo(json.dumps(report.to_dict()))
+        return
+
+    console.print(
+        f"[bold]calibration IRT[/bold] language={report.language} k={report.k} "
+        f"(tier abilities {DEFAULT_TIER_ABILITIES})"
+    )
+    console.print(
+        f"  irt_difficulty     : {report.irt_difficulty:+.4f}\n"
+        f"  irt_discrimination : {report.irt_discrimination:.4f}\n"
+        f"  frontier pass@k    : {report.frontier_pass_at_k():.4f}\n"
+        f"  band_verdict       : {report.band_verdict}"
+    )
+    for rec in report.models:
+        console.print(
+            f"    {rec.tier:8s} {rec.model:32s} "
+            f"solves={rec.solves}/{rec.k} pass@k={rec.pass_at_k:.4f}"
+        )
+    tier_rates = report.tier_pass_rates()
+    if tier_rates:
+        ordered = ", ".join(
+            f"{tier}={tier_rates[tier]:.3f}"
+            for tier in ("weak", "mid", "frontier")
+            if tier in tier_rates
+        )
+        console.print(f"  tier pass-rates    : {ordered}")

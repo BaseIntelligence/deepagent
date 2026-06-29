@@ -13,12 +13,21 @@ GeneratedSpec, OracleReport, CalibrationReport, ForgeTask, Provenance).
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 #: Languages the forge pipeline supports end to end.
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("python", "javascript", "go")
+
+#: The solver-panel difficulty tiers (weak -> mid -> frontier), ordered from the
+#: least to the most capable. Kept in sync with ``panel.VALID_TIERS``.
+PANEL_TIERS: tuple[str, ...] = ("weak", "mid", "frontier")
+
+#: Terminal band verdicts a :class:`CalibrationReport` may carry, plus the
+#: ``pending`` pre-filter state (the band filter assigns the terminal verdict).
+BAND_VERDICTS: tuple[str, ...] = ("keep", "drop", "pending")
 
 #: The complete bug-generator menu (Stage 2). Every :class:`Candidate` must name
 #: one of these; the concrete generators are added across the m3 milestone.
@@ -702,6 +711,209 @@ class OracleReport:
             differential_pass=bool(data.get("differential_pass", False)),
             alt_correct_accepted=bool(data.get("alt_correct_accepted", False)),
             leak_audit=str(data.get("leak_audit", "")),
+            provenance=Provenance.from_dict(provenance)
+            if isinstance(provenance, dict)
+            else None,
+            details=dict(details) if isinstance(details, dict) else {},
+        )
+
+
+def _coerce_float(value: object, default: float = 0.0) -> float:
+    """Best-effort float coercion for ``from_dict`` loaders (tolerant of junk)."""
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float, str)):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+@dataclass
+class ModelSolveRecord:
+    """One panel model's calibration summary on a :class:`CalibrationReport`.
+
+    ``solves`` of ``k`` independent rollouts succeeded (a *solve* = the model's
+    patch passed the FULL hidden test set in Docker), and ``pass_at_k`` is the
+    resulting pass-rate. The pass@k invariant is enforced here so the data model
+    itself guards it: ``solves == 0`` forces ``pass_at_k == 0`` and any solve
+    forces ``pass_at_k > 0``.
+    """
+
+    model: str
+    tier: str
+    k: int
+    solves: int
+    pass_at_k: float
+
+    def __post_init__(self) -> None:
+        if not str(self.model).strip():
+            raise ModelError("ModelSolveRecord.model must be non-empty")
+        if self.tier not in PANEL_TIERS:
+            raise ModelError(
+                f"ModelSolveRecord.tier must be one of {PANEL_TIERS}; got {self.tier!r}"
+            )
+        if self.k < 0:
+            raise ModelError(f"ModelSolveRecord.k must be >= 0; got {self.k}")
+        if not (0 <= self.solves <= self.k):
+            raise ModelError(
+                "ModelSolveRecord.solves must satisfy 0 <= solves <= k "
+                f"({self.solves} vs k={self.k})"
+            )
+        self.pass_at_k = float(self.pass_at_k)
+        if not (0.0 <= self.pass_at_k <= 1.0):
+            raise ModelError(
+                f"ModelSolveRecord.pass_at_k must be in [0, 1]; got {self.pass_at_k}"
+            )
+        if self.solves == 0 and self.pass_at_k != 0.0:
+            raise ModelError(
+                "ModelSolveRecord with solves == 0 must have pass_at_k == 0.0; "
+                f"got {self.pass_at_k}"
+            )
+        if self.solves >= 1 and self.pass_at_k <= 0.0:
+            raise ModelError(
+                "ModelSolveRecord with solves >= 1 must have pass_at_k > 0; "
+                f"got {self.pass_at_k}"
+            )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "model": self.model,
+            "tier": self.tier,
+            "k": self.k,
+            "solves": self.solves,
+            "pass_at_k": self.pass_at_k,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> ModelSolveRecord:
+        return cls(
+            model=str(data["model"]),
+            tier=str(data["tier"]),
+            k=_coerce_int(data.get("k", 0)),
+            solves=_coerce_int(data.get("solves", 0)),
+            pass_at_k=_coerce_float(data.get("pass_at_k", 0.0)),
+        )
+
+
+@dataclass
+class CalibrationReport:
+    """Stage 4 artifact: the calibration (difficulty + discrimination) verdict.
+
+    Records the per-model panel outcome (``models``: one
+    :class:`ModelSolveRecord` per validated model), the 2-parameter IRT fit over
+    that per-model/per-rollout solve matrix (``irt_difficulty`` and
+    ``irt_discrimination``, both matrix-derived), and the band ``band_verdict``.
+
+    The IRT fields are populated by the calibration fit; ``band_verdict`` starts
+    ``"pending"`` and is set to its terminal ``"keep"``/``"drop"`` value by the
+    band filter (with an attributable ``reason``). A ``ForgeTask`` may only be
+    built from a ``keep`` report.
+    """
+
+    language: str
+    models: list[ModelSolveRecord]
+    k: int
+    irt_difficulty: float
+    irt_discrimination: float
+    band_verdict: str = "pending"
+    reasons: list[str] = field(default_factory=list)
+    difficulty_hint: str = ""
+    provenance: Provenance | None = None
+    details: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.language not in SUPPORTED_LANGUAGES:
+            raise ModelError(
+                f"CalibrationReport.language must be one of {SUPPORTED_LANGUAGES}; "
+                f"got {self.language!r}"
+            )
+        if self.band_verdict not in BAND_VERDICTS:
+            raise ModelError(
+                f"CalibrationReport.band_verdict must be one of {BAND_VERDICTS}; "
+                f"got {self.band_verdict!r}"
+            )
+        if self.k < 0:
+            raise ModelError(f"CalibrationReport.k must be >= 0; got {self.k}")
+        self.irt_difficulty = float(self.irt_difficulty)
+        self.irt_discrimination = float(self.irt_discrimination)
+        if not math.isfinite(self.irt_difficulty):
+            raise ModelError(
+                f"CalibrationReport.irt_difficulty must be finite; "
+                f"got {self.irt_difficulty}"
+            )
+        if not math.isfinite(self.irt_discrimination):
+            raise ModelError(
+                f"CalibrationReport.irt_discrimination must be finite; "
+                f"got {self.irt_discrimination}"
+            )
+
+    @property
+    def is_keep(self) -> bool:
+        """``True`` iff the terminal band verdict is ``keep``."""
+        return self.band_verdict == "keep"
+
+    def tier_pass_rates(self) -> dict[str, float]:
+        """Mean ``pass_at_k`` per tier present in ``models`` (empty tiers omitted)."""
+        sums: dict[str, float] = {}
+        counts: dict[str, int] = {}
+        for rec in self.models:
+            sums[rec.tier] = sums.get(rec.tier, 0.0) + rec.pass_at_k
+            counts[rec.tier] = counts.get(rec.tier, 0) + 1
+        return {tier: sums[tier] / counts[tier] for tier in sums}
+
+    def frontier_pass_at_k(self) -> float:
+        """The strongest frontier model's ``pass_at_k`` (``0.0`` if no frontier)."""
+        frontier = [r.pass_at_k for r in self.models if r.tier == "frontier"]
+        return max(frontier) if frontier else 0.0
+
+    def set_band_verdict(self, verdict: str, reason: str) -> None:
+        """Set the terminal band verdict (``keep``/``drop``) with a reason."""
+        if verdict not in ("keep", "drop"):
+            raise ModelError(
+                f"terminal band_verdict must be 'keep' or 'drop'; got {verdict!r}"
+            )
+        if not str(reason).strip():
+            raise ModelError("a band verdict requires a non-empty reason")
+        self.band_verdict = verdict
+        self.reasons = [reason]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "language": self.language,
+            "models": [m.to_dict() for m in self.models],
+            "k": self.k,
+            "irt_difficulty": self.irt_difficulty,
+            "irt_discrimination": self.irt_discrimination,
+            "band_verdict": self.band_verdict,
+            "reasons": list(self.reasons),
+            "difficulty_hint": self.difficulty_hint,
+            "frontier_pass_at_k": self.frontier_pass_at_k(),
+            "tier_pass_rates": self.tier_pass_rates(),
+            "provenance": self.provenance.to_dict() if self.provenance else None,
+            "details": dict(self.details),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> CalibrationReport:
+        models = data.get("models", [])
+        provenance = data.get("provenance")
+        reasons = data.get("reasons", [])
+        details = data.get("details", {})
+        return cls(
+            language=str(data["language"]),
+            models=[
+                ModelSolveRecord.from_dict(m) for m in models if isinstance(m, dict)
+            ]
+            if isinstance(models, list)
+            else [],
+            k=_coerce_int(data.get("k", 0)),
+            irt_difficulty=_coerce_float(data.get("irt_difficulty", 0.0)),
+            irt_discrimination=_coerce_float(data.get("irt_discrimination", 0.0)),
+            band_verdict=str(data.get("band_verdict", "pending")),
+            reasons=[str(r) for r in reasons] if isinstance(reasons, list) else [],
+            difficulty_hint=str(data.get("difficulty_hint", "")),
             provenance=Provenance.from_dict(provenance)
             if isinstance(provenance, dict)
             else None,

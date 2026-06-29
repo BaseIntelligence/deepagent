@@ -8,16 +8,20 @@ hostname or brand string is hardcoded anywhere in this package.
 
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.models import (
+    BAND_VERDICTS,
     GENERATOR_NAMES,
     ORACLE_VERDICTS,
+    PANEL_TIERS,
     SUPPORTED_LANGUAGES,
     BaselineNotGreenError,
+    CalibrationReport,
     Candidate,
     CandidateTarget,
     EnvImage,
     GeneratedSpec,
     InstanceGrant,
     ModelError,
+    ModelSolveRecord,
     OracleReport,
     OracleTestFile,
     Provenance,
@@ -40,11 +44,14 @@ from swe_forge.forge.sources import (
 )
 
 __all__ = [
+    "BAND_VERDICTS",
     "GATE_ORDER",
     "GENERATOR_NAMES",
     "ORACLE_VERDICTS",
+    "PANEL_TIERS",
     "SUPPORTED_LANGUAGES",
     "BaselineNotGreenError",
+    "CalibrationReport",
     "Candidate",
     "CandidateTarget",
     "EnvImage",
@@ -53,6 +60,7 @@ __all__ = [
     "GeneratedSpec",
     "InstanceGrant",
     "ModelError",
+    "ModelSolveRecord",
     "OraclePipelineError",
     "OracleReport",
     "OracleTestFile",

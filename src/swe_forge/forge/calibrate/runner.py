@@ -40,6 +40,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
 from swe_forge.forge.adapters import LanguageAdapter, build_default_registry
+from swe_forge.forge.calibrate.irt import pass_at_k as _irt_pass_at_k
 from swe_forge.forge.calibrate.solver import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
@@ -103,15 +104,13 @@ def suppress_litellm_async_warning():  # type: ignore[no-untyped-def]
 
 
 def compute_pass_at_k(solves: int, k: int) -> float:
-    """Empirical pass@k = ``solves / k`` clamped to ``[0, 1]``.
+    """Per-model pass@k estimator; re-exported from :mod:`...calibrate.irt`.
 
-    A correct nondecreasing function of ``solves``: zero solves yields exactly
-    ``0.0`` and any solve yields ``> 0`` (VAL-CAL-011's baseline estimator). The
-    IRT/discrimination math layers on top of this in :mod:`...calibrate.irt`.
+    The canonical implementation lives in the IRT module (the single source of
+    truth for pass@k, VAL-CAL-011); the runner re-exports it so existing
+    ``runner.compute_pass_at_k`` imports keep working.
     """
-    if k <= 0 or solves <= 0:
-        return 0.0
-    return min(1.0, solves / k)
+    return _irt_pass_at_k(solves, k)
 
 
 # Difficulty labels emitted by the generators (low/medium/high) plus common
