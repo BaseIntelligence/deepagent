@@ -35,6 +35,12 @@ from swe_forge.forge.calibrate.irt import (
     pass_at_k,
     to_solve_records,
 )
+from swe_forge.forge.calibrate.pipeline import (
+    CalibrationOutcome,
+    assemble_calibration_report,
+    build_usage_accounting,
+    run_calibration,
+)
 from swe_forge.forge.calibrate.runner import (
     DEFAULT_BUDGET,
     CalibrationRun,
@@ -95,6 +101,7 @@ __all__ = [
     "BandDecision",
     "BandFilterConfig",
     "BandFilterError",
+    "CalibrationOutcome",
     "CalibrationRun",
     "CalibrationRunnerError",
     "DockerPatchScorer",
@@ -110,13 +117,16 @@ __all__ = [
     "SolverRollout",
     "ValidatorFn",
     "apply_band_filter",
+    "assemble_calibration_report",
     "build_calibration_report",
     "build_solver_prompt",
+    "build_usage_accounting",
     "capture_workspace_patch",
     "classify_band",
     "compute_pass_at_k",
     "fit_irt",
     "pass_at_k",
+    "run_calibration",
     "run_panel_calibration",
     "run_solver_rollout",
     "score_patch",

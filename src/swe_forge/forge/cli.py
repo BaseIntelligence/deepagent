@@ -39,6 +39,11 @@ from swe_forge.forge.calibrate.irt import (
     build_calibration_report,
     pass_at_k,
 )
+from swe_forge.forge.calibrate.pipeline import (
+    CalibrationOutcome,
+    run_calibration,
+)
+from swe_forge.forge.calibrate.runner import CalibrationRunnerError
 from swe_forge.forge.calibrate.solver import (
     DEFAULT_MAX_TOKENS as SOLVER_DEFAULT_MAX_TOKENS,
 )
@@ -2697,6 +2702,244 @@ def calibrate_filter(
             f"  band_verdict       : [{color}]{calibration.band_verdict}[/{color}] "
             f"({decision['rule']})\n"
             f"  reason             : {calibration.reasons[0] if calibration.reasons else ''}"
+        )
+
+    if require_keep and not calibration.is_keep:
+        raise typer.Exit(code=1)
+
+
+def _write_calibration_outcome(out: str, outcome: CalibrationOutcome) -> Path:
+    """Write the finalized CalibrationReport JSON to a file or directory path."""
+    out_path = Path(out)
+    if out_path.suffix == ".json":
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path = out_path
+    else:
+        out_path.mkdir(parents=True, exist_ok=True)
+        report_path = out_path / "calibration_report.json"
+    report_path.write_text(
+        json.dumps(outcome.report.to_dict(), indent=2), encoding="utf-8"
+    )
+    return report_path
+
+
+def _parse_panel_models(spec: str, base_url: str, api_key: str) -> list[PanelModel]:
+    """Parse a ``tier:model_string`` panel override into bound PanelModels.
+
+    Each comma-separated entry is ``<tier>:<provider/model_id>`` (the tier is
+    everything before the FIRST colon; the model string keeps its ``provider/``
+    prefix). Every model inherits the resolved panel endpoint/key.
+    """
+    panel: list[PanelModel] = []
+    for raw in (e.strip() for e in spec.split(",")):
+        if not raw:
+            continue
+        tier, sep, model_string = raw.partition(":")
+        tier = tier.strip()
+        model_string = model_string.strip()
+        if not sep or not model_string:
+            _fail(
+                f"invalid --models entry {raw!r}; expected 'tier:provider/model_id' "
+                f"(e.g. 'frontier:anthropic/claude-opus-4-8')"
+            )
+        if tier not in VALID_TIERS:
+            _fail(f"--models tier must be one of {VALID_TIERS}, got {tier!r}")
+        try:
+            panel.append(
+                PanelModel(
+                    id=model_string,
+                    model_string=model_string,
+                    tier=tier,
+                    base_url=base_url,
+                    api_key=api_key,
+                )
+            )
+        except Exception as exc:
+            _fail(str(exc), api_key)
+    if not panel:
+        _fail("no panel models parsed from --models")
+    return panel
+
+
+@app.command(name="calibrate")
+def calibrate(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the oracle-pass OracleReport JSON (its F2P/P2P/test_files set).",
+    ),
+    spec: str = typer.Option(
+        ...,
+        "--spec",
+        help="Path to the GeneratedSpec JSON (statement+requirements+interface ONLY).",
+    ),
+    models: str | None = typer.Option(
+        None,
+        "--models",
+        help=(
+            "Override the panel: comma-separated 'tier:model_string' entries "
+            "(e.g. 'weak:openai/gpt-4o-mini,frontier:anthropic/claude-opus-4-8'). "
+            "Default: the env-configured panel (all tiers)."
+        ),
+    ),
+    k: int | None = typer.Option(
+        None,
+        "--k",
+        help="Rollouts per model (default: the difficulty-aware budget for the candidate).",
+    ),
+    concurrency: int = typer.Option(
+        4, "--concurrency", help="Max concurrent in-flight rollouts (semaphore cap)."
+    ),
+    band_high: float = typer.Option(
+        DEFAULT_BAND_HIGH,
+        "--band-high",
+        help="Upper edge of the low-but-nonzero band; frontier pass@k above it is too easy.",
+    ),
+    discrimination_threshold: float = typer.Option(
+        DEFAULT_DISCRIMINATION_THRESHOLD,
+        "--discrimination-threshold",
+        help="Minimum irt_discrimination required to keep (tiers must separate).",
+    ),
+    max_turns: int = typer.Option(
+        DEFAULT_MAX_TURNS, "--max-turns", help="Bounded solver tool-loop budget."
+    ),
+    max_tokens: int = typer.Option(
+        SOLVER_DEFAULT_MAX_TOKENS, "--max-tokens", help="Max tokens per solver call."
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    validate: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Probe each panel model id once before its k-burst of rollouts.",
+    ),
+    require_keep: bool = typer.Option(
+        False,
+        "--require-keep",
+        help="Exit non-zero when the band verdict is 'drop' (e.g. to gate an export step).",
+    ),
+    out: str | None = typer.Option(
+        None,
+        "--out",
+        help="Write the finalized CalibrationReport JSON here (file or dir).",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Calibrate a candidate end to end: panel run -> finalized CalibrationReport.
+
+    Runs the FULL Stage-4 panel calibration on the candidate's green EnvImage:
+    validate every panel model id once (cost discipline), issue k independent,
+    uncached, concurrency-bounded rollouts per validated model, score each via the
+    SHARED Docker FAIL->PASS path (a solve requires the FULL OracleReport
+    test_files[] hidden suite to pass AND P2P/regression green -- never just the
+    original F2P), fit the 2-parameter IRT, and apply the band filter. The emitted
+    CalibrationReport carries the per-model {model,tier,k,solves,pass_at_k} array,
+    irt_difficulty/irt_discrimination, the terminal keep/drop band_verdict +
+    reason, full per-call + aggregate usage/cost accounting, and provenance.
+    Throwaway containers only (--rm); off-limits containers are never touched.
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    oracle_report = _load_oracle_report(report)
+    spec_obj = _load_spec(spec)
+    if spec_obj is None:
+        _fail("a valid --spec (GeneratedSpec JSON) is required for calibration")
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    base_url, api_key = resolve_panel_endpoint()
+    _require_panel_creds(base_url, api_key)
+
+    try:
+        config = BandFilterConfig(
+            band_high=band_high,
+            discrimination_threshold=discrimination_threshold,
+        )
+    except BandFilterError as exc:
+        _fail(str(exc))
+
+    panel = (
+        build_panel_from_env()
+        if models is None
+        else _parse_panel_models(models, base_url, api_key)
+    )
+    if not panel:
+        _fail("panel is empty; configure at least one panel model")
+
+    try:
+        outcome = asyncio.run(
+            run_calibration(
+                candidate_obj,
+                env_image,
+                spec_obj,
+                oracle_report,
+                panel,
+                k=k,
+                concurrency=concurrency,
+                validate=validate,
+                config=config,
+                max_turns=max_turns,
+                max_tokens=max_tokens,
+                command_timeout=timeout,
+                adapter=adapter,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"calibration: {exc}", api_key)
+    except (SolverError, CalibrationRunnerError, PanelError, DockerError) as exc:
+        _fail(f"calibration: {exc}", api_key)
+
+    calibration = outcome.report
+    if out:
+        _write_calibration_outcome(out, outcome)
+
+    if json_out:
+        # The raw patches are never echoed (they can be large); the report carries
+        # only counts/usage/cost, never the API key.
+        typer.echo(json.dumps({"report": calibration.to_dict()}))
+    else:
+        color = "green" if calibration.is_keep else "yellow"
+        accounting = outcome.run
+        console.print(
+            f"[bold]calibrate[/bold] language={calibration.language} "
+            f"k={calibration.k} band=(0, {config.band_high:.4f}] "
+            f"disc_threshold={config.discrimination_threshold:.4f}"
+        )
+        for rec in calibration.models:
+            console.print(
+                f"    {rec.tier:8s} {rec.model:32s} "
+                f"solves={rec.solves}/{rec.k} pass@k={rec.pass_at_k:.4f}"
+            )
+        console.print(
+            f"  irt_difficulty     : {calibration.irt_difficulty:+.4f}\n"
+            f"  irt_discrimination : {calibration.irt_discrimination:.4f}\n"
+            f"  frontier pass@k    : {calibration.frontier_pass_at_k():.4f}\n"
+            f"  band_verdict       : [{color}]{calibration.band_verdict}[/{color}]\n"
+            f"  reason             : "
+            f"{calibration.reasons[0] if calibration.reasons else ''}"
+        )
+        console.print(
+            f"  calls              : {accounting.total_calls} "
+            f"(validation={accounting.validation_calls}, "
+            f"rollout={accounting.rollout_calls})\n"
+            f"  usage/cost         : {accounting.usage.total_tokens} tok / "
+            f"{accounting.cost}"
         )
 
     if require_keep and not calibration.is_keep:
