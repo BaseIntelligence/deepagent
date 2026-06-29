@@ -55,6 +55,10 @@ from swe_forge.forge.calibrate.solver import (
 )
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.envbuild import EnvBuilder
+from swe_forge.forge.export import (
+    ExportRequest,
+    export_batch,
+)
 from swe_forge.forge.generators import (
     GenerationError,
     GenerationRequest,
@@ -2943,4 +2947,172 @@ def calibrate(
         )
 
     if require_keep and not calibration.is_keep:
+        raise typer.Exit(code=1)
+
+
+def _build_export_request(entry: dict[str, object]) -> ExportRequest:
+    """Build an :class:`ExportRequest` from a bundle of artifact file paths."""
+
+    def _need(key: str) -> str:
+        value = entry.get(key)
+        if not isinstance(value, str) or not value:
+            _fail(f"export entry missing required path field {key!r}")
+        return value
+
+    candidate_obj = _load_candidate(_need("candidate"))
+    env_image = _load_env_image(_need("env"))
+    spec_obj = _load_spec(_need("spec"))
+    if spec_obj is None:
+        _fail("export entry requires a valid GeneratedSpec ('spec')")
+    oracle_report = _load_oracle_report(_need("oracle"))
+    calibration = _load_calibration_report(_need("calibration"))
+    repo_url = entry.get("repo_url")
+    base_commit = entry.get("base_commit")
+    repo = entry.get("repo")
+    task_id = entry.get("task_id")
+    return ExportRequest(
+        candidate=candidate_obj,
+        spec=spec_obj,
+        oracle_report=oracle_report,
+        calibration_report=calibration,
+        env_image=env_image,
+        repo_url=str(repo_url) if isinstance(repo_url, str) else "",
+        base_commit=str(base_commit) if isinstance(base_commit, str) else "",
+        repo=str(repo) if isinstance(repo, str) else None,
+        task_id=str(task_id) if isinstance(task_id, str) else None,
+    )
+
+
+@app.command(name="export")
+def export_cmd(
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output directory (receives tasks/<id>/, dataset.jsonl, dataset.parquet).",
+    ),
+    manifest: str | None = typer.Option(
+        None,
+        "--manifest",
+        help=(
+            "Path to a JSON list of task bundles to export as a batch; each entry "
+            "names file paths {candidate, env, spec, oracle, calibration[, repo_url, "
+            "base_commit, repo, task_id]}."
+        ),
+    ),
+    candidate: str | None = typer.Option(
+        None, "--candidate", help="Single-task: path to the Stage 2 Candidate JSON."
+    ),
+    env: str | None = typer.Option(
+        None, "--env", help="Single-task: path to the Stage 1 EnvImage JSON."
+    ),
+    spec: str | None = typer.Option(
+        None, "--spec", help="Single-task: path to the GeneratedSpec JSON."
+    ),
+    oracle: str | None = typer.Option(
+        None, "--oracle", help="Single-task: path to the OracleReport JSON."
+    ),
+    calibration: str | None = typer.Option(
+        None, "--calibration", help="Single-task: path to the CalibrationReport JSON."
+    ),
+    repo_url: str = typer.Option(
+        "", "--repo-url", help="Single-task: the repo clone URL (for evaluate.sh)."
+    ),
+    base_commit: str = typer.Option(
+        "",
+        "--base-commit",
+        help="Single-task: base commit (defaults to EnvImage commit).",
+    ),
+    repo: str | None = typer.Option(
+        None,
+        "--repo",
+        help="Single-task: dataset 'owner/repo' slug (derived if unset).",
+    ),
+    overwrite: bool = typer.Option(
+        False, "--overwrite", help="Overwrite an existing tasks/<id>/ in place."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Assemble + export the qualified subset of a batch (Stage 5).
+
+    A task is shipped ONLY when its oracle verdict is 'pass' AND its calibration
+    band_verdict is 'keep' (fail-fast at assembly; an oracle pass alone is
+    necessary but NOT sufficient). Each shipped task gets a self-contained
+    ``tasks/<id>/`` workspace (workspace.yaml + gold patch.diff + mutation
+    deletion_patch.diff + the FULL hidden ``tests/`` + an executable robust
+    ``evaluate.sh``) and exactly one jsonl + one parquet record; the leak audit
+    (file scan + .git history) blocks any task that would ship a gold/oracle leak.
+    A refused task never aborts its qualified siblings; an empty/zero-kept run
+    still writes valid empty datasets.
+    """
+    if manifest is not None:
+        path = Path(manifest)
+        if not path.is_file():
+            _fail(f"manifest file not found: {manifest}")
+        try:
+            entries = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            _fail(f"invalid manifest JSON: {exc}")
+        if not isinstance(entries, list):
+            _fail("manifest JSON must be a list of task bundles")
+        requests = [
+            _build_export_request(entry) for entry in entries if isinstance(entry, dict)
+        ]
+    else:
+        required = {
+            "--candidate": candidate,
+            "--env": env,
+            "--spec": spec,
+            "--oracle": oracle,
+            "--calibration": calibration,
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            _fail(
+                "single-task export requires "
+                + ", ".join(sorted(missing))
+                + " (or use --manifest)"
+            )
+        requests = [
+            _build_export_request(
+                {
+                    "candidate": candidate,
+                    "env": env,
+                    "spec": spec,
+                    "oracle": oracle,
+                    "calibration": calibration,
+                    "repo_url": repo_url,
+                    "base_commit": base_commit,
+                    "repo": repo,
+                }
+            )
+        ]
+
+    result = export_batch(requests, out, overwrite=overwrite)
+
+    if json_out:
+        typer.echo(json.dumps(result.to_dict()))
+    else:
+        console.print(
+            f"[bold]export[/bold] out={result.out_dir} "
+            f"shipped={len(result.shipped)} kept={len(result.kept)} "
+            f"refused={len(result.refused)}"
+        )
+        for res in result.results:
+            color = {
+                "shipped": "green",
+                "skipped": "cyan",
+                "refused": "yellow",
+                "failed": "red",
+            }.get(res.status, "white")
+            line = f"  [{color}]{res.status:8s}[/{color}] {res.task_id}"
+            if res.reason:
+                line += f"  ({res.reason})"
+            console.print(line)
+        console.print(
+            f"  datasets: {result.jsonl_path.name} / {result.parquet_path.name}"
+        )
+
+    # A run that produced no kept task BUT had refusals is a failed export
+    # (e.g. a single unqualified task); an empty input or a mixed batch is fine.
+    if requests and not result.kept and result.refused:
         raise typer.Exit(code=1)

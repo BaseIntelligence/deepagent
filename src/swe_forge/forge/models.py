@@ -919,3 +919,129 @@ class CalibrationReport:
             else None,
             details=dict(details) if isinstance(details, dict) else {},
         )
+
+
+class ExportGateError(ModelError):
+    """Raised when a :class:`ForgeTask` is assembled from non-shippable gates.
+
+    The architecture export invariant (S3 data model): a ``ForgeTask`` may only be
+    created when ``OracleReport.verdict == 'pass'`` AND
+    ``CalibrationReport.band_verdict == 'keep'``. The gate is enforced here, at
+    assembly, so a half-built shippable object can never reach the writer (an
+    oracle pass alone is necessary but NOT sufficient).
+    """
+
+
+@dataclass
+class ForgeTask:
+    """Stage 5 artifact: the shippable task = the whole verified pipeline bundle.
+
+    A :class:`ForgeTask` bundles the env image, the by-construction
+    :class:`Candidate` (mutation + gold), the agent-facing :class:`GeneratedSpec`,
+    the :class:`OracleReport` (the 100%-verifiable contract), and the
+    :class:`CalibrationReport` (the hard-for-LLMs evidence), plus the
+    export-ready ``fail_to_pass``/``pass_to_pass`` selection commands (the FULL
+    hidden ``test_files[]`` suite, NOT just the original F2P) and full
+    :class:`Provenance`.
+
+    Invariant (enforced fail-fast in :meth:`__post_init__`): the task can exist
+    ONLY when ``oracle_report.verdict == 'pass'`` AND
+    ``calibration_report.band_verdict == 'keep'``. A rejected or
+    calibration-dropped candidate raises :class:`ExportGateError` at assembly and
+    never reaches the writer.
+    """
+
+    task_id: str
+    repo: str
+    repo_url: str
+    base_commit: str
+    language: str
+    generator: str
+    candidate: Candidate
+    spec: GeneratedSpec
+    oracle_report: OracleReport
+    calibration_report: CalibrationReport
+    env_image: EnvImage
+    install_commands: list[str]
+    fail_to_pass: list[str]
+    pass_to_pass: list[str]
+    provenance: Provenance
+    created_at: str = ""
+
+    def __post_init__(self) -> None:
+        if not str(self.task_id).strip():
+            raise ModelError("ForgeTask.task_id must be non-empty")
+        if self.language not in SUPPORTED_LANGUAGES:
+            raise ModelError(
+                f"ForgeTask.language must be one of {SUPPORTED_LANGUAGES}; "
+                f"got {self.language!r}"
+            )
+        # Fail-fast export gate: oracle pass is necessary but NOT sufficient --
+        # calibration must also keep the candidate (architecture S3 invariant).
+        if self.oracle_report.verdict != "pass":
+            raise ExportGateError(
+                "ForgeTask refused: OracleReport.verdict is "
+                f"{self.oracle_report.verdict!r} (reasons="
+                f"{list(self.oracle_report.reasons)}); a rejected candidate is "
+                "never assembled into a shippable task"
+            )
+        if self.calibration_report.band_verdict != "keep":
+            raise ExportGateError(
+                "ForgeTask refused: oracle passed but CalibrationReport.band_verdict "
+                f"is {self.calibration_report.band_verdict!r}; an oracle pass is "
+                "necessary but a calibration 'keep' is also required to ship"
+            )
+        if not self.fail_to_pass:
+            raise ModelError(
+                "ForgeTask.fail_to_pass must be non-empty (the hidden F2P suite)"
+            )
+        if not self.created_at:
+            self.created_at = _utc_now_iso()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "task_id": self.task_id,
+            "repo": self.repo,
+            "repo_url": self.repo_url,
+            "base_commit": self.base_commit,
+            "language": self.language,
+            "generator": self.generator,
+            "candidate": self.candidate.to_dict(),
+            "spec": self.spec.to_dict(),
+            "oracle_report": self.oracle_report.to_dict(),
+            "calibration_report": self.calibration_report.to_dict(),
+            "env_image": self.env_image.to_dict(),
+            "install_commands": list(self.install_commands),
+            "fail_to_pass": list(self.fail_to_pass),
+            "pass_to_pass": list(self.pass_to_pass),
+            "provenance": self.provenance.to_dict(),
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> ForgeTask:
+        install = data.get("install_commands", [])
+        f2p = data.get("fail_to_pass", [])
+        p2p = data.get("pass_to_pass", [])
+        return cls(
+            task_id=str(data["task_id"]),
+            repo=str(data.get("repo", "")),
+            repo_url=str(data.get("repo_url", "")),
+            base_commit=str(data.get("base_commit", "")),
+            language=str(data["language"]),
+            generator=str(data.get("generator", "")),
+            candidate=Candidate.from_dict(data["candidate"]),  # type: ignore[arg-type]
+            spec=GeneratedSpec.from_dict(data["spec"]),  # type: ignore[arg-type]
+            oracle_report=OracleReport.from_dict(data["oracle_report"]),  # type: ignore[arg-type]
+            calibration_report=CalibrationReport.from_dict(
+                data["calibration_report"]  # type: ignore[arg-type]
+            ),
+            env_image=EnvImage.from_dict(data["env_image"]),  # type: ignore[arg-type]
+            install_commands=[str(c) for c in install]
+            if isinstance(install, list)
+            else [],
+            fail_to_pass=[str(c) for c in f2p] if isinstance(f2p, list) else [],
+            pass_to_pass=[str(c) for c in p2p] if isinstance(p2p, list) else [],
+            provenance=Provenance.from_dict(data["provenance"]),  # type: ignore[arg-type]
+            created_at=str(data.get("created_at", "")),
+        )
