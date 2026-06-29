@@ -221,10 +221,12 @@ class CalibrationRun:
 
     ``models`` holds one :class:`ModelCalibration` per VALIDATED model (invalid
     ids are excluded, never fabricated). ``validations`` records every pre-flight
-    probe (one per id, including the rejected ones). ``validation_calls`` /
-    ``rollout_calls`` make the call accounting auditable: with every id valid,
-    ``total_calls == sum(1 + k)`` over the panel; a rejected id contributes its
-    single probe but ZERO rollouts (no k-burst).
+    probe (one per id, including the rejected ones) and is EMPTY when
+    ``validate=False`` (no probes are issued), so ``len(validations)`` always
+    equals ``validation_calls``. ``validation_calls`` / ``rollout_calls`` make the
+    call accounting auditable: with every id valid, ``total_calls == sum(1 + k)``
+    over the panel; a rejected id contributes its single probe but ZERO rollouts
+    (no k-burst).
     """
 
     models: list[ModelCalibration]
@@ -338,12 +340,13 @@ async def run_panel_calibration(
             validations = list(
                 await asyncio.gather(*(_bounded_validate(m) for m in panel))
             )
+            valid_models = [m for m, v in zip(panel, validations) if v.valid]
         else:
-            validations = [
-                ModelValidation(model=m.model_string, valid=True) for m in panel
-            ]
-
-        valid_models = [m for m, v in zip(panel, validations) if v.valid]
+            # No probes are issued, so record ZERO validations (keeping
+            # ``len(validations) == validation_calls``); every panel model
+            # proceeds straight to its k-burst.
+            validations = []
+            valid_models = list(panel)
 
         # Phase 2 - k independent, concurrency-bounded rollouts per VALID model.
         async def _bounded_rollout(model: PanelModel, index: int) -> RolloutOutcome:
@@ -381,7 +384,7 @@ async def run_panel_calibration(
             )
         )
 
-    validation_calls = len(validations) if validate else 0
+    validation_calls = len(validations)
     validation_usage = _sum_usage(v.usage for v in validations if v.usage is not None)
     validation_cost = sum(v.cost for v in validations)
     rollout_usage = _sum_usage(o.usage for o in outcomes)

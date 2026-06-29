@@ -439,12 +439,32 @@ async def capture_workspace_patch(
 ) -> str:
     """Capture the working tree's diff against HEAD as a unified diff.
 
-    The broken baseline is committed as HEAD before the rollout, so this returns
-    exactly the model's edits (including new files) and never the mutation. The
-    output applies cleanly with ``git apply`` at the repo root.
+    The broken baseline is committed as HEAD before the rollout (a single orphan
+    root commit of the full source tree), so this returns exactly the model's
+    edits to the existing source and never the mutation. The output applies
+    cleanly with ``git apply`` at the repo root.
+
+    Scope: only edits to tracked source files (``git add -u`` -- modifications and
+    deletions of files that were in the broken baseline) are folded into the
+    submitted patch. Stray scratch files the model created outside the source tree
+    (scratch ``test_*`` files, debug logs, build output) are untracked, so they
+    are deliberately excluded and only warned about; otherwise they would be
+    materialized in the scorer container and perturb F2P/P2P collection.
     """
+    others = await sandbox.run_command(
+        "git ls-files --others --exclude-standard", timeout=timeout
+    )
+    if others.exit_code == 0:
+        stray = sorted(line for line in others.stdout.splitlines() if line.strip())
+        if stray:
+            logger.warning(
+                "solver wrote %d untracked file(s) outside the source tree; "
+                "excluding them from the submitted patch: %s",
+                len(stray),
+                ", ".join(stray[:10]) + (" ..." if len(stray) > 10 else ""),
+            )
     result = await sandbox.run_command(
-        f"git {_GIT_IDENT} add -A && git {_GIT_IDENT} diff --cached HEAD",
+        f"git {_GIT_IDENT} add -u && git {_GIT_IDENT} diff --cached HEAD",
         timeout=timeout,
     )
     if result.exit_code != 0:
@@ -667,7 +687,23 @@ class RolloutOutcome:
 async def _setup_broken_baseline(
     sandbox: SandboxProtocol, candidate: Candidate, *, timeout: float
 ) -> None:
-    """Apply the forward mutation and commit it as HEAD (the broken baseline).
+    """Apply the forward mutation and RE-INIT git so the broken tree is a single
+    orphan/root commit (no recoverable gold ancestor).
+
+    forge builds the broken tree as a synthetic commit ON TOP of the pinned GOLD
+    commit, and the EnvImage keeps the repo's full ``.git`` history -- so an
+    agent-facing rollout exposing an unrestricted ``shell`` could otherwise recover
+    the gold/oracle source via ``git show HEAD~1`` / ``git diff HEAD~1 HEAD`` /
+    ``git checkout HEAD~1 -- <path>`` / ``git show HEAD:<path>`` and submit a
+    gold-restoring patch (AGENTS.md "No gold leak via .git history"; VAL-CAL-005).
+    After staging the broken working tree we therefore delete ``.git`` entirely
+    and re-init a fresh repo whose ONLY commit is the broken baseline: exactly one
+    ``HEAD`` remains (so the ``git add -u && git diff --cached HEAD`` patch capture
+    still works), ``git show HEAD~1`` fails, and gold is unrecoverable from history.
+
+    This is applied ONLY here, in the agent-facing rollout container. The persisted
+    EnvImage and the deterministic scorer (``DockerOracleRecipe``) are untouched --
+    they legitimately keep gold history for oracle scoring.
 
     The captured rollout diff is taken relative to this commit, so it contains
     only the model's edits (never the mutation, never build artifacts that are
@@ -689,15 +725,16 @@ async def _setup_broken_baseline(
                 "failed to apply mutation_patch to set the broken tree: "
                 f"{(primary.stderr or primary.stdout or '').strip()[:300]}"
             )
-    commit = await sandbox.run_command(
-        f"rm -rf {shlex.quote(_SOLVER_DIR)} && git {_GIT_IDENT} add -A && "
-        f"git {_GIT_IDENT} commit -q -m forge-broken",
+    reinit = await sandbox.run_command(
+        f"rm -rf {shlex.quote(_SOLVER_DIR)} .git && git init -q && "
+        f"git {_GIT_IDENT} add -A && "
+        f"git {_GIT_IDENT} commit -q -m broken-baseline",
         timeout=timeout,
     )
-    if commit.exit_code != 0:
+    if reinit.exit_code != 0:
         raise SolverError(
-            "failed to commit the broken baseline: "
-            f"{(commit.stderr or commit.stdout or '').strip()[:300]}"
+            "failed to re-init git history for the broken baseline: "
+            f"{(reinit.stderr or reinit.stdout or '').strip()[:300]}"
         )
 
 

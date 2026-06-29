@@ -20,6 +20,10 @@ validator in real Docker (see this feature's manual verification).
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+
 import pytest
 
 from swe_forge.forge.calibrate.solver import (
@@ -33,6 +37,7 @@ from swe_forge.forge.calibrate.solver import (
     SolveScore,
     SolverContext,
     build_solver_prompt,
+    capture_workspace_patch,
     run_solver_rollout,
     score_patch,
     solver_tools,
@@ -529,8 +534,6 @@ def test_solve_score_serializable() -> None:
 
 
 def test_require_green_baseline_precondition() -> None:
-    import asyncio
-
     from swe_forge.forge.models import BaselineNotGreenError
 
     red = _env_image()
@@ -539,3 +542,202 @@ def test_require_green_baseline_precondition() -> None:
     # run_solver_rollout enforces require_green_baseline before any Docker work.
     with pytest.raises(BaselineNotGreenError):
         asyncio.run(run_solver_rollout(_candidate(), red, _spec(), _oracle_report()))
+
+
+# --------------------------------------------------------------------------- #
+# No gold leak via .git history (VAL-CAL-005; AGENTS.md "No gold leak via .git
+# history"). Proven for real against a temp git repo (no Docker, no LLM): the
+# broken baseline must be a single ORPHAN/root commit and gold must be
+# unrecoverable from history, while patch capture still works.
+# --------------------------------------------------------------------------- #
+_TEST_IDENT = "-c user.email=t@localhost -c user.name=t"
+GOLD_CALC = "def subtract(a, b):\n    return a - b\n"
+BROKEN_CALC = "def subtract(a, b):\n    return a + b\n"
+_MUTATION_DIFF = (
+    "diff --git a/calc.py b/calc.py\n"
+    "--- a/calc.py\n"
+    "+++ b/calc.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " def subtract(a, b):\n"
+    "-    return a - b\n"
+    "+    return a + b\n"
+)
+
+
+class _LocalExec:
+    def __init__(self, exit_code: int, stdout: str, stderr: str) -> None:
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class LocalGitSandbox:
+    """A real-filesystem sandbox: runs shell/git in a temp workspace.
+
+    Implements the :class:`SandboxProtocol` surface against a real directory so
+    the git-history protection can be proven for real (single orphan commit,
+    ``git show HEAD~1`` fails, gold unrecoverable) with no Docker and no LLM.
+    """
+
+    def __init__(self, root) -> None:  # noqa: ANN001
+        self.root = root
+
+    async def run_command(self, cmd, *, cwd=None, timeout=None, env=None) -> _LocalExec:  # noqa: ANN001
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            cwd=str(cwd or self.root),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, **(env or {})},
+        )
+        out, err = await proc.communicate()
+        return _LocalExec(
+            proc.returncode if proc.returncode is not None else 0,
+            out.decode(errors="replace"),
+            err.decode(errors="replace"),
+        )
+
+    async def write_file(self, path: str, content: str) -> None:
+        target = self.root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    async def read_file(self, path: str) -> str:
+        return (self.root / path).read_text(encoding="utf-8")
+
+
+def _history_candidate() -> Candidate:
+    return Candidate(
+        language="python",
+        generator="ast_mutation",
+        target=CandidateTarget(files=("calc.py",), symbols=("subtract",)),
+        mutation_patch=_MUTATION_DIFF,
+        oracle_patch=(
+            "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+            "@@ -1,2 +1,2 @@\n def subtract(a, b):\n"
+            "-    return a + b\n+    return a - b\n"
+        ),
+        difficulty_hint="easy",
+        provenance=Provenance(generator="ast_mutation", seed=1, language="python"),
+    )
+
+
+async def _make_gold_repo(root) -> LocalGitSandbox:  # noqa: ANN001
+    """A temp repo whose HEAD = the pinned GOLD commit (as an EnvImage checkout)."""
+    sandbox = LocalGitSandbox(root)
+    await sandbox.write_file("calc.py", GOLD_CALC)
+    await sandbox.write_file("tests/test_calc.py", "import calc\n")
+    init = await sandbox.run_command(
+        f"git init -q && git {_TEST_IDENT} add -A && "
+        f"git {_TEST_IDENT} commit -q -m gold"
+    )
+    assert init.exit_code == 0, init.stderr
+    return sandbox
+
+
+async def test_setup_broken_baseline_single_orphan_commit(tmp_path) -> None:
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    sandbox = await _make_gold_repo(tmp_path)
+    await _setup_broken_baseline(sandbox, _history_candidate(), timeout=60.0)
+
+    log = await sandbox.run_command("git log --oneline")
+    assert log.exit_code == 0
+    assert len([ln for ln in log.stdout.splitlines() if ln.strip()]) == 1
+
+    count = await sandbox.run_command("git rev-list --count HEAD")
+    assert count.stdout.strip() == "1"
+
+    # No parent: HEAD~1 / HEAD^ do not resolve.
+    parent = await sandbox.run_command("git show HEAD~1")
+    assert parent.exit_code != 0
+
+
+async def test_setup_broken_baseline_gold_unrecoverable(tmp_path) -> None:
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    sandbox = await _make_gold_repo(tmp_path)
+    await _setup_broken_baseline(sandbox, _history_candidate(), timeout=60.0)
+
+    # HEAD:<path> returns the BROKEN content, never gold.
+    head = await sandbox.run_command("git show HEAD:calc.py")
+    assert head.exit_code == 0
+    assert "return a + b" in head.stdout
+    assert "return a - b" not in head.stdout
+
+    # Adversarial "mine the git history" probes all fail (no recoverable ancestor).
+    for probe in (
+        "git show HEAD~1:calc.py",
+        "git checkout HEAD~1 -- calc.py",
+        "git diff HEAD~1 HEAD",
+        "git cat-file -p HEAD^",
+    ):
+        res = await sandbox.run_command(probe)
+        assert res.exit_code != 0, f"{probe!r} unexpectedly succeeded"
+
+    # Gold appears in no reachable commit, and the working tree is broken.
+    log_all = await sandbox.run_command("git log --all -p")
+    assert "return a - b" not in log_all.stdout
+    assert (tmp_path / "calc.py").read_text() == BROKEN_CALC
+
+
+async def test_capture_patch_excludes_stray_untracked_files(tmp_path, caplog) -> None:
+    sandbox = await _make_gold_repo(tmp_path)
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    await _setup_broken_baseline(sandbox, _history_candidate(), timeout=60.0)
+
+    # Model restores gold (a tracked-source edit) and drops scratch files.
+    await sandbox.write_file("calc.py", GOLD_CALC)
+    await sandbox.write_file("scratch_notes.txt", "debugging\n")
+    await sandbox.write_file("junk/out.log", "noise\n")
+
+    with caplog.at_level(logging.WARNING):
+        patch = await capture_workspace_patch(sandbox, timeout=60.0)
+
+    assert patch.strip()
+    assert "calc.py" in patch
+    assert "return a - b" in patch  # the model's fix is captured
+    assert "scratch_notes.txt" not in patch
+    assert "out.log" not in patch
+    # Stray files are warned about, not silently folded in.
+    assert "untracked file" in caplog.text
+    assert "scratch_notes.txt" in caplog.text
+
+
+async def test_capture_patch_applies_and_restores_gold(tmp_path) -> None:
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    sandbox = await _make_gold_repo(tmp_path)
+    await _setup_broken_baseline(sandbox, _history_candidate(), timeout=60.0)
+
+    await sandbox.write_file("calc.py", GOLD_CALC)
+    patch = await capture_workspace_patch(sandbox, timeout=60.0)
+    assert patch.strip()
+
+    # Reset to the broken baseline, then the captured diff must apply cleanly.
+    await sandbox.run_command("git reset --hard -q HEAD")
+    assert (tmp_path / "calc.py").read_text() == BROKEN_CALC
+    await sandbox.write_file(".captured.patch", patch)
+    applied = await sandbox.run_command("git apply --whitespace=nowarn .captured.patch")
+    assert applied.exit_code == 0, applied.stderr
+    assert (tmp_path / "calc.py").read_text() == GOLD_CALC
+
+
+async def test_setup_broken_baseline_reinitializes_history() -> None:
+    # Fast, git-free structural guard: the broken baseline must be created by a
+    # `.git` removal + `git init` + a SINGLE `broken-baseline` commit, never the
+    # old "commit on top of the gold history" path (which leaked gold).
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    sandbox = FakeSandbox()
+    await _setup_broken_baseline(sandbox, _candidate(), timeout=30.0)
+    cmds = [str(c["cmd"]) for c in sandbox.calls]
+
+    assert any("git apply" in c and "mutation.patch" in c for c in cmds)
+    commits = [c for c in cmds if "commit" in c]
+    assert len(commits) == 1
+    assert "git init" in commits[0]
+    assert ".git" in commits[0]
+    assert "broken-baseline" in commits[0]
+    assert "forge-broken" not in " ".join(cmds)  # old child-commit message is gone

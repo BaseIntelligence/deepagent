@@ -484,6 +484,30 @@ async def test_no_validate_runs_all_models() -> None:
     assert run.rollout_calls == 3 * 2
 
 
+async def test_no_validate_keeps_validations_consistent_with_count() -> None:
+    # Under validate=False no probe is issued, so the validations array must stay
+    # empty (no synthetic entries) and match validation_calls == 0.
+    panel = _panel()
+    rollouts = FakeRollouts()
+    run = await run_panel_calibration(
+        _candidate(),
+        _env_image(),
+        _spec(),
+        _oracle_report(),
+        panel,
+        k=2,
+        validate=False,
+        rollout_fn=rollouts,
+    )
+    assert run.validation_calls == 0
+    assert run.validations == []
+    assert len(run.validations) == run.validation_calls
+    # to_dict mirrors the same consistency.
+    data = run.to_dict()
+    assert data["validations"] == []
+    assert data["validation_calls"] == 0
+
+
 # --------------------------------------------------------------------------- #
 # Difficulty-aware budget (VAL-CAL-009)
 # --------------------------------------------------------------------------- #
