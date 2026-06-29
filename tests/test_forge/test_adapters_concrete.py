@@ -245,6 +245,47 @@ class TestTestCommand:
 
 
 # --------------------------------------------------------------------------- #
+# parse_test_failures: derive a structural mutation's collateral (per candidate).
+# --------------------------------------------------------------------------- #
+class TestParseTestFailures:
+    def test_python_pytest_failures_reduced_to_k_names(self) -> None:
+        adapter = PythonAdapter()
+        output = (
+            "=== short test summary info ===\n"
+            "FAILED tests/test_strutils.py::test_slugify_basic - AssertionError\n"
+            "FAILED tests/test_x.py::test_param[case-1] - ValueError\n"
+            "FAILED boltons/strutils.py::boltons.strutils.slugify\n"
+            "ERROR tests/test_setup.py\n"
+        )
+        names = adapter.parse_test_failures(output)
+        # node ids reduced to bare -k keywords; doctest leaf taken; params stripped;
+        # a whole-file collection ERROR (no per-test name) is dropped.
+        assert names == ["test_slugify_basic", "test_param", "slugify"]
+
+    def test_python_no_failures_empty(self) -> None:
+        adapter = PythonAdapter()
+        assert adapter.parse_test_failures("3 passed in 0.1s") == []
+
+    def test_go_fail_lines_reduced_to_top_level_names(self) -> None:
+        adapter = GoAdapter()
+        output = (
+            "--- FAIL: TestEllipsis (0.00s)\n"
+            "    string_test.go:10: got x want y\n"
+            "--- FAIL: TestRouter/subcase (0.00s)\n"
+            "FAIL\n"
+        )
+        names = adapter.parse_test_failures(output)
+        # Subtests reduce to their parent so -skip anchored on it skips the whole.
+        assert names == ["TestEllipsis", "TestRouter"]
+
+    def test_javascript_default_is_conservative_empty(self) -> None:
+        adapter = JavaScriptAdapter()
+        # The JS adapter keeps the conservative base default (no fragile Mocha
+        # failure parsing); JS keeps come from pr_mirror, not structural faults.
+        assert adapter.parse_test_failures("  1) some failing test:\n") == []
+
+
+# --------------------------------------------------------------------------- #
 # VAL-ENV-007: mutation-tool hook is language-correct and distinct.
 # --------------------------------------------------------------------------- #
 class TestMutationToolHook:

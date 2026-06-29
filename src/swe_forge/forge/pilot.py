@@ -43,7 +43,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -79,9 +79,13 @@ from swe_forge.forge.models import (
 from swe_forge.forge.oracle import (
     DEFAULT_FLAKINESS_RUNS,
     DEFAULT_KILL_THRESHOLD,
+    STRUCTURAL_GENERATORS,
     HiddenTest,
+    P2PDerivation,
+    derive_structural_p2p_exclusions,
     run_oracle_pipeline,
 )
+from swe_forge.forge.oracle.establish import EstablishError
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.differential_synth import (
     DifferentialKillSynthesizer,
@@ -262,6 +266,7 @@ class CandidateArtifacts:
     teacher_cost: float = 0.0
     panel_usage: Usage = field(default_factory=Usage)
     panel_cost: float = 0.0
+    p2p_derivation: P2PDerivation | None = None
     failure_reason: str = ""
     cleanup_paths: list[Path] = field(default_factory=list)
 
@@ -481,6 +486,20 @@ class LiveCandidateProcessor:
         provided_tests = _pr_mirror_provided_tests(
             candidate, adapter, plan.repo, baseline_command
         )
+
+        # Per-candidate P2P exclusions for STRUCTURAL faults: a structural
+        # mutation breaks the target's OWN existing tests as collateral damage,
+        # so the full baseline goes red on the broken tree. Derive exactly those
+        # fault-independent collateral failures and bake them into a derived
+        # EnvImage baseline (the per-candidate analogue of the curated per-repo
+        # RepoSpec.p2p_exclusions pr_mirror gets) so establish's P2P is green on
+        # broken -- never the synthesized F2P, never a gate loosening. The derived
+        # baseline threads through establish -> pass_to_pass -> calibration/export.
+        if candidate.generator in STRUCTURAL_GENERATORS:
+            art.env_image = await self._apply_structural_p2p_exclusions(
+                candidate, art.env_image, adapter, art
+            )
+
         oracle = await run_oracle_pipeline(
             candidate,
             art.env_image,
@@ -523,6 +542,63 @@ class LiveCandidateProcessor:
             art.broken_tree = broken
         return art
 
+    async def _apply_structural_p2p_exclusions(
+        self,
+        candidate: Candidate,
+        env_image: EnvImage,
+        adapter: LanguageAdapter,
+        art: CandidateArtifacts,
+    ) -> EnvImage:
+        """Derive a structural candidate's collateral P2P exclusions; bake them in.
+
+        Runs the broken-tree baseline once in a throwaway sandbox to find the
+        existing tests the structural fault breaks for fault-independent reasons,
+        then returns a derived :class:`EnvImage` whose baseline command excludes
+        exactly those (via ``adapter.apply_p2p_exclusions``) so the establish P2P
+        is green on broken. Best-effort: a Docker/parse hiccup leaves the baseline
+        untouched (establish then rejects with ``p2p_not_green_on_broken`` if the
+        collateral is real), never weakening a gate. The exclusions are recorded
+        on the artifact and the derived image provenance for audit.
+        """
+        try:
+            derivation = await derive_structural_p2p_exclusions(
+                candidate,
+                env_image,
+                adapter,
+                baseline_command=env_image.baseline_test_command,
+                command_timeout=self._command_timeout,
+            )
+        except (EstablishError, PilotError):
+            return env_image
+        art.p2p_derivation = derivation
+        if not derivation.has_exclusions:
+            return env_image
+        return _with_p2p_exclusions(env_image, adapter, derivation)
+
+
+def _with_p2p_exclusions(
+    env_image: EnvImage, adapter: LanguageAdapter, derivation: P2PDerivation
+) -> EnvImage:
+    """Return a derived :class:`EnvImage` whose baseline excludes the collateral.
+
+    Narrows the proven-green baseline command with ``adapter.apply_p2p_exclusions``
+    so the per-candidate collateral tests are skipped from the P2P/regression set.
+    The image tag is unchanged (same Docker image); only the recorded command and
+    provenance change. Excluding tests from an already-green suite keeps gold
+    green (and the establish gate re-checks ``p2p_gold`` defensively), so
+    ``baseline_green`` is preserved.
+    """
+    new_command = adapter.apply_p2p_exclusions(
+        env_image.baseline_test_command, derivation.exclusions
+    )
+    provenance = dict(env_image.provenance)
+    provenance["per_candidate_p2p_exclusions"] = derivation.to_dict()
+    return replace(
+        env_image,
+        baseline_test_command=new_command,
+        provenance=provenance,
+    )
+
 
 def _pr_mirror_provided_tests(
     candidate: Candidate,
@@ -540,19 +616,26 @@ def _pr_mirror_provided_tests(
     the very tests the baked baseline excludes to keep P2P green on broken), the
     F2P runs exactly those tests via the repo's OWN runner -- ``select_tests``
     narrows ``baseline_command`` positively, the mirror of the baked exclusion.
-    This is what makes a non-standard-runner repo (e.g. JS/TS ``npm test``
-    driving Mocha, which the ``node --test`` standard runner cannot execute)
-    confirm its F2P at all. Otherwise it falls back to running each recorded PR
-    test file via the standard runner. ``files=()`` so nothing is written/removed
-    and the test the mutation leaves in place is exactly what runs.
+    A repo may further pin a SINGLE discriminating assertion via
+    ``RepoSpec.pr_f2p_names`` (preferred when set): in semantic-correctness
+    domains (URL/email validators) a single precise F2P assertion -- rather than a
+    whole flipping test -- keeps the differential synthesizer's discriminators
+    gold-green (fewer ``differential_gold_not_green`` rejects). This is what makes
+    a non-standard-runner repo (e.g. JS/TS ``npm test`` driving Mocha, which the
+    ``node --test`` standard runner cannot execute) confirm its F2P at all.
+    Otherwise it falls back to running each recorded PR test file via the standard
+    runner. ``files=()`` so nothing is written/removed and the test the mutation
+    leaves in place is exactly what runs.
     """
     if candidate.generator != "pr_mirror":
         return []
-    names = [n.strip() for n in repo.p2p_exclusions if n.strip()]
-    if names and baseline_command.strip():
+    f2p_names = [n.strip() for n in repo.pr_f2p_names if n.strip()] or [
+        n.strip() for n in repo.p2p_exclusions if n.strip()
+    ]
+    if f2p_names and baseline_command.strip():
         return [
             HiddenTest(
-                test_id=adapter.select_tests(baseline_command, names),
+                test_id=adapter.select_tests(baseline_command, f2p_names),
                 files=(),
                 origin="provided",
             )
@@ -654,11 +737,18 @@ def _accumulate_panel_usage(art: CandidateArtifacts, report: CalibrationReport) 
 # --------------------------------------------------------------------------- #
 #: Generators exercised per language for the pilot. Every generator family is
 #: deterministic+verifiable on Python; the cross-language families (ast_mutation,
-#: function_removal) round-trip on JS/Go too. >=2 generators keeps VAL-CROSS-005.
+#: function_removal, and the difficulty amplifiers bug_combination/multi_file)
+#: round-trip on JS/Go too. The amplifiers (``bug_combination`` merges >=2
+#: independently-behavior-changing faults; ``multi_file`` coordinates edits across
+#: >=2 files) raise candidate DIFFICULTY so the mix spans easy->hard and the band
+#: filter can SELECT the in-band ones -- they run only on the diversified MODULAR
+#: structural-source repos (where a structural fault isolates), guarded by
+#: ``RepoSpec.structural_source`` in :func:`build_pilot_plans`. >=2 generators
+#: keeps VAL-CROSS-005.
 DEFAULT_GENERATORS_BY_LANGUAGE: dict[str, tuple[str, ...]] = {
-    "python": ("ast_mutation", "function_removal", "lm_authored"),
-    "javascript": ("ast_mutation", "function_removal"),
-    "go": ("ast_mutation", "function_removal"),
+    "python": ("ast_mutation", "function_removal", "bug_combination", "lm_authored"),
+    "javascript": ("ast_mutation", "function_removal", "bug_combination"),
+    "go": ("ast_mutation", "function_removal", "bug_combination"),
 }
 
 

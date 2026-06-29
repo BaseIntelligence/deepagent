@@ -127,6 +127,13 @@ from swe_forge.forge.oracle.pipeline import (
     run_oracle_pipeline,
     verify_pass_consistency,
 )
+from swe_forge.forge.oracle.p2p_derive import (
+    STRUCTURAL_GENERATORS,
+    P2PDerivation,
+    compute_collateral_exclusions,
+    derive_from_recipe,
+    derive_structural_p2p_exclusions,
+)
 
 __all__ = [
     "GATE_ORDER",
@@ -140,6 +147,11 @@ __all__ = [
     "orchestrate_gates",
     "run_oracle_pipeline",
     "verify_pass_consistency",
+    "STRUCTURAL_GENERATORS",
+    "P2PDerivation",
+    "compute_collateral_exclusions",
+    "derive_from_recipe",
+    "derive_structural_p2p_exclusions",
     "DEFAULT_FORBIDDEN_FILENAMES",
     "DEFAULT_FLAKINESS_RUNS",
     "DEFAULT_KILL_THRESHOLD",

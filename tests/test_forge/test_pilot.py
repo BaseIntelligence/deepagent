@@ -534,6 +534,170 @@ def test_default_pilot_config_wires_plans_and_overrides() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Difficulty-amplifier wiring (m6-pilot-difficulty task 1)
+# --------------------------------------------------------------------------- #
+def test_build_pilot_plans_emits_bug_combination_on_modular_repos() -> None:
+    # The difficulty amplifier bug_combination is wired into every language's
+    # structural generator set and runs ONLY on the diversified MODULAR repos.
+    for generators in DEFAULT_GENERATORS_BY_LANGUAGE.values():
+        assert "bug_combination" in generators
+
+    registry = build_source_registry()
+    modular = {s.repo_id for s in registry.specs() if s.structural_source}
+    plans = build_pilot_plans(registry=registry, seeds_per_cell=2)
+    amp = [p for p in plans if p.generator == "bug_combination"]
+    assert amp, "expected bug_combination plans"
+    # Amplifier plans only ever target the modular structural-source repos, and
+    # span >=1 language so the candidate mix can reach the hard band.
+    assert {p.repo.repo_id for p in amp} <= modular
+    assert {p.language for p in amp} & {"python", "javascript", "go"}
+    # The tiny single-module seeds never get an amplifier plan.
+    assert all(p.repo.structural_source for p in amp)
+
+
+# --------------------------------------------------------------------------- #
+# Per-candidate P2P-exclusion wiring (m6-pilot-difficulty task 2)
+# --------------------------------------------------------------------------- #
+def test_with_p2p_exclusions_narrows_baseline_and_records_provenance() -> None:
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.oracle.p2p_derive import compute_collateral_exclusions
+    from swe_forge.forge.pilot import _with_p2p_exclusions
+
+    adapter = build_default_registry().get("python")
+    env = _env_image(_plan("boltons", "function_removal", 0))
+    derivation = compute_collateral_exclusions(["slugify", "test_slugify"])
+    derived = _with_p2p_exclusions(env, adapter, derivation)
+
+    # Same image (same Docker container), narrowed baseline command excludes the
+    # collateral via the adapter's -k 'not (...)' filter, baseline still green.
+    assert derived.image_tag == env.image_tag
+    assert derived.baseline_test_command.startswith(env.baseline_test_command)
+    assert "not (slugify or test_slugify)" in derived.baseline_test_command
+    assert derived.baseline_green is True
+    # The derivation is recorded on the derived image provenance for audit.
+    assert derived.provenance["per_candidate_p2p_exclusions"]["exclusions"] == [
+        "slugify",
+        "test_slugify",
+    ]
+
+
+def test_apply_structural_p2p_exclusions_bakes_derived_exclusions(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # The LiveCandidateProcessor derives a structural candidate's collateral and
+    # bakes it into the EnvImage baseline (Docker derivation stubbed offline).
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.oracle.p2p_derive import P2PDerivation
+
+    plan = _plan("boltons", "function_removal", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    adapter = build_default_registry().get("python")
+    art = CandidateArtifacts(plan=plan)
+
+    derivation = P2PDerivation(exclusions=("slugify",), broken_failures=("slugify",))
+
+    async def _fake_derive(*args: object, **kw: object) -> P2PDerivation:
+        return derivation
+
+    monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _fake_derive)
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    derived = asyncio.run(
+        processor._apply_structural_p2p_exclusions(candidate, env, adapter, art)
+    )
+    assert "not (slugify)" in derived.baseline_test_command
+    assert art.p2p_derivation is derivation
+
+
+def test_apply_structural_p2p_exclusions_noop_when_no_collateral(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.oracle.p2p_derive import P2PDerivation
+
+    plan = _plan("boltons", "bug_combination", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    adapter = build_default_registry().get("python")
+    art = CandidateArtifacts(plan=plan)
+
+    async def _fake_derive(*args: object, **kw: object) -> P2PDerivation:
+        return P2PDerivation(exclusions=(), p2p_green_on_broken=True)
+
+    monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _fake_derive)
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    derived = asyncio.run(
+        processor._apply_structural_p2p_exclusions(candidate, env, adapter, art)
+    )
+    # No collateral -> the baseline command is left untouched (no loosening).
+    assert derived.baseline_test_command == env.baseline_test_command
+
+
+def test_apply_structural_p2p_exclusions_best_effort_on_docker_error(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.oracle.establish import EstablishError
+
+    plan = _plan("boltons", "function_removal", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    adapter = build_default_registry().get("python")
+    art = CandidateArtifacts(plan=plan)
+
+    async def _boom(*args: object, **kw: object) -> object:
+        raise EstablishError("docker hiccup")
+
+    monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _boom)
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    derived = asyncio.run(
+        processor._apply_structural_p2p_exclusions(candidate, env, adapter, art)
+    )
+    # A derivation failure never weakens a gate: the baseline is untouched and the
+    # establish gate will reject p2p_not_green_on_broken if the collateral is real.
+    assert derived.baseline_test_command == env.baseline_test_command
+
+
+# --------------------------------------------------------------------------- #
+# Single-discriminating-assertion pr_mirror F2P preference (task 3)
+# --------------------------------------------------------------------------- #
+def test_pr_mirror_provided_tests_prefers_single_assertion_f2p() -> None:
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.pilot import _pr_mirror_provided_tests
+
+    adapter = build_default_registry().get("python")
+    candidate = Candidate(
+        language="python",
+        generator="pr_mirror",
+        target=CandidateTarget(files=("src/validators/url.py",)),
+        mutation_patch="x",
+        oracle_patch="y",
+        difficulty_hint="high",
+        provenance=Provenance(generator="pr_mirror", seed=0, language="python"),
+    )
+    # The repo curates BOTH the whole flipping test (excluded from P2P) and a
+    # single discriminating assertion (preferred as the F2P).
+    repo = RepoSpec(
+        repo_id="python-validators/validators#305",
+        url="https://github.com/python-validators/validators.git",
+        commit="a" * 40,
+        commit_date="2024-01-01T00:00:00+00:00",
+        language="python",
+        license="MIT",
+        instance_cap=2,
+        p2p_exclusions=("test_returns_true_on_valid_url",),
+        pr_f2p_names=("test_returns_true_on_valid_url_matrix_fragment",),
+        pr_repo="python-validators/validators",
+        pr_number=305,
+        pr_generator="pr_mirror",
+    )
+    tests = _pr_mirror_provided_tests(candidate, adapter, repo, "python -m pytest")
+    assert len(tests) == 1
+    # The narrow single-assertion name is selected, NOT the whole flipping test.
+    assert "test_returns_true_on_valid_url_matrix_fragment" in tests[0].test_id
+    assert "test_returns_true_on_valid_url)" not in tests[0].test_id
+
+
+# --------------------------------------------------------------------------- #
 # The full offline funnel (VAL-CROSS-012/013/014/016/017/022)
 # --------------------------------------------------------------------------- #
 def _run(config: PilotConfig, processor: FakeProcessor, **kw: object):

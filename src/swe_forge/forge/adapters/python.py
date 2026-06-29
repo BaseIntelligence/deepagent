@@ -50,6 +50,8 @@ _REQUIREMENT_FILES = (
 )
 _BUILD_MANIFESTS = ("pyproject.toml", "setup.py", "setup.cfg")
 _TEST_FILE_RE = re.compile(r"(?:test_.*|.*_test)\.py$")
+#: pytest summary lines: ``FAILED path::node - ...`` / ``ERROR path::node - ...``.
+_PYTEST_FAILURE_RE = re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.MULTILINE)
 
 # Optional-dependency extras / dependency-group names that typically carry the
 # repo's test dependencies, in priority order.
@@ -253,6 +255,31 @@ class PythonAdapter(LanguageAdapter):
             return command
         expr = "(" + " or ".join(selected) + ")"
         return f"{command} -k {shlex.quote(expr)}"
+
+    def parse_test_failures(self, output: str) -> list[str]:
+        """Return the ``-k``-usable names of the pytest tests that FAILED.
+
+        Reads pytest's ``FAILED``/``ERROR`` summary lines and reduces each node id
+        to a bare ``-k`` keyword: the last ``::`` segment with any ``[param]`` id
+        stripped, and the trailing ``.func`` taken for a doctest node
+        (``module.py::pkg.module.func``). Only valid identifiers are kept (a
+        whole-file collection error has no per-test name to skip), de-duplicated
+        in first-seen order. These feed :meth:`apply_p2p_exclusions` so a
+        structural mutation's collateral failures are excluded from P2P.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        for nodeid in _PYTEST_FAILURE_RE.findall(output):
+            if "::" not in nodeid:
+                # A whole-file collection error has no per-test name to skip.
+                continue
+            leaf = nodeid.split("::")[-1]
+            leaf = leaf.split("[", 1)[0]
+            leaf = leaf.rsplit(".", 1)[-1].strip()
+            if leaf.isidentifier() and leaf not in seen:
+                seen.add(leaf)
+                names.append(leaf)
+        return names
 
     def is_test_file(self, path: PathLike) -> bool:
         return bool(_TEST_FILE_RE.fullmatch(Path(path).name))

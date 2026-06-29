@@ -246,6 +246,22 @@ class LanguageAdapter(ABC):
         """
         return command
 
+    def parse_test_failures(self, output: str) -> list[str]:
+        """Return the de-selectable names of the tests that FAILED in ``output``.
+
+        Parses this language's test-runner output (pytest / Mocha / ``go test``)
+        and returns the identifiers of the tests that failed, in first-seen order
+        with duplicates removed. The names are exactly the form :meth:`select_tests`
+        / :meth:`apply_p2p_exclusions` consume, so a STRUCTURAL mutation's
+        fault-independent collateral failures (e.g. a removed function's own
+        doctests) can be derived per candidate and excluded from the establish
+        P2P set -- never the synthesized F2P, never a gate loosening.
+
+        The default returns ``[]`` (a conservative no-op for runners whose output
+        is not safely parseable); adapters whose output can be parsed override it.
+        """
+        return []
+
     @abstractmethod
     def parse_symbols(self, file: PathLike) -> list[Symbol]:
         """Parse ``file`` and return its declared, locatable symbols."""

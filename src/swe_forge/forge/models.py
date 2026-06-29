@@ -135,6 +135,13 @@ class RepoSpec:
     pr_repo: str = ""
     pr_number: int = 0
     pr_generator: str = ""
+    #: Optional SINGLE discriminating-assertion F2P selector for a ``pr_mirror``
+    #: entry. When set, the pilot selects exactly these test name(s) as the
+    #: isolated F2P (instead of the whole flipping test the ``p2p_exclusions``
+    #: name), keeping the F2P a single precise assertion in semantic-correctness
+    #: domains (URL/email validators) so the differential synthesizer's
+    #: discriminators stay gold-green. Falls back to ``p2p_exclusions`` when unset.
+    pr_f2p_names: tuple[str, ...] = ()
     #: When ``True`` the pilot also runs the structural generators
     #: (ast_mutation/function_removal/...) on this repo. Set on the diversified
     #: MODULAR seeds where a structural mutation can isolate a fault.
@@ -182,6 +189,9 @@ class RepoSpec:
         )
         self.p2p_exclusions = tuple(
             str(e).strip() for e in self.p2p_exclusions if str(e).strip()
+        )
+        self.pr_f2p_names = tuple(
+            str(n).strip() for n in self.pr_f2p_names if str(n).strip()
         )
         self.baseline_test = str(self.baseline_test).strip()
         self.pr_repo = str(self.pr_repo).strip()
@@ -300,6 +310,7 @@ class RepoSpec:
             "pr_repo": self.pr_repo,
             "pr_number": self.pr_number,
             "pr_generator": self.pr_generator,
+            "pr_f2p_names": list(self.pr_f2p_names),
             "structural_source": self.structural_source,
         }
 

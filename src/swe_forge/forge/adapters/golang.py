@@ -29,6 +29,8 @@ from swe_forge.forge.adapters.base import (
 
 _GO_MARKERS = ("go.mod", "go.sum", "go.work")
 _GO_EXTENSIONS = (".go",)
+#: ``go test`` failure lines: ``--- FAIL: TestName (0.00s)`` (subtests use ``/``).
+_GO_FAILURE_RE = re.compile(r"^\s*--- FAIL:\s+(\S+)", re.MULTILINE)
 
 
 def _is_go_package(token: str) -> bool:
@@ -126,6 +128,24 @@ class GoAdapter(LanguageAdapter):
 
     def is_test_file(self, path: PathLike) -> bool:
         return Path(path).name.endswith("_test.go")
+
+    def parse_test_failures(self, output: str) -> list[str]:
+        """Return the ``-skip``-usable top-level names of the FAILED ``go test`` tests.
+
+        Reads ``--- FAIL: TestName (...)`` lines and returns each test's top-level
+        name (a subtest ``TestName/case`` reduces to ``TestName`` so ``-skip``
+        anchored on the parent de-selects the whole collateral test), de-duplicated
+        in first-seen order. Feeds :meth:`apply_p2p_exclusions` so a structural
+        mutation's collateral failures are excluded from P2P per candidate.
+        """
+        names: list[str] = []
+        seen: set[str] = set()
+        for name in _GO_FAILURE_RE.findall(output):
+            top = name.split("/")[0].strip()
+            if top and top not in seen:
+                seen.add(top)
+                names.append(top)
+        return names
 
     def parse_symbols(self, file: PathLike) -> list[Symbol]:
         return parse_go_symbols(file)
