@@ -9,6 +9,21 @@ the panel runner (:mod:`swe_forge.forge.calibrate.runner`), which issues ``k``
 independent rollouts per model and records the per-model pass@k.
 """
 
+from swe_forge.forge.calibrate.filter import (
+    DEFAULT_BAND_FILTER,
+    DEFAULT_BAND_HIGH,
+    DEFAULT_DISCRIMINATION_THRESHOLD,
+    RULE_KEEP,
+    RULE_LOW_DISCRIMINATION,
+    RULE_OUT_OF_BAND,
+    RULE_SOLVE_ALL,
+    RULE_SOLVE_NONE,
+    BandDecision,
+    BandFilterConfig,
+    BandFilterError,
+    apply_band_filter,
+    classify_band,
+)
 from swe_forge.forge.calibrate.irt import (
     DEFAULT_TIER_ABILITIES,
     DIFFICULTY_MAX,
@@ -56,7 +71,10 @@ from swe_forge.forge.calibrate.solver import (
 )
 
 __all__ = [
+    "DEFAULT_BAND_FILTER",
+    "DEFAULT_BAND_HIGH",
     "DEFAULT_BUDGET",
+    "DEFAULT_DISCRIMINATION_THRESHOLD",
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_MAX_TURNS",
     "DEFAULT_TIER_ABILITIES",
@@ -68,7 +86,15 @@ __all__ = [
     "REASON_NOT_FINISHED",
     "REASON_ROLLOUT_ERROR",
     "REASON_SCORE_ERROR",
+    "RULE_KEEP",
+    "RULE_LOW_DISCRIMINATION",
+    "RULE_OUT_OF_BAND",
+    "RULE_SOLVE_ALL",
+    "RULE_SOLVE_NONE",
     "AgenticSolver",
+    "BandDecision",
+    "BandFilterConfig",
+    "BandFilterError",
     "CalibrationRun",
     "CalibrationRunnerError",
     "DockerPatchScorer",
@@ -83,9 +109,11 @@ __all__ = [
     "SolverError",
     "SolverRollout",
     "ValidatorFn",
+    "apply_band_filter",
     "build_calibration_report",
     "build_solver_prompt",
     "capture_workspace_patch",
+    "classify_band",
     "compute_pass_at_k",
     "fit_irt",
     "pass_at_k",

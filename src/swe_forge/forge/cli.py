@@ -26,6 +26,13 @@ from swe_forge.forge.adapters import (
     ParseError,
     build_default_registry,
 )
+from swe_forge.forge.calibrate.filter import (
+    DEFAULT_BAND_HIGH,
+    DEFAULT_DISCRIMINATION_THRESHOLD,
+    BandFilterConfig,
+    BandFilterError,
+    apply_band_filter,
+)
 from swe_forge.forge.calibrate.irt import (
     DEFAULT_TIER_ABILITIES,
     IrtError,
@@ -53,6 +60,7 @@ from swe_forge.forge.generators import (
 from swe_forge.forge.models import (
     SUPPORTED_LANGUAGES,
     BaselineNotGreenError,
+    CalibrationReport,
     Candidate,
     EnvImage,
     GeneratedSpec,
@@ -2571,3 +2579,125 @@ def calibrate_irt(
             if tier in tier_rates
         )
         console.print(f"  tier pass-rates    : {ordered}")
+
+
+def _load_calibration_report(report_file: str) -> CalibrationReport:
+    """Load a :class:`CalibrationReport` JSON (as written by ``calibrate-irt``)."""
+    path = Path(report_file)
+    if not path.is_file():
+        _fail(f"calibration report file not found: {report_file}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        _fail(f"invalid calibration report JSON: {exc}")
+    if not isinstance(data, dict):
+        _fail("calibration report JSON must be a CalibrationReport object")
+    try:
+        return CalibrationReport.from_dict(data)
+    except (KeyError, ValueError, ModelError) as exc:
+        _fail(f"invalid calibration report: {exc}")
+
+
+@app.command(name="calibrate-filter")
+def calibrate_filter(
+    report: str | None = typer.Option(
+        None,
+        "--report",
+        help="Path to a CalibrationReport JSON (e.g. from 'calibrate-irt --out').",
+    ),
+    matrix: str | None = typer.Option(
+        None,
+        "--matrix",
+        help="Alternatively, a per-model solve matrix JSON to fit + filter in one step.",
+    ),
+    language: str = typer.Option(
+        "python", "--language", help="Task language when building from --matrix."
+    ),
+    band_high: float = typer.Option(
+        DEFAULT_BAND_HIGH,
+        "--band-high",
+        help="Upper edge of the low-but-nonzero band; frontier pass@k above it is too easy.",
+    ),
+    discrimination_threshold: float = typer.Option(
+        DEFAULT_DISCRIMINATION_THRESHOLD,
+        "--discrimination-threshold",
+        help="Minimum irt_discrimination required to keep (tiers must separate).",
+    ),
+    require_keep: bool = typer.Option(
+        False,
+        "--require-keep",
+        help="Exit non-zero when the verdict is 'drop' (e.g. to gate an export step).",
+    ),
+    out: str | None = typer.Option(
+        None, "--out", help="Write the filtered CalibrationReport JSON to this path."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Apply the band filter to a CalibrationReport -> terminal keep/drop verdict.
+
+    Pure offline classification (no Docker, no LLM): KEEP only when the frontier
+    pass-rate is in the low-but-nonzero band (``0 < pass@k <= --band-high``) AND
+    ``irt_discrimination >= --discrimination-threshold`` AND solves are nonzero;
+    otherwise DROP solve-all (too easy), solve-none (broken/impossible),
+    out-of-band (too easy), or in-band-low-discrimination. The verdict + an
+    attributable reason are written onto the report, and ``keep`` is the necessary
+    precondition for export (``drop`` blocks ForgeTask emission).
+    """
+    if (report is None) == (matrix is None):
+        _fail("provide exactly one of --report or --matrix")
+
+    if report is not None:
+        calibration = _load_calibration_report(report)
+    else:
+        if language not in SUPPORTED_LANGUAGES:
+            _fail(f"--language must be one of {SUPPORTED_LANGUAGES}; got {language!r}")
+        assert matrix is not None
+        records, inferred_k = _load_solve_matrix(matrix)
+        try:
+            calibration = build_calibration_report(language, records, k=inferred_k)
+        except IrtError as exc:
+            _fail(f"IRT fit failed: {exc}")
+
+    try:
+        config = BandFilterConfig(
+            band_high=band_high,
+            discrimination_threshold=discrimination_threshold,
+        )
+    except BandFilterError as exc:
+        _fail(str(exc))
+
+    apply_band_filter(calibration, config=config)
+    decision = calibration.details["band_filter"]
+    assert isinstance(decision, dict)
+
+    if out:
+        out_path = Path(out)
+        if out_path.suffix == ".json":
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path = out_path
+        else:
+            out_path.mkdir(parents=True, exist_ok=True)
+            report_path = out_path / "calibration_report.json"
+        report_path.write_text(
+            json.dumps(calibration.to_dict(), indent=2), encoding="utf-8"
+        )
+
+    if json_out:
+        typer.echo(json.dumps(calibration.to_dict()))
+    else:
+        color = "green" if calibration.is_keep else "yellow"
+        console.print(
+            f"[bold]band filter[/bold] language={calibration.language} "
+            f"band=(0, {config.band_high:.4f}] "
+            f"disc_threshold={config.discrimination_threshold:.4f}"
+        )
+        console.print(
+            f"  frontier pass@k    : {calibration.frontier_pass_at_k():.4f}\n"
+            f"  irt_discrimination : {calibration.irt_discrimination:.4f}\n"
+            f"  band_verdict       : [{color}]{calibration.band_verdict}[/{color}] "
+            f"({decision['rule']})\n"
+            f"  reason             : {calibration.reasons[0] if calibration.reasons else ''}"
+        )
+
+    if require_keep and not calibration.is_keep:
+        raise typer.Exit(code=1)
