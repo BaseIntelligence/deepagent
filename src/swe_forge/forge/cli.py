@@ -26,6 +26,15 @@ from swe_forge.forge.adapters import (
     ParseError,
     build_default_registry,
 )
+from swe_forge.forge.calibrate.solver import (
+    DEFAULT_MAX_TOKENS as SOLVER_DEFAULT_MAX_TOKENS,
+)
+from swe_forge.forge.calibrate.solver import (
+    DEFAULT_MAX_TURNS,
+    AgenticSolver,
+    SolverError,
+    run_solver_rollout,
+)
 from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.envbuild import EnvBuilder
 from swe_forge.forge.generators import (
@@ -2284,3 +2293,137 @@ def oracle(
 
     if not report.is_pass:
         raise typer.Exit(code=1)
+
+
+@app.command(name="solver-rollout")
+def solver_rollout(
+    candidate: str = typer.Option(
+        ..., "--candidate", help="Path to a valid candidate.json (Stage 2 Candidate)."
+    ),
+    env: str = typer.Option(
+        ..., "--env", help="Path to the EnvImage JSON (Stage 1 green build)."
+    ),
+    report: str = typer.Option(
+        ...,
+        "--report",
+        help="Path to the oracle-pass OracleReport JSON (its F2P/P2P/test_files set).",
+    ),
+    spec: str = typer.Option(
+        ...,
+        "--spec",
+        help="Path to the GeneratedSpec JSON (statement+requirements+interface ONLY).",
+    ),
+    model: str | None = typer.Option(
+        None,
+        "--model",
+        help="Provider-prefixed solver model id (default: a frontier panel model).",
+    ),
+    tier: str = typer.Option(
+        "frontier", help="Tier to pick a default model from when --model is unset."
+    ),
+    max_turns: int = typer.Option(
+        DEFAULT_MAX_TURNS, "--max-turns", help="Bounded solver tool-loop budget."
+    ),
+    max_tokens: int = typer.Option(
+        SOLVER_DEFAULT_MAX_TOKENS, "--max-tokens", help="Max tokens per solver call."
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    emit_patch: str | None = typer.Option(
+        None, "--emit-patch", help="Write the submitted unified diff to this file."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """Run ONE agentic solver rollout on a broken task and score it (shared path).
+
+    Sets the broken tree (mutation applied) in a throwaway DockerSandbox, hands the
+    solver model ONLY the GeneratedSpec surface (statement+requirements+interface),
+    runs the bash/read/write/finish tool loop, captures the finish-submitted patch,
+    and scores it via the SAME Docker FAIL->PASS recipe the oracle gates use (a solve
+    requires the FULL hidden test_files[] set to pass AND P2P/regression green).
+    Submit-gated: a non-finish / empty / non-applying patch records solve=false
+    without crashing. Exits non-zero only when the rollout could not run at all.
+    """
+    from swe_forge.execution.docker_client import DockerError
+
+    candidate_obj = _load_candidate(candidate)
+    env_image = _load_env_image(env)
+    oracle_report = _load_oracle_report(report)
+    spec_obj = _load_spec(spec)
+    if spec_obj is None:
+        _fail("a valid --spec (GeneratedSpec JSON) is required for a solver rollout")
+
+    registry = build_default_registry()
+    try:
+        adapter = registry.get(candidate_obj.language)
+    except NoAdapterFoundError:
+        _fail(
+            f"no adapter for language {candidate_obj.language!r}; "
+            f"known: {', '.join(registry.names())}"
+        )
+
+    base_url, api_key = resolve_panel_endpoint()
+    _require_panel_creds(base_url, api_key)
+
+    if model is not None:
+        if tier not in VALID_TIERS:
+            _fail(f"--tier must be one of {VALID_TIERS}, got {tier!r}")
+        try:
+            panel_model = PanelModel(
+                id=model,
+                model_string=model,
+                tier=tier,
+                base_url=base_url,
+                api_key=api_key,
+            )
+        except Exception as exc:
+            _fail(str(exc), api_key)
+    else:
+        panel_model = select_default_model(build_panel_from_env(), tier=tier)
+
+    solver = AgenticSolver(
+        client=panel_model.client(max_tokens=max_tokens, timeout=timeout),
+        max_turns=max_turns,
+        max_tokens=max_tokens,
+    )
+
+    try:
+        outcome = asyncio.run(
+            run_solver_rollout(
+                candidate_obj,
+                env_image,
+                spec_obj,
+                oracle_report,
+                model=panel_model.model_string,
+                solver=solver,
+                adapter=adapter,
+                command_timeout=timeout,
+            )
+        )
+    except BaselineNotGreenError as exc:
+        _fail(f"solver rollout: {exc}", api_key)
+    except (SolverError, DockerError) as exc:
+        _fail(f"solver rollout: {exc}", api_key)
+
+    if emit_patch and outcome.patch:
+        patch_path = Path(emit_patch)
+        patch_path.parent.mkdir(parents=True, exist_ok=True)
+        patch_path.write_text(outcome.patch, encoding="utf-8")
+
+    if json_out:
+        # The raw patch text is never echoed (it can be large); use --emit-patch.
+        typer.echo(json.dumps({"outcome": outcome.to_dict()}))
+    else:
+        colour = "green" if outcome.solved else "yellow"
+        console.print(
+            f"[{colour}]solve={outcome.solved}[/{colour}] "
+            f"model={outcome.model} finished={outcome.finished} turns={outcome.turns}"
+        )
+        console.print(f"  patch_bytes  : {len(outcome.patch)}")
+        console.print(
+            f"  usage/cost   : {outcome.usage.total_tokens} tok / {outcome.cost}"
+        )
+        console.print(f"  score        : {outcome.score.to_dict()}")
+        if outcome.error:
+            console.print(f"  error        : {outcome.error}")
