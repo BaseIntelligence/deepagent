@@ -76,6 +76,13 @@ from swe_forge.forge.report import (
     build_benchmark_report,
     write_report,
 )
+from swe_forge.forge.pilot import (
+    DEFAULT_GENERATORS_BY_LANGUAGE,
+    PilotError,
+    build_pilot_plans,
+    default_pilot_config,
+    run_pilot,
+)
 from swe_forge.forge.generators import (
     GenerationError,
     GenerationRequest,
@@ -3379,3 +3386,209 @@ def report_cmd(
         _print_benchmark_report(report)
 
     raise typer.Exit(code=0 if report.passed else 1)
+
+
+def _print_pilot_outcome(outcome) -> None:  # type: ignore[no-untyped-def]
+    counts = outcome.counts
+    verdict = "[green]PASS[/green]" if outcome.ok else "[red]FAIL[/red]"
+    console.print(
+        f"[bold]build --pilot[/bold] {verdict}  out={outcome.out_dir}  "
+        f"shipped={outcome.shipped_count} (in_band[10,30]={outcome.in_band})"
+    )
+    console.print(
+        "  funnel: "
+        f"sourced={counts.sourced} >= env={counts.env_built} >= "
+        f"synth={counts.synthesized} >= oracle_pass={counts.oracle_pass} >= "
+        f"keep={counts.calibration_keep} == exported={counts.exported} "
+        f"(monotone: {counts.monotone})"
+    )
+    console.print(
+        f"  generators: {outcome.generators_used}  "
+        f"languages: {outcome.languages_shipped}"
+    )
+    if outcome.report is not None:
+        rep = outcome.report
+        console.print(
+            f"  headline A (gold=100%): {rep.headline_a_pass}  "
+            f"({rep.gold.gold_count}/{rep.gold.shipped_count})"
+        )
+        console.print(
+            f"  headline B (frontier {rep.frontier_solve_rate:.4f} < "
+            f"{rep.frontier_threshold:.4f} and > 0): {rep.headline_b_pass}"
+        )
+    usage = outcome.usage
+    console.print(
+        f"  usage/cost: teacher={usage.teacher.total_tokens} tok / "
+        f"{usage.teacher_cost:.4f}  panel={usage.panel.total_tokens} tok / "
+        f"{usage.panel_cost:.4f}  total={usage.total_tokens} tok / "
+        f"{usage.total_cost:.4f}"
+    )
+    for disposition in outcome.dispositions:
+        color = {"kept": "green"}.get(disposition.stage, "yellow")
+        line = (
+            f"  [{color}]{disposition.stage:13s}[/{color}] {disposition.plan.label}"
+        )
+        if disposition.task_id:
+            line += f"  -> {disposition.task_id}"
+        if disposition.reason:
+            line += f"  ({disposition.reason[:80]})"
+        console.print(line)
+
+
+@app.command(name="build")
+def build(
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Output dir (receives tasks/<id>/, datasets, and the benchmark report).",
+    ),
+    pilot: bool = typer.Option(
+        False,
+        "--pilot",
+        help="Run the Stage 0->5 pilot preset (many candidates across all 3 languages).",
+    ),
+    seeds_per_cell: int = typer.Option(
+        4,
+        "--seeds-per-cell",
+        help="Candidates per (repo, generator) cell (more = more in-band candidates).",
+    ),
+    max_plans: int | None = typer.Option(
+        None, "--max-plans", help="Cap the total candidate count (e.g. a quick smoke run)."
+    ),
+    languages: str | None = typer.Option(
+        None,
+        "--languages",
+        help="Comma-separated subset of python,javascript,go (default: all three).",
+    ),
+    k: int | None = typer.Option(
+        None,
+        "--k",
+        help="Rollouts per panel model (default: the difficulty-aware budget).",
+    ),
+    concurrency: int = typer.Option(
+        4, "--concurrency", help="Max concurrent in-flight rollouts (semaphore cap)."
+    ),
+    band_high: float = typer.Option(
+        DEFAULT_BAND_HIGH,
+        "--band-high",
+        help="Keep-band upper edge (frontier pass@k above it is dropped as too easy).",
+    ),
+    discrimination_threshold: float = typer.Option(
+        DEFAULT_DISCRIMINATION_THRESHOLD,
+        "--discrimination-threshold",
+        help="Minimum IRT discrimination required to keep.",
+    ),
+    frontier_threshold: float = typer.Option(
+        DEFAULT_FRONTIER_THRESHOLD,
+        "--frontier-threshold",
+        help="HEADLINE B: the stated frontier solve-rate threshold.",
+    ),
+    kill_threshold: float = typer.Option(
+        DEFAULT_KILL_THRESHOLD,
+        "--kill-threshold",
+        help="Mutation-adequacy kill ratio required by the oracle gate.",
+    ),
+    flakiness_runs: int = typer.Option(
+        DEFAULT_FLAKINESS_RUNS,
+        "--flakiness-runs",
+        help="Determinism repeats in fresh containers (clamped up to 3).",
+    ),
+    gold_runs: int = typer.Option(
+        2, "--gold-runs", min=1, help="gold-eval --rm runs per shipped task."
+    ),
+    run_gold: bool = typer.Option(
+        True,
+        "--gold-eval/--no-gold-eval",
+        help="Run gold-eval in Docker after export (Headline A).",
+    ),
+    validate_models_flag: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Probe each panel model id once before its k-burst of rollouts.",
+    ),
+    timeout: float = typer.Option(
+        600.0, "--timeout", help="Per-command Docker timeout (seconds)."
+    ),
+    mutation_timeout: float = typer.Option(
+        1200.0, "--mutation-timeout", help="Mutation-gate Docker timeout (seconds)."
+    ),
+    write: bool = typer.Option(
+        True, "--write/--no-write", help="Write report.md + report.json into --out."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the JSON outcome."),
+) -> None:
+    """Pilot: orchestrate Stage 0->5 end-to-end and ship a benchmark set.
+
+    Runs the entire pipeline in one invocation: source the curated seed repos
+    (Stage 0), build one green-baseline image per repo (Stage 1), synthesize many
+    candidates across generators/languages/targets (Stage 2), harden each through
+    the NON-OFFLINE oracle gates with a real teacher (Stage 3), calibrate the
+    oracle-pass candidates against the panel and KEEP only the borderline in-band
+    set (Stage 4), then export the qualified subset, prove gold=100% in Docker,
+    and write the benchmark report (Stage 5). Only an oracle-pass AND band-keep
+    candidate ever becomes a ForgeTask; the per-stage funnel is monotone; teacher
+    + panel usage/cost is surfaced; every container is torn down even on failure;
+    and no secret reaches any pilot surface. Exit 0 iff the funnel is monotone, a
+    non-empty set shipped, gold=100%, the frontier rate is below threshold yet >0,
+    and >=2 generators were used.
+    """
+    base_url, api_key = resolve_panel_endpoint()
+    _require_panel_creds(base_url, api_key)
+
+    try:
+        band_config = BandFilterConfig(
+            band_high=band_high,
+            discrimination_threshold=discrimination_threshold,
+        )
+    except BandFilterError as exc:
+        _fail(str(exc))
+
+    language_filter = _split_csv(languages) or None
+    if language_filter:
+        for lang in language_filter:
+            if lang not in DEFAULT_GENERATORS_BY_LANGUAGE:
+                _fail(
+                    f"--languages entry {lang!r} is not one of "
+                    f"{tuple(DEFAULT_GENERATORS_BY_LANGUAGE)}"
+                )
+
+    # `--pilot` and the default share the same orchestration; the flag documents
+    # intent and (with the default knobs) selects the full Stage 0->5 preset.
+    plans = build_pilot_plans(
+        seeds_per_cell=seeds_per_cell,
+        languages=language_filter,
+        max_plans=max_plans,
+    )
+    if not plans:
+        _fail("no candidate plans built; check --languages / --seeds-per-cell")
+
+    config = default_pilot_config(
+        out,
+        seeds_per_cell=seeds_per_cell,
+        languages=language_filter,
+        max_plans=max_plans,
+        k=k,
+        band_config=band_config,
+        frontier_threshold=frontier_threshold,
+        kill_threshold=kill_threshold,
+        flakiness_runs=flakiness_runs,
+        concurrency=concurrency,
+        validate_models=validate_models_flag,
+        command_timeout=timeout,
+        mutation_timeout=mutation_timeout,
+        gold_eval_runs=gold_runs,
+        run_gold_eval=run_gold,
+        write_report=write,
+    )
+
+    try:
+        outcome = asyncio.run(run_pilot(config))
+    except (PilotError, MissingCredentialsError, ModelRoutingError) as exc:
+        _fail(f"pilot: {exc}", api_key)
+
+    if json_out:
+        typer.echo(json.dumps(outcome.to_dict()))
+    else:
+        _print_pilot_outcome(outcome)
+
+    raise typer.Exit(code=0 if outcome.ok else 1)

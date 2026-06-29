@@ -1,0 +1,973 @@
+"""Pilot orchestration: the `swe-forge forge build --pilot` end-to-end run.
+
+This is the capstone that drives Stage 0 -> Stage 5 in one invocation and proves
+the two mission headlines on a real, shipped set:
+
+* **(A)** every shipped task's gold patch scores ``{"score": 1}`` in Docker, and
+* **(B)** the frontier panel solve-rate over the shipped set is low (below the
+  stated threshold) but > 0.
+
+The orchestrator is deliberately thin and language-agnostic: it threads a fixed
+candidate through the SAME stage functions the per-stage CLI subcommands call
+(env build, generate, spec, oracle pipeline, calibration, export, gold-eval,
+report), so the ``--pilot`` path and the per-stage path agree by construction
+(VAL-CROSS-020). The heavy per-candidate work lives behind the
+:class:`CandidateProcessor` seam: :class:`LiveCandidateProcessor` wires the real
+Docker + live-endpoint stages, while a fake processor lets the funnel/gate/
+reconciliation invariants be unit-tested offline and deterministically.
+
+Whole-pipeline invariants enforced here:
+
+* the per-stage **funnel is monotone**: ``sourced >= env_built >= synthesized >=
+  oracle_pass >= calibration_keep == exported`` (VAL-CROSS-013);
+* **rejections never propagate**: an oracle-reject candidate is never calibrated
+  and never exported; a calibration-drop candidate is never exported; only an
+  oracle-pass AND band-keep candidate becomes an :class:`ExportRequest`
+  (VAL-CROSS-012) -- and the export layer re-checks the same gate, so a
+  mis-routed task is still refused;
+* **usage/cost is surfaced**: teacher (spec + oracle synthesis) and panel
+  (calibration) per-call usage is aggregated into the run summary
+  (VAL-CROSS-022);
+* **Docker hygiene with guaranteed teardown**: every container is throwaway and
+  torn down by the stage that owns it (even on an induced failure); the pilot
+  only ever names mission-scoped resources, so off-limits containers are never
+  touched (VAL-CROSS-018/019).
+
+Secrets never reach any pilot surface: the orchestrator only handles model ids,
+counts, usage, and verdicts -- never the API key (VAL-CROSS-023).
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Protocol
+
+from swe_forge.forge.adapters import (
+    AdapterRegistry,
+    NoAdapterFoundError,
+    build_default_registry,
+)
+from swe_forge.forge.calibrate.filter import DEFAULT_BAND_FILTER, BandFilterConfig
+from swe_forge.forge.calibrate.pipeline import run_calibration
+from swe_forge.forge.export import (
+    BatchExportResult,
+    ExportRequest,
+    export_batch,
+)
+from swe_forge.forge.gold_eval import GoldEvalError, GoldEvalReport, run_gold_eval
+from swe_forge.forge.generators import (
+    GenerationError,
+    GenerationRequest,
+    build_default_generator_registry,
+)
+from swe_forge.forge.envbuild import EnvBuilder
+from swe_forge.forge.models import (
+    BaselineNotGreenError,
+    CalibrationReport,
+    Candidate,
+    EnvImage,
+    GeneratedSpec,
+    OracleReport,
+    RepoSpec,
+)
+from swe_forge.forge.oracle import (
+    DEFAULT_FLAKINESS_RUNS,
+    DEFAULT_KILL_THRESHOLD,
+    run_oracle_pipeline,
+)
+from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
+from swe_forge.forge.oracle.differential_synth import (
+    DifferentialKillSynthesizer,
+    TeacherVariantGenerator,
+)
+from swe_forge.forge.oracle.mutation_synth import MutationKillSynthesizer
+from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
+from swe_forge.forge.panel import (
+    PanelModel,
+    build_panel_from_env,
+    resolve_panel_endpoint,
+)
+from swe_forge.forge.report import (
+    DEFAULT_FRONTIER_THRESHOLD,
+    BenchmarkReport,
+    GoldSummary,
+    build_benchmark_report,
+    write_report,
+)
+from swe_forge.forge.sources import SourceRegistry, build_source_registry
+from swe_forge.forge.spec import (
+    F2PTrace,
+    FailingTest,
+    SpecError,
+    TemplateSpecAuthor,
+    generate_spec,
+)
+from swe_forge.forge.teacher import (
+    MissingCredentialsError,
+    ModelRoutingError,
+    Usage,
+)
+
+
+class PilotError(RuntimeError):
+    """Raised for an unrecoverable failure while orchestrating the pilot."""
+
+
+# --------------------------------------------------------------------------- #
+# Stage-count funnel
+# --------------------------------------------------------------------------- #
+@dataclass
+class StageCounts:
+    """The monotone per-stage funnel of the pilot run.
+
+    Each gate only reduces or holds the population, and the terminal stage equals
+    the exported workspace count: ``sourced >= env_built >= synthesized >=
+    oracle_pass >= calibration_keep == exported`` (VAL-CROSS-013).
+    """
+
+    sourced: int = 0
+    env_built: int = 0
+    synthesized: int = 0
+    oracle_pass: int = 0
+    calibration_keep: int = 0
+    exported: int = 0
+
+    @property
+    def monotone(self) -> bool:
+        """``True`` iff the funnel is non-increasing and keep == exported."""
+        return (
+            self.sourced
+            >= self.env_built
+            >= self.synthesized
+            >= self.oracle_pass
+            >= self.calibration_keep
+            and self.calibration_keep == self.exported
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "sourced": self.sourced,
+            "env_built": self.env_built,
+            "synthesized": self.synthesized,
+            "oracle_pass": self.oracle_pass,
+            "calibration_keep": self.calibration_keep,
+            "exported": self.exported,
+            "monotone": self.monotone,
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Aggregate usage/cost (teacher + panel)
+# --------------------------------------------------------------------------- #
+@dataclass
+class PilotUsage:
+    """Aggregate LLM usage/cost for the run, split by teacher vs panel.
+
+    ``teacher`` pools the spec-author + oracle-synthesis calls; ``panel`` pools
+    the calibration validation + rollout calls. Both are surfaced so VAL-CROSS-022
+    can confirm non-zero token usage and cost attributable to each.
+    """
+
+    teacher: Usage = field(default_factory=Usage)
+    teacher_cost: float = 0.0
+    panel: Usage = field(default_factory=Usage)
+    panel_cost: float = 0.0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.teacher.total_tokens + self.panel.total_tokens
+
+    @property
+    def total_cost(self) -> float:
+        return self.teacher_cost + self.panel_cost
+
+    def add(self, artifacts: CandidateArtifacts) -> None:
+        self.teacher = self.teacher + artifacts.teacher_usage
+        self.teacher_cost += artifacts.teacher_cost
+        self.panel = self.panel + artifacts.panel_usage
+        self.panel_cost += artifacts.panel_cost
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "teacher": {"usage": self.teacher.to_dict(), "cost": self.teacher_cost},
+            "panel": {"usage": self.panel.to_dict(), "cost": self.panel_cost},
+            "total_tokens": self.total_tokens,
+            "total_cost": self.total_cost,
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Plans, per-candidate artifacts, dispositions
+# --------------------------------------------------------------------------- #
+@dataclass
+class CandidatePlan:
+    """One candidate to attempt: a (repo, generator, seed[, target]) tuple."""
+
+    repo: RepoSpec
+    generator: str
+    seed: int
+    file: str | None = None
+    symbol: str | None = None
+    op: str | None = None
+    params: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def language(self) -> str:
+        return self.repo.language
+
+    @property
+    def label(self) -> str:
+        return f"{self.repo.repo_id}::{self.generator}#{self.seed}"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "repo_id": self.repo.repo_id,
+            "language": self.language,
+            "generator": self.generator,
+            "seed": self.seed,
+            "file": self.file,
+            "symbol": self.symbol,
+            "op": self.op,
+        }
+
+
+@dataclass
+class CandidateArtifacts:
+    """Everything Stage 1-4 produced for one candidate plan.
+
+    A ``None`` for an early field marks where the candidate dropped out of the
+    funnel (env build red, generation failed, oracle reject, calibration drop).
+    ``cleanup_paths`` are extra host dirs (beyond the orchestrator-owned workdir)
+    a processor may ask to be removed after export.
+    """
+
+    plan: CandidatePlan
+    env_image: EnvImage | None = None
+    candidate: Candidate | None = None
+    spec: GeneratedSpec | None = None
+    oracle_report: OracleReport | None = None
+    calibration_report: CalibrationReport | None = None
+    broken_tree: Path | None = None
+    repo_url: str = ""
+    base_commit: str = ""
+    teacher_usage: Usage = field(default_factory=Usage)
+    teacher_cost: float = 0.0
+    panel_usage: Usage = field(default_factory=Usage)
+    panel_cost: float = 0.0
+    failure_reason: str = ""
+    cleanup_paths: list[Path] = field(default_factory=list)
+
+
+@dataclass
+class CandidateDisposition:
+    """Where one candidate exited the funnel (one row of the run ledger)."""
+
+    plan: CandidatePlan
+    stage: str  # env_failed | synth_failed | oracle_reject | calib_drop | kept
+    oracle_verdict: str = ""
+    band_verdict: str = ""
+    task_id: str = ""
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **self.plan.to_dict(),
+            "stage": self.stage,
+            "oracle_verdict": self.oracle_verdict,
+            "band_verdict": self.band_verdict,
+            "task_id": self.task_id,
+            "reason": self.reason,
+        }
+
+
+# --------------------------------------------------------------------------- #
+# The candidate processor seam (Stage 1-4)
+# --------------------------------------------------------------------------- #
+class CandidateProcessor(Protocol):
+    """Runs Stage 1-4 for one candidate plan and returns its artifacts.
+
+    The orchestrator owns ``workdir`` (a fresh host dir under the run-scoped temp
+    root) and tears it down after the run -- even if processing raises -- so the
+    processor never needs to manage host cleanup. The live implementation drives
+    real Docker + the live endpoint; offline tests inject a deterministic fake so
+    the orchestrator's funnel/gate/reconciliation logic is exercised without
+    Docker or the network.
+    """
+
+    async def process(
+        self, plan: CandidatePlan, workdir: Path
+    ) -> CandidateArtifacts: ...
+
+
+class GoldEvalFn(Protocol):
+    """The Stage-5 gold-eval seam (real Docker by default; injectable for tests)."""
+
+    def __call__(
+        self, tasks_dir: Path | str, *, runs: int = ...
+    ) -> GoldEvalReport: ...
+
+
+def candidate_trace(candidate: Candidate) -> F2PTrace:
+    """A minimal F2P trace for the spec, keyed to the candidate's target symbol.
+
+    The spec's problem statement/requirements are backtranslated from the failing
+    behavior of the target (never the diff); the real Docker F2P establishment
+    happens in Stage 3. One named failing test is enough to ground the spec's
+    requirements (Stage 2 contract).
+    """
+    files = [f for f in candidate.target.files if f]
+    symbols = [s for s in candidate.target.symbols if s]
+    target = symbols[0] if symbols else (files[0] if files else candidate.generator)
+    file = files[0] if files else ""
+    name = f"{file}::{target}" if file else str(target)
+    return F2PTrace(
+        tests=(
+            FailingTest(
+                name=name,
+                file=file,
+                message=(
+                    f"{target} returns an incorrect result for the "
+                    "manufactured fault"
+                ),
+            ),
+        )
+    )
+
+
+def _ensure_trailing_newline(text: str) -> str:
+    return text if text.endswith("\n") else text + "\n"
+
+
+def _materialize_broken_tree(
+    checkout: Path, candidate: Candidate, dest: Path
+) -> Path:
+    """Copy the gold checkout, apply the forward mutation, return the broken tree.
+
+    The export layer re-inits this tree to a single orphan commit before shipping
+    it (so gold is unrecoverable from ``.git`` history); here we only need the
+    mutated working tree the agent will see.
+    """
+    shutil.copytree(checkout, dest)
+    patch_file = dest / ".forge_mutation.patch"
+    patch_file.write_text(
+        _ensure_trailing_newline(candidate.mutation_patch), encoding="utf-8"
+    )
+    apply = subprocess.run(
+        ["git", "apply", "--whitespace=nowarn", str(patch_file.name)],
+        cwd=dest,
+        capture_output=True,
+        text=True,
+    )
+    if apply.returncode != 0:
+        fallback = subprocess.run(
+            ["git", "apply", "--3way", "--whitespace=nowarn", str(patch_file.name)],
+            cwd=dest,
+            capture_output=True,
+            text=True,
+        )
+        if fallback.returncode != 0:
+            raise PilotError(
+                f"could not apply mutation to broken tree: "
+                f"{(apply.stderr or fallback.stderr).strip()[:300]}"
+            )
+    patch_file.unlink(missing_ok=True)
+    return dest
+
+
+class LiveCandidateProcessor:
+    """The real Stage 1-4 processor: Docker env build + live-endpoint gates.
+
+    Order: env build (green baseline, host checkout retained) -> generate the
+    candidate -> author the spec (teacher, deterministic-template fallback) ->
+    run the FULL oracle pipeline NON-OFFLINE with real teacher generators (so the
+    differential/alt-correct gates never pass vacuously) -> calibrate via the
+    panel when oracle passes. Each stage owns its own throwaway-container hygiene;
+    the host checkout/broken-tree dirs live under the orchestrator-owned
+    ``workdir`` (torn down after export, even on failure).
+    """
+
+    def __init__(
+        self,
+        *,
+        panel: list[PanelModel],
+        band_config: BandFilterConfig = DEFAULT_BAND_FILTER,
+        kill_threshold: float = DEFAULT_KILL_THRESHOLD,
+        flakiness_runs: int = DEFAULT_FLAKINESS_RUNS,
+        k: int | None = None,
+        concurrency: int = 4,
+        validate_models: bool = True,
+        command_timeout: float = 600.0,
+        mutation_timeout: float = 1200.0,
+        registry: AdapterRegistry | None = None,
+    ) -> None:
+        self._panel = panel
+        self._band_config = band_config
+        self._kill_threshold = kill_threshold
+        self._flakiness_runs = flakiness_runs
+        self._k = k
+        self._concurrency = concurrency
+        self._validate_models = validate_models
+        self._command_timeout = command_timeout
+        self._mutation_timeout = mutation_timeout
+        self._registry = registry or build_default_registry()
+        self._generators = build_default_generator_registry()
+
+    async def process(
+        self, plan: CandidatePlan, workdir: Path
+    ) -> CandidateArtifacts:
+        art = CandidateArtifacts(plan=plan)
+        try:
+            return await self._process(plan, workdir, art)
+        except (
+            BaselineNotGreenError,
+            GenerationError,
+            SpecError,
+            MissingCredentialsError,
+            ModelRoutingError,
+            PilotError,
+        ) as exc:
+            art.failure_reason = f"{type(exc).__name__}: {exc}"
+            return art
+
+    async def _process(
+        self, plan: CandidatePlan, work: Path, art: CandidateArtifacts
+    ) -> CandidateArtifacts:
+        try:
+            adapter = self._registry.get(plan.language)
+        except NoAdapterFoundError as exc:
+            art.failure_reason = str(exc)
+            return art
+
+        # -- Stage 1: env-first build (host checkout retained) ------------- #
+        checkout = work / "checkout"
+        checkout.mkdir()
+        clone = _checkout_repo(plan.repo, checkout)
+        if clone is not None:
+            art.failure_reason = f"checkout failed: {clone}"
+            return art
+
+        build = EnvBuilder().build(plan.repo, workdir=checkout)
+        if not build.success or build.env_image is None:
+            art.failure_reason = (
+                f"env build {build.failure_kind}: {build.reason}"
+            )
+            return art
+        art.env_image = build.env_image
+        art.repo_url = plan.repo.url
+        art.base_commit = build.env_image.commit
+
+        # -- Stage 2a: generate the candidate ------------------------------ #
+        request = GenerationRequest(
+            repo_root=checkout,
+            seed=plan.seed,
+            file=plan.file,
+            symbol=plan.symbol,
+            op=plan.op,
+            env_image=art.env_image,
+            params=dict(plan.params),
+        )
+        candidate = self._generators.get(plan.generator).generate(request, adapter)
+        art.candidate = candidate
+
+        # -- Stage 2b: author the spec (teacher; template fallback) -------- #
+        trace = candidate_trace(candidate)
+        spec = _author_spec(candidate, trace, checkout, adapter)
+        art.spec = spec
+        _accumulate_spec_usage(art, spec)
+
+        # -- Stage 3: oracle pipeline (NON-OFFLINE; real teacher) ---------- #
+        oracle = await run_oracle_pipeline(
+            candidate,
+            art.env_image,
+            establish_synthesizer=AgenticTestSynthesizer(),
+            mutation_synthesizer=MutationKillSynthesizer(),
+            variant_generator=TeacherVariantGenerator(),
+            differential_synthesizer=DifferentialKillSynthesizer(),
+            alt_generator=TeacherAltCorrectGenerator(),
+            spec=spec,
+            flakiness_runs=self._flakiness_runs,
+            kill_threshold=self._kill_threshold,
+            adapter=adapter,
+            command_timeout=self._command_timeout,
+            mutation_timeout=self._mutation_timeout,
+        )
+        art.oracle_report = oracle
+        if not oracle.is_pass:
+            return art
+
+        # -- Stage 4: calibration (panel; only on oracle-pass) ------------- #
+        outcome = await run_calibration(
+            candidate,
+            art.env_image,
+            spec,
+            oracle,
+            self._panel,
+            k=self._k,
+            concurrency=self._concurrency,
+            validate=self._validate_models,
+            config=self._band_config,
+            command_timeout=self._command_timeout,
+            adapter=adapter,
+        )
+        art.calibration_report = outcome.report
+        _accumulate_panel_usage(art, outcome.report)
+
+        if outcome.report.is_keep:
+            broken = _materialize_broken_tree(
+                checkout, candidate, work / "broken"
+            )
+            art.broken_tree = broken
+        return art
+
+
+def _checkout_repo(repo: RepoSpec, dest: Path) -> str | None:
+    """Clone+checkout the pinned commit into ``dest``; ``None`` on success."""
+    for command in repo.checkout_commands():
+        completed = subprocess.run(
+            command,
+            shell=True,
+            cwd=dest,
+            capture_output=True,
+            text=True,
+            timeout=600.0,
+        )
+        if completed.returncode != 0:
+            return (completed.stderr or completed.stdout).strip()[:300]
+    return None
+
+
+def _author_spec(
+    candidate: Candidate,
+    trace: F2PTrace,
+    checkout: Path,
+    adapter: object,
+) -> GeneratedSpec:
+    """Author the spec via the teacher; fall back to the deterministic template.
+
+    The teacher (the default) backtranslates a test-conditioned statement; the
+    template author is a deterministic, offline fallback so a transient endpoint
+    hiccup never drops an otherwise-valid candidate at the spec step. (The
+    shipped task's ORACLE gates still run non-offline with a real teacher.)
+    """
+    try:
+        return generate_spec(candidate, trace, checkout, adapter)  # type: ignore[arg-type]
+    except (SpecError, MissingCredentialsError, ModelRoutingError):
+        return generate_spec(
+            candidate, trace, checkout, adapter, author=TemplateSpecAuthor()  # type: ignore[arg-type]
+        )
+
+
+def _accumulate_spec_usage(art: CandidateArtifacts, spec: GeneratedSpec) -> None:
+    teacher = spec.provenance.details.get("teacher")
+    if isinstance(teacher, dict):
+        usage = teacher.get("usage")
+        if isinstance(usage, dict):
+            art.teacher_usage = art.teacher_usage + Usage(
+                prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                total_tokens=int(usage.get("total_tokens", 0) or 0),
+            )
+        cost = teacher.get("cost")
+        if isinstance(cost, (int, float)):
+            art.teacher_cost += float(cost)
+
+
+def _accumulate_panel_usage(
+    art: CandidateArtifacts, report: CalibrationReport
+) -> None:
+    accounting = report.details.get("usage_accounting")
+    if not isinstance(accounting, dict):
+        return
+    aggregate = accounting.get("aggregate")
+    if isinstance(aggregate, dict):
+        usage = aggregate.get("usage")
+        if isinstance(usage, dict):
+            art.panel_usage = art.panel_usage + Usage(
+                prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                total_tokens=int(usage.get("total_tokens", 0) or 0),
+            )
+        cost = aggregate.get("cost")
+        if isinstance(cost, (int, float)):
+            art.panel_cost += float(cost)
+
+
+# --------------------------------------------------------------------------- #
+# Pilot config + plan building
+# --------------------------------------------------------------------------- #
+#: Generators exercised per language for the pilot. Every generator family is
+#: deterministic+verifiable on Python; the cross-language families (ast_mutation,
+#: function_removal) round-trip on JS/Go too. >=2 generators keeps VAL-CROSS-005.
+DEFAULT_GENERATORS_BY_LANGUAGE: dict[str, tuple[str, ...]] = {
+    "python": ("ast_mutation", "function_removal", "lm_authored"),
+    "javascript": ("ast_mutation", "function_removal"),
+    "go": ("ast_mutation", "function_removal"),
+}
+
+
+@dataclass
+class PilotConfig:
+    """All knobs for one pilot run (Stage 0 -> Stage 5)."""
+
+    plans: list[CandidatePlan]
+    out_dir: Path
+    band_config: BandFilterConfig = DEFAULT_BAND_FILTER
+    frontier_threshold: float = DEFAULT_FRONTIER_THRESHOLD
+    kill_threshold: float = DEFAULT_KILL_THRESHOLD
+    flakiness_runs: int = DEFAULT_FLAKINESS_RUNS
+    k: int | None = None
+    concurrency: int = 4
+    validate_models: bool = True
+    command_timeout: float = 600.0
+    mutation_timeout: float = 1200.0
+    gold_eval_runs: int = 2
+    run_gold_eval: bool = True
+    write_report: bool = True
+
+
+def build_pilot_plans(
+    *,
+    registry: SourceRegistry | None = None,
+    generators_by_language: dict[str, tuple[str, ...]] | None = None,
+    seeds_per_cell: int = 2,
+    languages: Sequence[str] | None = None,
+    max_plans: int | None = None,
+) -> list[CandidatePlan]:
+    """Build the candidate plan list (Stage 0 sourcing) for a pilot run.
+
+    Enumerates ``repo x generator x seed`` cells across the curated source
+    registry (one repo per language). The per-repo cap bounds the SHIPPED set
+    (acquired at keep time), not the candidate count, so the pilot is fed many
+    candidates per repo and lets the band filter select the in-band ones.
+    """
+    src = registry or build_source_registry()
+    gens = generators_by_language or DEFAULT_GENERATORS_BY_LANGUAGE
+    plans: list[CandidatePlan] = []
+    for repo in src.specs():
+        if languages is not None and repo.language not in languages:
+            continue
+        for generator in gens.get(repo.language, ("ast_mutation",)):
+            for seed in range(seeds_per_cell):
+                plans.append(
+                    CandidatePlan(repo=repo, generator=generator, seed=seed)
+                )
+                if max_plans is not None and len(plans) >= max_plans:
+                    return plans
+    return plans
+
+
+def default_pilot_config(
+    out_dir: Path | str,
+    *,
+    seeds_per_cell: int = 4,
+    languages: Sequence[str] | None = None,
+    max_plans: int | None = None,
+    k: int | None = None,
+    **overrides: object,
+) -> PilotConfig:
+    """The ``--pilot`` preset: many candidates across all three languages.
+
+    Budgeted to feed the funnel enough borderline candidates that the band filter
+    can select ~10-30 in-band keeps (the frontier is bimodal per task, so a large
+    candidate count + an adequate hard-band ``k`` is how the shipped set is built
+    -- never by hand-tuning one task or loosening the band).
+    """
+    plans = build_pilot_plans(
+        seeds_per_cell=seeds_per_cell, languages=languages, max_plans=max_plans
+    )
+    config = PilotConfig(plans=plans, out_dir=Path(out_dir), k=k)
+    for key, value in overrides.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+    return config
+
+
+# --------------------------------------------------------------------------- #
+# Pilot outcome
+# --------------------------------------------------------------------------- #
+@dataclass
+class PilotOutcome:
+    """The end-to-end result of a pilot run."""
+
+    out_dir: Path
+    counts: StageCounts
+    usage: PilotUsage
+    dispositions: list[CandidateDisposition]
+    export_result: BatchExportResult | None = None
+    gold: GoldEvalReport | None = None
+    report: BenchmarkReport | None = None
+
+    @property
+    def shipped_count(self) -> int:
+        return self.counts.exported
+
+    @property
+    def generators_used(self) -> list[str]:
+        return sorted(
+            {d.plan.generator for d in self.dispositions if d.stage == "kept"}
+        )
+
+    @property
+    def languages_shipped(self) -> list[str]:
+        return sorted(
+            {d.plan.language for d in self.dispositions if d.stage == "kept"}
+        )
+
+    @property
+    def headline_a_pass(self) -> bool:
+        return self.report is not None and self.report.headline_a_pass
+
+    @property
+    def headline_b_pass(self) -> bool:
+        return self.report is not None and self.report.headline_b_pass
+
+    @property
+    def in_band(self) -> bool:
+        """True iff the shipped count lands in the documented ~10-30 band."""
+        return 10 <= self.shipped_count <= 30
+
+    @property
+    def ok(self) -> bool:
+        """Exit-0 condition: funnel monotone and (if shipped) both headlines hold."""
+        if not self.counts.monotone:
+            return False
+        if self.shipped_count == 0:
+            return False
+        return (
+            self.report is not None
+            and self.report.passed
+            and len(self.generators_used) >= 2
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "out_dir": str(self.out_dir),
+            "counts": self.counts.to_dict(),
+            "usage": self.usage.to_dict(),
+            "shipped_count": self.shipped_count,
+            "generators_used": self.generators_used,
+            "languages_shipped": self.languages_shipped,
+            "in_band": self.in_band,
+            "headline_a_pass": self.headline_a_pass,
+            "headline_b_pass": self.headline_b_pass,
+            "report": self.report.to_dict() if self.report is not None else None,
+            "dispositions": [d.to_dict() for d in self.dispositions],
+            "ok": self.ok,
+        }
+
+
+# --------------------------------------------------------------------------- #
+# Orchestration (Stage 0 -> Stage 5)
+# --------------------------------------------------------------------------- #
+async def run_pilot(
+    config: PilotConfig,
+    *,
+    processor: CandidateProcessor | None = None,
+    gold_eval_fn: GoldEvalFn | None = None,
+) -> PilotOutcome:
+    """Drive Stage 0 -> Stage 5 for ``config`` and return the :class:`PilotOutcome`.
+
+    For each sourced candidate plan the processor runs Stage 1-4; the orchestrator
+    counts the monotone funnel, builds an :class:`ExportRequest` ONLY for an
+    oracle-pass AND band-keep candidate (rejections/drops never propagate), then
+    Stage 5 exports the qualified subset (the export layer re-checks the gate),
+    runs gold-eval in Docker (Headline A), and builds the benchmark report
+    (Headline B + provenance audit + count reconciliation). Host temp dirs are
+    always cleaned up; the per-stage containers are torn down by their owners.
+    """
+    if processor is None:
+        processor = _live_processor(config)
+
+    counts = StageCounts()
+    usage = PilotUsage()
+    dispositions: list[CandidateDisposition] = []
+    export_requests: list[ExportRequest] = []
+    run_root = Path(tempfile.mkdtemp(prefix="forge-pilot-run-"))
+    cleanup: list[Path] = [run_root]
+
+    try:
+        for index, plan in enumerate(config.plans):
+            counts.sourced += 1
+            workdir = run_root / f"cand-{index:04d}"
+            workdir.mkdir(parents=True, exist_ok=True)
+            art = await processor.process(plan, workdir)
+            cleanup.extend(art.cleanup_paths)
+            usage.add(art)
+
+            if art.env_image is None:
+                dispositions.append(
+                    CandidateDisposition(plan, "env_failed", reason=art.failure_reason)
+                )
+                continue
+            counts.env_built += 1
+
+            if art.candidate is None:
+                dispositions.append(
+                    CandidateDisposition(
+                        plan, "synth_failed", reason=art.failure_reason
+                    )
+                )
+                continue
+            counts.synthesized += 1
+
+            oracle = art.oracle_report
+            if oracle is None or not oracle.is_pass:
+                dispositions.append(
+                    CandidateDisposition(
+                        plan,
+                        "oracle_reject",
+                        oracle_verdict=oracle.verdict if oracle else "missing",
+                        reason="; ".join(oracle.reasons) if oracle else art.failure_reason,
+                    )
+                )
+                continue
+            counts.oracle_pass += 1
+
+            calibration = art.calibration_report
+            if calibration is None or not calibration.is_keep:
+                dispositions.append(
+                    CandidateDisposition(
+                        plan,
+                        "calib_drop",
+                        oracle_verdict=oracle.verdict,
+                        band_verdict=calibration.band_verdict if calibration else "missing",
+                        reason=calibration.reasons[0]
+                        if calibration and calibration.reasons
+                        else "",
+                    )
+                )
+                continue
+
+            # Oracle pass AND band keep -> the only candidates that become tasks.
+            export_requests.append(
+                ExportRequest(
+                    candidate=art.candidate,
+                    spec=_require_spec(art),
+                    oracle_report=oracle,
+                    calibration_report=calibration,
+                    env_image=art.env_image,
+                    repo_url=art.repo_url,
+                    base_commit=art.base_commit,
+                    broken_tree=art.broken_tree,
+                )
+            )
+            dispositions.append(
+                CandidateDisposition(
+                    plan,
+                    "kept",
+                    oracle_verdict=oracle.verdict,
+                    band_verdict=calibration.band_verdict,
+                )
+            )
+
+        export_result = export_batch(export_requests, config.out_dir, overwrite=True)
+        counts.calibration_keep = len(export_requests)
+        counts.exported = len(export_result.kept)
+        _attach_task_ids(dispositions, export_result)
+
+        gold: GoldEvalReport | None = None
+        if config.run_gold_eval and export_result.shipped:
+            evaluate = gold_eval_fn or run_gold_eval
+            try:
+                gold = evaluate(config.out_dir, runs=config.gold_eval_runs)
+            except GoldEvalError:
+                gold = None
+
+        report = _build_report(config, gold)
+        if config.write_report and report is not None:
+            write_report(report, config.out_dir)
+
+        return PilotOutcome(
+            out_dir=Path(config.out_dir),
+            counts=counts,
+            usage=usage,
+            dispositions=dispositions,
+            export_result=export_result,
+            gold=gold,
+            report=report,
+        )
+    finally:
+        for path in cleanup:
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def _live_processor(config: PilotConfig) -> LiveCandidateProcessor:
+    """Build the real Stage 1-4 processor from the env-configured panel."""
+    base_url, api_key = resolve_panel_endpoint()
+    if not base_url or not api_key:
+        raise PilotError(
+            "no panel endpoint/credentials configured; export TEACHER_LLM_* "
+            "(and optionally PANEL_LLM_*) before running the pilot"
+        )
+    panel = build_panel_from_env()
+    return LiveCandidateProcessor(
+        panel=panel,
+        band_config=config.band_config,
+        kill_threshold=config.kill_threshold,
+        flakiness_runs=config.flakiness_runs,
+        k=config.k,
+        concurrency=config.concurrency,
+        validate_models=config.validate_models,
+        command_timeout=config.command_timeout,
+        mutation_timeout=config.mutation_timeout,
+    )
+
+
+def _require_spec(art: CandidateArtifacts) -> GeneratedSpec:
+    if art.spec is None:  # pragma: no cover - a kept candidate always has a spec
+        raise PilotError(
+            f"kept candidate {art.plan.label!r} is missing its GeneratedSpec"
+        )
+    return art.spec
+
+
+def _attach_task_ids(
+    dispositions: list[CandidateDisposition], result: BatchExportResult
+) -> None:
+    """Best-effort: map each kept disposition to its exported task id (by order)."""
+    shipped_ids = [r.task_id for r in result.results if r.status in ("shipped", "skipped")]
+    kept = [d for d in dispositions if d.stage == "kept"]
+    for disposition, task_id in zip(kept, shipped_ids):
+        disposition.task_id = task_id
+
+
+def _build_report(
+    config: PilotConfig, gold: GoldEvalReport | None
+) -> BenchmarkReport | None:
+    gold_summary: GoldSummary | None = (
+        GoldSummary.from_gold_eval(gold) if gold is not None else None
+    )
+    try:
+        return build_benchmark_report(
+            config.out_dir,
+            gold=gold_summary,
+            frontier_threshold=config.frontier_threshold,
+            band_config=config.band_config,
+            kill_threshold=config.kill_threshold,
+        )
+    except Exception:  # noqa: BLE001 - a report build failure is surfaced as None
+        return None
+
+
+__all__ = [
+    "DEFAULT_GENERATORS_BY_LANGUAGE",
+    "CandidateArtifacts",
+    "CandidateDisposition",
+    "CandidatePlan",
+    "CandidateProcessor",
+    "LiveCandidateProcessor",
+    "PilotConfig",
+    "PilotError",
+    "PilotOutcome",
+    "PilotUsage",
+    "StageCounts",
+    "build_pilot_plans",
+    "candidate_trace",
+    "default_pilot_config",
+    "run_pilot",
+]
