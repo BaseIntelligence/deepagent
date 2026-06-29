@@ -209,6 +209,79 @@ class TestSourceRegistry:
         assert {r["repo_id"] for r in records} == {"a/py", "b/js"}
 
 
+class TestRepoSpecOverrides:
+    def test_defaults_are_empty_and_no_pr_mirror(self) -> None:
+        spec = make_spec()
+        assert spec.baseline_install == ()
+        assert spec.baseline_test == ""
+        assert spec.p2p_exclusions == ()
+        assert spec.pr_repo == ""
+        assert spec.pr_number == 0
+        assert spec.pr_generator == ""
+        assert spec.structural_source is False
+        assert spec.has_pr_mirror is False
+
+    def test_override_fields_normalize_to_tuples(self) -> None:
+        spec = make_spec(
+            baseline_install=["pip install -e .", "  ", "pip install pytest"],
+            baseline_test="  npm run tests-only  ",
+            p2p_exclusions=["should export the version number", ""],
+        )
+        assert spec.baseline_install == ("pip install -e .", "pip install pytest")
+        assert spec.baseline_test == "npm run tests-only"
+        assert spec.p2p_exclusions == ("should export the version number",)
+
+    def test_pr_mirror_fields_round_trip(self) -> None:
+        spec = make_spec(
+            pr_repo="validatorjs/validator.js",
+            pr_number=2787,
+            pr_generator="pr_mirror",
+        )
+        assert spec.has_pr_mirror is True
+        assert spec.preferred_generator == "pr_mirror"
+        assert spec.pr_params() == {
+            "repo": "validatorjs/validator.js",
+            "pr_number": 2787,
+        }
+        # The params payload never carries a credential.
+        assert "token" not in {k.lower() for k in spec.pr_params()}
+
+    def test_preferred_generator_defaults_to_pr_mirror(self) -> None:
+        spec = make_spec(pr_repo="owner/name", pr_number=5)
+        assert spec.preferred_generator == "pr_mirror"
+
+    def test_pr_number_without_slug_rejected(self) -> None:
+        with pytest.raises(ModelError):
+            make_spec(pr_repo="not-a-slug", pr_number=5)
+
+    def test_negative_pr_number_rejected(self) -> None:
+        with pytest.raises(ModelError):
+            make_spec(pr_number=-1)
+
+    def test_unknown_pr_generator_rejected(self) -> None:
+        with pytest.raises(ModelError):
+            make_spec(pr_generator="not_a_generator")
+
+    def test_to_dict_exposes_override_fields(self) -> None:
+        spec = make_spec(
+            baseline_install=["pip install -e ."],
+            baseline_test="pytest",
+            p2p_exclusions=["x"],
+            pr_repo="owner/name",
+            pr_number=9,
+            pr_generator="pr_mirror",
+            structural_source=True,
+        )
+        data = spec.to_dict()
+        assert data["baseline_install"] == ["pip install -e ."]
+        assert data["baseline_test"] == "pytest"
+        assert data["p2p_exclusions"] == ["x"]
+        assert data["pr_repo"] == "owner/name"
+        assert data["pr_number"] == 9
+        assert data["pr_generator"] == "pr_mirror"
+        assert data["structural_source"] is True
+
+
 class TestCuratedRegistry:
     def test_covers_every_supported_language(self) -> None:
         registry = build_source_registry()
@@ -233,6 +306,68 @@ class TestCuratedRegistry:
         assert first.get(repo_id).used == 1
         # A second registry must start clean (no shared mutable state).
         assert second.get(repo_id).used == 0
+
+    def test_contains_fifteen_git_verified_pr_mirror_entries(self) -> None:
+        registry = build_source_registry()
+        allowlist = [s for s in registry.specs() if s.has_pr_mirror]
+        assert len(allowlist) == 15
+        # >=1 pr_mirror entry per language (the supply spans all three).
+        langs = {s.language for s in allowlist}
+        assert langs == {"python", "javascript", "go"}
+        for spec in allowlist:
+            # Each entry is pinned to its OWN base_commit (a real 40-hex SHA) and
+            # carries the upstream slug + pr_number generation params.
+            assert _FULL_SHA.match(spec.commit)
+            assert "/" in spec.pr_repo
+            assert spec.pr_number > 0
+            assert spec.preferred_generator == "pr_mirror"
+            assert spec.instance_cap >= 1
+
+    def test_contains_diversified_modular_repos(self) -> None:
+        registry = build_source_registry()
+        modular_ids = {s.repo_id for s in registry.specs() if s.structural_source}
+        # The dedicated modular structural sources are present...
+        assert {"tkem/cachetools", "mahmoud/boltons", "spf13/cast", "gorilla/mux"} <= (
+            modular_ids
+        )
+        # ...plus the validator.js / qs entries that double as JS modular sources.
+        assert "validatorjs/validator.js#2787" in modular_ids
+        assert "ljharb/qs#555" in modular_ids
+
+    def test_per_repo_install_overrides_present(self) -> None:
+        registry = build_source_registry()
+        validators_411 = registry.get("python-validators/validators#411")
+        assert "pip install -e '.[crypto-eth-addresses]'" in (
+            validators_411.baseline_install
+        )
+        qs_555 = registry.get("ljharb/qs#555")
+        assert qs_555.baseline_test == "npm run tests-only"
+        assert "--legacy-peer-deps" in " ".join(qs_555.baseline_install)
+        # The validator.js non-release entries exclude the version self-test.
+        validator_2693 = registry.get("validatorjs/validator.js#2693")
+        assert "should export the version number" in validator_2693.p2p_exclusions
+        # The validators#301 entry excludes its flipping F2P test from P2P so the
+        # regression suite stays green on the broken tree (no collateral damage).
+        validators_301 = registry.get("python-validators/validators#301")
+        assert "test_returns_true_on_valid_range" in validators_301.p2p_exclusions
+        # The validator.js#2787 entry excludes its flipping ISO8601 F2P from P2P.
+        validator_2787 = registry.get("validatorjs/validator.js#2787")
+        assert "should validate ISO 8601 dates" in validator_2787.p2p_exclusions
+        # Go entries fall back to the adapter defaults (no override).
+        jwt_509 = registry.get("golang-jwt/jwt#509")
+        assert jwt_509.baseline_install == ()
+        assert jwt_509.baseline_test == ""
+
+    def test_pr_entry_ids_unique_despite_shared_upstream(self) -> None:
+        registry = build_source_registry()
+        validators = [
+            s for s in registry.specs() if s.pr_repo == "python-validators/validators"
+        ]
+        assert len(validators) == 4
+        # Same upstream URL, distinct repo_ids and distinct pinned commits.
+        assert len({s.repo_id for s in validators}) == 4
+        assert len({s.commit for s in validators}) == 4
+        assert len({s.url for s in validators}) == 1
 
 
 class TestSourcesCli:

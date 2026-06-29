@@ -48,6 +48,7 @@ from swe_forge.forge.models import (
     RepoSpec,
 )
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
+from swe_forge.forge.sources import build_source_registry
 from swe_forge.forge.pilot import (
     DEFAULT_GENERATORS_BY_LANGUAGE,
     CandidateArtifacts,
@@ -147,8 +148,7 @@ def _env_image(plan: CandidatePlan) -> EnvImage:
 
 def _spec(plan: CandidatePlan, *, problem: str = "") -> GeneratedSpec:
     return GeneratedSpec(
-        problem_statement=problem
-        or "total() must include tax in the returned amount.",
+        problem_statement=problem or "total() must include tax in the returned amount.",
         requirements=["total() returns the taxed sum for the items"],
         interface_block="def total(items, tax_rate): ...",
         provenance=_provenance(plan),
@@ -318,7 +318,12 @@ def _mixed_plans() -> list[CandidatePlan]:
 # --------------------------------------------------------------------------- #
 def test_stage_counts_monotone_true() -> None:
     counts = StageCounts(
-        sourced=10, env_built=8, synthesized=7, oracle_pass=5, calibration_keep=3, exported=3
+        sourced=10,
+        env_built=8,
+        synthesized=7,
+        oracle_pass=5,
+        calibration_keep=3,
+        exported=3,
     )
     assert counts.monotone is True
 
@@ -327,8 +332,17 @@ def test_stage_counts_monotone_true() -> None:
     "counts",
     [
         StageCounts(sourced=3, env_built=5),  # env > sourced
-        StageCounts(sourced=5, env_built=4, synthesized=4, oracle_pass=5),  # pass > synth
-        StageCounts(sourced=5, env_built=4, synthesized=4, oracle_pass=3, calibration_keep=3, exported=2),  # keep != exported
+        StageCounts(
+            sourced=5, env_built=4, synthesized=4, oracle_pass=5
+        ),  # pass > synth
+        StageCounts(
+            sourced=5,
+            env_built=4,
+            synthesized=4,
+            oracle_pass=3,
+            calibration_keep=3,
+            exported=2,
+        ),  # keep != exported
     ],
 )
 def test_stage_counts_monotone_false(counts: StageCounts) -> None:
@@ -342,10 +356,59 @@ def test_build_pilot_plans_spans_languages_and_generators() -> None:
     plans = build_pilot_plans(seeds_per_cell=2)
     languages = {p.language for p in plans}
     assert languages == {"python", "javascript", "go"}
+    # Each language carries the structural generators on its modular repos PLUS a
+    # pr_mirror plan from its allowlist entries -> >=2 generators per language
+    # (VAL-CROSS-005) and pr_mirror present everywhere.
     for language, generators in DEFAULT_GENERATORS_BY_LANGUAGE.items():
         cell = {p.generator for p in plans if p.language == language}
-        assert cell == set(generators)
+        assert set(generators) <= cell  # structural generators all present
+        assert "pr_mirror" in cell
         assert len(cell) >= 2
+
+
+def test_build_pilot_plans_emits_pr_mirror_for_allowlist_entries() -> None:
+    # Every pr_mirror allowlist RepoSpec yields exactly one pr_mirror plan whose
+    # params carry the upstream slug + pr_number (no secret), pinned to that
+    # repo's own base_commit.
+    registry = build_source_registry()
+    allowlist = [s for s in registry.specs() if s.has_pr_mirror]
+    assert len(allowlist) == 15
+
+    plans = build_pilot_plans(registry=registry, seeds_per_cell=1)
+    pr_plans = [p for p in plans if p.generator == "pr_mirror"]
+    assert len(pr_plans) == len(allowlist)
+    for plan in pr_plans:
+        assert plan.params == {
+            "repo": plan.repo.pr_repo,
+            "pr_number": plan.repo.pr_number,
+        }
+        # The plan is pinned to the entry's own base_commit.
+        assert plan.repo.commit == plan.repo.commit  # spec carries its SHA
+        # No credential ever leaks into a plan payload.
+        assert "token" not in {k.lower() for k in plan.params}
+    # >=1 pr_mirror plan per language (the supply spans all three).
+    assert {p.language for p in pr_plans} == {"python", "javascript", "go"}
+
+
+def test_build_pilot_plans_emits_structural_only_on_modular_repos() -> None:
+    registry = build_source_registry()
+    modular = {s.repo_id for s in registry.specs() if s.structural_source}
+    plans = build_pilot_plans(registry=registry, seeds_per_cell=2)
+    structural = [p for p in plans if p.generator != "pr_mirror"]
+    # Structural plans only ever target the modular (structural_source) repos.
+    assert {p.repo.repo_id for p in structural} <= modular
+    # The tiny single-module seeds get no structural plans (they ship 0).
+    assert all(
+        p.repo.repo_id not in {"pytest-dev/iniconfig", "sindresorhus/yocto-queue"}
+        for p in structural
+    )
+
+
+def test_build_pilot_plans_toggle_families() -> None:
+    only_pr = build_pilot_plans(seeds_per_cell=2, include_structural=False)
+    assert only_pr and all(p.generator == "pr_mirror" for p in only_pr)
+    only_struct = build_pilot_plans(seeds_per_cell=2, include_pr_mirror=False)
+    assert only_struct and all(p.generator != "pr_mirror" for p in only_struct)
 
 
 def test_build_pilot_plans_respects_language_filter_and_cap() -> None:
@@ -353,6 +416,112 @@ def test_build_pilot_plans_respects_language_filter_and_cap() -> None:
     assert {p.language for p in only_go} == {"go"}
     capped = build_pilot_plans(seeds_per_cell=5, max_plans=4)
     assert len(capped) == 4
+
+
+def test_pr_mirror_provided_tests_builds_isolated_f2p() -> None:
+    """A pr_mirror candidate's recorded test files become provided F2P selectors.
+
+    The recorded test file (left in place by the source-only mutation) is run via
+    the adapter's selection-aware command with no files to write, so the pilot
+    establishes the isolated F2P without perturbing the regression suite.
+    """
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.pilot import _pr_mirror_provided_tests
+
+    adapter = build_default_registry().get("python")
+    candidate = Candidate(
+        language="python",
+        generator="pr_mirror",
+        target=CandidateTarget(files=("src/validators/between.py",)),
+        mutation_patch="x",
+        oracle_patch="y",
+        difficulty_hint="high",
+        provenance=Provenance(
+            generator="pr_mirror",
+            seed=0,
+            language="python",
+            details={"test_files": ["tests/test_between.py"]},
+        ),
+    )
+    # No curated flipping names -> fall back to running the recorded test FILE.
+    repo = _repo("acme/x")
+    tests = _pr_mirror_provided_tests(candidate, adapter, repo, "python -m pytest")
+    assert len(tests) == 1
+    assert tests[0].test_id == "python -m pytest tests/test_between.py"
+    assert tests[0].files == ()
+    assert tests[0].origin == "provided"
+
+
+def test_pr_mirror_provided_tests_uses_repo_runner_for_flipping_names() -> None:
+    """Curated flipping-test names drive a positive selection via the repo runner.
+
+    When the RepoSpec records the F2P-flipping test names (the same ones the baked
+    baseline excludes), the provided F2P narrows the repo's OWN baseline command
+    positively -- here a JS/TS Mocha ``npm test -- --grep`` the ``node --test``
+    standard runner could not produce -- so a non-standard-runner pr_mirror
+    candidate can confirm its isolated F2P at all.
+    """
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.pilot import _pr_mirror_provided_tests
+
+    adapter = build_default_registry().get("javascript")
+    candidate = Candidate(
+        language="javascript",
+        generator="pr_mirror",
+        target=CandidateTarget(files=("src/lib/isISO8601.js",)),
+        mutation_patch="x",
+        oracle_patch="y",
+        difficulty_hint="high",
+        provenance=Provenance(
+            generator="pr_mirror",
+            seed=0,
+            language="javascript",
+            details={"test_files": ["test/validators.test.js"]},
+        ),
+    )
+    repo = RepoSpec(
+        repo_id="validatorjs/validator.js#2787",
+        url="https://github.com/validatorjs/validator.js.git",
+        commit="a" * 40,
+        commit_date="2024-01-01T00:00:00+00:00",
+        language="javascript",
+        license="MIT",
+        instance_cap=5,
+        baseline_test="npm test",
+        p2p_exclusions=("should validate ISO 8601 dates",),
+    )
+    tests = _pr_mirror_provided_tests(candidate, adapter, repo, repo.baseline_test)
+    assert len(tests) == 1
+    # The repo's Mocha runner, narrowed positively to the flipping title.
+    assert tests[0].test_id == (
+        "npm test -- --grep '(should\\ validate\\ ISO\\ 8601\\ dates)'"
+    )
+    assert "--invert" not in tests[0].test_id
+    assert tests[0].files == ()
+
+
+def test_pr_mirror_provided_tests_empty_for_non_pr_mirror() -> None:
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.pilot import _pr_mirror_provided_tests
+
+    adapter = build_default_registry().get("python")
+    candidate = Candidate(
+        language="python",
+        generator="ast_mutation",
+        target=CandidateTarget(files=("src/m.py",)),
+        mutation_patch="x",
+        oracle_patch="y",
+        difficulty_hint="low",
+        provenance=Provenance(
+            generator="ast_mutation",
+            seed=0,
+            language="python",
+            details={"test_files": ["tests/test_m.py"]},
+        ),
+    )
+    # The helper only fires for pr_mirror; a structural candidate gets nothing.
+    repo = _repo("acme/x")
+    assert _pr_mirror_provided_tests(candidate, adapter, repo, "python -m pytest") == []
 
 
 def test_default_pilot_config_wires_plans_and_overrides() -> None:
@@ -478,8 +647,14 @@ def test_usage_and_cost_surfaced(tmp_path: Path) -> None:
     # every oracle-pass candidate that reached calibration.
     synthesized = outcome.counts.synthesized
     oracle_pass = outcome.counts.oracle_pass
-    assert outcome.usage.teacher.total_tokens == synthesized * FakeProcessor.TEACHER.total_tokens
-    assert outcome.usage.panel.total_tokens == oracle_pass * FakeProcessor.PANEL.total_tokens
+    assert (
+        outcome.usage.teacher.total_tokens
+        == synthesized * FakeProcessor.TEACHER.total_tokens
+    )
+    assert (
+        outcome.usage.panel.total_tokens
+        == oracle_pass * FakeProcessor.PANEL.total_tokens
+    )
     assert outcome.usage.total_cost > 0.0
     assert outcome.usage.total_tokens == (
         outcome.usage.teacher.total_tokens + outcome.usage.panel.total_tokens

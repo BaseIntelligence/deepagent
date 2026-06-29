@@ -9,6 +9,8 @@ test-file classification, AST parsing/mutation, and the in-Docker mutation run
 
 from __future__ import annotations
 
+import re
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -96,6 +98,34 @@ class JavaScriptAdapter(LanguageAdapter):
         needs, and ``node --test`` remains available for synthesized F2P tests.
         """
         return "npm test"
+
+    def apply_p2p_exclusions(self, command: str, exclusions: Sequence[str]) -> str:
+        """Pass a Mocha ``--grep <regex> --invert`` filter to skip the named tests.
+
+        The repo's ``npm test`` script ultimately drives Mocha; npm forwards
+        everything after ``--`` to that script, so a ``--grep`` regex matching the
+        excluded test titles plus ``--invert`` de-selects exactly the
+        fix-independent self-tests from the baseline/P2P run.
+        """
+        names = [e.strip() for e in exclusions if e.strip()]
+        if not names:
+            return command
+        pattern = "(" + "|".join(re.escape(n) for n in names) + ")"
+        return f"{command} -- --grep {shlex.quote(pattern)} --invert"
+
+    def select_tests(self, command: str, names: Sequence[str]) -> str:
+        """Pass a Mocha ``--grep <regex>`` filter to run ONLY the named tests.
+
+        The positive counterpart of :meth:`apply_p2p_exclusions` (same
+        ``npm test`` / Mocha forwarding, without ``--invert``): the ``--grep``
+        regex selects exactly the F2P-flipping test titles so they run via the
+        repo's configured runner rather than the ``node --test`` standard runner.
+        """
+        selected = [n.strip() for n in names if n.strip()]
+        if not selected:
+            return command
+        pattern = "(" + "|".join(re.escape(n) for n in selected) + ")"
+        return f"{command} -- --grep {shlex.quote(pattern)}"
 
     def is_test_file(self, path: PathLike) -> bool:
         p = Path(path)

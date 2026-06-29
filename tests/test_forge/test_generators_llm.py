@@ -333,6 +333,49 @@ def test_pr_mirror_inverts_a_real_pr(tmp_path: Path) -> None:
     assert details["teacher"]["usage"]["total_tokens"] == 28
 
 
+def test_pr_mirror_records_pr_test_files(tmp_path: Path) -> None:
+    """A PR touching source + a test file records the test file as F2P input.
+
+    The source file is reverted (the manufactured fault); the PR's own test file
+    is NOT reverted but is recorded in provenance so the pilot can run it as the
+    isolated F2P (it FAILS once the source regresses, PASSES on gold).
+    """
+    repo = _pr_repo(tmp_path)
+    _write(repo, "test_mod.py", PR_HEAD)
+    pr = MergedPullRequest(
+        number=99,
+        sha="c" * 40,
+        repo="octocat/demo",
+        files=[
+            PrFileChange(
+                path="mod.py",
+                patch=make_patch("mod.py", PR_BASE.encode(), PR_HEAD.encode()),
+            ),
+            PrFileChange(
+                path="test_mod.py",
+                patch=make_patch("test_mod.py", PR_BASE.encode(), PR_HEAD.encode()),
+            ),
+        ],
+    )
+    candidate = PrMirrorGenerator(
+        resolver=_FakeResolver(pr),
+        inverter=_FakeInverter({"mod.py": PR_BASE}),
+    ).generate(GenerationRequest(repo_root=repo, seed=0), PythonAdapter())
+
+    # Only the source file is reverted; the test file is recorded, not mutated.
+    assert candidate.target.files == ("mod.py",)
+    assert candidate.provenance.details["test_files"] == ["test_mod.py"]
+
+
+def test_pr_mirror_records_no_test_files_when_pr_has_none(tmp_path: Path) -> None:
+    repo = _pr_repo(tmp_path)
+    candidate = PrMirrorGenerator(
+        resolver=_FakeResolver(_merged_pr()),
+        inverter=_FakeInverter({"mod.py": PR_BASE}),
+    ).generate(GenerationRequest(repo_root=repo, seed=0), PythonAdapter())
+    assert candidate.provenance.details["test_files"] == []
+
+
 def test_pr_mirror_mutation_is_semantic_inverse_of_pr_diff(tmp_path: Path) -> None:
     repo = _pr_repo(tmp_path)
     pr = _merged_pr()

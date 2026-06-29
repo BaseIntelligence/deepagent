@@ -9,6 +9,8 @@ test-file classification, AST parsing/mutation, and the in-Docker mutation run
 from __future__ import annotations
 
 import posixpath
+import re
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -94,6 +96,33 @@ class GoAdapter(LanguageAdapter):
             pattern = "|".join(names)
             return f"go test -run '^({pattern})$' {scope}"
         return f"go test {scope}"
+
+    def apply_p2p_exclusions(self, command: str, exclusions: Sequence[str]) -> str:
+        """Append a ``go test -skip '^(Name1|Name2)$'`` filter to skip the named tests.
+
+        Go's test runner (1.20+) honors ``-skip <regex>`` to de-select tests whose
+        name matches, so the fix-independent / F2P-flipping tests are kept out of
+        the baseline/P2P run without touching any other test. The names are
+        anchored so a prefix never accidentally skips a sibling.
+        """
+        names = [e.strip() for e in exclusions if e.strip()]
+        if not names:
+            return command
+        pattern = "^(" + "|".join(re.escape(n) for n in names) + ")$"
+        return f"{command} -skip {shlex.quote(pattern)}"
+
+    def select_tests(self, command: str, names: Sequence[str]) -> str:
+        """Append a ``go test -run '^(Name1|Name2)$'`` filter to run ONLY them.
+
+        The positive counterpart of :meth:`apply_p2p_exclusions`: ``-run`` keeps
+        only tests whose anchored name matches, so the named (F2P-flipping) tests
+        run via the repo's own ``go test`` runner without touching siblings.
+        """
+        selected = [n.strip() for n in names if n.strip()]
+        if not selected:
+            return command
+        pattern = "^(" + "|".join(re.escape(n) for n in selected) + ")$"
+        return f"{command} -run {shlex.quote(pattern)}"
 
     def is_test_file(self, path: PathLike) -> bool:
         return Path(path).name.endswith("_test.go")

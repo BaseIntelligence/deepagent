@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -379,8 +380,14 @@ class EnvBuilder:
         Checks out exactly ``spec.commit`` (host side, unless an already-checked-
         out ``workdir`` is supplied) and drives the Docker build/baseline/commit
         flow. The pinned-SHA checkout is verified so the image is built from the
-        recorded commit, never a moving branch tip.
+        recorded commit, never a moving branch tip. The spec's optional per-repo
+        overrides (baseline install, baseline/P2P test command, P2P exclusions)
+        are threaded in; unset overrides fall back to the adapter defaults.
         """
+        install_override = list(spec.baseline_install) or None
+        baseline_command_override = spec.baseline_test or None
+        p2p_exclusions = spec.p2p_exclusions
+
         if workdir is not None:
             return self._build_in_docker(
                 repo_path=Path(workdir),
@@ -388,6 +395,9 @@ class EnvBuilder:
                 language=spec.language,
                 commit=spec.commit,
                 url=spec.url,
+                install_override=install_override,
+                baseline_command_override=baseline_command_override,
+                p2p_exclusions=p2p_exclusions,
             )
 
         tmp = Path(tempfile.mkdtemp(prefix="swe-forge-envbuild-"))
@@ -408,6 +418,9 @@ class EnvBuilder:
                 language=spec.language,
                 commit=spec.commit,
                 url=spec.url,
+                install_override=install_override,
+                baseline_command_override=baseline_command_override,
+                p2p_exclusions=p2p_exclusions,
             )
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -481,6 +494,9 @@ class EnvBuilder:
         language: str,
         commit: str,
         url: str,
+        install_override: Sequence[str] | None = None,
+        baseline_command_override: str | None = None,
+        p2p_exclusions: Sequence[str] = (),
     ) -> EnvBuildResult:
         logs: dict[str, str] = {}
 
@@ -497,8 +513,19 @@ class EnvBuilder:
             )
 
         base_image = adapter.base_image()
-        install_commands = adapter.baseline_install_commands(repo_path)
-        baseline_cmd = adapter.baseline_test_command(repo_path)
+        # Per-repo overrides take precedence; otherwise fall back to the adapter
+        # defaults. Overrides live on the RepoSpec so the stage stays
+        # language-agnostic (no `if language ==` here).
+        install_commands = (
+            list(install_override)
+            if install_override
+            else adapter.baseline_install_commands(repo_path)
+        )
+        baseline_cmd = baseline_command_override or adapter.baseline_test_command(
+            repo_path
+        )
+        if p2p_exclusions:
+            baseline_cmd = adapter.apply_p2p_exclusions(baseline_cmd, p2p_exclusions)
         workdir = self._workspace_dir
 
         try:

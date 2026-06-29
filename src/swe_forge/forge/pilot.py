@@ -49,6 +49,7 @@ from typing import Protocol
 
 from swe_forge.forge.adapters import (
     AdapterRegistry,
+    LanguageAdapter,
     NoAdapterFoundError,
     build_default_registry,
 )
@@ -78,6 +79,7 @@ from swe_forge.forge.models import (
 from swe_forge.forge.oracle import (
     DEFAULT_FLAKINESS_RUNS,
     DEFAULT_KILL_THRESHOLD,
+    HiddenTest,
     run_oracle_pipeline,
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
@@ -233,6 +235,7 @@ class CandidatePlan:
             "file": self.file,
             "symbol": self.symbol,
             "op": self.op,
+            "params": dict(self.params),
         }
 
 
@@ -307,9 +310,7 @@ class CandidateProcessor(Protocol):
 class GoldEvalFn(Protocol):
     """The Stage-5 gold-eval seam (real Docker by default; injectable for tests)."""
 
-    def __call__(
-        self, tasks_dir: Path | str, *, runs: int = ...
-    ) -> GoldEvalReport: ...
+    def __call__(self, tasks_dir: Path | str, *, runs: int = ...) -> GoldEvalReport: ...
 
 
 def candidate_trace(candidate: Candidate) -> F2PTrace:
@@ -331,8 +332,7 @@ def candidate_trace(candidate: Candidate) -> F2PTrace:
                 name=name,
                 file=file,
                 message=(
-                    f"{target} returns an incorrect result for the "
-                    "manufactured fault"
+                    f"{target} returns an incorrect result for the manufactured fault"
                 ),
             ),
         )
@@ -343,9 +343,7 @@ def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith("\n") else text + "\n"
 
 
-def _materialize_broken_tree(
-    checkout: Path, candidate: Candidate, dest: Path
-) -> Path:
+def _materialize_broken_tree(checkout: Path, candidate: Candidate, dest: Path) -> Path:
     """Copy the gold checkout, apply the forward mutation, return the broken tree.
 
     The export layer re-inits this tree to a single orphan commit before shipping
@@ -417,9 +415,7 @@ class LiveCandidateProcessor:
         self._registry = registry or build_default_registry()
         self._generators = build_default_generator_registry()
 
-    async def process(
-        self, plan: CandidatePlan, workdir: Path
-    ) -> CandidateArtifacts:
+    async def process(self, plan: CandidatePlan, workdir: Path) -> CandidateArtifacts:
         art = CandidateArtifacts(plan=plan)
         try:
             return await self._process(plan, workdir, art)
@@ -453,9 +449,7 @@ class LiveCandidateProcessor:
 
         build = EnvBuilder().build(plan.repo, workdir=checkout)
         if not build.success or build.env_image is None:
-            art.failure_reason = (
-                f"env build {build.failure_kind}: {build.reason}"
-            )
+            art.failure_reason = f"env build {build.failure_kind}: {build.reason}"
             return art
         art.env_image = build.env_image
         art.repo_url = plan.repo.url
@@ -481,9 +475,16 @@ class LiveCandidateProcessor:
         _accumulate_spec_usage(art, spec)
 
         # -- Stage 3: oracle pipeline (NON-OFFLINE; real teacher) ---------- #
+        baseline_command = plan.repo.baseline_test or adapter.baseline_test_command(
+            checkout
+        )
+        provided_tests = _pr_mirror_provided_tests(
+            candidate, adapter, plan.repo, baseline_command
+        )
         oracle = await run_oracle_pipeline(
             candidate,
             art.env_image,
+            provided_tests=provided_tests,
             establish_synthesizer=AgenticTestSynthesizer(),
             mutation_synthesizer=MutationKillSynthesizer(),
             variant_generator=TeacherVariantGenerator(),
@@ -518,11 +519,60 @@ class LiveCandidateProcessor:
         _accumulate_panel_usage(art, outcome.report)
 
         if outcome.report.is_keep:
-            broken = _materialize_broken_tree(
-                checkout, candidate, work / "broken"
-            )
+            broken = _materialize_broken_tree(checkout, candidate, work / "broken")
             art.broken_tree = broken
         return art
+
+
+def _pr_mirror_provided_tests(
+    candidate: Candidate,
+    adapter: LanguageAdapter,
+    repo: RepoSpec,
+    baseline_command: str,
+) -> list[HiddenTest]:
+    """Build the isolated F2P tests a ``pr_mirror`` candidate reintroduces.
+
+    A merged bug-fix PR ships the test that pins the fixed behavior; the current
+    checkout already contains it, so reverting only the source (the mutation)
+    makes that test FAIL on the broken tree and PASS on gold -- an isolated F2P.
+
+    When the repo curates the flipping-test names (``RepoSpec.p2p_exclusions``,
+    the very tests the baked baseline excludes to keep P2P green on broken), the
+    F2P runs exactly those tests via the repo's OWN runner -- ``select_tests``
+    narrows ``baseline_command`` positively, the mirror of the baked exclusion.
+    This is what makes a non-standard-runner repo (e.g. JS/TS ``npm test``
+    driving Mocha, which the ``node --test`` standard runner cannot execute)
+    confirm its F2P at all. Otherwise it falls back to running each recorded PR
+    test file via the standard runner. ``files=()`` so nothing is written/removed
+    and the test the mutation leaves in place is exactly what runs.
+    """
+    if candidate.generator != "pr_mirror":
+        return []
+    names = [n.strip() for n in repo.p2p_exclusions if n.strip()]
+    if names and baseline_command.strip():
+        return [
+            HiddenTest(
+                test_id=adapter.select_tests(baseline_command, names),
+                files=(),
+                origin="provided",
+            )
+        ]
+    details = candidate.provenance.details
+    raw = details.get("test_files") if isinstance(details, dict) else None
+    if not isinstance(raw, list):
+        return []
+    tests: list[HiddenTest] = []
+    for path in raw:
+        if not isinstance(path, str) or not path.strip():
+            continue
+        tests.append(
+            HiddenTest(
+                test_id=adapter.test_command((path,)),
+                files=(),
+                origin="provided",
+            )
+        )
+    return tests
 
 
 def _checkout_repo(repo: RepoSpec, dest: Path) -> str | None:
@@ -558,7 +608,11 @@ def _author_spec(
         return generate_spec(candidate, trace, checkout, adapter)  # type: ignore[arg-type]
     except (SpecError, MissingCredentialsError, ModelRoutingError):
         return generate_spec(
-            candidate, trace, checkout, adapter, author=TemplateSpecAuthor()  # type: ignore[arg-type]
+            candidate,
+            trace,
+            checkout,
+            adapter,  # type: ignore[arg-type]
+            author=TemplateSpecAuthor(),
         )
 
 
@@ -577,9 +631,7 @@ def _accumulate_spec_usage(art: CandidateArtifacts, spec: GeneratedSpec) -> None
             art.teacher_cost += float(cost)
 
 
-def _accumulate_panel_usage(
-    art: CandidateArtifacts, report: CalibrationReport
-) -> None:
+def _accumulate_panel_usage(art: CandidateArtifacts, report: CalibrationReport) -> None:
     accounting = report.details.get("usage_accounting")
     if not isinstance(accounting, dict):
         return
@@ -637,27 +689,55 @@ def build_pilot_plans(
     seeds_per_cell: int = 2,
     languages: Sequence[str] | None = None,
     max_plans: int | None = None,
+    include_pr_mirror: bool = True,
+    include_structural: bool = True,
 ) -> list[CandidatePlan]:
     """Build the candidate plan list (Stage 0 sourcing) for a pilot run.
 
-    Enumerates ``repo x generator x seed`` cells across the curated source
-    registry (one repo per language). The per-repo cap bounds the SHIPPED set
-    (acquired at keep time), not the candidate count, so the pilot is fed many
-    candidates per repo and lets the band filter select the in-band ones.
+    Two plan families are emitted from the curated source registry:
+
+    * a **``pr_mirror``** plan for every allowlist entry
+      (:attr:`RepoSpec.has_pr_mirror`), pinned to that entry's own
+      ``base_commit`` and carrying ``params={"repo", "pr_number"}`` so the
+      generator reconstructs the reverted (isolated-F2P) fault; and
+    * **structural-generator** plans (``ast_mutation``/``function_removal``/...)
+      for every diversified MODULAR repo (:attr:`RepoSpec.structural_source`),
+      enumerated over ``generator x seed`` cells.
+
+    The per-repo cap bounds the SHIPPED set (acquired at keep time), not the
+    candidate count, so the funnel is fed many candidates per repo and the band
+    filter selects the in-band ones. The GitHub token the ``pr_mirror`` generator
+    needs is read from the environment at run time and never appears in a plan.
     """
     src = registry or build_source_registry()
     gens = generators_by_language or DEFAULT_GENERATORS_BY_LANGUAGE
     plans: list[CandidatePlan] = []
+
+    def _capped() -> bool:
+        return max_plans is not None and len(plans) >= max_plans
+
     for repo in src.specs():
         if languages is not None and repo.language not in languages:
             continue
-        for generator in gens.get(repo.language, ("ast_mutation",)):
-            for seed in range(seeds_per_cell):
-                plans.append(
-                    CandidatePlan(repo=repo, generator=generator, seed=seed)
+        if include_pr_mirror and repo.has_pr_mirror:
+            plans.append(
+                CandidatePlan(
+                    repo=repo,
+                    generator=repo.preferred_generator,
+                    seed=0,
+                    params=repo.pr_params(),
                 )
-                if max_plans is not None and len(plans) >= max_plans:
-                    return plans
+            )
+            if _capped():
+                return plans
+        if include_structural and repo.structural_source:
+            for generator in gens.get(repo.language, ("ast_mutation",)):
+                for seed in range(seeds_per_cell):
+                    plans.append(
+                        CandidatePlan(repo=repo, generator=generator, seed=seed)
+                    )
+                    if _capped():
+                        return plans
     return plans
 
 
@@ -714,9 +794,7 @@ class PilotOutcome:
 
     @property
     def languages_shipped(self) -> list[str]:
-        return sorted(
-            {d.plan.language for d in self.dispositions if d.stage == "kept"}
-        )
+        return sorted({d.plan.language for d in self.dispositions if d.stage == "kept"})
 
     @property
     def headline_a_pass(self) -> bool:
@@ -822,7 +900,9 @@ async def run_pilot(
                         plan,
                         "oracle_reject",
                         oracle_verdict=oracle.verdict if oracle else "missing",
-                        reason="; ".join(oracle.reasons) if oracle else art.failure_reason,
+                        reason="; ".join(oracle.reasons)
+                        if oracle
+                        else art.failure_reason,
                     )
                 )
                 continue
@@ -835,7 +915,9 @@ async def run_pilot(
                         plan,
                         "calib_drop",
                         oracle_verdict=oracle.verdict,
-                        band_verdict=calibration.band_verdict if calibration else "missing",
+                        band_verdict=calibration.band_verdict
+                        if calibration
+                        else "missing",
                         reason=calibration.reasons[0]
                         if calibration and calibration.reasons
                         else "",
@@ -930,7 +1012,9 @@ def _attach_task_ids(
     dispositions: list[CandidateDisposition], result: BatchExportResult
 ) -> None:
     """Best-effort: map each kept disposition to its exported task id (by order)."""
-    shipped_ids = [r.task_id for r in result.results if r.status in ("shipped", "skipped")]
+    shipped_ids = [
+        r.task_id for r in result.results if r.status in ("shipped", "skipped")
+    ]
     kept = [d for d in dispositions if d.stage == "kept"]
     for disposition, task_id in zip(kept, shipped_ids):
         disposition.task_id = task_id

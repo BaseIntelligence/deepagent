@@ -129,14 +129,21 @@ class PrInverter(Protocol):
 
 
 class TeacherPrInverter:
-    """Default :class:`PrInverter` backed by the LiteLLM teacher client."""
+    """Default :class:`PrInverter` backed by the LiteLLM teacher client.
 
-    def __init__(self, client: TeacherClient, *, max_tokens: int = 2048) -> None:
+    The default ``max_tokens`` is generous (8192) so the WHOLE reverted source
+    file fits the teacher's completion budget even for the larger allowlist
+    files (e.g. ``url.py``/``stringify.js`` run a few hundred lines); a truncated
+    completion would never reproduce the deterministic pre-PR content and the
+    candidate would be (correctly) rejected.
+    """
+
+    def __init__(self, client: TeacherClient, *, max_tokens: int = 8192) -> None:
         self._client = client
         self._max_tokens = max_tokens
 
     @classmethod
-    def from_settings(cls, *, max_tokens: int = 2048) -> "TeacherPrInverter":
+    def from_settings(cls, *, max_tokens: int = 8192) -> "TeacherPrInverter":
         return cls(TeacherClient.from_settings(), max_tokens=max_tokens)
 
     def __call__(self, ctx: PrInversionContext) -> InversionProposal:
@@ -353,9 +360,34 @@ class PrMirrorGenerator(BugGenerator):
                 )
 
             mutation, oracle = self._build_patches(accepted)
+            test_files = self._pr_test_files(adapter, pr)
             return self._build_candidate(
-                request, adapter, pr, accepted, proposal, mutation, oracle
+                request,
+                adapter,
+                pr,
+                accepted,
+                proposal,
+                mutation,
+                oracle,
+                test_files,
             )
+
+    def _pr_test_files(
+        self, adapter: LanguageAdapter, pr: MergedPullRequest
+    ) -> list[str]:
+        """The PR's own (post-merge) test files, present in the current checkout.
+
+        These already carry the assertion the bug-fix introduced, so they FAIL
+        once the source is reverted (the broken tree) and PASS on gold. The pilot
+        runs them as the isolated F2P; the matching ``p2p_exclusions`` keep them
+        out of the regression suite so P2P stays green on the broken tree.
+        """
+        files: list[str] = []
+        for change in pr.files:
+            rel = change.path
+            if adapter.is_test_file(rel) and Path(rel).is_file():
+                files.append(rel)
+        return files
 
     def _compute_inverses(
         self, adapter: LanguageAdapter, pr: MergedPullRequest
@@ -439,6 +471,7 @@ class PrMirrorGenerator(BugGenerator):
         proposal: InversionProposal,
         mutation: str,
         oracle: str,
+        test_files: list[str],
     ) -> Candidate:
         rels = tuple(rel for rel, _, _ in accepted)
         provenance = Provenance(
@@ -454,6 +487,7 @@ class PrMirrorGenerator(BugGenerator):
                 "pr_url": pr.url,
                 "pr_title": pr.title,
                 "files": list(rels),
+                "test_files": list(test_files),
                 "teacher": merge_usage(proposal.usage),
             },
         )

@@ -214,6 +214,38 @@ class LanguageAdapter(ABC):
         """
         return self.test_command()
 
+    def apply_p2p_exclusions(self, command: str, exclusions: Sequence[str]) -> str:
+        """Return ``command`` narrowed to SKIP the named fix-independent tests.
+
+        Some repos carry self-tests that are green/red independently of the
+        manufactured fault (e.g. a version-constant assertion that lags
+        ``package.json`` at a non-release commit). Such a test is NOT part of the
+        P2P regression contract, so the env build (and the P2P set recorded on the
+        ``EnvImage``) must exclude it. The exclusion is applied language-agnostic
+        from the stage's perspective (the stage only calls this method); the
+        per-language test-runner syntax lives here. The default is a no-op (return
+        ``command`` unchanged); adapters whose runner supports name-based skipping
+        override it.
+        """
+        return command
+
+    def select_tests(self, command: str, names: Sequence[str]) -> str:
+        """Return ``command`` narrowed to RUN ONLY the named tests.
+
+        The positive counterpart of :meth:`apply_p2p_exclusions`: given the
+        repo's own baseline command (its real runner) and the names of the
+        fault-isolating F2P tests, return a command that runs exactly those tests
+        via that runner. This lets a ``pr_mirror`` candidate confirm its isolated
+        F2P (fails-on-broken / passes-on-gold) using the repo's configured runner
+        rather than the standard :meth:`test_command` runner, which matters when
+        the two differ (e.g. JS/TS ``npm test`` driving Mocha vs ``node --test``).
+        The stage only calls this method; the per-language runner syntax lives in
+        the concrete adapter. The default returns ``command`` unchanged (run the
+        whole suite, which still FAILS on the broken tree because a named test
+        fails); adapters whose runner supports name-based selection override it.
+        """
+        return command
+
     @abstractmethod
     def parse_symbols(self, file: PathLike) -> list[Symbol]:
         """Parse ``file`` and return its declared, locatable symbols."""

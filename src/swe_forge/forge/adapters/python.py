@@ -228,6 +228,32 @@ class PythonAdapter(LanguageAdapter):
             commands.append("pip install pytest")
         return commands
 
+    def apply_p2p_exclusions(self, command: str, exclusions: Sequence[str]) -> str:
+        """Append a pytest ``-k 'not (...)'`` filter that skips the named tests.
+
+        pytest's ``-k`` matches a substring/expression against test node names,
+        so the fix-independent self-tests are de-selected from the baseline/P2P
+        run without touching any other test.
+        """
+        names = [e.strip() for e in exclusions if e.strip()]
+        if not names:
+            return command
+        expr = "not (" + " or ".join(names) + ")"
+        return f"{command} -k {shlex.quote(expr)}"
+
+    def select_tests(self, command: str, names: Sequence[str]) -> str:
+        """Append a pytest ``-k '(...)'`` filter that runs ONLY the named tests.
+
+        pytest's ``-k`` expression de-selects everything that does not match, so
+        the resulting command runs exactly the named (F2P-flipping) tests via the
+        repo's own pytest runner.
+        """
+        selected = [n.strip() for n in names if n.strip()]
+        if not selected:
+            return command
+        expr = "(" + " or ".join(selected) + ")"
+        return f"{command} -k {shlex.quote(expr)}"
+
     def is_test_file(self, path: PathLike) -> bool:
         return bool(_TEST_FILE_RE.fullmatch(Path(path).name))
 

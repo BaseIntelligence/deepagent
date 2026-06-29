@@ -115,6 +115,157 @@ class TestAdapterBaseline:
 
 
 # --------------------------------------------------------------------------- #
+# Adapter P2P-exclusion application (offline).
+# --------------------------------------------------------------------------- #
+class TestAdapterP2PExclusions:
+    def test_python_appends_k_not_filter(self) -> None:
+        adapter = build_default_registry().get("python")
+        cmd = adapter.apply_p2p_exclusions(
+            "python -m pytest", ["test_flaky", "test_other"]
+        )
+        assert cmd == "python -m pytest -k 'not (test_flaky or test_other)'"
+
+    def test_python_no_exclusions_is_noop(self) -> None:
+        adapter = build_default_registry().get("python")
+        assert (
+            adapter.apply_p2p_exclusions("python -m pytest", []) == "python -m pytest"
+        )
+
+    def test_javascript_appends_mocha_invert(self) -> None:
+        adapter = build_default_registry().get("javascript")
+        cmd = adapter.apply_p2p_exclusions(
+            "npm test", ["should export the version number"]
+        )
+        assert cmd.startswith("npm test -- --grep ")
+        assert "--invert" in cmd
+        # The excluded title appears as a regex (whitespace escaped by re.escape).
+        assert "version" in cmd and "export" in cmd
+
+    def test_javascript_no_exclusions_is_noop(self) -> None:
+        adapter = build_default_registry().get("javascript")
+        assert adapter.apply_p2p_exclusions("npm test", []) == "npm test"
+
+    def test_go_appends_skip_filter(self) -> None:
+        adapter = build_default_registry().get("go")
+        cmd = adapter.apply_p2p_exclusions(
+            "go test ./...", ["TestMapClaims_ZeroIsExpired", "TestOther"]
+        )
+        # Go 1.20+ -skip de-selects the named tests, anchored so a prefix never
+        # accidentally skips a sibling.
+        assert cmd == (
+            "go test ./... -skip '^(TestMapClaims_ZeroIsExpired|TestOther)$'"
+        )
+
+    def test_go_no_exclusions_is_noop(self) -> None:
+        adapter = build_default_registry().get("go")
+        assert adapter.apply_p2p_exclusions("go test ./...", []) == "go test ./..."
+
+
+# --------------------------------------------------------------------------- #
+# Adapter positive test selection (pr_mirror F2P via the repo's own runner).
+# --------------------------------------------------------------------------- #
+class TestAdapterSelectTests:
+    def test_python_appends_k_select_filter(self) -> None:
+        adapter = build_default_registry().get("python")
+        cmd = adapter.select_tests("python -m pytest", ["test_between", "test_other"])
+        assert cmd == "python -m pytest -k '(test_between or test_other)'"
+        assert "not (" not in cmd
+
+    def test_javascript_select_uses_mocha_grep_without_invert(self) -> None:
+        adapter = build_default_registry().get("javascript")
+        cmd = adapter.select_tests("npm test", ["should validate ISO 8601 dates"])
+        assert cmd.startswith("npm test -- --grep ")
+        assert "--invert" not in cmd
+        assert "ISO" in cmd and "8601" in cmd
+
+    def test_go_select_uses_run_anchored(self) -> None:
+        adapter = build_default_registry().get("go")
+        cmd = adapter.select_tests("go test ./...", ["TestVersion7Monotonicity"])
+        assert cmd == "go test ./... -run '^(TestVersion7Monotonicity)$'"
+
+    def test_select_no_names_is_noop(self) -> None:
+        registry = build_default_registry()
+        for language, base in (
+            ("python", "python -m pytest"),
+            ("javascript", "npm test"),
+            ("go", "go test ./..."),
+        ):
+            adapter = registry.get(language)
+            assert adapter.select_tests(base, []) == base
+
+
+# --------------------------------------------------------------------------- #
+# Per-repo override threading (offline; Docker mocked).
+# --------------------------------------------------------------------------- #
+class TestBuilderOverrides:
+    def _spec(self, **overrides: object) -> RepoSpec:
+        base: dict[str, object] = {
+            "repo_id": "python-validators/validators#411",
+            "url": "https://github.com/python-validators/validators.git",
+            "commit": "25fcef05c293def421fd3f6714403a54fce993cf",
+            "commit_date": "2025-03-28T20:52:14Z",
+            "language": "python",
+            "license": "MIT",
+            "instance_cap": 2,
+        }
+        base.update(overrides)
+        return RepoSpec(**base)  # type: ignore[arg-type]
+
+    def _builder(self, fake: FakeDocker) -> EnvBuilder:
+        return EnvBuilder(
+            docker=fake, registry=build_default_registry(), run_id="testrun"
+        )
+
+    def test_install_and_baseline_overrides_threaded(self, py_repo: Path) -> None:
+        fake = FakeDocker(exec_results=[_OK, _OK, ExecOutcome(0, "10 passed")])
+        spec = self._spec(
+            baseline_install=[
+                "pip install -e '.[crypto-eth-addresses]'",
+                "pip install pytest",
+            ],
+            baseline_test="python -m pytest -q",
+        )
+        result = self._builder(fake).build(spec, workdir=py_repo)
+
+        assert result.success is True
+        env = result.env_image
+        assert env is not None
+        assert env.install_commands == [
+            "pip install -e '.[crypto-eth-addresses]'",
+            "pip install pytest",
+        ]
+        assert env.baseline_test_command == "python -m pytest -q"
+        # The override install commands were actually executed in the container,
+        # and the baseline run used the override command (exec order: prep,
+        # install, baseline).
+        assert "crypto-eth-addresses" in fake.exec_scripts[1]
+        assert fake.exec_scripts[2] == "python -m pytest -q"
+
+    def test_p2p_exclusions_applied_to_recorded_baseline(self, py_repo: Path) -> None:
+        fake = FakeDocker(exec_results=[_OK, _OK, ExecOutcome(0, "passed")])
+        spec = self._spec(p2p_exclusions=["test_version_selftest"])
+        result = self._builder(fake).build(spec, workdir=py_repo)
+
+        assert result.success is True
+        env = result.env_image
+        assert env is not None
+        # The excluded self-test is de-selected from the recorded P2P command,
+        # and that exact command is what the container ran.
+        assert "not (test_version_selftest)" in env.baseline_test_command
+        assert fake.exec_scripts[2] == env.baseline_test_command
+
+    def test_no_overrides_falls_back_to_adapter_defaults(self, py_repo: Path) -> None:
+        fake = FakeDocker(exec_results=[_OK, _OK, ExecOutcome(0, "passed")])
+        spec = self._spec()  # no per-repo overrides set
+        result = self._builder(fake).build(spec, workdir=py_repo)
+
+        env = result.env_image
+        assert env is not None
+        assert env.install_commands == ["pip install -e .", "pip install pytest"]
+        assert env.baseline_test_command == "python -m pytest"
+
+
+# --------------------------------------------------------------------------- #
 # Fake docker CLI for offline builder logic tests.
 # --------------------------------------------------------------------------- #
 class FakeDocker:

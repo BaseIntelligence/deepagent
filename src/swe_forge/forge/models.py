@@ -116,6 +116,29 @@ class RepoSpec:
     used: int = 0
     default_branch: str = ""
     description: str = ""
+    #: Optional per-repo overrides (empty = fall back to the adapter defaults).
+    #: ``baseline_install`` overrides the adapter's baseline install commands;
+    #: ``baseline_test`` overrides the baseline/P2P test command;
+    #: ``p2p_exclusions`` names fix-independent self-tests the env build must
+    #: SKIP from the baseline/P2P suite (applied language-agnostically by the
+    #: adapter). These let a repo whose green baseline differs from the bare
+    #: adapter default join the registry without any ``if language ==`` in the
+    #: stage code.
+    baseline_install: tuple[str, ...] = ()
+    baseline_test: str = ""
+    p2p_exclusions: tuple[str, ...] = ()
+    #: ``pr_mirror`` generation params: the upstream ``owner/name`` slug and the
+    #: merged ``pr_number`` whose fault this entry reintroduces, plus the
+    #: preferred ``pr_generator`` (defaults to ``pr_mirror``). A non-zero
+    #: ``pr_number`` + a slug ``pr_repo`` marks an allowlist entry the pilot
+    #: drives through the ``pr_mirror`` generator (see :prop:`has_pr_mirror`).
+    pr_repo: str = ""
+    pr_number: int = 0
+    pr_generator: str = ""
+    #: When ``True`` the pilot also runs the structural generators
+    #: (ast_mutation/function_removal/...) on this repo. Set on the diversified
+    #: MODULAR seeds where a structural mutation can isolate a fault.
+    structural_source: bool = False
 
     def __post_init__(self) -> None:
         for field_name in ("repo_id", "url", "commit", "commit_date", "license"):
@@ -152,6 +175,31 @@ class RepoSpec:
                 f"instance_cap ({self.instance_cap})"
             )
 
+        # Normalize the optional override containers to immutable tuples of
+        # non-empty strings (tolerant of a list passed at construction).
+        self.baseline_install = tuple(
+            str(c).strip() for c in self.baseline_install if str(c).strip()
+        )
+        self.p2p_exclusions = tuple(
+            str(e).strip() for e in self.p2p_exclusions if str(e).strip()
+        )
+        self.baseline_test = str(self.baseline_test).strip()
+        self.pr_repo = str(self.pr_repo).strip()
+        self.pr_generator = str(self.pr_generator).strip()
+
+        if self.pr_number < 0:
+            raise ModelError(f"RepoSpec.pr_number must be >= 0; got {self.pr_number}")
+        if self.pr_generator and self.pr_generator not in GENERATOR_NAMES:
+            raise ModelError(
+                f"RepoSpec.pr_generator must be one of {GENERATOR_NAMES}; "
+                f"got {self.pr_generator!r}"
+            )
+        if self.pr_number > 0 and "/" not in self.pr_repo:
+            raise ModelError(
+                "RepoSpec.pr_repo must be an 'owner/name' slug when pr_number is "
+                f"set; got {self.pr_repo!r}"
+            )
+
     @property
     def remaining(self) -> int:
         """Instances still available before the cap is reached."""
@@ -161,6 +209,30 @@ class RepoSpec:
     def at_cap(self) -> bool:
         """``True`` when no further instances may be acquired."""
         return self.used >= self.instance_cap
+
+    @property
+    def has_pr_mirror(self) -> bool:
+        """``True`` iff this entry is a ``pr_mirror`` allowlist source.
+
+        An allowlist entry pins its own ``base_commit`` (the merged-PR state) and
+        carries the upstream ``pr_repo`` slug + ``pr_number`` the ``pr_mirror``
+        generator reconstructs the reverted fault from.
+        """
+        return self.pr_number > 0 and "/" in self.pr_repo
+
+    @property
+    def preferred_generator(self) -> str:
+        """The generator to drive a ``pr_mirror`` entry (defaults to ``pr_mirror``)."""
+        return self.pr_generator or "pr_mirror"
+
+    def pr_params(self) -> dict[str, object]:
+        """The ``pr_mirror`` generation params (``repo`` slug + ``pr_number``).
+
+        Returned as the ``CandidatePlan.params`` payload the generator reads; the
+        GitHub token is never part of this (it is read from the environment and
+        never logged).
+        """
+        return {"repo": self.pr_repo, "pr_number": self.pr_number}
 
     def acquire(self) -> InstanceGrant:
         """Request one task instance, enforcing the per-repo cap.
@@ -222,6 +294,13 @@ class RepoSpec:
             "remaining": self.remaining,
             "default_branch": self.default_branch,
             "description": self.description,
+            "baseline_install": list(self.baseline_install),
+            "baseline_test": self.baseline_test,
+            "p2p_exclusions": list(self.p2p_exclusions),
+            "pr_repo": self.pr_repo,
+            "pr_number": self.pr_number,
+            "pr_generator": self.pr_generator,
+            "structural_source": self.structural_source,
         }
 
 
