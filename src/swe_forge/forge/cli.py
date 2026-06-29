@@ -68,6 +68,14 @@ from swe_forge.forge.gold_eval import (
 from swe_forge.forge.gold_eval import (
     DEFAULT_TIMEOUT as GOLD_EVAL_TIMEOUT,
 )
+from swe_forge.forge.report import (
+    DEFAULT_FRONTIER_THRESHOLD,
+    BenchmarkReport,
+    GoldSummary,
+    ReportError,
+    build_benchmark_report,
+    write_report,
+)
 from swe_forge.forge.generators import (
     GenerationError,
     GenerationRequest,
@@ -3216,3 +3224,158 @@ def gold_eval_cmd(
 
     ok = report.shipped_count > 0 and report.passed
     raise typer.Exit(code=0 if ok else 1)
+
+
+def _print_benchmark_report(report: BenchmarkReport) -> None:
+    verdict = "[green]PASS[/green]" if report.passed else "[red]FAIL[/red]"
+    console.print(
+        f"[bold]report[/bold] {verdict}  shipped={report.shipped_count}  "
+        f"gold={'%.0f%%' % (report.gold.gold_rate * 100) if report.gold.measured else 'n/a'}  "
+        f"frontier={report.frontier_solve_rate:.4f} (< {report.frontier_threshold:.4f}, > 0: "
+        f"{report.headline_b_pass})"
+    )
+    console.print(
+        f"  counts: tasks={report.counts.tasks} jsonl={report.counts.jsonl} "
+        f"parquet={report.counts.parquet} reconciled={report.counts.reconciled}"
+    )
+    console.print(
+        f"  provenance: complete={report.completeness.complete}/"
+        f"{report.completeness.checked} "
+        f"consistent={report.consistency.consistent}/{report.consistency.checked}"
+    )
+    tiers = ", ".join(
+        f"{tier}={report.tier_solve_rates[tier]:.4f}"
+        for tier in ("weak", "mid", "frontier")
+        if tier in report.tier_solve_rates
+    )
+    console.print(
+        f"  tiers: {tiers or 'n/a'} (weak<=mid<=frontier: {report.tier_ordering_ok})"
+    )
+    console.print(
+        f"  breakdown: generators={report.generator_breakdown} "
+        f"languages={report.language_breakdown} "
+        f"(reconciles: {report.breakdown_reconciles})"
+    )
+
+
+@app.command(name="report")
+def report_cmd(
+    out_dir: str = typer.Option(
+        ...,
+        "--out-dir",
+        help=(
+            "Export out_dir holding tasks/<id>/ plus dataset.jsonl / "
+            "dataset.parquet (or the tasks/ dir directly)."
+        ),
+    ),
+    gold_json: str | None = typer.Option(
+        None,
+        "--gold-json",
+        help="Path to a saved `gold-eval --json` report (supplies Headline A).",
+    ),
+    run_gold_eval_flag: bool = typer.Option(
+        False,
+        "--run-gold-eval",
+        help="Run gold-eval in Docker now to measure Headline A (gold=100%).",
+    ),
+    image: str | None = typer.Option(
+        None, "--image", help="gold-eval image override (with --run-gold-eval)."
+    ),
+    gold_runs: int = typer.Option(
+        DEFAULT_DETERMINISM_RUNS,
+        "--gold-runs",
+        min=1,
+        help="gold-eval --rm runs per task (with --run-gold-eval).",
+    ),
+    timeout: float = typer.Option(
+        GOLD_EVAL_TIMEOUT, "--timeout", help="gold-eval per-run timeout in seconds."
+    ),
+    docker_arg: list[str] | None = typer.Option(
+        None, "--docker-arg", help="Extra `docker run` arg for gold-eval (repeatable)."
+    ),
+    frontier_threshold: float = typer.Option(
+        DEFAULT_FRONTIER_THRESHOLD,
+        "--frontier-threshold",
+        help="HEADLINE B: the stated frontier solve-rate threshold.",
+    ),
+    band_high: float = typer.Option(
+        DEFAULT_BAND_HIGH,
+        "--band-high",
+        help="Keep-band upper edge used for the provenance consistency check.",
+    ),
+    discrimination_threshold: float = typer.Option(
+        DEFAULT_DISCRIMINATION_THRESHOLD,
+        "--discrimination-threshold",
+        help="Minimum IRT discrimination used for the consistency check.",
+    ),
+    kill_threshold: float = typer.Option(
+        DEFAULT_KILL_THRESHOLD,
+        "--kill-threshold",
+        help="Mutation-adequacy kill ratio required by the completeness check.",
+    ),
+    write: bool = typer.Option(
+        False, "--write", help="Write report.md + report.json into the out_dir."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit the JSON report."),
+) -> None:
+    """Benchmark report + provenance audit over an exported pilot set (Stage 5).
+
+    Audits provenance completeness (VAL-EXPORT-014) and gate-consistency
+    (VAL-EXPORT-015) for every shipped task, then rolls up the two headlines:
+    gold == 100% from the injected gold-eval result (HEADLINE A / VAL-EXPORT-016),
+    and a stated frontier threshold with the measured aggregate frontier
+    solve-rate strictly below it yet > 0 (HEADLINE B / VAL-EXPORT-018). Also
+    surfaces per-model solve-rates (weak <= mid <= frontier < gold), an IRT
+    summary, and a generator/language breakdown summing to the shipped total
+    (VAL-EXPORT-017), and reconciles the shipped count with the jsonl/parquet/
+    tasks counts (VAL-EXPORT-019). Exit 0 iff every check passes.
+    """
+    gold: GoldSummary | dict[str, object] | None = None
+    if gold_json is not None:
+        gpath = Path(gold_json)
+        if not gpath.is_file():
+            _fail(f"gold-eval JSON not found: {gold_json}")
+        try:
+            loaded = json.loads(gpath.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            _fail(f"invalid gold-eval JSON: {exc}")
+        if not isinstance(loaded, dict):
+            _fail("gold-eval JSON must be an object (a gold-eval --json report)")
+        gold = loaded
+    elif run_gold_eval_flag:
+        try:
+            gold_report = run_gold_eval(
+                out_dir,
+                runs=gold_runs,
+                image=image,
+                timeout=timeout,
+                extra_args=list(docker_arg or []),
+            )
+        except GoldEvalError as exc:
+            _fail(str(exc))
+        gold = GoldSummary.from_gold_eval(gold_report)
+
+    try:
+        report = build_benchmark_report(
+            out_dir,
+            gold=gold,
+            frontier_threshold=frontier_threshold,
+            band_config=BandFilterConfig(
+                band_high=band_high,
+                discrimination_threshold=discrimination_threshold,
+            ),
+            kill_threshold=kill_threshold,
+        )
+    except (ReportError, BandFilterError) as exc:
+        _fail(str(exc))
+
+    if write:
+        md_path, json_path = write_report(report, out_dir)
+        console.print(f"[dim]wrote {md_path.name} + {json_path.name}[/dim]")
+
+    if json_out:
+        typer.echo(report.to_json(indent=None))
+    else:
+        _print_benchmark_report(report)
+
+    raise typer.Exit(code=0 if report.passed else 1)

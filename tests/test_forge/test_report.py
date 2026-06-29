@@ -1,0 +1,608 @@
+"""Offline coverage of Stage 5 reporting (provenance audit + benchmark report).
+
+Exercises this feature's ``fulfills`` assertions deterministically, without
+Docker or the live endpoint, over a real exported tree (built via
+``export_batch``) plus hand-built provenance views for the negative paths:
+
+- VAL-EXPORT-014: provenance complete for 100% of shipped tasks; a missing field
+  is detected.
+- VAL-EXPORT-015: provenance consistent with the gates (oracle=pass, band=keep,
+  in-band frontier rate, discrimination >= min); an inconsistent task is flagged.
+- VAL-EXPORT-016: HEADLINE A -- report shows gold == 100% from the injected
+  gold-eval result.
+- VAL-EXPORT-017: per-model solve-rates (weak <= mid <= frontier < gold), the IRT
+  summary, and the generator/language breakdown summing to the shipped total.
+- VAL-EXPORT-018: HEADLINE B -- a stated frontier threshold and a measured
+  aggregate frontier solve-rate strictly below it yet > 0.
+- VAL-EXPORT-019: counts reconcile (jsonl == parquet == tasks/*/) and the JSON
+  form parses with every required key.
+
+The Docker gold=100% measurement that feeds Headline A is exercised by the
+gold-eval suite; here it is injected as a :class:`GoldSummary`.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from swe_forge.forge.calibrate.filter import BandFilterConfig
+from swe_forge.forge.export import ExportRequest, export_batch
+from swe_forge.forge.gold_eval import GoldEvalReport
+from swe_forge.forge.models import (
+    CalibrationReport,
+    Candidate,
+    CandidateTarget,
+    EnvImage,
+    GeneratedSpec,
+    ModelSolveRecord,
+    Provenance,
+)
+from swe_forge.forge.report import (
+    DEFAULT_FRONTIER_THRESHOLD,
+    BenchmarkReport,
+    GoldSummary,
+    ReportError,
+    TaskProvenance,
+    aggregate_panel,
+    build_benchmark_report,
+    check_provenance_completeness,
+    check_provenance_consistency,
+    count_jsonl_records,
+    count_parquet_rows,
+    load_task_provenances,
+    write_report,
+)
+
+_TS = "2026-01-01T00:00:00+00:00"
+
+_BASE_IMAGE = {
+    "python": "python:3.12-slim",
+    "javascript": "node:22-slim",
+    "go": "golang:1.22",
+}
+
+
+# --------------------------------------------------------------------------- #
+# Export fixtures (build a real tasks/<id>/ tree with provenance.json)
+# --------------------------------------------------------------------------- #
+def _candidate(*, language: str, generator: str, seed: int) -> Candidate:
+    return Candidate(
+        language=language,
+        generator=generator,
+        target=CandidateTarget(files=("src/m.py",), symbols=("total",)),
+        mutation_patch=(
+            "--- a/src/m.py\n+++ b/src/m.py\n@@ -1,2 +1,2 @@\n"
+            " def total(items, tax_rate):\n"
+            "-    return compute_total_with_tax(items, tax_rate)\n"
+            "+    return sum(items)\n"
+        ),
+        oracle_patch=(
+            "--- a/src/m.py\n+++ b/src/m.py\n@@ -1,2 +1,2 @@\n"
+            " def total(items, tax_rate):\n"
+            "-    return sum(items)\n"
+            "+    return compute_total_with_tax(items, tax_rate)\n"
+        ),
+        difficulty_hint="medium",
+        provenance=Provenance(
+            generator=generator, seed=seed, language=language, created_at=_TS
+        ),
+    )
+
+
+def _env_image(*, language: str) -> EnvImage:
+    return EnvImage(
+        repo_id="demo-repo",
+        language=language,
+        image_tag=f"swe-forge-env-{language}:abc123",
+        base_image=_BASE_IMAGE[language],
+        commit="a" * 40,
+        workspace_dir="/workspace/repo",
+        install_commands=["pip install -e ."],
+        baseline_test_command="python -m pytest -q",
+        baseline_green=True,
+        baseline_exit_code=0,
+    )
+
+
+def _spec(*, language: str) -> GeneratedSpec:
+    return GeneratedSpec(
+        problem_statement="total() must include tax in the returned amount.",
+        requirements=["total() returns the taxed sum for the items"],
+        interface_block="def total(items, tax_rate): ...",
+        provenance=Provenance(
+            generator="ast_mutation", seed=7, language=language, created_at=_TS
+        ),
+    )
+
+
+def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-def]
+    from swe_forge.forge.models import OracleReport, OracleTestFile
+
+    return OracleReport(
+        language=language,
+        generator=generator,
+        verdict="pass",
+        reasons=[],
+        fail_to_pass=["python -m pytest tests/hidden/test_total.py"],
+        pass_to_pass=["python -m pytest -q"],
+        test_files=[
+            OracleTestFile(
+                path="tests/hidden/test_total.py",
+                content=(
+                    "from src.m import total\n\n\n"
+                    "def test_total():\n    assert total([100], 0.1) == 110\n"
+                ),
+            )
+        ],
+        flakiness_runs=3,
+        mutants_total=10,
+        mutants_killed=10,
+        differential_pass=True,
+        alt_correct_accepted=True,
+        leak_audit="clean",
+        provenance=Provenance(
+            generator=generator, seed=7, language=language, created_at=_TS
+        ),
+    )
+
+
+def _calibration(
+    *,
+    language: str,
+    frontier_solves: int = 1,
+    mid_solves: int = 1,
+    weak_solves: int = 0,
+    k: int = 4,
+    discrimination: float = 1.5,
+    difficulty: float = 1.0,
+    keep: bool = True,
+) -> CalibrationReport:
+    def rate(solves: int) -> float:
+        return solves / k if k else 0.0
+
+    models = [
+        ModelSolveRecord(
+            model="weak/m",
+            tier="weak",
+            k=k,
+            solves=weak_solves,
+            pass_at_k=rate(weak_solves),
+        ),
+        ModelSolveRecord(
+            model="mid/m",
+            tier="mid",
+            k=k,
+            solves=mid_solves,
+            pass_at_k=rate(mid_solves),
+        ),
+        ModelSolveRecord(
+            model="frontier/m",
+            tier="frontier",
+            k=k,
+            solves=frontier_solves,
+            pass_at_k=rate(frontier_solves),
+        ),
+    ]
+    report = CalibrationReport(
+        language=language,
+        models=models,
+        k=k,
+        irt_difficulty=difficulty,
+        irt_discrimination=discrimination,
+    )
+    report.set_band_verdict(
+        "keep" if keep else "drop",
+        "in-band frontier + high discrimination" if keep else "solve-all too easy",
+    )
+    return report
+
+
+def _request(
+    *,
+    language: str = "python",
+    generator: str = "ast_mutation",
+    seed: int = 7,
+    repo_url: str = "https://github.com/acme/demo.git",
+    **cal: object,
+) -> ExportRequest:
+    return ExportRequest(
+        candidate=_candidate(language=language, generator=generator, seed=seed),
+        spec=_spec(language=language),
+        oracle_report=_oracle_pass(language=language, generator=generator),
+        calibration_report=_calibration(language=language, **cal),  # type: ignore[arg-type]
+        env_image=_env_image(language=language),
+        repo_url=repo_url,
+    )
+
+
+@pytest.fixture
+def exported(tmp_path: Path) -> Path:
+    """A mixed-generator, multi-language exported tree (5 kept tasks)."""
+    requests = [
+        _request(generator="ast_mutation", seed=1),
+        _request(generator="lm_authored", seed=2),
+        _request(generator="function_removal", seed=3),
+        _request(language="javascript", generator="ast_mutation", seed=4),
+        _request(language="go", generator="multi_file", seed=5),
+    ]
+    result = export_batch(requests, tmp_path)
+    assert len(result.shipped) == 5
+    return tmp_path
+
+
+def _gold_all(shipped: int) -> GoldSummary:
+    return GoldSummary(
+        measured=True,
+        gold_count=shipped,
+        shipped_count=shipped,
+        all_gold=True,
+        deterministic=True,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# VAL-EXPORT-014: provenance completeness
+# --------------------------------------------------------------------------- #
+def test_provenance_complete_for_all_shipped(exported: Path) -> None:
+    provs = load_task_provenances(exported / "tasks")
+    assert len(provs) == 5
+    result = check_provenance_completeness(provs)
+    assert result.passed
+    assert result.checked == 5
+    assert result.complete == 5
+    assert result.findings == []
+    # Each task records the mandated fields, non-empty.
+    for prov in provs:
+        assert prov.generator
+        assert isinstance(prov.seed, int)
+        assert prov.language
+        assert prov.tool_versions
+        assert prov.difficulty is not None
+        assert prov.discrimination is not None
+        assert prov.panel_tiers() == {"weak", "mid", "frontier"}
+
+
+def test_completeness_detects_missing_field() -> None:
+    prov = TaskProvenance(
+        task_id="t1",
+        language="python",
+        generator="ast_mutation",
+        seed=7,
+        created_at=_TS,
+        tool_versions={"litellm": "1.90.0"},
+        mutants_total=0,  # missing -> mutants_total must be > 0
+        mutants_killed=0,
+        irt_difficulty=1.0,
+        irt_discrimination=1.5,
+        frontier_pass_at_k=0.25,
+        oracle_verdict="pass",
+        band_verdict="keep",
+        panel=[
+            {"model": "w", "tier": "weak", "k": 4, "solves": 0, "pass_at_k": 0.0},
+            {"model": "m", "tier": "mid", "k": 4, "solves": 1, "pass_at_k": 0.25},
+            {
+                "model": "f",
+                "tier": "frontier",
+                "k": 4,
+                "solves": 1,
+                "pass_at_k": 0.25,
+            },
+        ],
+    )
+    result = check_provenance_completeness([prov])
+    assert not result.passed
+    assert result.findings[0].task_id == "t1"
+    assert "mutants_total" in result.findings[0].missing
+
+
+def test_completeness_detects_missing_tier() -> None:
+    prov = TaskProvenance(
+        task_id="t2",
+        language="python",
+        generator="ast_mutation",
+        seed=7,
+        created_at=_TS,
+        tool_versions={"litellm": "1.90.0"},
+        mutants_total=10,
+        mutants_killed=10,
+        irt_difficulty=1.0,
+        irt_discrimination=1.5,
+        frontier_pass_at_k=0.25,
+        oracle_verdict="pass",
+        band_verdict="keep",
+        panel=[  # no frontier tier
+            {"model": "w", "tier": "weak", "k": 4, "solves": 0, "pass_at_k": 0.0},
+            {"model": "m", "tier": "mid", "k": 4, "solves": 1, "pass_at_k": 0.25},
+        ],
+    )
+    result = check_provenance_completeness([prov])
+    assert not result.passed
+    assert "panel:frontier" in result.findings[0].missing
+
+
+def test_completeness_detects_kill_ratio_below_threshold() -> None:
+    prov = TaskProvenance(
+        task_id="t3",
+        language="python",
+        generator="ast_mutation",
+        seed=7,
+        created_at=_TS,
+        tool_versions={"litellm": "1.90.0"},
+        mutants_total=10,
+        mutants_killed=3,  # 0.3 < 0.8 threshold
+        irt_difficulty=1.0,
+        irt_discrimination=1.5,
+        frontier_pass_at_k=0.25,
+        oracle_verdict="pass",
+        band_verdict="keep",
+        panel=[
+            {"model": "w", "tier": "weak", "k": 4, "solves": 0, "pass_at_k": 0.0},
+            {"model": "m", "tier": "mid", "k": 4, "solves": 1, "pass_at_k": 0.25},
+            {
+                "model": "f",
+                "tier": "frontier",
+                "k": 4,
+                "solves": 1,
+                "pass_at_k": 0.25,
+            },
+        ],
+    )
+    result = check_provenance_completeness([prov])
+    assert not result.passed
+    assert "mutants_killed<threshold" in result.findings[0].missing
+
+
+# --------------------------------------------------------------------------- #
+# VAL-EXPORT-015: provenance consistency with the gates
+# --------------------------------------------------------------------------- #
+def test_provenance_consistent_with_gates(exported: Path) -> None:
+    provs = load_task_provenances(exported / "tasks")
+    result = check_provenance_consistency(provs)
+    assert result.passed
+    assert result.consistent == 5
+    # Each shipped task: oracle=pass, band=keep, 0 < frontier <= band_high, disc >= min.
+    for prov in provs:
+        assert prov.oracle_verdict == "pass"
+        assert prov.band_verdict == "keep"
+        assert prov.frontier_rate is not None and 0.0 < prov.frontier_rate <= 0.5
+        assert prov.discrimination is not None and prov.discrimination >= 1.0
+
+
+def test_consistency_flags_out_of_band_frontier() -> None:
+    prov = TaskProvenance(
+        task_id="t4",
+        language="python",
+        generator="ast_mutation",
+        seed=7,
+        created_at=_TS,
+        tool_versions={"litellm": "1.90.0"},
+        mutants_total=10,
+        mutants_killed=10,
+        irt_difficulty=1.0,
+        irt_discrimination=1.5,
+        frontier_pass_at_k=0.9,  # above band_high (too easy)
+        oracle_verdict="pass",
+        band_verdict="keep",
+        panel=[],
+    )
+    result = check_provenance_consistency([prov])
+    assert not result.passed
+    assert any("frontier_pass_rate" in i for i in result.findings[0].issues)
+
+
+def test_consistency_flags_low_discrimination_and_bad_verdicts() -> None:
+    prov = TaskProvenance(
+        task_id="t5",
+        language="python",
+        generator="ast_mutation",
+        seed=7,
+        created_at=_TS,
+        tool_versions={"litellm": "1.90.0"},
+        mutants_total=10,
+        mutants_killed=10,
+        irt_difficulty=1.0,
+        irt_discrimination=0.2,  # below min
+        frontier_pass_at_k=0.25,
+        oracle_verdict="reject",  # bad
+        band_verdict="drop",  # bad
+        panel=[],
+    )
+    result = check_provenance_consistency([prov])
+    issues = result.findings[0].issues
+    assert any("oracle_verdict" in i for i in issues)
+    assert any("band_verdict" in i for i in issues)
+    assert any("irt_discrimination" in i for i in issues)
+
+
+# --------------------------------------------------------------------------- #
+# Panel aggregation + tier ordering
+# --------------------------------------------------------------------------- #
+def test_aggregate_panel_pools_per_model_and_per_tier(exported: Path) -> None:
+    provs = load_task_provenances(exported / "tasks")
+    per_model, tier_rates = aggregate_panel(provs)
+    # One aggregate per distinct model id, sorted weak -> mid -> frontier.
+    tiers = [a.tier for a in per_model]
+    assert tiers == ["weak", "mid", "frontier"]
+    assert tier_rates["weak"] == 0.0
+    assert tier_rates["mid"] == pytest.approx(0.25)
+    assert tier_rates["frontier"] == pytest.approx(0.25)
+    # weak <= mid <= frontier.
+    assert tier_rates["weak"] <= tier_rates["mid"] <= tier_rates["frontier"]
+
+
+# --------------------------------------------------------------------------- #
+# VAL-EXPORT-016/017/018/019: the benchmark report
+# --------------------------------------------------------------------------- #
+def test_report_headline_a_gold_100(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=_gold_all(5))
+    assert report.gold.gold_rate == 1.0
+    assert report.gold.gold_count == report.shipped_count == 5
+    assert report.headline_a_pass
+
+
+def test_report_per_model_irt_breakdown(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=_gold_all(5))
+    # Per-model + tier ordering weak <= mid <= frontier < gold(100%).
+    assert report.per_model
+    assert report.tier_ordering_ok
+    assert report.gold_ge_frontier
+    # IRT summary present and numeric.
+    assert set(report.irt_difficulty) == {"mean", "min", "max"}
+    assert set(report.irt_discrimination) == {"mean", "min", "max"}
+    assert report.irt_discrimination["mean"] == pytest.approx(1.5)
+    # Generator + language breakdowns sum to the shipped total.
+    assert sum(report.generator_breakdown.values()) == 5
+    assert sum(report.language_breakdown.values()) == 5
+    assert report.generator_breakdown == {
+        "ast_mutation": 2,
+        "lm_authored": 1,
+        "function_removal": 1,
+        "multi_file": 1,
+    }
+    assert report.language_breakdown == {"python": 3, "javascript": 1, "go": 1}
+    assert report.breakdown_reconciles
+
+
+def test_report_headline_b_frontier_below_threshold(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=_gold_all(5))
+    assert report.frontier_threshold == DEFAULT_FRONTIER_THRESHOLD
+    assert 0.0 < report.frontier_solve_rate < report.frontier_threshold
+    assert report.headline_b_pass
+
+
+def test_report_counts_reconcile_and_json_complete(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=_gold_all(5))
+    assert report.counts.tasks == 5
+    assert report.counts.jsonl == 5
+    assert report.counts.parquet == 5
+    assert report.counts.reconciled
+
+    # JSON parses and carries every required key (VAL-EXPORT-019).
+    parsed = json.loads(report.to_json())
+    for key in (
+        "gold_rate",
+        "per_model",
+        "irt",
+        "generator_breakdown",
+        "language_breakdown",
+        "frontier_solve_rate",
+        "frontier_threshold",
+    ):
+        assert key in parsed, key
+    assert parsed["counts"]["reconciled"] is True
+    assert parsed["gold_rate"] == 1.0
+    assert parsed["per_model"]
+    assert parsed["headline_b"]["passed"] is True
+
+
+def test_report_overall_pass(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=_gold_all(5))
+    assert report.passed
+
+
+def test_report_fails_headline_a_when_gold_not_100(exported: Path) -> None:
+    partial = GoldSummary(
+        measured=True, gold_count=4, shipped_count=5, all_gold=False, deterministic=True
+    )
+    report = build_benchmark_report(exported, gold=partial)
+    assert not report.headline_a_pass
+    assert not report.passed
+
+
+def test_report_gold_unmeasured_marks_headline_a_fail(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=None)
+    assert report.gold.measured is False
+    assert not report.headline_a_pass
+
+
+def test_report_from_gold_eval_report_object(exported: Path) -> None:
+    # A GoldEvalReport (Headline A) with no failures injects gold=100%.
+    gold_report = GoldEvalReport(tasks_dir=exported / "tasks", results=[])
+    summary = GoldSummary.from_gold_eval(
+        {"gold_count": 5, "shipped_count": 5, "all_gold": True, "deterministic": True}
+    )
+    assert summary.gold_rate == 1.0
+    assert isinstance(gold_report, GoldEvalReport)
+
+
+# --------------------------------------------------------------------------- #
+# Headline B edge cases (solve-none / out-of-band)
+# --------------------------------------------------------------------------- #
+def test_headline_b_fails_when_frontier_zero(tmp_path: Path) -> None:
+    # Hand-built provenance with frontier rate 0 (solve-none would never ship,
+    # but the report must report the headline correctly).
+    provs = [
+        TaskProvenance(
+            task_id="z",
+            language="python",
+            generator="ast_mutation",
+            seed=1,
+            created_at=_TS,
+            tool_versions={"litellm": "1.0"},
+            mutants_total=10,
+            mutants_killed=10,
+            irt_difficulty=5.0,
+            irt_discrimination=1.5,
+            frontier_pass_at_k=0.0,
+            oracle_verdict="pass",
+            band_verdict="keep",
+            panel=[
+                {
+                    "model": "f",
+                    "tier": "frontier",
+                    "k": 4,
+                    "solves": 0,
+                    "pass_at_k": 0.0,
+                },
+            ],
+        )
+    ]
+    _per_model, tier_rates = aggregate_panel(provs)
+    assert tier_rates["frontier"] == 0.0
+
+
+def test_report_band_config_threads_consistency(exported: Path) -> None:
+    # A stricter discrimination threshold makes the kept tasks inconsistent.
+    report = build_benchmark_report(
+        exported,
+        gold=_gold_all(5),
+        band_config=BandFilterConfig(band_high=0.5, discrimination_threshold=2.0),
+    )
+    assert not report.consistency.passed
+    assert not report.passed
+
+
+# --------------------------------------------------------------------------- #
+# Count helpers + write
+# --------------------------------------------------------------------------- #
+def test_count_helpers(exported: Path) -> None:
+    assert count_jsonl_records(exported / "dataset.jsonl") == 5
+    assert count_parquet_rows(exported / "dataset.parquet") == 5
+    assert count_jsonl_records(exported / "missing.jsonl") == 0
+
+
+def test_write_report_emits_md_and_json(exported: Path) -> None:
+    report = build_benchmark_report(exported, gold=_gold_all(5))
+    md_path, json_path = write_report(report, exported)
+    assert md_path.is_file() and json_path.is_file()
+    assert "SWE-Forge Benchmark Report" in md_path.read_text()
+    parsed = json.loads(json_path.read_text())
+    assert parsed["shipped_count"] == 5
+    assert parsed["passed"] is True
+
+
+def test_build_report_on_missing_dir_raises(tmp_path: Path) -> None:
+    with pytest.raises(ReportError):
+        build_benchmark_report(tmp_path / "does-not-exist")
+
+
+def test_empty_export_report(tmp_path: Path) -> None:
+    export_batch([], tmp_path)
+    report = build_benchmark_report(tmp_path, gold=GoldSummary.unmeasured())
+    assert report.shipped_count == 0
+    assert report.counts.reconciled  # 0 == 0 == 0
+    assert not report.passed  # no shipped tasks -> not a pass
+    assert isinstance(report, BenchmarkReport)
