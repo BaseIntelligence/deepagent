@@ -59,6 +59,15 @@ from swe_forge.forge.export import (
     ExportRequest,
     export_batch,
 )
+from swe_forge.forge.gold_eval import (
+    DEFAULT_DETERMINISM_RUNS,
+    GoldEvalError,
+    GoldEvalReport,
+    run_gold_eval,
+)
+from swe_forge.forge.gold_eval import (
+    DEFAULT_TIMEOUT as GOLD_EVAL_TIMEOUT,
+)
 from swe_forge.forge.generators import (
     GenerationError,
     GenerationRequest,
@@ -3116,3 +3125,94 @@ def export_cmd(
     # (e.g. a single unqualified task); an empty input or a mixed batch is fine.
     if requests and not result.kept and result.refused:
         raise typer.Exit(code=1)
+
+
+def _print_gold_eval_report(report: GoldEvalReport) -> None:
+    if report.shipped_count == 0:
+        console.print(
+            f"[red]gold-eval[/red] no tasks/<id>/ workspaces with evaluate.sh "
+            f"under {report.tasks_dir}"
+        )
+        return
+    verdict = "[green]PASS[/green]" if report.passed else "[red]FAIL[/red]"
+    console.print(
+        f"[bold]gold-eval[/bold] {verdict}  "
+        f"gold={report.gold_count}/{report.shipped_count} "
+        f"({report.gold_rate * 100:.0f}%)  "
+        f"deterministic={report.deterministic}"
+    )
+    for res in report.results:
+        if res.gold and res.deterministic:
+            color, tag = "green", "gold"
+        elif not res.deterministic:
+            color, tag = "red", "flip"
+        else:
+            color, tag = "red", "fail"
+        console.print(
+            f"  [{color}]{tag:4s}[/{color}] {res.task_id}  "
+            f"scores={res.scores}  phase1={res.phase1_all}  image={res.image}"
+        )
+
+
+@app.command(name="gold-eval")
+def gold_eval_cmd(
+    tasks_dir: str = typer.Option(
+        ...,
+        "--tasks-dir",
+        help=(
+            "Directory holding the exported tasks/<id>/ workspaces (or an export "
+            "out_dir containing a tasks/ subdir)."
+        ),
+    ),
+    runs: int = typer.Option(
+        DEFAULT_DETERMINISM_RUNS,
+        "--runs",
+        min=1,
+        help="Independent --rm container runs per task (>=2 proves determinism).",
+    ),
+    image: str | None = typer.Option(
+        None,
+        "--image",
+        help=(
+            "Override the Docker image for every task (default: each task's own "
+            "workspace.yaml environment image)."
+        ),
+    ),
+    timeout: float = typer.Option(
+        GOLD_EVAL_TIMEOUT, "--timeout", help="Per-run wall-clock timeout in seconds."
+    ),
+    docker_arg: list[str] | None = typer.Option(
+        None,
+        "--docker-arg",
+        help="Extra `docker run` argument (repeatable), e.g. an additional -v mount.",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output."),
+) -> None:
+    """HEADLINE A: run every shipped task's evaluate.sh in Docker and prove gold=100%.
+
+    For each ``tasks/<id>/`` the self-contained ``evaluate.sh`` is run in fresh
+    ``--rm`` containers: Phase 1 confirms the broken (mutation) tree FAILS the
+    hidden suite while regression stays green, Phase 2 confirms the gold-patched
+    tree PASSES the hidden suite AND regression, ending ``{"score": 1}``. The
+    command aggregates gold == 100% across the whole shipped set (VAL-EXPORT-010)
+    and re-runs each task ``--runs`` times to prove the score never flips
+    (VAL-EXPORT-011). Exit 0 iff every shipped task scored gold 1 on every run.
+    """
+    try:
+        report = run_gold_eval(
+            tasks_dir,
+            runs=runs,
+            image=image,
+            timeout=timeout,
+            extra_args=list(docker_arg or []),
+        )
+    except GoldEvalError as exc:
+        _fail(str(exc))
+
+    if json_out:
+        typer.echo(json.dumps(report.to_dict()))
+    else:
+        _print_gold_eval_report(report)
+
+    ok = report.shipped_count > 0 and report.passed
+    raise typer.Exit(code=0 if ok else 1)
