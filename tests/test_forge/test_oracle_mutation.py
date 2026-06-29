@@ -20,15 +20,19 @@ verification and the user-testing validator in real Docker.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from swe_forge.forge.adapters import PythonAdapter
 from swe_forge.forge.adapters._mutation_tools import (
     MutationToolError,
     ToolCounts,
+    gomutesting_command,
     parse_cosmicray_report,
     parse_gomutesting,
     parse_stryker_json,
+    robust_js_test_command,
 )
 from swe_forge.forge.models import (
     Candidate,
@@ -267,6 +271,243 @@ def test_parse_gomutesting_missing_summary_raises() -> None:
 def test_toolcounts_rejects_killed_gt_total() -> None:
     with pytest.raises(MutationToolError):
         ToolCounts(total=2, killed=3)
+
+
+# --------------------------------------------------------------------------- #
+# m6 mutation-tooling hardening: JS/Stryker + Go/go-mutesting edge cases
+# (offline coverage against captured REAL tool output)
+# --------------------------------------------------------------------------- #
+def test_robust_js_test_command_appends_ignore_scripts() -> None:
+    # The babel/ESM/nyc fix: skip the npm pre/post lifecycle hooks (validator.js's
+    # `pretest` build+lint) that crash Stryker's dry run on the instrumented source.
+    assert robust_js_test_command("npm test") == "npm test --ignore-scripts"
+    assert (
+        robust_js_test_command("npm run tests-only")
+        == "npm run tests-only --ignore-scripts"
+    )
+    assert robust_js_test_command() == "npm test --ignore-scripts"
+
+
+def test_robust_js_test_command_is_idempotent_and_scoped() -> None:
+    # Already-hardened commands are untouched; non-npm runners are passed through.
+    assert (
+        robust_js_test_command("npm test --ignore-scripts")
+        == "npm test --ignore-scripts"
+    )
+    assert robust_js_test_command("yarn test") == "yarn test --ignore-scripts"
+    assert robust_js_test_command("make check") == "make check"
+    assert robust_js_test_command("") == ""
+
+
+def test_robust_js_test_command_places_flag_before_runner_args() -> None:
+    # npm consumes its own flags before the `--` runner-arg separator.
+    assert (
+        robust_js_test_command("npm test -- --grep foo")
+        == "npm test --ignore-scripts -- --grep foo"
+    )
+
+
+def test_gomutesting_command_scopes_to_file_not_package() -> None:
+    # A *.go file is passed through as-is (file-scoped run = bounded + parseable);
+    # a bare package dir still gets a ./ prefix.
+    assert gomutesting_command("version7.go") == "go-mutesting version7.go"
+    assert gomutesting_command("pkg/foo.go") == "go-mutesting pkg/foo.go"
+    assert gomutesting_command("internal") == "go-mutesting ./internal"
+    assert gomutesting_command(".") == "go-mutesting ."
+
+
+def test_parse_stryker_json_real_validatorjs_report_shape() -> None:
+    # Captured shape from a real validator.js#2787 Stryker run (Regex mutator,
+    # killedBy/statusReason/testsCompleted fields, NoCoverage status). The parser
+    # must ignore the extra fields and count Killed+Timeout vs Survived+NoCoverage.
+    report = """
+    {
+      "schemaVersion": "1.0",
+      "thresholds": {"high": 80, "low": 60},
+      "files": {
+        "src/lib/isISO8601.js": {
+          "language": "javascript",
+          "source": "export default function isISO8601(str){...}",
+          "mutants": [
+            {"id": "0", "mutatorName": "Regex", "replacement": "/x/",
+             "statusReason": "", "status": "Killed", "testsCompleted": 2,
+             "killedBy": ["1"], "location": {"start": {"line": 5, "column": 17},
+             "end": {"line": 5, "column": 308}}},
+            {"id": "1", "mutatorName": "Regex", "status": "Killed",
+             "testsCompleted": 1, "location": {"start": {"line": 5}}},
+            {"id": "3", "mutatorName": "Regex", "status": "Survived",
+             "location": {"start": {"line": 5}}},
+            {"id": "17", "mutatorName": "ConditionalExpression",
+             "status": "NoCoverage", "location": {"start": {"line": 33}}}
+          ]
+        }
+      }
+    }
+    """
+    counts = parse_stryker_json(report)
+    assert counts.total == 4
+    assert counts.killed == 2
+    assert counts.survived == 2  # Survived + NoCoverage
+    assert len(counts.survivors) == 2
+
+
+def test_parse_gomutesting_real_new_summary_format() -> None:
+    # Captured from a real google/uuid#150 file-scoped run; note the avito fork's
+    # `0 duplicated, 0 skipped, total is N` summary tail (newer than the old
+    # `0 duration, 0 skipped` format).
+    output = (
+        'FAIL "/tmp/go-mutesting-1308782064/version7.go.0" with checksum a8e4\n'
+        'PASS "/tmp/go-mutesting-1308782064/version7.go.1" with checksum d05a\n'
+        "The mutation score is 0.506329 "
+        "(40 passed, 39 failed, 0 duplicated, 0 skipped, total is 79)\n"
+    )
+    counts = parse_gomutesting(output, exit_code=0)
+    assert counts.total == 79
+    assert counts.killed == 40
+    assert counts.survived == 39
+
+
+def test_parse_gomutesting_zero_eligible_is_sound_not_a_crash() -> None:
+    # go-mutesting prints this (with a non-zero exit) when the target has nothing
+    # to mutate: a SOUND 0/0 measurement (the gate rejects 0 mutants as
+    # under-determined), NOT a parse crash.
+    output = (
+        "no required module provides package nope.go; to add it:\n"
+        "\tgo get nope.go\n"
+        "Could not find any suitable Go source files\n"
+    )
+    counts = parse_gomutesting(output, exit_code=3)
+    assert counts.total == 0
+    assert counts.killed == 0
+    assert counts.kill_ratio == 0.0
+
+
+def test_parse_gomutesting_truncated_run_counts_completed_mutants() -> None:
+    # A run killed before the summary line (e.g. timeout) still has real per-mutant
+    # verdicts; each PASS/FAIL line is a completed measurement.
+    output = (
+        'PASS "/tmp/go-mutesting-1/version7.go.0" with checksum a\n'
+        'FAIL "/tmp/go-mutesting-1/version7.go.1" with checksum b\n'
+        'PASS "/tmp/go-mutesting-1/version7.go.2" with checksum c\n'
+    )
+    counts = parse_gomutesting(output, exit_code=124)
+    assert counts.total == 3
+    assert counts.killed == 2
+    assert counts.survived == 1
+    assert counts.survivors == ("/tmp/go-mutesting-1/version7.go.1",)
+
+
+def test_parse_gomutesting_genuine_crash_raises() -> None:
+    # A build/compile failure with no summary and no per-mutant verdicts is a real
+    # tool failure, surfaced as MutationToolError (never a silent vacuous pass).
+    output = (
+        "# github.com/google/uuid\n"
+        "./version7.go:99:1: syntax error: unexpected EOF\n"
+        "exit status 2\n"
+    )
+    with pytest.raises(MutationToolError):
+        parse_gomutesting(output, exit_code=2)
+
+
+def test_parse_gomutesting_zero_eligible_with_summary() -> None:
+    # A *complete* go-mutesting run on a no-op target still prints the summary with
+    # zero counts; the regex path handles it (no fallback needed).
+    output = (
+        "The mutation score is 0.000000 "
+        "(0 passed, 0 failed, 0 duplicated, 0 skipped, total is 0)\n"
+    )
+    counts = parse_gomutesting(output, exit_code=0)
+    assert counts.total == 0
+    assert counts.killed == 0
+
+
+# --------------------------------------------------------------------------- #
+# Go mutation_tool_run: baseline-soundness guard (no silent vacuous pass)
+# --------------------------------------------------------------------------- #
+@dataclass
+class _FakeExec:
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+class _ScriptedGoExecutor:
+    """A scriptable :class:`MutationExecutor` for ``mutation_tool_run`` tests.
+
+    ``scripts`` is an ordered list of ``(needle, (exit, stdout, stderr))``; the
+    first needle found in a command wins (else exit 0, empty output). Records the
+    commands run so a test can assert ordering / that go-mutesting was skipped.
+    """
+
+    workspace_dir = "/workspace/repo"
+
+    def __init__(self, scripts: list[tuple[str, tuple[int, str, str]]]) -> None:
+        self._scripts = scripts
+        self.commands: list[str] = []
+
+    async def run_command(self, cmd, *, cwd=None, timeout=None, env=None):  # type: ignore[no-untyped-def]
+        self.commands.append(cmd)
+        for needle, (code, out, err) in self._scripts:
+            if needle in cmd:
+                return _FakeExec(code, out, err)
+        return _FakeExec(0, "", "")
+
+    async def write_file(self, path: str, content: str) -> None:
+        return None
+
+    async def read_file(self, path: str) -> str:
+        return ""
+
+
+_GO_REAL_SUMMARY = (
+    "The mutation score is 0.506329 "
+    "(40 passed, 39 failed, 0 duplicated, 0 skipped, total is 79)\n"
+)
+
+
+async def test_go_mutation_tool_run_rejects_vacuous_red_baseline() -> None:
+    # When the unmutated package suite is RED, go-mutesting would report every
+    # mutant as killed (non-zero `go test` == killed) -> a vacuous 100%. The guard
+    # must surface a clean MutationToolError and never invoke go-mutesting.
+    from swe_forge.forge.adapters import GoAdapter
+
+    executor = _ScriptedGoExecutor(
+        [
+            ("go install", (0, "", "")),
+            ("go test", (1, "--- FAIL: TestVersion7Monotonicity", "FAIL\tpkg\t0.2s")),
+        ]
+    )
+    with pytest.raises(MutationToolError, match="vacuous"):
+        await GoAdapter().mutation_tool_run(
+            executor, target_files=("version7.go",), timeout=30.0
+        )
+    assert not any("go-mutesting version7.go" in c for c in executor.commands)
+
+
+async def test_go_mutation_tool_run_green_baseline_measures_real_ratio() -> None:
+    # A green unmutated baseline lets the real go-mutesting summary through as a
+    # trustworthy measurement (40/79), with the baseline checked before mutating.
+    from swe_forge.forge.adapters import GoAdapter
+
+    executor = _ScriptedGoExecutor(
+        [
+            ("go install", (0, "", "")),
+            ("go test", (0, "ok  \tgithub.com/google/uuid\t0.01s", "")),
+            ("go-mutesting", (0, _GO_REAL_SUMMARY, "")),
+        ]
+    )
+    stats = await GoAdapter().mutation_tool_run(
+        executor, target_files=("version7.go",), timeout=30.0
+    )
+    assert stats.total == 79
+    assert stats.killed == 40
+    assert stats.survived == 39
+    assert stats.tool == "go-mutesting"
+    baseline_idx = next(i for i, c in enumerate(executor.commands) if "go test" in c)
+    mutest_idx = next(
+        i for i, c in enumerate(executor.commands) if "go-mutesting version7.go" in c
+    )
+    assert baseline_idx < mutest_idx
 
 
 # --------------------------------------------------------------------------- #

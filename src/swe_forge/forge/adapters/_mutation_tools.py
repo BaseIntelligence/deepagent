@@ -201,6 +201,36 @@ def stryker_run_command() -> str:
     return f"npx --yes @stryker-mutator/core run {shlex.quote(STRYKER_CONFIG)}"
 
 
+# npm/yarn/pnpm runners whose lifecycle hooks we must suppress.
+_JS_PACKAGE_RUNNERS = ("npm", "yarn", "pnpm")
+
+
+def robust_js_test_command(test_command: str = "npm test") -> str:
+    """Make a JS test command safe to run as Stryker's command-runner target.
+
+    Stryker copies an INSTRUMENTED copy of the mutate file into its sandbox (every
+    mutant inlined behind a switch), so a babel/ESM repo whose ``test`` script runs
+    a ``pretest`` lifecycle hook (e.g. validator.js's ``npm run build && npm run
+    lint``) crashes Stryker's *dry run* with exit 1 BEFORE any test executes: the
+    instrumented source trips eslint with hundreds of style errors. ``--ignore-
+    scripts`` skips those pre/post hooks; the baseline build artifacts already
+    persist in the ``EnvImage`` and the suite tests the babel-transformed ``src``,
+    so no rebuild is needed and the per-mutant run is also faster (coverage tools
+    such as nyc embedded in the ``test`` script keep working and pass their exit
+    code through). Non-npm commands are returned unchanged.
+    """
+    cmd = test_command.strip()
+    if not cmd:
+        return cmd
+    if cmd.split()[0] not in _JS_PACKAGE_RUNNERS or "--ignore-scripts" in cmd:
+        return cmd
+    # Place the flag before any ``--`` runner-argument separator so npm consumes it.
+    head, sep, tail = cmd.partition(" -- ")
+    if sep:
+        return f"{head} --ignore-scripts{sep}{tail}"
+    return f"{cmd} --ignore-scripts"
+
+
 def parse_stryker_json(report_text: str) -> ToolCounts:
     """Parse a Stryker ``mutation.json`` report into :class:`ToolCounts`.
 
@@ -257,39 +287,79 @@ GO_MUTESTING_SETUP: tuple[str, ...] = (
 )
 
 
-def gomutesting_command(package: str) -> str:
-    """Run go-mutesting against one package directory (scoped to bound runtime)."""
-    target = package if package.startswith((".", "/")) else f"./{package}"
+def gomutesting_command(target: str) -> str:
+    """Run go-mutesting against one target (a Go FILE or a package directory).
+
+    Scoping to the single gold *file* (rather than its whole package) is what
+    keeps the run bounded and parseable: on a repo whose package has many sources
+    (e.g. google/uuid's root package: 250+ mutants in ``uuid.go`` alone) a
+    package-scoped run does not finish within the timeout, so its truncated output
+    has no ``mutation score`` summary and looks like a tool crash. go-mutesting
+    accepts a ``*.go`` file argument and still runs that file's package tests, so
+    a file-scoped run completes and yields a real kill ratio. A package dir is
+    given a ``./`` prefix; a file path is passed through as-is.
+    """
+    if not target.endswith(".go") and not target.startswith((".", "/")):
+        target = f"./{target}"
     return f"go-mutesting {shlex.quote(target)}"
 
 
 _GO_SCORE_RE = re.compile(
     r"mutation score is\s+[\d.]+\s*\((\d+)\s+passed,\s*(\d+)\s+failed", re.IGNORECASE
 )
-_GO_SURVIVOR_RE = re.compile(r"^FAIL\s+(.*)$")
+# go-mutesting's own per-mutant verdict lines are quoted: ``PASS "<tmp>/f.go.N"``
+# (killed) / ``FAIL "<tmp>/f.go.N" ...`` (survived). Anchoring on the quote avoids
+# miscounting an interleaved ``go test`` ``FAIL\tpkg`` line.
+_GO_PASS_LINE_RE = re.compile(r'^\s*PASS\s+"', re.MULTILINE)
+_GO_FAIL_LINE_RE = re.compile(r'^\s*FAIL\s+"([^"]+)"', re.MULTILINE)
+# Emitted (with a non-zero exit) when a target has no buildable Go source / nothing
+# to mutate: a SOUND "0 eligible mutants" result, NOT a tool crash.
+_GO_NO_MUTANTS_SIGNALS = (
+    "could not find any suitable go source files",
+    "found 0 mutations",
+)
 
 
-def parse_gomutesting(output: str) -> ToolCounts:
+def parse_gomutesting(output: str, *, exit_code: int | None = None) -> ToolCounts:
     """Parse go-mutesting output into :class:`ToolCounts`.
 
     go-mutesting prints ``PASS`` when a mutant is caught (killed) and ``FAIL``
-    when it survives, ending with ``The mutation score is X (P passed, F
-    failed, ...)``; ``passed`` == killed, ``failed`` == survived.
+    when it survives, ending with ``The mutation score is X (P passed, F failed,
+    ...)`` (``passed`` == killed, ``failed`` == survived). A *complete* run always
+    prints that summary, even with zero mutants (``0 passed, 0 failed``), so a
+    missing summary means the run did not finish normally. This parser tolerates
+    the edge cases and keeps "0 eligible mutants" distinct from "tool crashed":
+
+    1. summary present -> use its counts (also covers a clean 0/0 run);
+    2. no summary but per-mutant ``PASS``/``FAIL`` lines present -> count those
+       (a real, if truncated, measurement);
+    3. no summary, no results, but a benign "nothing to mutate" signal ->
+       ``ToolCounts(0, 0)`` (the gate rejects 0 mutants as under-determined, a
+       sound number-based verdict rather than a crash);
+    4. otherwise -> :class:`MutationToolError` (a genuine tool failure).
     """
+    survivors = tuple(m.group(1).strip() for m in _GO_FAIL_LINE_RE.finditer(output))
+
     match = _GO_SCORE_RE.search(output)
-    if not match:
-        raise MutationToolError(
-            "could not parse go-mutesting output (no 'mutation score' summary)"
+    if match:
+        killed = int(match.group(1))
+        survived = int(match.group(2))
+        return ToolCounts(total=killed + survived, killed=killed, survivors=survivors)
+
+    pass_count = len(_GO_PASS_LINE_RE.findall(output))
+    fail_count = len(survivors)
+    if pass_count + fail_count > 0:
+        return ToolCounts(
+            total=pass_count + fail_count, killed=pass_count, survivors=survivors
         )
-    killed = int(match.group(1))
-    survived = int(match.group(2))
-    survivors = [
-        m.group(1).strip()
-        for m in (_GO_SURVIVOR_RE.match(line.strip()) for line in output.splitlines())
-        if m
-    ]
-    return ToolCounts(
-        total=killed + survived, killed=killed, survivors=tuple(survivors)
+
+    lowered = output.lower()
+    if any(signal in lowered for signal in _GO_NO_MUTANTS_SIGNALS):
+        return ToolCounts(total=0, killed=0)
+
+    raise MutationToolError(
+        "could not parse go-mutesting output (no 'mutation score' summary, no "
+        f"per-mutant results; exit={exit_code}): {output.strip()[-400:]}"
     )
 
 
@@ -310,6 +380,7 @@ __all__ = [
     "parse_cosmicray_report",
     "parse_gomutesting",
     "parse_stryker_json",
+    "robust_js_test_command",
     "stryker_config",
     "stryker_run_command",
 ]

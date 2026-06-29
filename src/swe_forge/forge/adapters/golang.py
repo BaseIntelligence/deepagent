@@ -145,6 +145,15 @@ class GoAdapter(LanguageAdapter):
         go-mutesting is installed on demand (``go install``) and scoped to the
         target files' packages to bound runtime; ``PASS`` mutants are killed and
         ``FAIL`` mutants survive. Counts are aggregated across packages.
+
+        go-mutesting reports a mutant as *killed* on ANY non-zero ``go test``
+        exit, so an unmutated package suite that is already red (a flaky/
+        time-sensitive test the baked baseline deliberately ``-skip``s, or
+        resource pressure that makes ``go test`` fail to build) would make EVERY
+        mutant look killed - a silent vacuous 100% pass. To keep the measurement
+        trustworthy we first confirm the unmutated suite is green in the same
+        sandbox and raise a clean ``MutationToolError`` otherwise, rather than
+        recording a meaningless kill ratio.
         """
         from swe_forge.forge.adapters._mutation_tools import (
             GO_MUTESTING_SETUP,
@@ -165,13 +174,24 @@ class GoAdapter(LanguageAdapter):
                     f"{(res.stderr or res.stdout)[:400]}"
                 )
 
-        packages = sorted({posixpath.dirname(src) or "." for src in sources})
+        baseline_cmd = f"{self.test_command(tuple(sources))} -count=1"
+        baseline = await executor.run_command(baseline_cmd, timeout=timeout)
+        if baseline.exit_code != 0:
+            raise MutationToolError(
+                "go-mutesting baseline is not green: the unmutated package suite "
+                f"({baseline_cmd!r}) exited {baseline.exit_code}; go-mutesting would "
+                "report every mutant as killed, so the kill ratio would be a vacuous "
+                f"100%. {(baseline.stderr or baseline.stdout)[:300]}"
+            )
+
         total = 0
         killed = 0
         survivors: list[str] = []
-        for pkg in packages:
-            res = await executor.run_command(gomutesting_command(pkg), timeout=timeout)
-            counts = parse_gomutesting(res.stdout + "\n" + res.stderr)
+        for src in sources:
+            res = await executor.run_command(gomutesting_command(src), timeout=timeout)
+            counts = parse_gomutesting(
+                res.stdout + "\n" + res.stderr, exit_code=res.exit_code
+            )
             total += counts.total
             killed += counts.killed
             survivors.extend(counts.survivors)

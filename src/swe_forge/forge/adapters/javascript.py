@@ -163,6 +163,7 @@ class JavaScriptAdapter(LanguageAdapter):
             STRYKER_SETUP,
             MutationToolError,
             parse_stryker_json,
+            robust_js_test_command,
             stryker_config,
             stryker_run_command,
         )
@@ -181,7 +182,8 @@ class JavaScriptAdapter(LanguageAdapter):
                 )
 
         await executor.write_file(
-            STRYKER_CONFIG, stryker_config(sources, test_command="npm test")
+            STRYKER_CONFIG,
+            stryker_config(sources, test_command=robust_js_test_command("npm test")),
         )
         run = await executor.run_command(stryker_run_command(), timeout=timeout)
         try:
