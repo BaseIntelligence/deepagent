@@ -4,9 +4,23 @@ Calibration measures how hard a manufactured task is by letting a panel of solve
 models attempt it and scoring how often they succeed, through the SAME Docker
 FAIL->PASS primitives the oracle gates use. This package starts with the agentic
 solver scaffold (:mod:`swe_forge.forge.calibrate.solver`), which runs a bounded
-tool loop on the broken tree + spec surface and scores the submitted patch.
+tool loop on the broken tree + spec surface and scores the submitted patch, then
+the panel runner (:mod:`swe_forge.forge.calibrate.runner`), which issues ``k``
+independent rollouts per model and records the per-model pass@k.
 """
 
+from swe_forge.forge.calibrate.runner import (
+    DEFAULT_BUDGET,
+    CalibrationRun,
+    CalibrationRunnerError,
+    ModelCalibration,
+    RolloutBudget,
+    RolloutFn,
+    ValidatorFn,
+    compute_pass_at_k,
+    run_panel_calibration,
+    suppress_litellm_async_warning,
+)
 from swe_forge.forge.calibrate.solver import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_TURNS,
@@ -31,6 +45,7 @@ from swe_forge.forge.calibrate.solver import (
 )
 
 __all__ = [
+    "DEFAULT_BUDGET",
     "DEFAULT_MAX_TOKENS",
     "DEFAULT_MAX_TURNS",
     "REASON_APPLY_FAILED",
@@ -40,15 +55,24 @@ __all__ = [
     "REASON_ROLLOUT_ERROR",
     "REASON_SCORE_ERROR",
     "AgenticSolver",
+    "CalibrationRun",
+    "CalibrationRunnerError",
     "DockerPatchScorer",
+    "ModelCalibration",
+    "RolloutBudget",
+    "RolloutFn",
     "RolloutOutcome",
     "SolveScore",
     "SolverContext",
     "SolverError",
     "SolverRollout",
+    "ValidatorFn",
     "build_solver_prompt",
     "capture_workspace_patch",
+    "compute_pass_at_k",
+    "run_panel_calibration",
     "run_solver_rollout",
     "score_patch",
     "solver_tools",
+    "suppress_litellm_async_warning",
 ]
