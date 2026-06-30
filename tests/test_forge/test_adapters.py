@@ -66,6 +66,7 @@ class FakeAdapter(LanguageAdapter):
         *,
         target_files: Sequence[str],
         timeout: float = 1200.0,
+        target_regions: object | None = None,
     ) -> MutantStats:
         return MutantStats(total=4, killed=3, survived=1, tool=f"{self.name}-tool")
 

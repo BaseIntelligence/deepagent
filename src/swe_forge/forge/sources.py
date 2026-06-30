@@ -333,6 +333,7 @@ def _pr_mirror_allowlist() -> list[RepoSpec]:
             509,
             "go",
             "MIT",
+            exclude=("TestMapClaims_GetExpirationTime_ZeroIsExpired",),
             description="Revert MapClaims GetExpirationTime fix (1 F2P).",
         ),
         _pr(
@@ -342,6 +343,7 @@ def _pr_mirror_allowlist() -> list[RepoSpec]:
             510,
             "go",
             "MIT",
+            exclude=("Test_Validator_verifyExpiresAt",),
             description="Revert validator leeway fix (1 F2P).",
         ),
         _pr(
@@ -351,6 +353,7 @@ def _pr_mirror_allowlist() -> list[RepoSpec]:
             65,
             "go",
             "MIT",
+            exclude=("TestReltimeOffbyone",),
             description="Revert Reltime off-by-one fix in times.go (1 F2P).",
         ),
         _pr(
@@ -360,6 +363,7 @@ def _pr_mirror_allowlist() -> list[RepoSpec]:
             796,
             "go",
             "MIT",
+            exclude=("TestEllipsis",),
             description="Revert Ellipsis fix in string.go (1 F2P).",
         ),
         _pr(

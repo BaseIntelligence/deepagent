@@ -11,7 +11,7 @@ from __future__ import annotations
 import posixpath
 import re
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from swe_forge.forge.adapters._fsdetect import has_root_marker, has_source_file
@@ -159,12 +159,18 @@ class GoAdapter(LanguageAdapter):
         *,
         target_files: Sequence[str],
         timeout: float = 1200.0,
+        target_regions: Mapping[str, Sequence[tuple[int, int]]] | None = None,
     ) -> MutantStats:
         """Run go-mutesting against the target package(s) inside ``executor``.
 
         go-mutesting is installed on demand (``go install``) and scoped to the
         target files' packages to bound runtime; ``PASS`` mutants are killed and
         ``FAIL`` mutants survive. Counts are aggregated across packages.
+
+        ``target_regions`` is accepted for interface parity but unused:
+        go-mutesting is already scoped to the changed ``*.go`` FILE (not its whole
+        package), so a Go amplifier run is bounded by the changed-file set without
+        line ranges.
 
         go-mutesting reports a mutant as *killed* on ANY non-zero ``go test``
         exit, so an unmutated package suite that is already red (a flaky/

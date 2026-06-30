@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from swe_forge.forge.adapters._fsdetect import has_root_marker, has_source_file
@@ -150,12 +150,17 @@ class JavaScriptAdapter(LanguageAdapter):
         *,
         target_files: Sequence[str],
         timeout: float = 1200.0,
+        target_regions: Mapping[str, Sequence[tuple[int, int]]] | None = None,
     ) -> MutantStats:
         """Run Stryker against the gold target file(s) inside ``executor``.
 
         Uses Stryker's command test runner (a non-zero ``npm test`` exit = a kill)
         so any JS/TS suite works without a framework plugin, fetched on demand via
         ``npx``. Mutant statuses are read from Stryker's JSON report.
+
+        ``target_regions`` is accepted for interface parity but unused: Stryker is
+        already file-scoped (it mutates only the ``mutate`` list), so a JS/TS
+        amplifier run is bounded by the changed-file set without line ranges.
         """
         from swe_forge.forge.adapters._mutation_tools import (
             STRYKER_CONFIG,

@@ -122,6 +122,8 @@ class BugCombinationGenerator(BugGenerator):
                 "file": fault.rel,
                 "symbol": fault.symbol.name,
                 "symbol_kind": fault.symbol.kind,
+                "start_line": fault.symbol.start_line,
+                "end_line": fault.symbol.end_line,
                 "operator": fault.op.value if fault.op else "",
                 "mutation_patch": fault.mutation_patch,
                 "single_fault_revert": fault.oracle_patch,

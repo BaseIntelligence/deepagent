@@ -17,7 +17,7 @@ shipped adapter classes are stubs that raise :class:`NotImplementedError`.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -290,6 +290,7 @@ class LanguageAdapter(ABC):
         *,
         target_files: Sequence[str],
         timeout: float = 1200.0,
+        target_regions: Mapping[str, Sequence[tuple[int, int]]] | None = None,
     ) -> MutantStats:
         """Run this language's mutation tool against the gold code in ``executor``.
 
@@ -299,6 +300,14 @@ class LanguageAdapter(ABC):
         survivor descriptions) for the mutation-adequacy gate. The gate writes the
         hidden test files into the workspace before calling, so the tool's test
         command collects them alongside the repo's own suite.
+
+        ``target_regions`` optionally maps a target file to changed-symbol line
+        ranges (1-based, inclusive) so an over-large mutation run can be SCOPED to
+        the actually-mutated region -- the difficulty amplifiers
+        (``bug_combination`` / ``multi_file``) on a large modular module would not
+        otherwise finish within ``timeout``. Adapters whose tool is already
+        file-scoped (Go, JS) accept and ignore it; the Python adapter (cosmic-ray,
+        which mutates a whole module) honors it.
         """
 
     @abstractmethod

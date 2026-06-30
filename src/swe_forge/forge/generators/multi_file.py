@@ -120,6 +120,8 @@ class MultiFileGenerator(BugGenerator):
                     {
                         "file": fault.rel,
                         "symbol": fault.symbol.name,
+                        "start_line": fault.symbol.start_line,
+                        "end_line": fault.symbol.end_line,
                         "operator": fault.op.value if fault.op else "",
                         "original_sha256": sha256_bytes(fault.original),
                         "mutated_sha256": sha256_bytes(fault.mutated),

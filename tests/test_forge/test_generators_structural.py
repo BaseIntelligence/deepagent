@@ -285,6 +285,12 @@ def test_multi_file_touches_two_files_and_target_matches(tmp_path: Path) -> None
     assert files == {"alpha.py", "beta.py"}
     assert "test_mod.py" not in files
     assert _count_diff_sections(candidate.mutation_patch) >= 2
+    # Each edit records its enclosing-symbol line span (mutation-gate scoping).
+    edits = candidate.provenance.details["edits"]
+    assert all(
+        isinstance(e["start_line"], int) and e["end_line"] >= e["start_line"] >= 1
+        for e in edits
+    )
 
 
 def test_multi_file_roundtrips_every_file(tmp_path: Path) -> None:
@@ -333,6 +339,12 @@ def test_bug_combination_encodes_two_distinct_faults(tmp_path: Path) -> None:
     assert len({f["file"] for f in faults}) >= 2
     assert len({f["symbol"] for f in faults}) >= 2
     assert _count_diff_sections(candidate.mutation_patch) >= 2
+    # Each fault records its enclosing-symbol line span so the mutation gate can
+    # scope cosmic-ray to the changed region (m6-pilot-difficulty).
+    for fault in faults:
+        assert isinstance(fault["start_line"], int)
+        assert isinstance(fault["end_line"], int)
+        assert fault["end_line"] >= fault["start_line"] >= 1
 
 
 def test_bug_combination_full_oracle_restores_byte_for_byte(tmp_path: Path) -> None:

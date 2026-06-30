@@ -353,10 +353,15 @@ class TestCuratedRegistry:
         # The validator.js#2787 entry excludes its flipping ISO8601 F2P from P2P.
         validator_2787 = registry.get("validatorjs/validator.js#2787")
         assert "should validate ISO 8601 dates" in validator_2787.p2p_exclusions
-        # Go entries fall back to the adapter defaults (no override).
+        # Go entries use the adapter install/test defaults but DO exclude their
+        # flipping F2P test from P2P (so the regression suite stays green on the
+        # broken tree, no collateral damage), mirroring the Python/JS entries.
         jwt_509 = registry.get("golang-jwt/jwt#509")
         assert jwt_509.baseline_install == ()
         assert jwt_509.baseline_test == ""
+        assert "TestMapClaims_GetExpirationTime_ZeroIsExpired" in (
+            jwt_509.p2p_exclusions
+        )
 
     def test_pr_entry_ids_unique_despite_shared_upstream(self) -> None:
         registry = build_source_registry()

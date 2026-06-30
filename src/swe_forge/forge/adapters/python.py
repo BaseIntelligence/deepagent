@@ -13,7 +13,7 @@ import ast
 import re
 import shlex
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from swe_forge.forge.adapters._fsdetect import has_root_marker, has_source_file
@@ -307,6 +307,7 @@ class PythonAdapter(LanguageAdapter):
         *,
         target_files: Sequence[str],
         timeout: float = 1200.0,
+        target_regions: Mapping[str, Sequence[tuple[int, int]]] | None = None,
     ) -> MutantStats:
         """Run cosmic-ray against the gold target file(s) inside ``executor``.
 
@@ -316,21 +317,33 @@ class PythonAdapter(LanguageAdapter):
         and reports killed/surviving mutants. Counts are aggregated across target
         files. The Python ``.pyc`` re-test determinism invariant is honored
         (``PYTHONDONTWRITEBYTECODE=1`` + a ``__pycache__`` purge before each run).
+
+        When ``target_regions`` maps a target file to changed-symbol line ranges
+        (1-based, inclusive), the cosmic-ray session for that file is SCOPED to
+        those ranges after ``init`` and before ``exec`` -- bounding a difficulty-
+        amplifier (``bug_combination`` / ``multi_file``) run on a large modular
+        module to the actually-mutated region so it finishes within ``timeout``
+        (the same file/region scoping the Go/JS tooling already do). Files with no
+        entry are mutated whole, preserving the default behavior.
         """
         from swe_forge.forge.adapters._mutation_tools import (
             COSMIC_RAY_CONFIG,
+            COSMIC_RAY_SCOPE_SCRIPT,
             COSMIC_RAY_SESSION,
             COSMIC_RAY_SETUP,
             MutationToolError,
             cosmicray_config,
             cosmicray_report_command,
             cosmicray_run_commands,
+            cosmicray_scope_command,
+            cosmicray_scope_script,
             parse_cosmicray_report,
         )
 
         sources = [str(f) for f in target_files if not self.is_test_file(f)]
         if not sources:
             raise MutationToolError("no non-test target files to mutate (python)")
+        regions = dict(target_regions or {})
 
         for cmd in COSMIC_RAY_SETUP:
             res = await executor.run_command(cmd, timeout=timeout)
@@ -342,6 +355,7 @@ class PythonAdapter(LanguageAdapter):
 
         test_command = "python -m pytest -x -q -p no:cacheprovider"
         env = {"PYTHONDONTWRITEBYTECODE": "1"}
+        init_command, exec_command = cosmicray_run_commands()
         total = 0
         killed = 0
         survivors: list[str] = []
@@ -356,8 +370,16 @@ class PythonAdapter(LanguageAdapter):
                 COSMIC_RAY_CONFIG,
                 cosmicray_config(src, test_command, timeout=max(30.0, timeout / 6)),
             )
-            for cmd in cosmicray_run_commands():
-                await executor.run_command(cmd, timeout=timeout, env=env)
+            await executor.run_command(init_command, timeout=timeout, env=env)
+            ranges = regions.get(src)
+            if ranges:
+                await executor.write_file(
+                    COSMIC_RAY_SCOPE_SCRIPT, cosmicray_scope_script(ranges)
+                )
+                await executor.run_command(
+                    cosmicray_scope_command(), timeout=timeout, env=env
+                )
+            await executor.run_command(exec_command, timeout=timeout, env=env)
             report = await executor.run_command(
                 cosmicray_report_command(), timeout=timeout, env=env
             )

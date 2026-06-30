@@ -108,6 +108,60 @@ def cosmicray_report_command() -> str:
     return f"cr-report {shlex.quote(COSMIC_RAY_SESSION)}"
 
 
+#: The scope-filter script the Python adapter writes into the sandbox.
+COSMIC_RAY_SCOPE_SCRIPT = "swe_forge_cr_scope.py"
+
+
+def cosmicray_scope_script(ranges: Sequence[tuple[int, int]]) -> str:
+    """Return a self-contained script that scopes a cosmic-ray session to RANGES.
+
+    ``cosmic-ray init`` enumerates a work item per mutable AST node in the WHOLE
+    module, which on a large modular file (e.g. a boltons ``*utils.py``) is
+    hundreds of mutants -- each run through the established suite -- and does not
+    finish within ``mutation_timeout`` for a difficulty-amplifier
+    (``bug_combination`` / ``multi_file``) candidate. Run AFTER ``cosmic-ray
+    init`` and BEFORE ``cosmic-ray exec``, this filter keeps only the work items
+    whose mutation falls inside one of the changed-symbol line ``ranges``
+    (1-based, inclusive), bounding the run to the actually-mutated region -- the
+    same file/region scoping the Go (file-scoped) and JS (mutate-list) tooling
+    already do. The session path is ``argv[1]``.
+
+    Safety: if filtering would empty the session (no mutable node lies in range),
+    the original work items are kept untouched so the gate still measures the
+    suite rather than spuriously rejecting on ``0 mutants`` -- scoping only ever
+    *narrows* an over-large run, never fabricates a vacuous pass.
+    """
+    pairs = [(int(lo), int(hi)) for lo, hi in ranges]
+    return (
+        "import sys\n"
+        "from cosmic_ray.work_db import WorkDB\n"
+        f"RANGES = {pairs!r}\n"
+        "db = WorkDB(sys.argv[1], WorkDB.Mode.open)\n"
+        "try:\n"
+        "    total = db.num_work_items\n"
+        "    keep = [\n"
+        "        wi\n"
+        "        for wi in db.work_items\n"
+        "        if any(\n"
+        "            lo <= m.start_pos[0] <= hi\n"
+        "            for m in wi.mutations\n"
+        "            for (lo, hi) in RANGES\n"
+        "        )\n"
+        "    ]\n"
+        "    if keep and len(keep) != total:\n"
+        "        db.clear()\n"
+        "        db.add_work_items(keep)\n"
+        "    print('cr-scope kept', len(keep), 'of', total)\n"
+        "finally:\n"
+        "    db.close()\n"
+    )
+
+
+def cosmicray_scope_command() -> str:
+    """Run the scope-filter script against the written session."""
+    return f"python {shlex.quote(COSMIC_RAY_SCOPE_SCRIPT)} {shlex.quote(COSMIC_RAY_SESSION)}"
+
+
 _CR_TOTAL_RE = re.compile(r"total jobs:\s*(\d+)")
 _CR_SURVIVING_RE = re.compile(r"surviving mutants:\s*(\d+)")
 _CR_SURVIVED_OUTCOME = "test outcome: TestOutcome.SURVIVED"
@@ -365,6 +419,7 @@ def parse_gomutesting(output: str, *, exit_code: int | None = None) -> ToolCount
 
 __all__ = [
     "COSMIC_RAY_CONFIG",
+    "COSMIC_RAY_SCOPE_SCRIPT",
     "COSMIC_RAY_SESSION",
     "COSMIC_RAY_SETUP",
     "GO_MUTESTING_SETUP",
@@ -376,6 +431,8 @@ __all__ = [
     "cosmicray_config",
     "cosmicray_report_command",
     "cosmicray_run_commands",
+    "cosmicray_scope_command",
+    "cosmicray_scope_script",
     "gomutesting_command",
     "parse_cosmicray_report",
     "parse_gomutesting",

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
@@ -65,6 +66,19 @@ DEFAULT_KILL_THRESHOLD = 0.8
 #: How many auto-synthesis rounds the gate attempts before rejecting.
 DEFAULT_MAX_SYNTHESIS_ROUNDS = 3
 
+#: Difficulty-amplifier generators whose mutation run is scoped to the changed
+#: region. A ``bug_combination`` / ``multi_file`` candidate mutates >=2 symbols on
+#: large MODULAR modules; mutating each WHOLE module is hundreds of mutants and
+#: does not finish within ``mutation_timeout``, so the runner restricts cosmic-ray
+#: to the changed-symbol line ranges (the same file/region scoping the Go/JS
+#: tooling already do).
+AMPLIFIER_GENERATORS: frozenset[str] = frozenset({"bug_combination", "multi_file"})
+
+# ``@@ -old_start,old_count +new_start,new_count @@`` unified-diff hunk header.
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+# ``+++ b/path`` (or ``+++ path``) target-file marker, tab-trimmed.
+_PLUS_FILE_RE = re.compile(r"^\+\+\+ (?:b/)?(.+?)(?:\t.*)?$")
+
 # Attributable reject reason prefixes (stable keys the contract/CLI gate on).
 REASON_MUTATION_INADEQUATE = "mutation_adequacy_below_threshold"
 REASON_NO_MUTANTS = "mutation_no_mutants_generated"
@@ -72,6 +86,89 @@ REASON_NO_MUTANTS = "mutation_no_mutants_generated"
 
 class MutationError(RuntimeError):
     """Raised for an unrecoverable failure while driving the mutation gate."""
+
+
+def patch_old_side_regions(patch_text: str) -> dict[str, list[tuple[int, int]]]:
+    """Return per-file GOLD-side (old) changed line ranges from a unified diff.
+
+    The forward ``mutation_patch`` transforms gold -> broken, so each hunk's OLD
+    side (``@@ -old_start,old_count``) is the GOLD line range the fault touches --
+    exactly the lines cosmic-ray must mutate. Pure-insertion hunks (``old_count ==
+    0``) contribute no range. Ranges are 1-based and inclusive, keyed by the
+    repo-relative path from the ``+++ b/<path>`` marker.
+    """
+    regions: dict[str, list[tuple[int, int]]] = {}
+    current: str | None = None
+    for line in patch_text.splitlines():
+        file_match = _PLUS_FILE_RE.match(line)
+        if file_match:
+            path = file_match.group(1).strip()
+            current = None if path == "/dev/null" else path
+            continue
+        hunk = _HUNK_RE.match(line)
+        if hunk and current is not None:
+            start = int(hunk.group(1))
+            count = int(hunk.group(2)) if hunk.group(2) is not None else 1
+            if count > 0:
+                regions.setdefault(current, []).append((start, start + count - 1))
+    return regions
+
+
+def _provenance_symbol_regions(
+    candidate: Candidate,
+) -> dict[str, list[tuple[int, int]]]:
+    """Per-file changed-symbol line spans recorded in the candidate provenance.
+
+    The difficulty-amplifier generators record each constituent fault/edit's
+    enclosing-symbol span (``start_line``/``end_line``) under ``faults``/``edits``;
+    scoping cosmic-ray to the WHOLE changed function (rather than only the diff
+    lines) keeps enough mutable nodes for a meaningful adequacy measurement.
+    """
+    regions: dict[str, list[tuple[int, int]]] = {}
+    details = candidate.provenance.details if candidate.provenance else {}
+    if not isinstance(details, dict):
+        return regions
+    records = details.get("faults")
+    if not isinstance(records, list):
+        records = details.get("edits")
+    if not isinstance(records, list):
+        return regions
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        path = record.get("file")
+        start = record.get("start_line")
+        end = record.get("end_line")
+        if (
+            isinstance(path, str)
+            and path
+            and isinstance(start, int)
+            and isinstance(end, int)
+            and end >= start
+        ):
+            regions.setdefault(path, []).append((start, end))
+    return regions
+
+
+def candidate_mutation_regions(
+    candidate: Candidate,
+) -> dict[str, tuple[tuple[int, int], ...]]:
+    """Per-file GOLD line ranges to scope an amplifier candidate's mutation run.
+
+    Unions the provenance-recorded changed-symbol spans (function-level, generous)
+    with the ``mutation_patch`` hunk ranges (always available), so the cosmic-ray
+    run for a ``bug_combination`` / ``multi_file`` candidate is bounded to the
+    actually-mutated regions. Returns ``{}`` when no ranges can be derived (the
+    runner then mutates whole files, the safe default).
+    """
+    merged: dict[str, list[tuple[int, int]]] = {}
+    for source in (
+        _provenance_symbol_regions(candidate),
+        patch_old_side_regions(candidate.mutation_patch),
+    ):
+        for path, ranges in source.items():
+            merged.setdefault(path, []).extend(ranges)
+    return {path: tuple(ranges) for path, ranges in merged.items() if ranges}
 
 
 @dataclass(frozen=True)
@@ -442,6 +539,14 @@ class DockerMutationRunner:
         self._base_tests = list(base_tests)
         self._timeout = command_timeout
         self._docker_client = docker_client
+        # Difficulty-amplifier candidates mutate >=2 symbols on large modular
+        # modules; scope cosmic-ray to the changed regions so the run finishes
+        # within the timeout (other generators mutate whole files, unchanged).
+        self._regions: dict[str, tuple[tuple[int, int], ...]] | None = (
+            candidate_mutation_regions(candidate)
+            if candidate.generator in AMPLIFIER_GENERATORS
+            else None
+        )
 
     @property
     def language(self) -> str:
@@ -478,6 +583,7 @@ class DockerMutationRunner:
                 sandbox,
                 target_files=self._target_files,
                 timeout=self._timeout,
+                target_regions=self._regions,
             )
         return MutationMeasurement.from_stats(stats)
 
