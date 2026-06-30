@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Self
 
 from aiodocker import Docker
 from aiodocker.exceptions import DockerError as AioDockerError
+
+from swe_forge.execution._timeout import (
+    is_timeout_exit,
+    outer_read_deadline,
+    wrap_command_with_timeout,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -242,11 +250,25 @@ class DockerClient:
 
         Returns:
             ExecResult with exit_code, stdout, and stderr.
+
+        Raises:
+            DockerError: If the exec exceeds ``timeout``. When a timeout is set
+                the command is wrapped under coreutils ``timeout --signal=KILL``
+                so the in-container process tree is reaped (process-group
+                SIGKILL); the streaming reader is also cancelled/awaited so no
+                hung process or reader survives.
         """
+        start_time = time.monotonic()
         container = self._client.containers.container(container_id)
 
+        # Wrap under coreutils ``timeout`` so the daemon reaps the whole
+        # in-container process tree at the deadline even if the read below is
+        # uncancellable. No wrap when no timeout is requested (behavior
+        # unchanged).
+        exec_cmd = wrap_command_with_timeout(cmd, timeout) if timeout else cmd
+
         exec_id = await container.exec(
-            cmd=cmd,
+            cmd=exec_cmd,
             stdout=True,
             stderr=True,
             stdin=False,
@@ -271,18 +293,36 @@ class DockerClient:
                         stdout_chunks.append(chunk_str)
 
         if timeout:
-            try:
-                await asyncio.wait_for(read_stream(), timeout=timeout)
-            except asyncio.TimeoutError:
+            reader = asyncio.ensure_future(read_stream())
+            done, _pending = await asyncio.wait(
+                {reader}, timeout=outer_read_deadline(timeout)
+            )
+            if reader not in done:
+                reader.cancel()
+                finished, _ = await asyncio.wait({reader}, timeout=5.0)
+                for task in finished:
+                    with contextlib.suppress(BaseException):
+                        task.result()
                 raise DockerError(
-                    f"Exec timed out after {timeout}s",
+                    f"Exec timed out after {timeout}s; in-container process "
+                    "tree reaped, reader cancelled",
                     container_id=container_id,
                 )
+            reader.result()
         else:
             await read_stream()
 
         exec_info = await exec_instance.inspect()
         exit_code = exec_info.get("ExitCode", -1)
+
+        if timeout and is_timeout_exit(
+            exit_code, time.monotonic() - start_time, timeout
+        ):
+            raise DockerError(
+                f"Exec timed out after {timeout}s; in-container process tree "
+                f"reaped (exit {exit_code})",
+                container_id=container_id,
+            )
 
         stdout = "".join(stdout_chunks)
         stderr = "".join(stderr_chunks)

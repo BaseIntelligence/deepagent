@@ -312,8 +312,13 @@ class TestDockerClient:
                 assert result.exit_code == 0
 
     @pytest.mark.asyncio
-    async def test_exec_with_timeout(self):
+    async def test_exec_with_timeout(self, monkeypatch):
         import asyncio
+
+        from swe_forge.execution import _timeout
+
+        # Shrink the post-deadline grace so the stuck-read safety net fires fast.
+        monkeypatch.setattr(_timeout, "EXEC_TIMEOUT_GRACE_SECONDS", 0.05)
 
         class SlowMockExec(MockExec):
             def start(self, detach: bool = False):
@@ -332,6 +337,56 @@ class TestDockerClient:
             async with DockerClient() as client:
                 with pytest.raises(DockerError) as exc_info:
                     await client.exec("test-id", ["sleep", "10"], timeout=0.1)
+                assert "timed out" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_exec_wraps_cmd_with_timeout(self):
+        with patch("swe_forge.execution.docker_client.Docker") as mock_docker_cls:
+            mock_docker = MockDocker()
+            mock_exec = MockExec(exit_code=0)
+            mock_docker.exec.return_value = mock_exec
+            mock_docker_cls.return_value = mock_docker
+
+            async with DockerClient() as client:
+                await client.exec("test-id", ["ls", "-la"], timeout=30.0)
+
+            sent = mock_docker._mock_container.exec.await_args
+            wrapped = sent.kwargs["cmd"]
+            assert wrapped[0] == "timeout"
+            assert "KILL" in wrapped
+            assert wrapped[-2:] == ["ls", "-la"]
+
+    @pytest.mark.asyncio
+    async def test_exec_reaped_exit_code_surfaces_timeout(self, monkeypatch):
+        # A coreutils-``timeout`` reap returns control with exit 137 well within
+        # the grace window; the client must surface this as a clean DockerError
+        # (never a silent vacuous result).
+        from swe_forge.execution import _timeout
+
+        monkeypatch.setattr(_timeout, "EXEC_TIMEOUT_GRACE_SECONDS", 5.0)
+
+        class ReapedMockExec(MockExec):
+            def __init__(self):
+                super().__init__(exit_code=137)
+
+            def start(self, detach: bool = False):
+                return self._reaped_stream()
+
+            async def _reaped_stream(self):
+                import asyncio
+
+                await asyncio.sleep(0.05)
+                if False:
+                    yield b""
+
+        with patch("swe_forge.execution.docker_client.Docker") as mock_docker_cls:
+            mock_docker = MockDocker()
+            mock_docker.exec.return_value = ReapedMockExec()
+            mock_docker_cls.return_value = mock_docker
+
+            async with DockerClient() as client:
+                with pytest.raises(DockerError) as exc_info:
+                    await client.exec("test-id", ["sleep", "600"], timeout=0.05)
                 assert "timed out" in str(exc_info.value).lower()
 
     @pytest.mark.asyncio

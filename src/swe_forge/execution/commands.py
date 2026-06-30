@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from aiodocker import Docker
+
+from swe_forge.execution._timeout import (
+    is_timeout_exit,
+    outer_read_deadline,
+    wrap_command_with_timeout,
+)
 
 
 def demultiplex_docker_stream(data: bytes) -> str:
@@ -108,7 +116,9 @@ async def exec_in_container(
         ExecResult with stdout, stderr, exit_code, and duration.
 
     Raises:
-        asyncio.TimeoutError: If command execution exceeds timeout.
+        asyncio.TimeoutError: If command execution exceeds timeout. The
+            in-container process tree is reaped (process-group SIGKILL) before
+            this is raised, so no hung process survives.
         CommandError: If command execution fails.
     """
     start_time = time.monotonic()
@@ -116,7 +126,12 @@ async def exec_in_container(
     docker, own_connection = _get_docker_instance(client)
 
     try:
-        exec_options = _build_exec_options(cmd, cwd, env, user)
+        # Wrap under coreutils ``timeout --signal=KILL`` so the daemon reaps the
+        # whole in-container process tree at the deadline even if the HTTP read
+        # below is uncancellable.
+        exec_options = _build_exec_options(
+            wrap_command_with_timeout(cmd, timeout), cwd, env, user
+        )
 
         async with docker._query(
             f"containers/{container_id}/exec",
@@ -127,13 +142,9 @@ async def exec_in_container(
             exec_create = await response.json()
         exec_id = exec_create["Id"]
 
-        async with docker._query(
-            f"exec/{exec_id}/start",
-            method="POST",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps({"Detach": False, "Tty": False}),
-        ) as start_response:
-            output_bytes = await start_response.read()
+        output_bytes = await _start_and_read_output(
+            docker, exec_id, container_id, timeout
+        )
 
         stdout_str = demultiplex_docker_stream(output_bytes)
 
@@ -146,6 +157,12 @@ async def exec_in_container(
 
         duration = time.monotonic() - start_time
 
+        if is_timeout_exit(exit_code, duration, timeout):
+            raise asyncio.TimeoutError(
+                f"command in container {container_id} exceeded its {timeout}s "
+                f"timeout and was reaped (exit {exit_code})"
+            )
+
         return ExecResult(
             stdout=stdout_str,
             stderr="",
@@ -156,6 +173,52 @@ async def exec_in_container(
     finally:
         if own_connection:
             await docker.close()
+
+
+async def _start_and_read_output(
+    docker: Docker,
+    exec_id: str,
+    container_id: str,
+    timeout: float,
+) -> bytes:
+    """Start the exec and read its full output, bounded by ``timeout`` + grace.
+
+    The in-container command is wrapped under coreutils ``timeout``, so a hung
+    command is reaped at the deadline and the stream closes on its own. This
+    grace window only guards the pathological case where the HTTP read never
+    returns after the reap: the reader task is cancelled/awaited and an
+    ``asyncio.TimeoutError`` is raised so the caller never blocks indefinitely.
+    """
+
+    async def _read() -> bytes:
+        async with docker._query(
+            f"exec/{exec_id}/start",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps({"Detach": False, "Tty": False}),
+        ) as start_response:
+            return await start_response.read()
+
+    read_task = asyncio.ensure_future(_read())
+    done, _pending = await asyncio.wait(
+        {read_task}, timeout=outer_read_deadline(timeout)
+    )
+    if read_task not in done:
+        await _abandon_reader(read_task)
+        raise asyncio.TimeoutError(
+            f"command in container {container_id} exceeded its {timeout}s "
+            f"timeout; in-container process tree reaped, read abandoned"
+        )
+    return read_task.result()
+
+
+async def _abandon_reader(read_task: asyncio.Future) -> None:
+    """Cancel a still-pending reader task and drain it without blocking."""
+    read_task.cancel()
+    finished, _pending = await asyncio.wait({read_task}, timeout=5.0)
+    for task in finished:
+        with contextlib.suppress(BaseException):
+            task.result()
 
 
 async def stream_exec(
