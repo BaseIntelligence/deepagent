@@ -3425,9 +3425,7 @@ def _print_pilot_outcome(outcome) -> None:  # type: ignore[no-untyped-def]
     )
     for disposition in outcome.dispositions:
         color = {"kept": "green"}.get(disposition.stage, "yellow")
-        line = (
-            f"  [{color}]{disposition.stage:13s}[/{color}] {disposition.plan.label}"
-        )
+        line = f"  [{color}]{disposition.stage:13s}[/{color}] {disposition.plan.label}"
         if disposition.task_id:
             line += f"  -> {disposition.task_id}"
         if disposition.reason:
@@ -3453,7 +3451,9 @@ def build(
         help="Candidates per (repo, generator) cell (more = more in-band candidates).",
     ),
     max_plans: int | None = typer.Option(
-        None, "--max-plans", help="Cap the total candidate count (e.g. a quick smoke run)."
+        None,
+        "--max-plans",
+        help="Cap the total candidate count (e.g. a quick smoke run).",
     ),
     languages: str | None = typer.Option(
         None,
@@ -3467,6 +3467,11 @@ def build(
     ),
     concurrency: int = typer.Option(
         4, "--concurrency", help="Max concurrent in-flight rollouts (semaphore cap)."
+    ),
+    candidate_concurrency: int = typer.Option(
+        1,
+        "--candidate-concurrency",
+        help="Max candidates processed concurrently (>1 parallelizes the sweep).",
     ),
     band_high: float = typer.Option(
         DEFAULT_BAND_HIGH,
@@ -3573,6 +3578,7 @@ def build(
         kill_threshold=kill_threshold,
         flakiness_runs=flakiness_runs,
         concurrency=concurrency,
+        candidate_concurrency=candidate_concurrency,
         validate_models=validate_models_flag,
         command_timeout=timeout,
         mutation_timeout=mutation_timeout,

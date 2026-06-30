@@ -39,6 +39,7 @@ counts, usage, and verdicts -- never the API key (VAL-CROSS-023).
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 import subprocess
 import tempfile
@@ -419,6 +420,51 @@ class LiveCandidateProcessor:
         self._mutation_timeout = mutation_timeout
         self._registry = registry or build_default_registry()
         self._generators = build_default_generator_registry()
+        # Per-repo env-image cache: a repo's green-baseline image is built once
+        # per run and reused across its candidates (same image tag). The per-repo
+        # lock serializes concurrent same-repo builds so two candidates never race
+        # to commit the same tag (which could remove an image another is using).
+        self._env_cache: dict[str, EnvImage] = {}
+        self._env_failures: dict[str, str] = {}
+        self._env_locks: dict[str, asyncio.Lock] = {}
+        self._locks_guard = asyncio.Lock()
+
+    async def _lock_for(self, key: str) -> asyncio.Lock:
+        async with self._locks_guard:
+            lock = self._env_locks.get(key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._env_locks[key] = lock
+            return lock
+
+    async def _acquire_env_image(
+        self, plan: CandidatePlan, checkout: Path
+    ) -> tuple[EnvImage | None, str]:
+        """Build (once per repo per run) or reuse the cached green-baseline image.
+
+        The blocking Docker build runs in a worker thread so concurrent candidates
+        for OTHER repos overlap; the per-repo lock ensures a single build per repo.
+        Returns ``(env_image, "")`` on success or ``(None, reason)`` on failure
+        (the failure is cached so a red repo is not rebuilt for every candidate).
+        """
+        key = plan.repo.repo_id
+        lock = await self._lock_for(key)
+        async with lock:
+            cached = self._env_cache.get(key)
+            if cached is not None:
+                return cached, ""
+            failed = self._env_failures.get(key)
+            if failed is not None:
+                return None, failed
+            build = await asyncio.to_thread(
+                EnvBuilder().build, plan.repo, workdir=checkout
+            )
+            if not build.success or build.env_image is None:
+                reason = f"env build {build.failure_kind}: {build.reason}"
+                self._env_failures[key] = reason
+                return None, reason
+            self._env_cache[key] = build.env_image
+            return build.env_image, ""
 
     async def process(self, plan: CandidatePlan, workdir: Path) -> CandidateArtifacts:
         art = CandidateArtifacts(plan=plan)
@@ -447,18 +493,18 @@ class LiveCandidateProcessor:
         # -- Stage 1: env-first build (host checkout retained) ------------- #
         checkout = work / "checkout"
         checkout.mkdir()
-        clone = _checkout_repo(plan.repo, checkout)
+        clone = await asyncio.to_thread(_checkout_repo, plan.repo, checkout)
         if clone is not None:
             art.failure_reason = f"checkout failed: {clone}"
             return art
 
-        build = EnvBuilder().build(plan.repo, workdir=checkout)
-        if not build.success or build.env_image is None:
-            art.failure_reason = f"env build {build.failure_kind}: {build.reason}"
+        env_image, reason = await self._acquire_env_image(plan, checkout)
+        if env_image is None:
+            art.failure_reason = reason
             return art
-        art.env_image = build.env_image
+        art.env_image = env_image
         art.repo_url = plan.repo.url
-        art.base_commit = build.env_image.commit
+        art.base_commit = env_image.commit
 
         # -- Stage 2a: generate the candidate ------------------------------ #
         request = GenerationRequest(
@@ -538,7 +584,9 @@ class LiveCandidateProcessor:
         _accumulate_panel_usage(art, outcome.report)
 
         if outcome.report.is_keep:
-            broken = _materialize_broken_tree(checkout, candidate, work / "broken")
+            broken = await asyncio.to_thread(
+                _materialize_broken_tree, checkout, candidate, work / "broken"
+            )
             art.broken_tree = broken
         return art
 
@@ -764,6 +812,7 @@ class PilotConfig:
     flakiness_runs: int = DEFAULT_FLAKINESS_RUNS
     k: int | None = None
     concurrency: int = 4
+    candidate_concurrency: int = 1
     validate_models: bool = True
     command_timeout: float = 600.0
     mutation_timeout: float = 1200.0
@@ -932,6 +981,45 @@ class PilotOutcome:
 # --------------------------------------------------------------------------- #
 # Orchestration (Stage 0 -> Stage 5)
 # --------------------------------------------------------------------------- #
+async def _process_plans(
+    plans: Sequence[CandidatePlan],
+    processor: CandidateProcessor,
+    run_root: Path,
+    concurrency: int,
+) -> list[CandidateArtifacts]:
+    """Run Stage 1-4 for every plan, returning artifacts in plan order.
+
+    Each candidate gets its own run-scoped ``workdir`` (created up front, torn
+    down with ``run_root`` by the caller). Candidates run concurrently under a
+    semaphore of size ``concurrency`` (``1`` = the sequential default, which
+    preserves the historical single-candidate-at-a-time behavior); the heavy
+    per-candidate work overlaps so a large sweep is wall-clock tractable while
+    every stage still owns its own throwaway-container hygiene. Results are
+    placed by index so the funnel counting + export downstream stay deterministic
+    regardless of completion order. If a processor raises, the remaining tasks are
+    cancelled and the error propagates (the caller's ``finally`` still cleans up).
+    """
+    width = max(1, int(concurrency))
+    semaphore = asyncio.Semaphore(width)
+    results: list[CandidateArtifacts | None] = [None] * len(plans)
+
+    async def _one(index: int, plan: CandidatePlan) -> None:
+        workdir = run_root / f"cand-{index:04d}"
+        workdir.mkdir(parents=True, exist_ok=True)
+        async with semaphore:
+            results[index] = await processor.process(plan, workdir)
+
+    tasks = [asyncio.create_task(_one(index, plan)) for index, plan in enumerate(plans)]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    return [art for art in results if art is not None]
+
+
 async def run_pilot(
     config: PilotConfig,
     *,
@@ -959,11 +1047,14 @@ async def run_pilot(
     cleanup: list[Path] = [run_root]
 
     try:
-        for index, plan in enumerate(config.plans):
+        artifacts = await _process_plans(
+            config.plans,
+            processor,
+            run_root,
+            getattr(config, "candidate_concurrency", 1) or 1,
+        )
+        for plan, art in zip(config.plans, artifacts):
             counts.sourced += 1
-            workdir = run_root / f"cand-{index:04d}"
-            workdir.mkdir(parents=True, exist_ok=True)
-            art = await processor.process(plan, workdir)
             cleanup.extend(art.cleanup_paths)
             usage.add(art)
 

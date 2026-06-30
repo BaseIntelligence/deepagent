@@ -859,6 +859,53 @@ def test_pilot_ok_when_headlines_hold(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Candidate-level concurrency: parallel processing preserves order + invariants
+# --------------------------------------------------------------------------- #
+def test_candidate_concurrency_preserves_order_and_funnel(tmp_path: Path) -> None:
+    plans = _mixed_plans()
+    serial = _run(PilotConfig(plans=plans, out_dir=tmp_path / "s"), FakeProcessor())
+    parallel = _run(
+        PilotConfig(plans=plans, out_dir=tmp_path / "p", candidate_concurrency=4),
+        FakeProcessor(),
+    )
+    # Concurrency must not change the funnel, the shipped set, or disposition order.
+    assert serial.counts.to_dict() == parallel.counts.to_dict()
+    assert parallel.counts.monotone is True
+    assert [d.plan.label for d in serial.dispositions] == [
+        d.plan.label for d in parallel.dispositions
+    ]
+    ids_s = {p.name for p in (tmp_path / "s" / "tasks").iterdir()}
+    ids_p = {p.name for p in (tmp_path / "p" / "tasks").iterdir()}
+    assert ids_s == ids_p
+
+
+def test_candidate_concurrency_actually_overlaps(tmp_path: Path) -> None:
+    """A semaphore of N lets up to N candidates be in-flight simultaneously."""
+
+    in_flight = 0
+    peak = 0
+
+    class SlowProcessor(FakeProcessor):
+        async def process(
+            self, plan: CandidatePlan, workdir: Path
+        ) -> CandidateArtifacts:
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                await asyncio.sleep(0.05)
+                return await super().process(plan, workdir)
+            finally:
+                in_flight -= 1
+
+    _run(
+        PilotConfig(plans=_mixed_plans(), out_dir=tmp_path, candidate_concurrency=4),
+        SlowProcessor(),
+    )
+    assert peak >= 2  # genuine overlap occurred under the semaphore
+
+
+# --------------------------------------------------------------------------- #
 # Reproducibility (VAL-CROSS-016): a re-run ships the equivalent set
 # --------------------------------------------------------------------------- #
 def test_reexport_reproduces_equivalent_shipped_set(tmp_path: Path) -> None:
