@@ -31,6 +31,7 @@ from typer.testing import CliRunner
 from swe_forge.forge.adapters import JavaScriptAdapter, PythonAdapter
 from swe_forge.forge.generators import GenerationRequest
 from swe_forge.forge.generators.ast_mutation import AstMutationGenerator
+from swe_forge.forge.generators.bug_combination import BugCombinationGenerator
 from swe_forge.forge.generators.function_removal import FunctionRemovalGenerator
 from swe_forge.forge.models import Candidate, GeneratedSpec, ModelError
 from swe_forge.forge.spec import (
@@ -41,8 +42,10 @@ from swe_forge.forge.spec import (
     SpecAuthoringContext,
     SpecError,
     TemplateSpecAuthor,
+    _contract_signature,
     build_interface_block,
     generate_spec,
+    scan_spec_for_leaks,
 )
 
 runner = CliRunner()
@@ -216,6 +219,157 @@ def test_interface_block_cross_language_javascript(tmp_path: Path) -> None:
     block = build_interface_block(candidate, repo, JavaScriptAdapter())
     assert any(s.name == "classify" for s in block.symbols)
     assert "classify" in block.text
+
+
+# --------------------------------------------------------------------------- #
+# Spec-leak fix: the interface block is a signature CONTRACT (param names +
+# annotations) with default-VALUE expressions stripped, so a multi-fault
+# structural candidate whose faulted symbol has a signature with default values
+# (an implementation token that also appears as a source/patch line) is NOT
+# rejected as a false `spec_leak`. The leak auditor stays intact (still rejects
+# a genuine impl leak).
+# --------------------------------------------------------------------------- #
+# A boltons-like modular target: a function whose (multi-line) signature carries
+# default-value expressions -- the exact shape that leaked before the fix.
+PY_FORMATUTILS = (
+    'def render_field(name="field",\n'
+    '                 formatter=lambda value: "=" + repr(value),\n'
+    "                 defaults={},\n"
+    '                 prefix="> "):\n'
+    "    total = 0\n"
+    "    for ch in name:\n"
+    "        total = total + 1\n"
+    "    return prefix + str(total)\n"
+)
+PY_MATHUTILS = (
+    "def clamp(value, lower, upper):\n"
+    "    if value < lower:\n"
+    "        return lower\n"
+    "    if value > upper:\n"
+    "        return upper\n"
+    "    return value\n"
+)
+
+
+def _boltons_like_repo(root: Path) -> Path:
+    _write(root, "pyproject.toml", "[project]\nname='demo'\nversion='0'\n")
+    _write(root, "pkg/formatutils.py", PY_FORMATUTILS)
+    _write(root, "pkg/mathutils.py", PY_MATHUTILS)
+    return root
+
+
+def _multi_fault_candidate(root: Path) -> Candidate:
+    return BugCombinationGenerator().generate(
+        GenerationRequest(repo_root=root, seed=0, params={"faults": 2}), PythonAdapter()
+    )
+
+
+def test_contract_signature_strips_default_values() -> None:
+    sig = (
+        "def render_field(name, formatter=lambda value: '=' + repr(value), "
+        "defaults={}, prefix='> ')"
+    )
+    out = _contract_signature(sig)
+    # Parameter NAMES are preserved (the public contract).
+    for param in ("name", "formatter", "defaults", "prefix"):
+        assert param in out
+    # But no default-VALUE implementation token survives.
+    for token in ("lambda", "repr(value)", "{}", "'> '", "="):
+        assert token not in out
+
+
+def test_contract_signature_keeps_annotations_and_return() -> None:
+    # A ``=`` default is cut, but ``:`` annotations, ``==`` etc. and the return
+    # annotation are preserved (never mistaken for a default).
+    sig = "def f(x: int, y: Dict[str, int] = {}, z=0) -> bool"
+    out = _contract_signature(sig)
+    assert "x: int" in out
+    assert "y: Dict[str, int]" in out
+    assert "z" in out
+    assert "-> bool" in out
+    assert "= {}" not in out and "z=0" not in out
+
+
+def test_contract_signature_is_noop_without_defaults() -> None:
+    # Go-style / plain signatures (no defaults) are returned unchanged in effect.
+    assert _contract_signature("def clamp(value, lower, upper)") == (
+        "def clamp(value, lower, upper)"
+    )
+    assert _contract_signature("func Clamp(v, lo, hi int) int") == (
+        "func Clamp(v, lo, hi int) int"
+    )
+
+
+def test_multi_fault_interface_block_has_no_default_value_leak(
+    tmp_path: Path,
+) -> None:
+    repo = _boltons_like_repo(tmp_path)
+    candidate = _multi_fault_candidate(repo)
+    # The multi-fault candidate targets the default-carrying function.
+    assert "render_field" in candidate.target.symbols
+    block = build_interface_block(candidate, repo, PythonAdapter())
+    # The faulted symbol is still exposed by name (the contract is not empty).
+    assert any(s.name == "render_field" for s in block.symbols)
+    assert "render_field" in block.text
+    # No default-value implementation token appears in the interface text.
+    for token in ("lambda value", "defaults={}", 'prefix="> "', "repr(value)"):
+        assert token not in block.text
+    # And the leak auditor now PASSES the interface block for this candidate.
+    findings = scan_spec_for_leaks(
+        "A clean problem statement describing the expected behavior.",
+        ["A clean requirement grounded in a failing test."],
+        block.text,
+        candidate,
+        block.signatures(),
+    )
+    interface_findings = [f for f in findings if f.startswith("interface_block")]
+    assert interface_findings == []
+
+
+def test_multi_fault_candidate_yields_spec(tmp_path: Path) -> None:
+    repo = _boltons_like_repo(tmp_path)
+    candidate = _multi_fault_candidate(repo)
+    trace = F2PTrace(
+        tests=tuple(
+            FailingTest(
+                name=f"tests/test_hidden.py::test_{sym}",
+                file="tests/test_hidden.py",
+                expected="the correct result",
+                observed="a wrong result",
+            )
+            for sym in candidate.target.symbols
+        )
+    )
+    # generate_spec no longer raises SpecError('spec leaks ...') for this
+    # legitimate multi-fault structural candidate.
+    spec = generate_spec(
+        candidate, trace, repo, PythonAdapter(), author=TemplateSpecAuthor()
+    )
+    assert "render_field" in spec.interface_block
+    # No default-value impl token leaked into any field.
+    for token in ("lambda value", "defaults={}"):
+        assert token not in spec.interface_block
+
+
+def test_leak_auditor_still_rejects_genuine_impl_leak_in_interface(
+    tmp_path: Path,
+) -> None:
+    # TRUE-POSITIVE preserved: if a real body/impl line of the faulted symbol is
+    # injected into the interface block, the auditor STILL rejects it. The fix
+    # removed the SOURCE of the false leak, not the check.
+    repo = _boltons_like_repo(tmp_path)
+    candidate = _multi_fault_candidate(repo)
+    block = build_interface_block(candidate, repo, PythonAdapter())
+    leaked_line = _patch_code_lines(candidate)[0]
+    poisoned = block.text + "\n# " + leaked_line
+    findings = scan_spec_for_leaks(
+        "clean problem statement",
+        ["clean requirement"],
+        poisoned,
+        candidate,
+        block.signatures(),
+    )
+    assert any(f.startswith("interface_block") for f in findings)
 
 
 # --------------------------------------------------------------------------- #

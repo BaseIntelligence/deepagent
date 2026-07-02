@@ -193,6 +193,125 @@ class InterfaceBlock:
         return [sym.to_dict() for sym in self.symbols]
 
 
+_OPEN_BRACKETS = "([{"
+_CLOSE_BRACKETS = ")]}"
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split ``text`` on commas that sit at bracket/quote depth zero."""
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quote: str | None = None
+    prev = ""
+    for ch in text:
+        if quote is not None:
+            current.append(ch)
+            if ch == quote and prev != "\\":
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            current.append(ch)
+        elif ch in _OPEN_BRACKETS:
+            depth += 1
+            current.append(ch)
+        elif ch in _CLOSE_BRACKETS:
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+        prev = ch
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+def _strip_param_default(param: str) -> str:
+    """Drop a parameter's top-level ``= default`` value, keeping name+annotation.
+
+    The default VALUE (e.g. ``lambda name: '*' + name``, ``{}``, ``0``) is an
+    implementation token, not part of the public contract, so it is removed; the
+    parameter name and any ``: annotation`` (the type contract) are preserved.
+    Only a genuine default ``=`` at bracket/quote depth zero is cut - never a
+    ``==``/``<=``/``>=``/``!=``/``:=`` operator that could appear inside an
+    annotation, and never one nested in brackets or a string.
+    """
+    depth = 0
+    quote: str | None = None
+    prev = ""
+    for i, ch in enumerate(param):
+        if quote is not None:
+            if ch == quote and prev != "\\":
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch in _OPEN_BRACKETS:
+            depth += 1
+        elif ch in _CLOSE_BRACKETS:
+            depth -= 1
+        elif ch == "=" and depth == 0:
+            nxt = param[i + 1] if i + 1 < len(param) else ""
+            if prev not in "=<>!:" and nxt != "=":
+                return param[:i].strip()
+        prev = ch
+    return param.strip()
+
+
+def _contract_signature(signature: str) -> str:
+    """Return ``signature`` with every parameter default VALUE removed.
+
+    The agent-visible interface block must be a signature/behavioral contract
+    only: it lists the public name, parameters, and (return/param) type
+    annotations, but NOT any default-value expression. Those default expressions
+    are real implementation tokens that also appear verbatim as source/patch
+    lines of the faulted symbol (especially on multi-line signatures in modular
+    repos), so embedding them makes the leak auditor CORRECTLY reject an
+    otherwise-legitimate candidate. Stripping them removes the SOURCE of that
+    leak while leaving the auditor untouched. Language-agnostic: it operates on
+    the parameter list between the first top-level ``(`` and its match, so Go
+    (no defaults) is a no-op and Python/JS defaults are dropped.
+    """
+    sig = signature.strip()
+    open_idx = sig.find("(")
+    if open_idx == -1:
+        return sig
+    depth = 0
+    quote: str | None = None
+    prev = ""
+    close_idx = -1
+    for i in range(open_idx, len(sig)):
+        ch = sig[i]
+        if quote is not None:
+            if ch == quote and prev != "\\":
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch in _OPEN_BRACKETS:
+            depth += 1
+        elif ch in _CLOSE_BRACKETS:
+            depth -= 1
+            if depth == 0:
+                close_idx = i
+                break
+        prev = ch
+    if close_idx == -1:
+        return sig
+    prefix = sig[:open_idx]
+    params_str = sig[open_idx + 1 : close_idx]
+    suffix = sig[close_idx + 1 :]
+    if not params_str.strip():
+        return f"{prefix}(){suffix}".rstrip()
+    cleaned = [
+        stripped
+        for param in _split_top_level_commas(params_str)
+        if (stripped := _strip_param_default(param))
+    ]
+    return f"{prefix}({', '.join(cleaned)}){suffix}".rstrip()
+
+
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 
 
@@ -266,7 +385,9 @@ def build_interface_block(
                     name=sym.name,
                     kind=sym.kind,
                     file=rel,
-                    signature=(sym.signature or f"{sym.name}").strip(),
+                    signature=_contract_signature(
+                        (sym.signature or f"{sym.name}").strip()
+                    ),
                 )
             )
 
