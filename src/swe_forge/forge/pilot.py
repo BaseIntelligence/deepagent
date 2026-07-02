@@ -630,6 +630,12 @@ class LiveCandidateProcessor:
         except (EstablishError, PilotError):
             return env_image
         art.p2p_derivation = derivation
+        if derivation.has_protected_conflict:
+            # An un-importable module IS (or contains) the F2P's own module: a
+            # fault that breaks the F2P's own import is a real defect, not
+            # collateral. Leave the baseline UNTOUCHED so establish rejects on the
+            # still-red broken P2P (never a vacuous pass by excluding the F2P).
+            return env_image
         if not derivation.has_exclusions:
             return env_image
         return _with_p2p_exclusions(env_image, adapter, derivation)

@@ -88,6 +88,65 @@ def test_compute_collateral_mixes_name_and_file_exclusions() -> None:
     assert result.has_exclusions is True
 
 
+def test_compute_collateral_excludes_non_f2p_import_module_but_keeps_f2p() -> None:
+    # A NON-F2P test module fails to import: it is excluded wholesale; the F2P's
+    # own module (protected) is untouched and there is no conflict.
+    result = compute_collateral_exclusions(
+        [],
+        collection_error_files=["tests/test_iterutils.py"],
+        protected_files=["tests/test_strutils.py"],
+    )
+    assert result.file_exclusions == ("tests/test_iterutils.py",)
+    assert result.protected_file_conflicts == ()
+    assert result.has_protected_conflict is False
+    assert result.has_exclusions is True
+
+
+def test_compute_collateral_f2p_own_module_import_break_is_a_conflict_not_excluded() -> (
+    None
+):
+    # The F2P's OWN module fails to import: NEVER excluded -> recorded as a
+    # protected conflict so the caller leaves the baseline red and establish
+    # rejects (a fault breaking the F2P's own import is a real defect).
+    result = compute_collateral_exclusions(
+        [],
+        collection_error_files=["tests/test_strutils.py"],
+        protected_files=["tests/test_strutils.py"],
+    )
+    assert result.file_exclusions == ()
+    assert result.protected_file_conflicts == ("tests/test_strutils.py",)
+    assert result.has_protected_conflict is True
+    assert result.has_exclusions is False
+    # green_on_broken is False because a protected conflict leaves the P2P red.
+    assert result.p2p_green_on_broken is False
+
+
+def test_compute_collateral_protects_f2p_module_by_basename() -> None:
+    # The pytest summary path (repo-relative) and the recorded F2P path may differ
+    # only by the leading directory; basename matching still protects the module.
+    result = compute_collateral_exclusions(
+        [],
+        collection_error_files=["tests/test_strutils.py"],
+        protected_files=["boltons/tests/test_strutils.py"],
+    )
+    assert result.protected_file_conflicts == ("tests/test_strutils.py",)
+    assert result.file_exclusions == ()
+
+
+def test_compute_collateral_conflict_suppresses_other_exclusions_via_flag() -> None:
+    # When BOTH a non-F2P import break AND the F2P's own import break are present,
+    # the non-F2P is still recorded in file_exclusions but the conflict flag tells
+    # the caller to leave the baseline untouched (reject wholesale).
+    result = compute_collateral_exclusions(
+        [],
+        collection_error_files=["tests/test_a.py", "tests/test_strutils.py"],
+        protected_files=["tests/test_strutils.py"],
+    )
+    assert result.file_exclusions == ("tests/test_a.py",)
+    assert result.protected_file_conflicts == ("tests/test_strutils.py",)
+    assert result.has_protected_conflict is True
+
+
 # --------------------------------------------------------------------------- #
 # Recipe-driven core: run broken P2P once, parse via the adapter, reduce
 # --------------------------------------------------------------------------- #
@@ -179,6 +238,68 @@ def test_derive_from_recipe_green_broken_yields_no_exclusions() -> None:
     result = _derive(recipe)
     assert result.exclusions == ()
     assert result.p2p_green_on_broken is True
+
+
+def test_derive_from_recipe_excludes_non_f2p_import_module_keeps_f2p() -> None:
+    # A NON-F2P test module fails to import; the F2P's own module is passed as
+    # protected. The un-importable non-F2P module is excluded wholesale and no
+    # conflict is raised -> establish's remaining P2P can be green on broken.
+    output = (
+        "=== ERRORS ===\n"
+        "ImportError while importing test module 'tests/test_iterutils.py'.\n"
+        "=== short test summary info ===\n"
+        "ERROR tests/test_iterutils.py\n"
+    )
+    recipe = _FakeRecipe(
+        TestRun("python -m pytest", exit_code=2, passed=False, stdout=output)
+    )
+    result = _derive(recipe, protected_files=["tests/test_strutils.py"])
+    assert result.file_exclusions == ("tests/test_iterutils.py",)
+    assert result.protected_file_conflicts == ()
+    assert result.has_protected_conflict is False
+
+
+def test_derive_from_recipe_f2p_own_module_import_break_rejects() -> None:
+    # The F2P's OWN module fails to import (pytest exit 2). It is NEVER excluded;
+    # a protected conflict is recorded so the caller leaves the baseline red and
+    # establish rejects (a fault breaking the F2P's own import is a real defect).
+    output = (
+        "=== ERRORS ===\n"
+        "ImportError while importing test module 'tests/test_strutils.py'.\n"
+        "=== short test summary info ===\n"
+        "ERROR tests/test_strutils.py\n"
+    )
+    recipe = _FakeRecipe(
+        TestRun("python -m pytest", exit_code=2, passed=False, stdout=output)
+    )
+    result = _derive(recipe, protected_files=["tests/test_strutils.py"])
+    assert result.file_exclusions == ()
+    assert result.protected_file_conflicts == ("tests/test_strutils.py",)
+    assert result.has_protected_conflict is True
+    assert result.has_exclusions is False
+    assert result.p2p_green_on_broken is False
+
+
+def test_derive_from_recipe_unparseable_red_fails_safe_no_exclusions() -> None:
+    # Parse ambiguity: the broken P2P is red (exit 1) but the runner output has NO
+    # recognizable FAILED/ERROR summary line (truncated/garbled). The derivation
+    # yields NO exclusions and NO conflict, so the caller leaves the baseline red
+    # and establish rejects -- fail safe, never a vacuous pass.
+    recipe = _FakeRecipe(
+        TestRun(
+            "python -m pytest",
+            exit_code=1,
+            passed=False,
+            stdout="<< output truncated / unparseable >>",
+        )
+    )
+    result = _derive(recipe)
+    assert result.exclusions == ()
+    assert result.file_exclusions == ()
+    assert result.protected_file_conflicts == ()
+    assert result.has_exclusions is False
+    # A red broken P2P with nothing derivable stays not-green -> establish rejects.
+    assert result.p2p_green_on_broken is False
 
 
 def test_structural_generators_set_excludes_pr_mirror_and_lm_authored() -> None:

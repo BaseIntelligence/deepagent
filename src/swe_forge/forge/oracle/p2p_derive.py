@@ -68,13 +68,18 @@ class P2PDerivation:
     fault makes uncollectable (import error, no per-test name) to ignore
     wholesale; ``broken_failures`` is every existing test that failed on the
     broken tree (the superset before protecting the F2P); ``protected`` are the
-    F2P names that were filtered out and never excluded.
+    F2P names that were filtered out and never excluded;
+    ``protected_file_conflicts`` are un-importable modules that ARE (or contain)
+    the F2P's own module -- they are NEVER excluded, so establish rejects the
+    candidate (a fault that breaks the F2P's own import is a real defect, not
+    collateral).
     """
 
     exclusions: tuple[str, ...] = ()
     file_exclusions: tuple[str, ...] = ()
     broken_failures: tuple[str, ...] = ()
     protected: tuple[str, ...] = ()
+    protected_file_conflicts: tuple[str, ...] = ()
     p2p_green_on_broken: bool = True
     details: dict[str, object] = field(default_factory=dict)
 
@@ -82,12 +87,23 @@ class P2PDerivation:
     def has_exclusions(self) -> bool:
         return bool(self.exclusions or self.file_exclusions)
 
+    @property
+    def has_protected_conflict(self) -> bool:
+        """``True`` iff an un-importable module is (or contains) the F2P's module.
+
+        The caller must then leave the baseline UNTOUCHED so establish rejects on
+        the full broken P2P (the F2P module's import error stays red) rather than
+        excluding it -- never a vacuous pass.
+        """
+        return bool(self.protected_file_conflicts)
+
     def to_dict(self) -> dict[str, object]:
         return {
             "exclusions": list(self.exclusions),
             "file_exclusions": list(self.file_exclusions),
             "broken_failures": list(self.broken_failures),
             "protected": list(self.protected),
+            "protected_file_conflicts": list(self.protected_file_conflicts),
             "p2p_green_on_broken": self.p2p_green_on_broken,
             "details": dict(self.details),
         }
@@ -98,6 +114,7 @@ def compute_collateral_exclusions(
     *,
     protected: Sequence[str] = (),
     collection_error_files: Sequence[str] = (),
+    protected_files: Sequence[str] = (),
 ) -> P2PDerivation:
     """Reduce broken-tree failures to the collateral P2P exclusion set (pure).
 
@@ -106,11 +123,17 @@ def compute_collateral_exclusions(
     ``collection_error_files`` are whole test modules the structural fault makes
     uncollectable (an IMPORT-TIME collateral failure with no per-test name to
     skip); they are de-duplicated into ``file_exclusions`` so the module is
-    ignored wholesale. Returns the resulting :class:`P2PDerivation`. With neither
+    ignored wholesale -- EXCEPT any module that matches ``protected_files`` (the
+    F2P's own module path/basename), which is recorded in
+    ``protected_file_conflicts`` and NEVER excluded: a fault that breaks the
+    F2P's own import is a real defect, so the caller leaves the baseline untouched
+    and establish rejects with ``p2p_not_green_on_broken`` (fail safe, never a
+    vacuous pass). Returns the resulting :class:`P2PDerivation`. With neither
     per-test failures nor collection-error files the broken P2P is already green
     and both exclusion lists are empty.
     """
     protected_set = {p.strip() for p in protected if p.strip()}
+    protected_file_set = {p.strip() for p in protected_files if p.strip()}
     failures: list[str] = []
     exclusions: list[str] = []
     seen: set[str] = set()
@@ -123,20 +146,53 @@ def compute_collateral_exclusions(
         if name not in protected_set:
             exclusions.append(name)
     file_exclusions: list[str] = []
+    protected_conflicts: list[str] = []
     seen_files: set[str] = set()
     for raw in collection_error_files:
         path = raw.strip()
         if not path or path in seen_files:
             continue
         seen_files.add(path)
-        file_exclusions.append(path)
+        if _module_is_protected(path, protected_file_set):
+            protected_conflicts.append(path)
+        else:
+            file_exclusions.append(path)
     return P2PDerivation(
         exclusions=tuple(exclusions),
         file_exclusions=tuple(file_exclusions),
         broken_failures=tuple(failures),
         protected=tuple(sorted(protected_set)),
-        p2p_green_on_broken=not (failures or file_exclusions),
+        protected_file_conflicts=tuple(protected_conflicts),
+        p2p_green_on_broken=not (failures or file_exclusions or protected_conflicts),
     )
+
+
+def _module_is_protected(path: str, protected_files: set[str]) -> bool:
+    """Return ``True`` iff ``path`` is (or matches) a protected F2P module.
+
+    A collection-erroring module is the F2P's own module when its path equals a
+    protected path or shares its basename (the F2P file the mutation broke the
+    import of). Matching by basename too keeps the guard robust to the leading
+    directory differing between the pytest summary (repo-relative) and the
+    recorded F2P path.
+    """
+    from pathlib import PurePosixPath
+
+    if not protected_files:
+        return False
+    candidate = path.strip()
+    if not candidate:
+        return False
+    candidate_base = PurePosixPath(candidate).name
+    for raw in protected_files:
+        prot = raw.strip()
+        if not prot:
+            continue
+        if candidate == prot:
+            return True
+        if candidate_base and candidate_base == PurePosixPath(prot).name:
+            return True
+    return False
 
 
 async def derive_from_recipe(
@@ -144,15 +200,20 @@ async def derive_from_recipe(
     adapter: LanguageAdapter,
     *,
     protected_names: Sequence[str] = (),
+    protected_files: Sequence[str] = (),
 ) -> P2PDerivation:
     """Derive the collateral exclusions by running the BROKEN-tree P2P via ``recipe``.
 
     Sets the tree to broken, runs the repo's full baseline (P2P) suite once, and
     -- when it is red -- parses the failing test names via
-    :meth:`LanguageAdapter.parse_test_failures` and reduces them to the collateral
-    exclusion set (protecting any F2P name). This is the offline-testable core
-    (drive it with a fake recipe + adapter); the Docker wrapper is
-    :func:`derive_structural_p2p_exclusions`.
+    :meth:`LanguageAdapter.parse_test_failures` (and the un-importable modules via
+    :meth:`LanguageAdapter.parse_collection_error_files`) and reduces them to the
+    collateral exclusion set. ``protected_names`` are the F2P test names that must
+    never be excluded; ``protected_files`` are the F2P's own module path(s) -- an
+    un-importable module matching one is recorded as a protected conflict and NOT
+    excluded, so establish rejects (a fault that breaks the F2P's own import is a
+    real defect). This is the offline-testable core (drive it with a fake recipe +
+    adapter); the Docker wrapper is :func:`derive_structural_p2p_exclusions`.
     """
     await recipe.set_state(TreeState.BROKEN)
     run = await recipe.run_p2p()
@@ -171,18 +232,24 @@ async def derive_from_recipe(
         failures,
         protected=protected_names,
         collection_error_files=collection_files,
+        protected_files=protected_files,
     )
     return P2PDerivation(
         exclusions=derivation.exclusions,
         file_exclusions=derivation.file_exclusions,
         broken_failures=derivation.broken_failures,
         protected=derivation.protected,
-        p2p_green_on_broken=derivation.p2p_green_on_broken,
+        protected_file_conflicts=derivation.protected_file_conflicts,
+        # The raw broken P2P was RED (we are past the ``run.passed`` short-circuit)
+        # -- so this is honestly False even when nothing parseable was derived
+        # (parse ambiguity): the baseline is left untouched and establish rejects.
+        p2p_green_on_broken=False,
         details={
             "p2p_command": recipe.p2p_command,
             "broken_p2p_exit": run.exit_code,
             "parsed_failures": list(failures),
             "collection_error_files": list(collection_files),
+            "protected_file_conflicts": list(derivation.protected_file_conflicts),
         },
     )
 
@@ -194,6 +261,7 @@ async def derive_structural_p2p_exclusions(
     *,
     baseline_command: str = "",
     protected_names: Sequence[str] = (),
+    protected_files: Sequence[str] = (),
     command_timeout: float = 600.0,
     docker_client: "DockerClient | None" = None,
 ) -> P2PDerivation:
@@ -202,9 +270,13 @@ async def derive_structural_p2p_exclusions(
     A green baseline is a hard precondition. Opens a ``--rm`` DockerSandbox on the
     candidate's EnvImage, applies the forward mutation (broken tree), runs the
     repo's baseline (P2P) suite, and reduces its failures to the collateral
-    exclusion set (never the F2P). Returns the :class:`P2PDerivation`; the caller
-    bakes ``exclusions`` into a derived EnvImage baseline command (via
-    :func:`apply_p2p_exclusions`) so establish's P2P is green on broken.
+    exclusion set (never the F2P). ``protected_files`` are the F2P's own test
+    module path(s): an un-importable module matching one is recorded as a
+    protected conflict and NOT excluded, so the caller leaves the baseline
+    untouched and establish rejects (a fault breaking the F2P's own import is a
+    real defect). Returns the :class:`P2PDerivation`; the caller bakes
+    ``exclusions``/``file_exclusions`` into a derived EnvImage baseline command
+    (via :func:`apply_p2p_exclusions`) so establish's P2P is green on broken.
     """
     require_green_baseline(env_image)
     if adapter is None:
@@ -233,7 +305,10 @@ async def derive_structural_p2p_exclusions(
             command_timeout=command_timeout,
         )
         return await derive_from_recipe(
-            recipe, adapter, protected_names=protected_names
+            recipe,
+            adapter,
+            protected_names=protected_names,
+            protected_files=protected_files,
         )
 
 

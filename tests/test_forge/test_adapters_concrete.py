@@ -308,15 +308,19 @@ class TestImportCollateralExclusions:
         adapter = PythonAdapter()
         assert adapter.parse_collection_error_files("3 passed in 0.1s") == []
 
-    def test_python_apply_file_exclusions_appends_ignore_flags(self) -> None:
+    def test_python_apply_file_exclusions_removes_erroring_modules(self) -> None:
         adapter = PythonAdapter()
         command = adapter.apply_p2p_file_exclusions(
             "python -m pytest", ["tests/test_iterutils.py", "tests/a b.py"]
         )
-        assert "--ignore=tests/test_iterutils.py" in command
+        # The module is DELETED (not --ignore'd) so a repo whose conftest defines
+        # pytest_ignore_collect returning False cannot force it back into
+        # collection; the pytest command still runs afterward.
+        assert "rm -f tests/test_iterutils.py;" in command
         # A path with a space is shell-quoted.
         assert "'tests/a b.py'" in command
-        assert command.startswith("python -m pytest")
+        assert command.strip().endswith("python -m pytest")
+        assert "--ignore" not in command
 
     def test_python_apply_file_exclusions_no_op_when_empty(self) -> None:
         adapter = PythonAdapter()

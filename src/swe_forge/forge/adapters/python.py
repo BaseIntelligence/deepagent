@@ -305,19 +305,29 @@ class PythonAdapter(LanguageAdapter):
         return files
 
     def apply_p2p_file_exclusions(self, command: str, files: Sequence[str]) -> str:
-        """Append pytest ``--ignore=<path>`` flags skipping whole erroring modules.
+        """Prepend ``rm -f <module>`` removals skipping whole erroring modules.
 
-        A test module the structural mutation makes uncollectable (import error,
-        no per-test name) is ignored wholesale from the P2P/regression run. Only
-        the derived collateral modules are ignored -- an unignored collection
-        error still turns the P2P red so establish rejects rather than passing
-        vacuously (no ``--continue-on-collection-errors``).
+        A test module the structural mutation makes uncollectable (import error /
+        module-scope failure at collection, pytest exit 2, no per-test name) is
+        dropped wholesale from the P2P/regression run by DELETING the file before
+        pytest runs. A plain ``--ignore=<path>`` is NOT reliable: a repo whose
+        ``conftest.py`` defines ``pytest_ignore_collect`` returning ``False`` (the
+        canonical structural source ``boltons`` does exactly this) OVERRIDES
+        ``--ignore``/``--ignore-glob`` -- the ``firstresult`` hook forces
+        collection and the module still errors (verified in Docker). Physically
+        removing the file is the only mechanism that survives such a conftest, and
+        it is the faithful realization of "exclude the module from the P2P set":
+        the file is green on the gold tree (so removing it keeps gold green -- the
+        establish gate re-checks ``p2p_gold`` defensively) and the runs happen in
+        throwaway broken-tree sandboxes only. Only the derived collateral modules
+        are removed -- any un-derived collection error still turns the P2P red so
+        establish rejects rather than passing vacuously.
         """
         paths = [f.strip() for f in files if f.strip()]
         if not paths:
             return command
-        flags = " ".join(f"--ignore={shlex.quote(p)}" for p in paths)
-        return f"{command} {flags}"
+        removals = " ".join(f"rm -f {shlex.quote(p)};" for p in paths)
+        return f"{removals} {command}"
 
     def is_test_file(self, path: PathLike) -> bool:
         return bool(_TEST_FILE_RE.fullmatch(Path(path).name))
