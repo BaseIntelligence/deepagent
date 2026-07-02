@@ -64,12 +64,15 @@ class P2PDerivation:
     """The per-candidate P2P-exclusion derivation result.
 
     ``exclusions`` are the collateral existing-test names to keep OUT of the
-    establish P2P set; ``broken_failures`` is every existing test that failed on
-    the broken tree (the superset before protecting the F2P); ``protected`` are
-    the F2P names that were filtered out and never excluded.
+    establish P2P set; ``file_exclusions`` are whole test MODULES the structural
+    fault makes uncollectable (import error, no per-test name) to ignore
+    wholesale; ``broken_failures`` is every existing test that failed on the
+    broken tree (the superset before protecting the F2P); ``protected`` are the
+    F2P names that were filtered out and never excluded.
     """
 
     exclusions: tuple[str, ...] = ()
+    file_exclusions: tuple[str, ...] = ()
     broken_failures: tuple[str, ...] = ()
     protected: tuple[str, ...] = ()
     p2p_green_on_broken: bool = True
@@ -77,11 +80,12 @@ class P2PDerivation:
 
     @property
     def has_exclusions(self) -> bool:
-        return bool(self.exclusions)
+        return bool(self.exclusions or self.file_exclusions)
 
     def to_dict(self) -> dict[str, object]:
         return {
             "exclusions": list(self.exclusions),
+            "file_exclusions": list(self.file_exclusions),
             "broken_failures": list(self.broken_failures),
             "protected": list(self.protected),
             "p2p_green_on_broken": self.p2p_green_on_broken,
@@ -93,13 +97,18 @@ def compute_collateral_exclusions(
     broken_failures: Sequence[str],
     *,
     protected: Sequence[str] = (),
+    collection_error_files: Sequence[str] = (),
 ) -> P2PDerivation:
     """Reduce broken-tree failures to the collateral P2P exclusion set (pure).
 
     De-duplicates ``broken_failures`` in first-seen order and removes any name in
     ``protected`` (the synthesized/provided F2P) so the F2P is never excluded.
-    Returns the resulting :class:`P2PDerivation`. With no failures the broken P2P
-    is already green and the exclusion list is empty.
+    ``collection_error_files`` are whole test modules the structural fault makes
+    uncollectable (an IMPORT-TIME collateral failure with no per-test name to
+    skip); they are de-duplicated into ``file_exclusions`` so the module is
+    ignored wholesale. Returns the resulting :class:`P2PDerivation`. With neither
+    per-test failures nor collection-error files the broken P2P is already green
+    and both exclusion lists are empty.
     """
     protected_set = {p.strip() for p in protected if p.strip()}
     failures: list[str] = []
@@ -113,11 +122,20 @@ def compute_collateral_exclusions(
         failures.append(name)
         if name not in protected_set:
             exclusions.append(name)
+    file_exclusions: list[str] = []
+    seen_files: set[str] = set()
+    for raw in collection_error_files:
+        path = raw.strip()
+        if not path or path in seen_files:
+            continue
+        seen_files.add(path)
+        file_exclusions.append(path)
     return P2PDerivation(
         exclusions=tuple(exclusions),
+        file_exclusions=tuple(file_exclusions),
         broken_failures=tuple(failures),
         protected=tuple(sorted(protected_set)),
-        p2p_green_on_broken=not failures,
+        p2p_green_on_broken=not (failures or file_exclusions),
     )
 
 
@@ -148,9 +166,15 @@ async def derive_from_recipe(
         )
     output = "\n".join(part for part in (run.stdout, run.stderr) if part)
     failures = adapter.parse_test_failures(output)
-    derivation = compute_collateral_exclusions(failures, protected=protected_names)
+    collection_files = adapter.parse_collection_error_files(output)
+    derivation = compute_collateral_exclusions(
+        failures,
+        protected=protected_names,
+        collection_error_files=collection_files,
+    )
     return P2PDerivation(
         exclusions=derivation.exclusions,
+        file_exclusions=derivation.file_exclusions,
         broken_failures=derivation.broken_failures,
         protected=derivation.protected,
         p2p_green_on_broken=derivation.p2p_green_on_broken,
@@ -158,6 +182,7 @@ async def derive_from_recipe(
             "p2p_command": recipe.p2p_command,
             "broken_p2p_exit": run.exit_code,
             "parsed_failures": list(failures),
+            "collection_error_files": list(collection_files),
         },
     )
 

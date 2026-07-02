@@ -657,6 +657,26 @@ def test_apply_structural_p2p_exclusions_best_effort_on_docker_error(
     assert derived.baseline_test_command == env.baseline_test_command
 
 
+def test_process_swallows_unexpected_candidate_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # A single candidate's UNEXPECTED error (e.g. a mutation-tool misconfig raising
+    # deep in a gate) must be recorded as that candidate's failure, NOT propagated
+    # to abort the whole sweep. The candidate is dropped (no oracle pass), never
+    # vacuously passed.
+    import swe_forge.forge.pilot as pilot_mod
+
+    plan = _plan("cast", "bug_combination", 1)
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+
+    async def _boom(_plan: object, _work: object, _art: object) -> object:
+        raise RuntimeError("go-mutesting baseline is not green")
+
+    monkeypatch.setattr(processor, "_process", _boom)
+    art = asyncio.run(processor.process(plan, Path("/tmp")))
+    assert art.candidate is None
+    assert art.oracle_report is None
+    assert "RuntimeError: go-mutesting baseline is not green" in art.failure_reason
+
+
 # --------------------------------------------------------------------------- #
 # Single-discriminating-assertion pr_mirror F2P preference (task 3)
 # --------------------------------------------------------------------------- #

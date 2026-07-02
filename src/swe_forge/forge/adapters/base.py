@@ -262,6 +262,40 @@ class LanguageAdapter(ABC):
         """
         return []
 
+    def parse_collection_error_files(self, output: str) -> list[str]:
+        """Return test-FILE paths that failed at IMPORT/collection in ``output``.
+
+        Some structural mutations change/remove a symbol a test MODULE imports, so
+        the runner fails to COLLECT that whole module (e.g. pytest exit 2) and the
+        summary carries a file-level error with no per-test name. Those failures
+        are invisible to :meth:`parse_test_failures` (there is no ``-k`` name to
+        skip), so the broken P2P stays red and an otherwise-isolable candidate is
+        lost to ``p2p_not_green_on_broken``. This returns exactly the erroring
+        module paths so the whole module can be ignored from the P2P set via
+        :meth:`apply_p2p_file_exclusions` -- the file-level analogue of
+        :meth:`parse_test_failures`, and never the synthesized F2P (a separate
+        hidden file the baseline P2P run never collects).
+
+        The default returns ``[]``; adapters whose output surfaces file-level
+        collection errors override it.
+        """
+        return []
+
+    def apply_p2p_file_exclusions(self, command: str, files: Sequence[str]) -> str:
+        """Return ``command`` narrowed to SKIP whole test MODULES that fail to import.
+
+        The file-level counterpart of :meth:`apply_p2p_exclusions`: when a
+        structural mutation breaks a test module's IMPORT there is no per-test name
+        to skip, so the whole (fault-dependent, uncollectable) module is ignored
+        from the P2P/regression run. Excluding an already-green module from the
+        gold P2P keeps it green, so ``baseline_green`` is preserved; the establish
+        gate still re-checks ``p2p_gold`` defensively. The stage only calls this
+        method; the per-language runner syntax lives in the concrete adapter. The
+        default is a no-op; adapters whose runner supports file-level skipping
+        override it.
+        """
+        return command
+
     @abstractmethod
     def parse_symbols(self, file: PathLike) -> list[Symbol]:
         """Parse ``file`` and return its declared, locatable symbols."""

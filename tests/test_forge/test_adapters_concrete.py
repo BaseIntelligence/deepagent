@@ -286,6 +286,55 @@ class TestParseTestFailures:
 
 
 # --------------------------------------------------------------------------- #
+# parse_collection_error_files + apply_p2p_file_exclusions: IMPORT-TIME collateral.
+# --------------------------------------------------------------------------- #
+class TestImportCollateralExclusions:
+    def test_python_collection_errors_return_module_paths(self) -> None:
+        adapter = PythonAdapter()
+        output = (
+            "ImportError while importing test module 'tests/test_iterutils.py'.\n"
+            "=== short test summary info ===\n"
+            "ERROR tests/test_iterutils.py\n"
+            "ERROR tests/test_iterutils.py\n"  # dedup
+            "FAILED tests/test_other.py::test_ok - AssertionError\n"  # not a file err
+        )
+        # A whole-module collection ERROR (no ``::``) is returned as a file path;
+        # a per-test FAILED (has ``::``) is NOT (it is a name-level exclusion).
+        assert adapter.parse_collection_error_files(output) == [
+            "tests/test_iterutils.py"
+        ]
+
+    def test_python_no_collection_errors_empty(self) -> None:
+        adapter = PythonAdapter()
+        assert adapter.parse_collection_error_files("3 passed in 0.1s") == []
+
+    def test_python_apply_file_exclusions_appends_ignore_flags(self) -> None:
+        adapter = PythonAdapter()
+        command = adapter.apply_p2p_file_exclusions(
+            "python -m pytest", ["tests/test_iterutils.py", "tests/a b.py"]
+        )
+        assert "--ignore=tests/test_iterutils.py" in command
+        # A path with a space is shell-quoted.
+        assert "'tests/a b.py'" in command
+        assert command.startswith("python -m pytest")
+
+    def test_python_apply_file_exclusions_no_op_when_empty(self) -> None:
+        adapter = PythonAdapter()
+        assert adapter.apply_p2p_file_exclusions("python -m pytest", []) == (
+            "python -m pytest"
+        )
+
+    def test_js_go_file_exclusions_default_noop(self) -> None:
+        # JS/Go do not surface pytest-style file collection errors; the base
+        # defaults keep them safe no-ops so a structural JS/Go fault is unaffected.
+        assert JavaScriptAdapter().parse_collection_error_files("x") == []
+        assert GoAdapter().parse_collection_error_files("x") == []
+        assert JavaScriptAdapter().apply_p2p_file_exclusions("npm test", ["a.py"]) == (
+            "npm test"
+        )
+
+
+# --------------------------------------------------------------------------- #
 # VAL-ENV-007: mutation-tool hook is language-correct and distinct.
 # --------------------------------------------------------------------------- #
 class TestMutationToolHook:

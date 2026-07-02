@@ -281,6 +281,44 @@ class PythonAdapter(LanguageAdapter):
                 names.append(leaf)
         return names
 
+    def parse_collection_error_files(self, output: str) -> list[str]:
+        """Return pytest test-file paths that failed at IMPORT/collection.
+
+        A structural mutation that changes/removes a symbol a test module imports
+        makes pytest fail to COLLECT that whole module: the summary carries an
+        ``ERROR <file>`` line whose token has no per-test ``::`` node id (pytest
+        exit 2). :meth:`parse_test_failures` skips those (there is no ``-k`` name),
+        so this returns the erroring ``*.py`` module paths -- deduplicated in
+        first-seen order -- for :meth:`apply_p2p_file_exclusions` to ``--ignore``
+        wholesale from the P2P set. The synthesized F2P lives in a separate hidden
+        file the baseline run never collects, so it can never appear here.
+        """
+        files: list[str] = []
+        seen: set[str] = set()
+        for token in _PYTEST_FAILURE_RE.findall(output):
+            if "::" in token:
+                continue
+            path = token.strip()
+            if path.endswith(".py") and path not in seen:
+                seen.add(path)
+                files.append(path)
+        return files
+
+    def apply_p2p_file_exclusions(self, command: str, files: Sequence[str]) -> str:
+        """Append pytest ``--ignore=<path>`` flags skipping whole erroring modules.
+
+        A test module the structural mutation makes uncollectable (import error,
+        no per-test name) is ignored wholesale from the P2P/regression run. Only
+        the derived collateral modules are ignored -- an unignored collection
+        error still turns the P2P red so establish rejects rather than passing
+        vacuously (no ``--continue-on-collection-errors``).
+        """
+        paths = [f.strip() for f in files if f.strip()]
+        if not paths:
+            return command
+        flags = " ".join(f"--ignore={shlex.quote(p)}" for p in paths)
+        return f"{command} {flags}"
+
     def is_test_file(self, path: PathLike) -> bool:
         return bool(_TEST_FILE_RE.fullmatch(Path(path).name))
 

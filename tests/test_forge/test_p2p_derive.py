@@ -57,8 +57,35 @@ def test_compute_collateral_dedupes_in_first_seen_order() -> None:
 def test_compute_collateral_green_broken_has_no_exclusions() -> None:
     result = compute_collateral_exclusions([])
     assert result.exclusions == ()
+    assert result.file_exclusions == ()
     assert result.p2p_green_on_broken is True
     assert result.has_exclusions is False
+
+
+def test_compute_collateral_captures_import_collateral_files() -> None:
+    # A structural fault that breaks a test module's IMPORT (pytest exit 2) has no
+    # per-test name; the whole module is excluded via file_exclusions instead.
+    result = compute_collateral_exclusions(
+        [],
+        collection_error_files=[
+            "tests/test_broken_import.py",
+            "tests/test_broken_import.py",
+        ],
+    )
+    assert result.exclusions == ()
+    assert result.file_exclusions == ("tests/test_broken_import.py",)
+    assert result.p2p_green_on_broken is False
+    assert result.has_exclusions is True
+
+
+def test_compute_collateral_mixes_name_and_file_exclusions() -> None:
+    result = compute_collateral_exclusions(
+        ["test_collateral"],
+        collection_error_files=["tests/test_import_err.py"],
+    )
+    assert result.exclusions == ("test_collateral",)
+    assert result.file_exclusions == ("tests/test_import_err.py",)
+    assert result.has_exclusions is True
 
 
 # --------------------------------------------------------------------------- #
@@ -123,6 +150,26 @@ def test_derive_from_recipe_protects_the_f2p_name() -> None:
     result = _derive(recipe, protected_names=["test_f2p"])
     assert "test_f2p" not in result.exclusions
     assert result.exclusions == ("test_collateral",)
+
+
+def test_derive_from_recipe_extracts_import_collateral_module() -> None:
+    # pytest exit 2: a structural fault broke a test module's import, so the
+    # summary is a file-level ERROR with no ``::`` per-test node id. The whole
+    # module must be excluded (file_exclusions), not silently lost.
+    output = (
+        "=== ERRORS ===\n"
+        "ImportError while importing test module 'tests/test_iterutils.py'.\n"
+        "=== short test summary info ===\n"
+        "ERROR tests/test_iterutils.py\n"
+    )
+    recipe = _FakeRecipe(
+        TestRun("python -m pytest", exit_code=2, passed=False, stdout=output)
+    )
+    result = _derive(recipe)
+    assert result.exclusions == ()
+    assert result.file_exclusions == ("tests/test_iterutils.py",)
+    assert result.p2p_green_on_broken is False
+    assert result.has_exclusions is True
 
 
 def test_derive_from_recipe_green_broken_yields_no_exclusions() -> None:

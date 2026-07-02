@@ -480,6 +480,17 @@ class LiveCandidateProcessor:
         ) as exc:
             art.failure_reason = f"{type(exc).__name__}: {exc}"
             return art
+        except Exception as exc:  # noqa: BLE001
+            # An UNEXPECTED per-candidate failure (a mutation-tool misconfig, a
+            # transient Docker/endpoint error, a parser edge case, ...) must NOT
+            # abort the whole sweep -- it is recorded as this candidate's failure
+            # (dropping it out of the funnel at the stage it reached) so the
+            # remaining candidates still run. This never masks a vacuous oracle
+            # pass: the candidate is DROPPED, not passed (its oracle_report stays
+            # unset -> counted as an oracle_reject with the reason). ``asyncio``
+            # cancellation is a ``BaseException`` and still propagates.
+            art.failure_reason = f"{type(exc).__name__}: {exc}"
+            return art
 
     async def _process(
         self, plan: CandidatePlan, work: Path, art: CandidateArtifacts
@@ -630,14 +641,19 @@ def _with_p2p_exclusions(
     """Return a derived :class:`EnvImage` whose baseline excludes the collateral.
 
     Narrows the proven-green baseline command with ``adapter.apply_p2p_exclusions``
-    so the per-candidate collateral tests are skipped from the P2P/regression set.
-    The image tag is unchanged (same Docker image); only the recorded command and
+    (per-test names) and ``adapter.apply_p2p_file_exclusions`` (whole test modules
+    the fault makes uncollectable -- IMPORT-TIME collateral with no per-test name)
+    so the per-candidate collateral is skipped from the P2P/regression set. The
+    image tag is unchanged (same Docker image); only the recorded command and
     provenance change. Excluding tests from an already-green suite keeps gold
     green (and the establish gate re-checks ``p2p_gold`` defensively), so
     ``baseline_green`` is preserved.
     """
     new_command = adapter.apply_p2p_exclusions(
         env_image.baseline_test_command, derivation.exclusions
+    )
+    new_command = adapter.apply_p2p_file_exclusions(
+        new_command, derivation.file_exclusions
     )
     provenance = dict(env_image.provenance)
     provenance["per_candidate_p2p_exclusions"] = derivation.to_dict()
