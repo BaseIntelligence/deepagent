@@ -240,19 +240,73 @@ def try_removal_fault(
     return _verify_single_file_fault(rel, symbol, None, forward)
 
 
+# Fault-difficulty preference labels for :func:`order_symbols_by_difficulty`.
+#: ``"parse"`` keeps the natural parse order (the historical default -- the first
+#: applicable fault wins); ``"largest"`` tries the longest symbols first (a subtle
+#: operator/off-by-one fault buried in a big function is a genuine needle for the
+#: frontier yet still isolated to one hidden test); ``"smallest"`` tries the
+#: shortest first (obvious faults -- useful only to widen the easy end of a sweep).
+PREFER_PARSE = "parse"
+PREFER_LARGEST = "largest"
+PREFER_SMALLEST = "smallest"
+FAULT_PREFERENCES: frozenset[str] = frozenset(
+    {PREFER_PARSE, PREFER_LARGEST, PREFER_SMALLEST}
+)
+
+
+def _symbol_span(symbol: Symbol) -> int:
+    """The 1-based inclusive line span of ``symbol`` (a size/difficulty proxy)."""
+    return max(0, symbol.end_line - symbol.start_line + 1)
+
+
+def order_symbols_by_difficulty(
+    symbols: list[Symbol],
+    *,
+    min_symbol_lines: int = 0,
+    prefer: str = PREFER_PARSE,
+) -> list[Symbol]:
+    """Order/filter parsed symbols by a fault-difficulty target (deterministic).
+
+    A single AST fault's difficulty for a strong solver tracks how hard the fault
+    is to LOCATE, which tracks the enclosing symbol's size: a one-character
+    operator swap in a 3-line helper is obvious (the frontier solves it every
+    time -> solve-all), while the same swap inside a 40-line function is a real
+    needle yet still flips exactly one hidden test (isolable). This helper lets
+    the amplifier center per-fault difficulty by (1) dropping symbols shorter than
+    ``min_symbol_lines`` (skip the trivial obvious faults) and (2) trying larger
+    symbols first when ``prefer == "largest"``. The sort is stable (ties keep
+    parse order), so selection stays deterministic for a fixed seed + params.
+    """
+    filtered = [s for s in symbols if _symbol_span(s) >= max(0, min_symbol_lines)]
+    if prefer == PREFER_LARGEST:
+        return sorted(filtered, key=_symbol_span, reverse=True)
+    if prefer == PREFER_SMALLEST:
+        return sorted(filtered, key=_symbol_span)
+    return filtered
+
+
 def first_fault_in_file(
     adapter: LanguageAdapter,
     rel: str,
     ops: tuple[MutationOp, ...],
     *,
     symbol_hint: str | None = None,
+    min_symbol_lines: int = 0,
+    prefer: str = PREFER_PARSE,
 ) -> SingleFileFault | None:
     """Return the first verified fault for ``rel`` over its symbols x ``ops``.
 
-    Symbols are tried in parse order and operators in ``ops`` order, so selection
-    is deterministic. Must run with cwd at the repo root.
+    Symbols are tried in the order :func:`order_symbols_by_difficulty` yields
+    (parse order by default, largest-first when ``prefer == "largest"``, and
+    symbols shorter than ``min_symbol_lines`` skipped) and operators in ``ops``
+    order, so selection is deterministic. Must run with cwd at the repo root.
     """
-    for symbol in parse_symbols_safe(adapter, rel):
+    symbols = order_symbols_by_difficulty(
+        parse_symbols_safe(adapter, rel),
+        min_symbol_lines=min_symbol_lines,
+        prefer=prefer,
+    )
+    for symbol in symbols:
         if symbol_hint is not None and symbol.name != symbol_hint:
             continue
         for op in ops:
@@ -269,14 +323,17 @@ def collect_distinct_file_faults(
     *,
     seed: int,
     count: int,
+    min_symbol_lines: int = 0,
+    prefer: str = PREFER_PARSE,
 ) -> list[SingleFileFault]:
     """Collect up to ``count`` independent faults, each in a DISTINCT file.
 
     Files are shuffled deterministically by ``seed`` and the first applicable
-    fault per file is taken, so the faults are independent (distinct files,
-    distinct symbols, non-adjacent hunks) and each reverts on its own. Returns
-    however many distinct-file faults were found (possibly fewer than ``count``);
-    callers enforce their own minimum. Must run with cwd at the repo root.
+    fault per file (honoring the ``min_symbol_lines``/``prefer`` difficulty
+    target) is taken, so the faults are independent (distinct files, distinct
+    symbols, non-adjacent hunks) and each reverts on its own. Returns however many
+    distinct-file faults were found (possibly fewer than ``count``); callers
+    enforce their own minimum. Must run with cwd at the repo root.
     """
     ordered = list(files)
     random.Random(seed).shuffle(ordered)
@@ -284,7 +341,9 @@ def collect_distinct_file_faults(
     for rel in ordered:
         if len(faults) >= count:
             break
-        fault = first_fault_in_file(adapter, rel, ops)
+        fault = first_fault_in_file(
+            adapter, rel, ops, min_symbol_lines=min_symbol_lines, prefer=prefer
+        )
         if fault is not None:
             faults.append(fault)
     return faults

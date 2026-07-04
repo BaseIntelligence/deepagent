@@ -182,11 +182,20 @@ def _pr(
     install: tuple[str, ...] = (),
     test: str = "",
     exclude: tuple[str, ...] = (),
+    f2p_names: tuple[str, ...] = (),
     structural: bool = False,
     cap: int = 2,
     description: str = "",
 ) -> RepoSpec:
-    """Build one ``pr_mirror`` allowlist :class:`RepoSpec` (unique id ``slug#pr``)."""
+    """Build one ``pr_mirror`` allowlist :class:`RepoSpec` (unique id ``slug#pr``).
+
+    ``exclude`` names the fix-independent flipping test(s) the baked baseline keeps
+    OUT of P2P (green-on-broken by construction); ``f2p_names`` optionally pins a
+    SINGLE tightly-discriminating assertion as the isolated F2P (via pytest/Mocha
+    ``-k``/``--grep`` substring match) so the differential synthesizer's
+    discriminators stay gold-green in subtle semantic domains (URL/email). When
+    unset the whole flipping test (``exclude``) is the F2P.
+    """
     return RepoSpec(
         repo_id=f"{slug}#{pr_number}",
         url=f"https://github.com/{slug}.git",
@@ -199,6 +208,7 @@ def _pr(
         baseline_install=install,
         baseline_test=test,
         p2p_exclusions=exclude,
+        pr_f2p_names=f2p_names,
         pr_repo=slug,
         pr_number=pr_number,
         pr_generator="pr_mirror",
@@ -218,8 +228,9 @@ def _pr_mirror_allowlist() -> list[RepoSpec]:
             "python",
             "MIT",
             install=_PIP_PYTEST_CRYPTO,
-            exclude=("test_returns_failed_validation_on_invalid_email",),
-            description="Revert email-validation fix (2 invalid-email F2P).",
+            exclude=("stephen",),
+            f2p_names=("stephen",),
+            description="Revert email-validation fix (tight invalid-local-part F2P).",
         ),
         _pr(
             "python-validators/validators",
@@ -229,8 +240,9 @@ def _pr_mirror_allowlist() -> list[RepoSpec]:
             "python",
             "MIT",
             install=_PIP_PYTEST,
-            exclude=("test_returns_true_on_valid_url",),
-            description="Revert URL fragment fix (matrix.to F2P; 0.22-era, no extra).",
+            exclude=("matrix",),
+            f2p_names=("matrix",),
+            description="Revert URL fragment fix (single matrix.to F2P; 0.22-era).",
         ),
         _pr(
             "python-validators/validators",
@@ -427,6 +439,20 @@ def _modular_sources() -> list[RepoSpec]:
             "BSD-3-Clause",
             install=_PIP_PYTEST,
             description="Pure-Python utility modules (modular; prefer *utils.py).",
+        ),
+        _modular(
+            "jmespath/jmespath.py",
+            "2812594e69d43098ef60f81f4efc404c071b0418",
+            "2026-01-22T16:29:18Z",
+            "python",
+            "MIT",
+            install=_PIP_PYTEST,
+            test="pytest tests",
+            description=(
+                "JMESPath JSON query engine (larger modular pure-logic source: "
+                "lexer/parser/visitor/functions; baseline `pytest tests` skips the "
+                "hypothesis-only extra/ suite)."
+            ),
         ),
         _modular(
             "spf13/cast",

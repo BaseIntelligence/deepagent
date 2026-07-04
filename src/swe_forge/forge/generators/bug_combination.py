@@ -24,6 +24,8 @@ from pathlib import Path
 
 from swe_forge.forge.adapters.base import LanguageAdapter
 from swe_forge.forge.generators._targeting import (
+    FAULT_PREFERENCES,
+    PREFER_PARSE,
     SingleFileFault,
     build_combined_patches,
     collect_distinct_file_faults,
@@ -61,6 +63,26 @@ def _resolve_count(request: GenerationRequest, minimum: int) -> int:
     return max(count, minimum)
 
 
+def _resolve_int_param(request: GenerationRequest, key: str, default: int) -> int:
+    """Read a non-negative int generation param (tolerant of str/bool)."""
+    raw = request.params.get(key, default)
+    if isinstance(raw, bool):
+        return default
+    if isinstance(raw, int):
+        return max(0, raw)
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        return max(0, int(raw))
+    return default
+
+
+def _resolve_prefer(request: GenerationRequest) -> str:
+    """Read the fault-difficulty ``prefer`` param (``parse``/``largest``/...)."""
+    raw = request.params.get("prefer", PREFER_PARSE)
+    if isinstance(raw, str) and raw.strip() in FAULT_PREFERENCES:
+        return raw.strip()
+    return PREFER_PARSE
+
+
 class BugCombinationGenerator(BugGenerator):
     """Multi-fault combination generator (difficulty amplifier; multi-language)."""
 
@@ -83,6 +105,8 @@ class BugCombinationGenerator(BugGenerator):
                 f"bug_combination: unknown operator {request.op!r}"
             ) from None
         count = _resolve_count(request, _MIN_FAULTS)
+        min_symbol_lines = _resolve_int_param(request, "min_symbol_lines", 0)
+        prefer = _resolve_prefer(request)
 
         with contextlib.chdir(repo_root):
             files = discover_source_files(repo_root, adapter)
@@ -93,20 +117,28 @@ class BugCombinationGenerator(BugGenerator):
                     f"in {repo_root}"
                 )
             faults = collect_distinct_file_faults(
-                adapter, files, ops, seed=request.seed, count=count
+                adapter,
+                files,
+                ops,
+                seed=request.seed,
+                count=count,
+                min_symbol_lines=min_symbol_lines,
+                prefer=prefer,
             )
             if len(faults) < _MIN_FAULTS:
                 raise GenerationError(
                     f"bug_combination: could not build >= {_MIN_FAULTS} independent "
                     f"round-tripping faults in {repo_root} (found {len(faults)})"
                 )
-            return self._build_candidate(request, adapter, faults)
+            return self._build_candidate(request, adapter, faults, prefer=prefer)
 
     def _build_candidate(
         self,
         request: GenerationRequest,
         adapter: LanguageAdapter,
         faults: list[SingleFileFault],
+        *,
+        prefer: str = PREFER_PARSE,
     ) -> Candidate:
         combined = build_combined_patches(faults)
         ordered = sorted(faults, key=lambda fault: fault.rel)
@@ -140,6 +172,8 @@ class BugCombinationGenerator(BugGenerator):
             details={
                 "operation": "bug_combination",
                 "fault_count": len(ordered),
+                "prefer": prefer,
+                "min_symbol_lines": _resolve_int_param(request, "min_symbol_lines", 0),
                 "files": list(files),
                 "faults": fault_records,
             },

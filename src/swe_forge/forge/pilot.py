@@ -821,6 +821,31 @@ DEFAULT_GENERATORS_BY_LANGUAGE: dict[str, tuple[str, ...]] = {
     "go": ("ast_mutation", "function_removal", "bug_combination"),
 }
 
+#: Difficulty amplifier ("m6-band-supply"). The m6-pilot-build measurement showed
+#: ``bug_combination`` difficulty against the elite sealed panel is BIMODAL on the
+#: fault-COUNT knob (faults=2 -> solve-all pass@k=1.0; faults=3 -> solve-none 0.0
+#: AND more import-collateral rejects), so the keep band is a knife-edge on that
+#: axis. This ladder instead centers difficulty on the ORTHOGONAL "how hard is the
+#: fault to LOCATE" axis: it fixes faults=2 (the count that clears the oracle
+#: cleanly) and varies the TARGET-SYMBOL SIZE -- a subtle operator/off-by-one
+#: fault buried in a LARGER function is a genuine needle for the frontier yet
+#: still flips exactly one hidden test (isolable), while the same fault in a tiny
+#: helper is obvious. Each rung is a ``{faults, min_symbol_lines, prefer}`` param
+#: set handed to the ``bug_combination`` generator; sweeping the rungs x seeds
+#: spreads oracle-passing candidates ACROSS the difficulty spectrum so the band
+#: filter can SELECT the in-band ones (never by loosening the band). ``prefer``:
+#: ``largest`` tries the biggest symbols first (needle), ``smallest`` the easy end.
+DEFAULT_AMPLIFIER_LADDER: tuple[dict[str, object], ...] = (
+    {"faults": 2, "min_symbol_lines": 0, "prefer": "smallest"},
+    {"faults": 2, "min_symbol_lines": 10, "prefer": "largest"},
+    {"faults": 2, "min_symbol_lines": 20, "prefer": "largest"},
+    {"faults": 2, "min_symbol_lines": 30, "prefer": "largest"},
+)
+
+#: Structural generators the amplifier ladder is applied to (only the multi-fault
+#: amplifier reliably reaches calibration on the modular repos, per m6-pilot-build).
+AMPLIFIER_GENERATORS: frozenset[str] = frozenset({"bug_combination"})
+
 
 @dataclass
 class PilotConfig:
@@ -852,6 +877,7 @@ def build_pilot_plans(
     max_plans: int | None = None,
     include_pr_mirror: bool = True,
     include_structural: bool = True,
+    amplifier_ladder: Sequence[dict[str, object]] | None = None,
 ) -> list[CandidatePlan]:
     """Build the candidate plan list (Stage 0 sourcing) for a pilot run.
 
@@ -865,6 +891,15 @@ def build_pilot_plans(
       for every diversified MODULAR repo (:attr:`RepoSpec.structural_source`),
       enumerated over ``generator x seed`` cells.
 
+    The difficulty **amplifier** generators (``bug_combination``) are additionally
+    swept over the :data:`DEFAULT_AMPLIFIER_LADDER` (``amplifier_ladder``
+    override): each ``(generator, seed)`` cell is expanded to one plan per ladder
+    rung, and the rung's ``{faults, min_symbol_lines, prefer}`` are threaded as
+    generation ``params`` so per-fault difficulty is CENTERED on the band (varying
+    the fault-LOCATE difficulty via target-symbol size) rather than bimodal on the
+    fault-COUNT knob. Non-amplifier structural generators keep the plain
+    one-plan-per-cell behavior.
+
     The per-repo cap bounds the SHIPPED set (acquired at keep time), not the
     candidate count, so the funnel is fed many candidates per repo and the band
     filter selects the in-band ones. The GitHub token the ``pr_mirror`` generator
@@ -872,6 +907,9 @@ def build_pilot_plans(
     """
     src = registry or build_source_registry()
     gens = generators_by_language or DEFAULT_GENERATORS_BY_LANGUAGE
+    ladder = list(
+        amplifier_ladder if amplifier_ladder is not None else DEFAULT_AMPLIFIER_LADDER
+    )
     plans: list[CandidatePlan] = []
 
     def _capped() -> bool:
@@ -893,12 +931,21 @@ def build_pilot_plans(
                 return plans
         if include_structural and repo.structural_source:
             for generator in gens.get(repo.language, ("ast_mutation",)):
+                rungs: Sequence[dict[str, object]] = (
+                    ladder if generator in AMPLIFIER_GENERATORS and ladder else ({},)
+                )
                 for seed in range(seeds_per_cell):
-                    plans.append(
-                        CandidatePlan(repo=repo, generator=generator, seed=seed)
-                    )
-                    if _capped():
-                        return plans
+                    for rung in rungs:
+                        plans.append(
+                            CandidatePlan(
+                                repo=repo,
+                                generator=generator,
+                                seed=seed,
+                                params=dict(rung),
+                            )
+                        )
+                        if _capped():
+                            return plans
     return plans
 
 
@@ -1242,6 +1289,8 @@ def _build_report(
 
 
 __all__ = [
+    "AMPLIFIER_GENERATORS",
+    "DEFAULT_AMPLIFIER_LADDER",
     "DEFAULT_GENERATORS_BY_LANGUAGE",
     "CandidateArtifacts",
     "CandidateDisposition",
