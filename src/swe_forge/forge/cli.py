@@ -3588,7 +3588,7 @@ def build(
     )
 
     try:
-        outcome = asyncio.run(run_pilot(config))
+        outcome = asyncio.run(run_pilot(config, handle_signals=True))
     except (PilotError, MissingCredentialsError, ModelRoutingError) as exc:
         _fail(f"pilot: {exc}", api_key)
 

@@ -994,3 +994,285 @@ def test_host_workdirs_torn_down_even_when_processor_raises(tmp_path: Path) -> N
     # (including the one in flight when the stage raised) is still torn down.
     assert scratch
     assert all(not d.exists() for d in scratch)
+
+
+# --------------------------------------------------------------------------- #
+# Incremental checkpoint export (m6-pilot-checkpoint-export)
+#
+# The pilot now materializes each band-keep the instant it is found (workspace +
+# jsonl/parquet row + provenance) via the reused Stage-5 export path, so a run
+# stopped at any point has already shipped every keep found so far -- instead of
+# the old all-or-nothing export that ran only after EVERY plan completed.
+# --------------------------------------------------------------------------- #
+from datetime import datetime, timezone  # noqa: E402
+
+from swe_forge.forge.checkpoint import PilotCheckpoint  # noqa: E402
+from swe_forge.forge.export import export_batch  # noqa: E402
+from swe_forge.forge.pilot import _keep_export_request  # noqa: E402
+
+
+def _task_dirs(out_dir: Path) -> list[Path]:
+    tasks = out_dir / "tasks"
+    return [p for p in tasks.iterdir() if p.is_dir()] if tasks.exists() else []
+
+
+def _freeze_time(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Freeze both timestamp sources so two exports are byte-comparable.
+
+    ``forge.models._utc_now_iso`` feeds ForgeTask/Provenance/meta timestamps;
+    ``SweTask.created_at`` is set from ``datetime.now`` inside the dataset record
+    conversion. Freezing both makes the shipped artifact a pure function of the
+    (deterministic) FakeProcessor inputs.
+    """
+    monkeypatch.setattr("swe_forge.forge.models._utc_now_iso", lambda: _TS)
+
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr("swe_forge.swe.models.datetime", _Frozen)
+
+
+def test_checkpoint_ships_each_keep_incrementally(tmp_path: Path) -> None:
+    """Each recorded keep immediately grows tasks/ + jsonl + parquet by exactly 1.
+
+    Proves the checkpoint materializes the workspace AND both dataset rows AND
+    provenance per keep (not deferred to a final all-at-once pass).
+    """
+    plans = _mixed_plans()  # all keeps under the default FakeProcessor
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+
+    # A stop before the first keep still leaves valid empty artifacts.
+    assert (tmp_path / "dataset.jsonl").read_text() == ""
+    assert import_parquet(tmp_path / "dataset.parquet") == []
+
+    async def _drive() -> None:
+        processor = FakeProcessor()
+        for i, plan in enumerate(plans):
+            workdir = tmp_path / "run" / f"c{i}"
+            workdir.mkdir(parents=True)
+            art = await processor.process(plan, workdir)
+            request = _keep_export_request(art)
+            assert request is not None
+            result = await checkpoint.record_keep(i, request)
+            assert result.status == "shipped"
+            shipped = i + 1
+            assert len(_task_dirs(tmp_path)) == shipped
+            assert len(import_jsonl(tmp_path / "dataset.jsonl")) == shipped
+            assert len(import_parquet(tmp_path / "dataset.parquet")) == shipped
+
+    asyncio.run(_drive())
+    # Every materialized keep carries provenance.
+    for task_dir in _task_dirs(tmp_path):
+        assert (task_dir / "provenance.json").is_file()
+
+
+def test_pilot_stopped_after_k_keeps_ships_exactly_k(tmp_path: Path) -> None:
+    """A sweep stopped after the k-th keep has already shipped exactly those k.
+
+    The processor raises when it reaches the (k+1)-th plan (sequential order); the
+    k keeps found before it are already materialized on disk (workspace + both
+    dataset rows + provenance) and the on-disk funnel reconciles (keep==exported).
+    """
+    plans = _mixed_plans()
+    k = 3
+    stop_label = plans[k].label
+
+    class StopAfterK(FakeProcessor):
+        async def process(
+            self, plan: CandidatePlan, workdir: Path
+        ) -> CandidateArtifacts:
+            if plan.label == stop_label:
+                raise RuntimeError("budget/time ceiling reached")
+            return await super().process(plan, workdir)
+
+    with pytest.raises(RuntimeError):
+        _run(
+            PilotConfig(plans=plans, out_dir=tmp_path, candidate_concurrency=1),
+            StopAfterK(),
+        )
+
+    task_dirs = _task_dirs(tmp_path)
+    jsonl = import_jsonl(tmp_path / "dataset.jsonl")
+    parquet = import_parquet(tmp_path / "dataset.parquet")
+    # Exactly k keeps shipped -- not 0 (the old all-or-nothing failure mode).
+    assert len(task_dirs) == k
+    # Funnel reconciles under interruption: keep == exported across all artifacts.
+    assert len(jsonl) == len(parquet) == k
+    assert (
+        {t.id for t in jsonl}
+        == {r["id"] for r in parquet}
+        == {d.name for d in task_dirs}
+    )
+    # Provenance is complete for each shipped keep.
+    for task_dir in task_dirs:
+        assert (task_dir / "provenance.json").is_file()
+
+
+def test_completed_run_dataset_byte_identical_to_all_at_once(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """A completed incremental run's dataset == the pre-change one-shot export.
+
+    Checkpointing changes only WHEN a keep is written, never WHAT ships: the
+    finalized datasets are regenerated from the full kept set in plan order, so
+    they are byte-for-byte identical to a single ``export_batch`` of the same set.
+    """
+    _freeze_time(monkeypatch)
+    plans = _mixed_plans()
+
+    # Reference: the old all-at-once path over the identical kept set (plan order).
+    async def _collect_requests():  # type: ignore[no-untyped-def]
+        processor = FakeProcessor()
+        requests = []
+        for i, plan in enumerate(plans):
+            workdir = tmp_path / "ref-run" / f"c{i}"
+            workdir.mkdir(parents=True)
+            art = await processor.process(plan, workdir)
+            request = _keep_export_request(art)
+            if request is not None:
+                requests.append(request)
+        return requests
+
+    ref_dir = tmp_path / "ref"
+    export_batch(asyncio.run(_collect_requests()), ref_dir, overwrite=True)
+
+    # The new incremental pilot.
+    pilot_dir = tmp_path / "pilot"
+    _run(PilotConfig(plans=plans, out_dir=pilot_dir), FakeProcessor())
+
+    assert (pilot_dir / "dataset.jsonl").read_bytes() == (
+        ref_dir / "dataset.jsonl"
+    ).read_bytes()
+    assert (pilot_dir / "dataset.parquet").read_bytes() == (
+        ref_dir / "dataset.parquet"
+    ).read_bytes()
+
+
+def test_mid_write_kill_leaves_valid_dataset(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """A crash DURING a dataset write never corrupts the already-shipped dataset.
+
+    The first keep is shipped; the parquet half of the next atomic write is then
+    forced to fail. Temp-then-rename means the failure removes the temp files and
+    leaves BOTH previously-shipped datasets untouched, valid, and consistent.
+    """
+    plans = _mixed_plans()
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+
+    async def _drive() -> None:
+        processor = FakeProcessor()
+        first = await processor.process(plans[0], tmp_path / "w0")
+        await checkpoint.record_keep(0, _keep_export_request(first))  # type: ignore[arg-type]
+
+        def _boom(*args: object, **kw: object) -> int:
+            raise OSError("disk full mid-write")
+
+        monkeypatch.setattr("swe_forge.export.parquet.export_parquet", _boom)
+        second = await processor.process(plans[3], tmp_path / "w1")
+        with pytest.raises(OSError):
+            await checkpoint.record_keep(3, _keep_export_request(second))  # type: ignore[arg-type]
+
+    asyncio.run(_drive())
+
+    # Both datasets are still parseable (not corrupt) and reflect the first keep.
+    jsonl = import_jsonl(tmp_path / "dataset.jsonl")
+    parquet = import_parquet(tmp_path / "dataset.parquet")
+    assert len(jsonl) == len(parquet) == 1
+    # No temp scratch left behind after the failed atomic write.
+    assert list(tmp_path.glob("dataset.jsonl.ckpt-*")) == []
+    assert list(tmp_path.glob("dataset.parquet.ckpt-*")) == []
+
+
+def test_cancellation_mid_sweep_preserves_shipped_keeps(tmp_path: Path) -> None:
+    """A SIGTERM-style cancellation mid-sweep keeps every keep found so far shipped.
+
+    A blocking candidate stalls the sweep after two keeps are already checkpointed;
+    cancelling the pilot task (what the SIGTERM shutdown hook does) tears down the
+    sweep, and the two keeps found before the interruption remain materialized as
+    workspaces + dataset rows.
+    """
+    plans = _mixed_plans()
+    block_label = plans[2].label
+
+    async def _drive() -> None:
+        reached = asyncio.Event()
+
+        class Blocking(FakeProcessor):
+            async def process(
+                self, plan: CandidatePlan, workdir: Path
+            ) -> CandidateArtifacts:
+                if plan.label == block_label:
+                    reached.set()
+                    await asyncio.Event().wait()  # block until cancelled
+                return await super().process(plan, workdir)
+
+        task = asyncio.create_task(
+            run_pilot(
+                PilotConfig(plans=plans, out_dir=tmp_path, candidate_concurrency=1),
+                processor=Blocking(),
+            )
+        )
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_drive())
+
+    # The two keeps found before the interruption are shipped + in both datasets.
+    assert len(_task_dirs(tmp_path)) == 2
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 2
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 2
+
+
+def test_handle_signals_does_not_change_the_happy_path(tmp_path: Path) -> None:
+    """Installing the SIGTERM/SIGINT shutdown hook is a no-op on a clean run."""
+    without = _run(
+        PilotConfig(plans=_mixed_plans(), out_dir=tmp_path / "a"), FakeProcessor()
+    )
+
+    async def _drive():  # type: ignore[no-untyped-def]
+        return await run_pilot(
+            PilotConfig(plans=_mixed_plans(), out_dir=tmp_path / "b"),
+            processor=FakeProcessor(),
+            handle_signals=True,
+        )
+
+    with_hook = asyncio.run(_drive())
+    assert without.counts.to_dict() == with_hook.counts.to_dict()
+    assert without.shipped_count == with_hook.shipped_count
+
+
+def test_keep_export_request_only_for_pass_and_keep() -> None:
+    """The checkpoint gate mirrors the funnel: only oracle-pass AND band-keep."""
+    keep_plan = _plan("iniconfig", "ast_mutation", 0)
+
+    art_keep = CandidateArtifacts(
+        plan=keep_plan,
+        env_image=_env_image(keep_plan),
+        candidate=_candidate(keep_plan),
+        spec=_spec(keep_plan),
+        oracle_report=_oracle_pass(keep_plan),
+        calibration_report=_calibration(keep_plan, keep=True),
+    )
+    assert _keep_export_request(art_keep) is not None
+
+    art_drop = CandidateArtifacts(
+        plan=keep_plan,
+        env_image=_env_image(keep_plan),
+        candidate=_candidate(keep_plan),
+        spec=_spec(keep_plan),
+        oracle_report=_oracle_pass(keep_plan),
+        calibration_report=_calibration(keep_plan, keep=False),
+    )
+    assert _keep_export_request(art_drop) is None
+
+    art_reject = CandidateArtifacts(
+        plan=keep_plan,
+        env_image=_env_image(keep_plan),
+        candidate=_candidate(keep_plan),
+        spec=_spec(keep_plan),
+        oracle_report=_oracle_reject(keep_plan),
+    )
+    assert _keep_export_request(art_reject) is None

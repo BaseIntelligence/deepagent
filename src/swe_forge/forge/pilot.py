@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import signal
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
@@ -56,10 +57,10 @@ from swe_forge.forge.adapters import (
 )
 from swe_forge.forge.calibrate.filter import DEFAULT_BAND_FILTER, BandFilterConfig
 from swe_forge.forge.calibrate.pipeline import run_calibration
+from swe_forge.forge.checkpoint import PilotCheckpoint
 from swe_forge.forge.export import (
     BatchExportResult,
     ExportRequest,
-    export_batch,
 )
 from swe_forge.forge.gold_eval import GoldEvalError, GoldEvalReport, run_gold_eval
 from swe_forge.forge.generators import (
@@ -1055,6 +1056,8 @@ async def _process_plans(
     processor: CandidateProcessor,
     run_root: Path,
     concurrency: int,
+    on_complete: Callable[[int, CandidatePlan, CandidateArtifacts], Awaitable[None]]
+    | None = None,
 ) -> list[CandidateArtifacts]:
     """Run Stage 1-4 for every plan, returning artifacts in plan order.
 
@@ -1065,8 +1068,14 @@ async def _process_plans(
     per-candidate work overlaps so a large sweep is wall-clock tractable while
     every stage still owns its own throwaway-container hygiene. Results are
     placed by index so the funnel counting + export downstream stay deterministic
-    regardless of completion order. If a processor raises, the remaining tasks are
-    cancelled and the error propagates (the caller's ``finally`` still cleans up).
+    regardless of completion order.
+
+    ``on_complete`` (when given) is awaited for each candidate the instant its
+    artifacts are ready -- WHILE the sweep is still running and still holding this
+    candidate's semaphore slot -- so a keep is checkpointed/shipped as it is found
+    rather than after every plan finishes. If a processor (or the callback) raises,
+    the remaining tasks are cancelled and the error propagates (the caller's
+    ``finally`` still cleans up), but every keep already checkpointed stays shipped.
     """
     width = max(1, int(concurrency))
     semaphore = asyncio.Semaphore(width)
@@ -1076,7 +1085,10 @@ async def _process_plans(
         workdir = run_root / f"cand-{index:04d}"
         workdir.mkdir(parents=True, exist_ok=True)
         async with semaphore:
-            results[index] = await processor.process(plan, workdir)
+            art = await processor.process(plan, workdir)
+            results[index] = art
+            if on_complete is not None:
+                await on_complete(index, plan, art)
 
     tasks = [asyncio.create_task(_one(index, plan)) for index, plan in enumerate(plans)]
     try:
@@ -1089,21 +1101,101 @@ async def _process_plans(
     return [art for art in results if art is not None]
 
 
+def _keep_export_request(art: CandidateArtifacts) -> ExportRequest | None:
+    """The :class:`ExportRequest` for an oracle-pass AND band-keep candidate.
+
+    Returns ``None`` for a candidate that failed env build / generation / oracle /
+    calibration, so a rejection/drop is never checkpointed (never materializes a
+    workspace or dataset row). This mirrors exactly the funnel gate the post-sweep
+    counting loop applies, so the checkpointed set == the kept set.
+    """
+    oracle = art.oracle_report
+    calibration = art.calibration_report
+    if (
+        art.env_image is None
+        or art.candidate is None
+        or oracle is None
+        or not oracle.is_pass
+        or calibration is None
+        or not calibration.is_keep
+    ):
+        return None
+    return ExportRequest(
+        candidate=art.candidate,
+        spec=_require_spec(art),
+        oracle_report=oracle,
+        calibration_report=calibration,
+        env_image=art.env_image,
+        repo_url=art.repo_url,
+        base_commit=art.base_commit,
+        broken_tree=art.broken_tree,
+    )
+
+
+def _install_shutdown_handlers() -> Callable[[], None]:
+    """Cancel the running pilot task on SIGTERM/SIGINT for a clean shutdown.
+
+    A ceiling/SIGTERM cancels the in-flight sweep; the ``CancelledError``
+    propagates through every stage's ``async with DockerSandbox(...)`` so its
+    throwaway container is torn down by id (off-limits containers are never named,
+    so they are never touched), and the checkpoint's already-written dataset stays
+    valid (every keep found so far is shipped). Best-effort: a platform without
+    ``add_signal_handler`` (or a non-main thread) simply runs without the hook, and
+    the incremental checkpoint still preserves every keep even on a hard kill.
+    Returns a no-arg remover to uninstall the handlers.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # pragma: no cover - run_pilot is always awaited
+        return lambda: None
+    task = asyncio.current_task()
+    if task is None:  # pragma: no cover - defensive
+        return lambda: None
+
+    installed: list[signal.Signals] = []
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, task.cancel)
+            installed.append(sig)
+        except (NotImplementedError, RuntimeError, ValueError):  # pragma: no cover
+            continue
+
+    def _remove() -> None:
+        for sig in installed:
+            try:
+                loop.remove_signal_handler(sig)
+            except (NotImplementedError, RuntimeError, ValueError):  # pragma: no cover
+                continue
+
+    return _remove
+
+
 async def run_pilot(
     config: PilotConfig,
     *,
     processor: CandidateProcessor | None = None,
     gold_eval_fn: GoldEvalFn | None = None,
+    handle_signals: bool = False,
 ) -> PilotOutcome:
     """Drive Stage 0 -> Stage 5 for ``config`` and return the :class:`PilotOutcome`.
 
-    For each sourced candidate plan the processor runs Stage 1-4; the orchestrator
-    counts the monotone funnel, builds an :class:`ExportRequest` ONLY for an
-    oracle-pass AND band-keep candidate (rejections/drops never propagate), then
-    Stage 5 exports the qualified subset (the export layer re-checks the gate),
-    runs gold-eval in Docker (Headline A), and builds the benchmark report
-    (Headline B + provenance audit + count reconciliation). Host temp dirs are
-    always cleaned up; the per-stage containers are torn down by their owners.
+    For each sourced candidate plan the processor runs Stage 1-4; the moment a
+    candidate is calibrated oracle-pass AND band-keep it is CHECKPOINTED -- its
+    workspace + jsonl/parquet row + provenance are materialized immediately via
+    the reused Stage-5 export path (see :class:`PilotCheckpoint`) -- so a run
+    stopped at any point (SIGTERM / budget-or-time ceiling / crash) has already
+    shipped every keep found so far, not 0. Rejections/drops never propagate (only
+    an oracle-pass AND band-keep candidate is ever materialized, and the export
+    layer re-checks the gate). After the sweep the orchestrator counts the monotone
+    funnel, finalizes the plan-ordered datasets (byte-identical to a one-shot
+    export of the same kept set), runs gold-eval in Docker (Headline A), and builds
+    the benchmark report (Headline B + provenance audit + count reconciliation).
+
+    With ``handle_signals=True`` a clean shutdown hook cancels the in-flight sweep
+    on SIGTERM/SIGINT so throwaway containers are torn down (by id, via each
+    stage's ``async with`` sandbox) and the already-written checkpoint is left
+    valid; off-limits containers are never named, so they are never touched. Host
+    temp dirs are always cleaned up.
     """
     if processor is None:
         processor = _live_processor(config)
@@ -1111,20 +1203,33 @@ async def run_pilot(
     counts = StageCounts()
     usage = PilotUsage()
     dispositions: list[CandidateDisposition] = []
-    export_requests: list[ExportRequest] = []
     run_root = Path(tempfile.mkdtemp(prefix="forge-pilot-run-"))
     cleanup: list[Path] = [run_root]
 
+    # Stage 5 is now INCREMENTAL: each band-keep is materialized (workspace +
+    # jsonl/parquet row + provenance) the instant it is found, reusing the export
+    # path unchanged, so an interruption never loses the keeps found so far.
+    checkpoint = PilotCheckpoint(config.out_dir, overwrite=True)
+
+    async def _on_complete(
+        index: int, plan: CandidatePlan, art: CandidateArtifacts
+    ) -> None:
+        cleanup.extend(art.cleanup_paths)
+        request = _keep_export_request(art)
+        if request is not None:
+            await checkpoint.record_keep(index, request)
+
+    remove_signals = _install_shutdown_handlers() if handle_signals else (lambda: None)
     try:
         artifacts = await _process_plans(
             config.plans,
             processor,
             run_root,
             getattr(config, "candidate_concurrency", 1) or 1,
+            _on_complete,
         )
         for plan, art in zip(config.plans, artifacts):
             counts.sourced += 1
-            cleanup.extend(art.cleanup_paths)
             usage.add(art)
 
             if art.env_image is None:
@@ -1175,19 +1280,9 @@ async def run_pilot(
                 )
                 continue
 
-            # Oracle pass AND band keep -> the only candidates that become tasks.
-            export_requests.append(
-                ExportRequest(
-                    candidate=art.candidate,
-                    spec=_require_spec(art),
-                    oracle_report=oracle,
-                    calibration_report=calibration,
-                    env_image=art.env_image,
-                    repo_url=art.repo_url,
-                    base_commit=art.base_commit,
-                    broken_tree=art.broken_tree,
-                )
-            )
+            # Oracle pass AND band keep -> already checkpointed (workspace +
+            # dataset row + provenance) by ``_on_complete`` the moment it was found.
+            counts.calibration_keep += 1
             dispositions.append(
                 CandidateDisposition(
                     plan,
@@ -1197,8 +1292,11 @@ async def run_pilot(
                 )
             )
 
-        export_result = export_batch(export_requests, config.out_dir, overwrite=True)
-        counts.calibration_keep = len(export_requests)
+        # Finalize: rewrite the plan-ordered datasets (idempotent + byte-identical
+        # to a one-shot export of the same kept set) and collect the per-candidate
+        # ship/refuse ledger. A refused keep (e.g. a planted leak) is left out of
+        # the datasets, so ``exported < calibration_keep`` surfaces the problem.
+        export_result = checkpoint.finalize()
         counts.exported = len(export_result.kept)
         _attach_task_ids(dispositions, export_result)
 
@@ -1224,6 +1322,7 @@ async def run_pilot(
             report=report,
         )
     finally:
+        remove_signals()
         for path in cleanup:
             shutil.rmtree(path, ignore_errors=True)
 
