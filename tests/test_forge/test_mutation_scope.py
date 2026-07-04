@@ -37,6 +37,8 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.mutation import (
     AMPLIFIER_GENERATORS,
+    MAX_SCOPED_SYMBOL_LINES,
+    REGION_PAD_LINES,
     candidate_mutation_regions,
     patch_old_side_regions,
 )
@@ -159,6 +161,148 @@ class TestCandidateMutationRegions:
 
 
 # --------------------------------------------------------------------------- #
+# candidate_mutation_regions: LARGE-symbol narrowing (m6-mutation-throughput)
+# --------------------------------------------------------------------------- #
+def _large_symbol_patch(start: int, count: int = 3) -> str:
+    """A one-file mutation patch whose sole hunk starts at ``start``."""
+    return (
+        "diff --git a/pkg/a.py b/pkg/a.py\n"
+        "--- a/pkg/a.py\n"
+        "+++ b/pkg/a.py\n"
+        f"@@ -{start},{count} +{start},{count} @@ def big():\n"
+        "-    value = 1\n"
+        "+    value = 2\n"
+    )
+
+
+class TestLargeSymbolNarrowing:
+    """A LARGE faulted function is scoped to the changed lines, not the whole span."""
+
+    def test_large_symbol_narrows_to_padded_changed_lines(self) -> None:
+        # A 101-line function (well over the cap) with a subtle fault at 147-149.
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "big",
+                    "start_line": 100,
+                    "end_line": 200,
+                }
+            ]
+        }
+        cand = _candidate(
+            "bug_combination",
+            mutation_patch=_large_symbol_patch(147),
+            details=details,
+        )
+        regions = candidate_mutation_regions(cand)
+        # Only the padded changed-line hunk (147-149 +/- REGION_PAD_LINES) remains,
+        # NOT the whole (100, 200) function span.
+        assert regions == {
+            "pkg/a.py": ((147 - REGION_PAD_LINES, 149 + REGION_PAD_LINES),)
+        }
+        assert (100, 200) not in regions["pkg/a.py"]
+
+    def test_padding_clamped_to_symbol_lower_bound(self) -> None:
+        # Fault near the symbol start: padding must not run below the symbol.
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "big",
+                    "start_line": 100,
+                    "end_line": 200,
+                }
+            ]
+        }
+        cand = _candidate(
+            "bug_combination", mutation_patch=_large_symbol_patch(102), details=details
+        )
+        regions = candidate_mutation_regions(cand)
+        (lo, hi) = regions["pkg/a.py"][0]
+        assert lo == 100  # clamped to symbol start, not 102 - REGION_PAD_LINES
+        assert hi == 104 + REGION_PAD_LINES
+
+    def test_padding_clamped_to_symbol_upper_bound(self) -> None:
+        # Fault near the symbol end: padding must not run past the symbol.
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "big",
+                    "start_line": 100,
+                    "end_line": 200,
+                }
+            ]
+        }
+        cand = _candidate(
+            "bug_combination", mutation_patch=_large_symbol_patch(196), details=details
+        )
+        regions = candidate_mutation_regions(cand)
+        (lo, hi) = regions["pkg/a.py"][0]
+        assert lo == 196 - REGION_PAD_LINES
+        assert hi == 200  # clamped to symbol end, not 198 + REGION_PAD_LINES
+
+    def test_large_symbol_without_hunks_keeps_whole_span(self) -> None:
+        # No derivable changed lines -> keep the whole span (never WORSE than the
+        # pre-narrowing behavior; the scope-script fallback still protects it).
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "big",
+                    "start_line": 100,
+                    "end_line": 200,
+                }
+            ]
+        }
+        cand = _candidate("bug_combination", details=details)  # placeholder patch
+        assert candidate_mutation_regions(cand) == {"pkg/a.py": ((100, 200),)}
+
+    def test_symbol_exactly_at_cap_keeps_whole_span(self) -> None:
+        # A symbol whose span == MAX_SCOPED_SYMBOL_LINES is NOT narrowed
+        # (verdict-stable for candidates that already finish in budget).
+        end = 100 + MAX_SCOPED_SYMBOL_LINES - 1  # inclusive span == cap
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "mid",
+                    "start_line": 100,
+                    "end_line": end,
+                }
+            ]
+        }
+        cand = _candidate(
+            "bug_combination", mutation_patch=_large_symbol_patch(110), details=details
+        )
+        regions = candidate_mutation_regions(cand)
+        assert (100, end) in regions["pkg/a.py"]
+        assert (110, 112) in regions["pkg/a.py"]
+
+    def test_symbol_just_over_cap_narrows(self) -> None:
+        end = 100 + MAX_SCOPED_SYMBOL_LINES  # inclusive span == cap + 1
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "mid",
+                    "start_line": 100,
+                    "end_line": end,
+                }
+            ]
+        }
+        cand = _candidate(
+            "bug_combination", mutation_patch=_large_symbol_patch(120), details=details
+        )
+        regions = candidate_mutation_regions(cand)
+        assert (100, end) not in regions["pkg/a.py"]
+        assert regions["pkg/a.py"] == (
+            (120 - REGION_PAD_LINES, 122 + REGION_PAD_LINES),
+        )
+
+
+# --------------------------------------------------------------------------- #
 # cosmicray_scope_script against a REAL host cosmic-ray WorkDB
 # --------------------------------------------------------------------------- #
 def _build_session(path: Path, rows: list[int]) -> None:
@@ -220,6 +364,39 @@ class TestCosmicrayScopeScriptReal:
         script.write_text(cosmicray_scope_script([(100, 200)]))
         _run_scope(session, script)
         assert _surviving_rows(session) == [5, 6, 7]
+
+    def test_large_symbol_regions_really_bound_the_workdb(self, tmp_path: Path) -> None:
+        # End-to-end: a LARGE faulted function (mutable nodes on every line
+        # 100..200 = 101 work items) with a subtle fault at 147-149 is narrowed by
+        # candidate_mutation_regions to the padded changed lines, and the scope
+        # script REALLY shrinks the cosmic-ray session to that region -- the
+        # throughput win (101 -> 19 mutants) that keeps the hard-rung run bounded.
+        session = tmp_path / "cr.sqlite"
+        _build_session(session, rows=list(range(100, 201)))
+        details = {
+            "faults": [
+                {
+                    "file": "pkg/a.py",
+                    "symbol": "big",
+                    "start_line": 100,
+                    "end_line": 200,
+                }
+            ]
+        }
+        cand = _candidate(
+            "bug_combination",
+            mutation_patch=_large_symbol_patch(147),
+            details=details,
+        )
+        ranges = candidate_mutation_regions(cand)["pkg/a.py"]
+        script = tmp_path / COSMIC_RAY_SCOPE_SCRIPT
+        script.write_text(cosmicray_scope_script(ranges))
+        _run_scope(session, script)
+        survivors = _surviving_rows(session)
+        assert survivors == list(
+            range(147 - REGION_PAD_LINES, 149 + REGION_PAD_LINES + 1)
+        )
+        assert len(survivors) == 19 < 101
 
 
 # --------------------------------------------------------------------------- #

@@ -74,6 +74,24 @@ DEFAULT_MAX_SYNTHESIS_ROUNDS = 3
 #: tooling already do).
 AMPLIFIER_GENERATORS: frozenset[str] = frozenset({"bug_combination", "multi_file"})
 
+#: Above this many lines, a faulted symbol is a LARGE function whose WHOLE-span
+#: cosmic-ray run does not finish within ``mutation_timeout``. The m6-pilot-build
+#: sweep measured ~28min mutation timeouts on boltons ``bug_combination`` HARD
+#: rungs (``min_symbol_lines=20/30``, ``prefer=largest``): the amplifier buries a
+#: subtle single fault inside a LARGE function, so scoping to the WHOLE enclosing
+#: symbol is still hundreds of mutants and blocks a candidate-concurrency slot ~28
+#: minutes before the exec-timeout reaper drops it. For such a symbol the run is
+#: narrowed to only the actually-CHANGED lines (the ``mutation_patch`` hunks,
+#: padded by :data:`REGION_PAD_LINES` and clamped to the symbol) -- bounding the
+#: run to the fault region so it finishes fast instead of timing out. A symbol
+#: at/under this size keeps the whole-span behavior, so candidates whose mutation
+#: run already finished in budget compute the SAME kill ratio / verdict as before.
+MAX_SCOPED_SYMBOL_LINES = 40
+#: Lines of context kept on each side of a changed-line hunk when a LARGE symbol
+#: span is narrowed, so cosmic-ray still enumerates the mutable nodes flanking the
+#: fault (a meaningful adequacy sample) without mutating the whole large function.
+REGION_PAD_LINES = 8
+
 # ``@@ -old_start,old_count +new_start,new_count @@`` unified-diff hunk header.
 _HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
 # ``+++ b/path`` (or ``+++ path``) target-file marker, tab-trimmed.
@@ -120,9 +138,11 @@ def _provenance_symbol_regions(
     """Per-file changed-symbol line spans recorded in the candidate provenance.
 
     The difficulty-amplifier generators record each constituent fault/edit's
-    enclosing-symbol span (``start_line``/``end_line``) under ``faults``/``edits``;
-    scoping cosmic-ray to the WHOLE changed function (rather than only the diff
-    lines) keeps enough mutable nodes for a meaningful adequacy measurement.
+    enclosing-symbol span (``start_line``/``end_line``) under ``faults``/``edits``.
+    A SMALL faulted symbol is mutated whole (the span keeps enough mutable nodes
+    for a meaningful adequacy measurement); a LARGE one (over
+    :data:`MAX_SCOPED_SYMBOL_LINES`) is narrowed by :func:`candidate_mutation_regions`
+    to only the changed lines so the run does not time out on the whole function.
     """
     regions: dict[str, list[tuple[int, int]]] = {}
     details = candidate.provenance.details if candidate.provenance else {}
@@ -150,25 +170,67 @@ def _provenance_symbol_regions(
     return regions
 
 
+def _narrow_to_changed_lines(
+    hunks: Sequence[tuple[int, int]],
+    symbol_spans: Sequence[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Bound a LARGE faulted symbol's mutation run to its actually-CHANGED lines.
+
+    Pads each ``mutation_patch`` hunk range by :data:`REGION_PAD_LINES` on each
+    side (keeping the mutable nodes flanking the fault) and clamps it to the
+    enclosing symbol span so the scoped region never spills past the changed
+    symbol. This replaces the whole-large-function span with a small,
+    fault-centered region so cosmic-ray finishes fast instead of timing out; the
+    padding still leaves a meaningful adequacy sample.
+    """
+    narrowed: list[tuple[int, int]] = []
+    for lo, hi in hunks:
+        padded_lo = max(1, lo - REGION_PAD_LINES)
+        padded_hi = hi + REGION_PAD_LINES
+        enclosing = [(s, e) for s, e in symbol_spans if s <= lo and hi <= e]
+        if enclosing:
+            sym_lo = min(s for s, _ in enclosing)
+            sym_hi = max(e for _, e in enclosing)
+            padded_lo = max(padded_lo, sym_lo)
+            padded_hi = min(padded_hi, sym_hi)
+        narrowed.append((padded_lo, padded_hi))
+    return narrowed
+
+
 def candidate_mutation_regions(
     candidate: Candidate,
 ) -> dict[str, tuple[tuple[int, int], ...]]:
     """Per-file GOLD line ranges to scope an amplifier candidate's mutation run.
 
-    Unions the provenance-recorded changed-symbol spans (function-level, generous)
-    with the ``mutation_patch`` hunk ranges (always available), so the cosmic-ray
-    run for a ``bug_combination`` / ``multi_file`` candidate is bounded to the
-    actually-mutated regions. Returns ``{}`` when no ranges can be derived (the
-    runner then mutates whole files, the safe default).
+    Per target file, the scoped region depends on the size of the faulted symbol:
+
+    * a SMALL symbol (span at/under :data:`MAX_SCOPED_SYMBOL_LINES`) keeps the
+      union of the provenance-recorded symbol span with the ``mutation_patch``
+      hunk ranges -- the generous whole-symbol scoping, so a candidate whose
+      mutation run already finished in budget computes the SAME kill ratio /
+      verdict as before;
+    * a LARGE symbol (the ``bug_combination`` / ``multi_file`` HARD rungs whose
+      whole-span run times out ~28min) is narrowed to only the changed lines via
+      :func:`_narrow_to_changed_lines`, bounding the run to the fault region.
+
+    Returns ``{}`` when no ranges can be derived (the runner then mutates whole
+    files, the safe default). A large symbol with no derivable hunks also keeps
+    its whole span (never worse than the pre-narrowing behavior).
     """
-    merged: dict[str, list[tuple[int, int]]] = {}
-    for source in (
-        _provenance_symbol_regions(candidate),
-        patch_old_side_regions(candidate.mutation_patch),
-    ):
-        for path, ranges in source.items():
-            merged.setdefault(path, []).extend(ranges)
-    return {path: tuple(ranges) for path, ranges in merged.items() if ranges}
+    symbol_regions = _provenance_symbol_regions(candidate)
+    hunk_regions = patch_old_side_regions(candidate.mutation_patch)
+    result: dict[str, tuple[tuple[int, int], ...]] = {}
+    for path in set(symbol_regions) | set(hunk_regions):
+        symbols = symbol_regions.get(path, [])
+        hunks = hunk_regions.get(path, [])
+        largest_symbol = max((hi - lo + 1 for lo, hi in symbols), default=0)
+        if largest_symbol > MAX_SCOPED_SYMBOL_LINES and hunks:
+            ranges = _narrow_to_changed_lines(hunks, symbols)
+        else:
+            ranges = [*symbols, *hunks]
+        if ranges:
+            result[path] = tuple(ranges)
+    return result
 
 
 @dataclass(frozen=True)
