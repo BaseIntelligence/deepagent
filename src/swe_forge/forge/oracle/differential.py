@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
 from typing import TYPE_CHECKING, Protocol
@@ -140,15 +140,33 @@ class VariantScore:
 
 
 class DifferentialRunner(Protocol):
-    """The scoring surface the gate drives (Docker-backed in production)."""
+    """The scoring surface the gate drives (Docker-backed in production).
+
+    ``exclude`` is the set of base-suite test ids to skip for a run: the gate uses
+    it to drop an inherited SYNTHESIZED discriminator (a later-gate survivor-killer
+    in ``test_files`` but NOT in ``fail_to_pass``) that a mis-modeling teacher left
+    red-on-gold, so an invalid discriminator can no longer make gold fail and
+    reject the candidate. ``discardable_tests`` are exactly those discardable
+    inherited discriminators (the established F2P and the P2P suite are never
+    discardable - if they are red on gold that is a genuine ``gold_not_green``).
+    """
 
     @property
     def language(self) -> str: ...
 
-    async def score_gold(self, extra_tests: Sequence[HiddenTest]) -> VariantScore: ...
+    @property
+    def discardable_tests(self) -> tuple[HiddenTest, ...]: ...
+
+    async def score_gold(
+        self, extra_tests: Sequence[HiddenTest], *, exclude: Collection[str] = ()
+    ) -> VariantScore: ...
 
     async def score_variant(
-        self, variant: Variant, extra_tests: Sequence[HiddenTest]
+        self,
+        variant: Variant,
+        extra_tests: Sequence[HiddenTest],
+        *,
+        exclude: Collection[str] = (),
     ) -> VariantScore: ...
 
     async def read_sources(self) -> dict[str, str]: ...
@@ -226,6 +244,7 @@ class DifferentialOutcome:
     variants_total: int
     variants_killed: int
     added_tests: list[HiddenTest] = field(default_factory=list)
+    discarded_test_paths: list[str] = field(default_factory=list)
     rounds: int = 0
     survivors: list[str] = field(default_factory=list)
     details: dict[str, object] = field(default_factory=dict)
@@ -245,19 +264,70 @@ async def assess_differential(
 ) -> DifferentialOutcome:
     """Run the differential gate and auto-strengthen until variants are separated.
 
-    Confirms gold passes its own suite, then scores every variant. Survivors (a
-    variant that passes the full suite) drive up to ``max_rounds`` strengthening
-    rounds; in each round the ``synthesizer`` proposes extra tests and every
-    proposal is confirmed by execution - kept only if it keeps gold green AND
-    makes a surviving variant fail. Rejects (``differential_pass == False``) when
-    a survivor cannot be separated from gold within the bounded loop.
+    Before judging distinguishability the gate VETS the established gold suite: a
+    mis-modeling teacher may have left an inherited SYNTHESIZED discriminator (a
+    later-gate survivor-killer, in ``test_files`` but NOT in ``fail_to_pass``) that
+    is RED on gold. Such a test is an invalid discriminator (a TEACHER error), not
+    evidence the candidate is bad, so it is DISCARDED (and pruned from the shipped
+    suite) rather than counted as a ``differential_gold_not_green`` reject of the
+    candidate. Only when gold still fails after every discardable discriminator is
+    dropped - i.e. an established F2P or the P2P/regression suite is itself red on
+    gold - does the gate reject ``differential_gold_not_green`` (case B, a genuine
+    gold-not-green).
+
+    Then it scores every variant. Survivors (a variant that passes the full suite)
+    drive up to ``max_rounds`` strengthening rounds; in each round the
+    ``synthesizer`` proposes extra tests and every proposal is confirmed by
+    execution - kept only if it keeps gold green AND makes a surviving variant
+    fail (the bounded re-synthesis of VALID gold-green discriminators). Rejects
+    (``differential_pass == False``) when a survivor cannot be separated from gold
+    within the bounded loop (``differential_indistinguishable_variant``) - the
+    gate's purpose stays intact.
     """
+    discardable = tuple(getattr(runner, "discardable_tests", ()) or ())
+    discardable_by_id = {t.test_id: t for t in discardable}
+    exclude: set[str] = set()
+
     gold_base = await runner.score_gold([])
+    if not gold_base.passes_suite and discardable:
+        # A mis-modeled inherited discriminator may be red on gold. Drop the
+        # discardable discriminators one at a time (bisecting toward the genuine
+        # cause) and re-vet gold; keep only the drops that are actually needed to
+        # make gold green. If gold is green with NONE excluded the failure is a
+        # protected test (established F2P / P2P) and stays a real reject.
+        failing = set(gold_base.failing_test_ids)
+        for test in discardable:
+            if test.test_id in failing or not failing:
+                exclude.add(test.test_id)
+                trial = await runner.score_gold([], exclude=exclude)
+                gold_base = trial
+                if trial.passes_suite:
+                    break
+                failing = set(trial.failing_test_ids)
+        # Minimize the exclusion set: keep only discriminators whose removal is
+        # required for gold to pass (so a still-red discriminator is not blamed).
+        if gold_base.passes_suite and exclude:
+            minimal: set[str] = set()
+            for test_id in list(exclude):
+                probe = await runner.score_gold([], exclude=exclude - {test_id})
+                if not probe.passes_suite:
+                    minimal.add(test_id)
+            exclude = minimal
+            gold_base = await runner.score_gold([], exclude=exclude)
+
+    discarded = sorted(
+        {
+            f.path
+            for tid in exclude
+            for f in discardable_by_id.get(tid, HiddenTest(tid)).files
+        }
+    )
     round_records: list[dict[str, object]] = []
     details: dict[str, object] = {
         "stage": "differential",
         "variants_total": len(variants),
         "gold_base": gold_base.summary(),
+        "discarded_discriminators": discarded,
         "rounds": round_records,
     }
 
@@ -267,12 +337,14 @@ async def assess_differential(
             reasons=[
                 f"{REASON_DIFFERENTIAL_GOLD_NOT_GREEN}: the gold tree did not pass "
                 f"its own established F2P+P2P suite (failing: "
-                f"{list(gold_base.failing_test_ids)}); the differential gate cannot "
-                "establish uniqueness"
+                f"{list(gold_base.failing_test_ids)}) even after discarding "
+                f"{len(discarded)} mis-modeled synthesized discriminator(s); the "
+                "differential gate cannot establish uniqueness"
             ],
             differential_pass=False,
             variants_total=len(variants),
             variants_killed=0,
+            discarded_test_paths=discarded,
             details=details,
         )
 
@@ -280,7 +352,7 @@ async def assess_differential(
     variant_scores: dict[str, VariantScore] = {}
     survivors: list[Variant] = []
     for variant in variants:
-        score = await runner.score_variant(variant, [])
+        score = await runner.score_variant(variant, [], exclude=exclude)
         variant_scores[variant.variant_id] = score
         if score.passes_suite:
             survivors.append(variant)
@@ -310,12 +382,16 @@ async def assess_differential(
             proposals = await synthesizer(ctx)
             accepted_this_round = 0
             for proposal in proposals:
-                gold_trial = await runner.score_gold([*accepted, proposal])
+                gold_trial = await runner.score_gold(
+                    [*accepted, proposal], exclude=exclude
+                )
                 if not gold_trial.passes_suite:
                     continue
                 newly_killed: list[Variant] = []
                 for variant in survivors:
-                    trial = await runner.score_variant(variant, [*accepted, proposal])
+                    trial = await runner.score_variant(
+                        variant, [*accepted, proposal], exclude=exclude
+                    )
                     if not trial.passes_suite:
                         newly_killed.append(variant)
                         variant_scores[variant.variant_id] = trial
@@ -353,6 +429,7 @@ async def assess_differential(
             variants_total=variants_total,
             variants_killed=variants_killed,
             added_tests=accepted,
+            discarded_test_paths=discarded,
             rounds=len(round_records),
             survivors=[],
             details=details,
@@ -372,6 +449,7 @@ async def assess_differential(
         variants_total=variants_total,
         variants_killed=variants_killed,
         added_tests=accepted,
+        discarded_test_paths=discarded,
         rounds=len(round_records),
         survivors=survivor_ids,
         details=details,
@@ -402,9 +480,11 @@ def build_differential_report(
 
     Carries the establish + flakiness + mutation fields forward, sets
     ``differential_pass``, appends any survivor-killing tests to ``test_files``,
-    and sets the terminal verdict (``pass`` when every variant is separated from
-    gold; ``reject`` with an attributable differential reason citing the
-    surviving variant otherwise).
+    PRUNES any inherited synthesized discriminator the gate discarded as
+    red-on-gold (so the shipped suite stays gold=100%), and sets the terminal
+    verdict (``pass`` when every variant is separated from gold; ``reject`` with
+    an attributable differential reason - a surviving indistinguishable variant,
+    or a genuine gold-not-green after discards - otherwise).
     """
     details: dict[str, object] = dict(prior_report.details)
     details["differential"] = outcome.details
@@ -413,7 +493,8 @@ def build_differential_report(
     if extra_details:
         details.update(extra_details)
 
-    test_files = list(prior_report.test_files)
+    discarded = set(outcome.discarded_test_paths)
+    test_files = [tf for tf in prior_report.test_files if tf.path not in discarded]
     seen = {tf.path for tf in test_files}
     for test in outcome.added_tests:
         for file in test.files:
@@ -439,6 +520,7 @@ def build_differential_report(
             "differential_pass": outcome.differential_pass,
             "strengthen_rounds": outcome.rounds,
             "added_tests": [f.path for t in outcome.added_tests for f in t.files],
+            "discarded_discriminators": list(outcome.discarded_test_paths),
             "survivors": list(outcome.survivors),
         },
     )
@@ -514,6 +596,7 @@ class DockerDifferentialRunner:
         adapter: LanguageAdapter,
         *,
         base_tests: Sequence[HiddenTest] = (),
+        fail_to_pass: Sequence[str] = (),
         p2p_command: str = "",
         command_timeout: float = 600.0,
         docker_client: "DockerClient | None" = None,
@@ -522,6 +605,13 @@ class DockerDifferentialRunner:
         self._env_image = env_image
         self._adapter = adapter
         self._base_tests = list(base_tests)
+        # A base test is DISCARDABLE iff it is not an established F2P (its id is not
+        # in ``fail_to_pass``): those are the later-gate SYNTHESIZED discriminators
+        # (mutation-gate survivor-killers) that were never gold-vetted. The
+        # established F2P (gold-confirmed by establish) and the P2P suite are
+        # PROTECTED - if they are red on gold that is a genuine gold-not-green.
+        ftp = set(fail_to_pass)
+        self._discardable = tuple(t for t in self._base_tests if t.test_id not in ftp)
         self._p2p_command = p2p_command or env_image.baseline_test_command
         self._timeout = command_timeout
         self._docker_client = docker_client
@@ -529,6 +619,10 @@ class DockerDifferentialRunner:
     @property
     def language(self) -> str:
         return self._candidate.language
+
+    @property
+    def discardable_tests(self) -> tuple[HiddenTest, ...]:
+        return self._discardable
 
     @property
     def _target_files(self) -> list[str]:
@@ -564,7 +658,10 @@ class DockerDifferentialRunner:
         self,
         variant_files: Sequence[VariantFile],
         extra_tests: Sequence[HiddenTest],
+        *,
+        exclude: Collection[str] = (),
     ) -> VariantScore:
+        excluded = set(exclude)
         async with self._recipe() as recipe:
             # The EnvImage checkout is pristine = gold; overwrite target files to
             # materialize a variant (no-op when scoring gold).
@@ -579,6 +676,8 @@ class DockerDifferentialRunner:
             failing: list[str] = []
             f2p_passed = True
             for test in [*self._base_tests, *extra_tests]:
+                if test.test_id in excluded:
+                    continue
                 await recipe.write_test(test)
                 run = await recipe.run_test(test)
                 await recipe.remove_test(test)
@@ -594,13 +693,19 @@ class DockerDifferentialRunner:
                 failing_test_ids=tuple(failing),
             )
 
-    async def score_gold(self, extra_tests: Sequence[HiddenTest]) -> VariantScore:
-        return await self._score((), extra_tests)
+    async def score_gold(
+        self, extra_tests: Sequence[HiddenTest], *, exclude: Collection[str] = ()
+    ) -> VariantScore:
+        return await self._score((), extra_tests, exclude=exclude)
 
     async def score_variant(
-        self, variant: Variant, extra_tests: Sequence[HiddenTest]
+        self,
+        variant: Variant,
+        extra_tests: Sequence[HiddenTest],
+        *,
+        exclude: Collection[str] = (),
     ) -> VariantScore:
-        return await self._score(variant.files, extra_tests)
+        return await self._score(variant.files, extra_tests, exclude=exclude)
 
     async def read_sources(self) -> dict[str, str]:
         sources: dict[str, str] = {}
@@ -656,6 +761,7 @@ async def run_differential_gate(
         env_image,
         adapter,
         base_tests=base_tests,
+        fail_to_pass=prior_report.fail_to_pass,
         p2p_command=p2p_command,
         command_timeout=command_timeout,
         docker_client=docker_client,

@@ -65,6 +65,13 @@ class FakeDifferentialRunner:
     paths that (additionally) kill it. ``gold_breakers`` are extra-test paths that
     would break gold (so the gate must discard them). ``gold_base_fails`` makes the
     initial gold suite run fail (the defensive gold-not-green path).
+
+    ``discardable`` are inherited SYNTHESIZED discriminators (later-gate
+    survivor-killers, not established F2P) the gate may drop; ``gold_red_ids`` are
+    the test ids among them that are RED on gold (a mis-modeled discriminator) --
+    excluding all of them from a gold run makes gold green again (unless
+    ``protected_gold_red`` also fails, which models a genuine gold-not-green that
+    no discard can fix).
     """
 
     def __init__(
@@ -75,6 +82,9 @@ class FakeDifferentialRunner:
         gold_breakers: set[str] | None = None,
         gold_base_fails: bool = False,
         sources: dict[str, str] | None = None,
+        discardable: list[HiddenTest] | None = None,
+        gold_red_ids: set[str] | None = None,
+        protected_gold_red: bool = False,
     ) -> None:
         self.language = "python"
         self._base_killed = set(base_killed or set())
@@ -82,34 +92,51 @@ class FakeDifferentialRunner:
         self._gold_breakers = set(gold_breakers or set())
         self._gold_base_fails = gold_base_fails
         self._sources = sources or {}
+        self.discardable_tests = tuple(discardable or ())
+        self._gold_red_ids = set(gold_red_ids or set())
+        self._protected_gold_red = protected_gold_red
         self.gold_calls: list[tuple[str, ...]] = []
+        self.gold_exclude_calls: list[tuple[str, ...]] = []
         self.variant_calls: list[tuple[str, tuple[str, ...]]] = []
         self.read_sources_calls = 0
 
-    async def score_gold(self, extra_tests) -> VariantScore:  # type: ignore[no-untyped-def]
+    def _active_red(self, exclude: set[str]) -> tuple[str, ...]:
+        """Red-on-gold base discriminators that are NOT excluded."""
+        return tuple(sorted(self._gold_red_ids - exclude))
+
+    async def score_gold(self, extra_tests, *, exclude=()) -> VariantScore:  # type: ignore[no-untyped-def]
         paths = tuple(f.path for t in extra_tests for f in t.files)
+        excluded = set(exclude)
         self.gold_calls.append(paths)
+        self.gold_exclude_calls.append(tuple(sorted(excluded)))
         if self._gold_base_fails and not paths:
             return VariantScore(
                 f2p_passed=False, p2p_passed=True, failing_test_ids=("base",)
             )
         breakers = tuple(p for p in paths if p in self._gold_breakers)
+        active_red = self._active_red(excluded)
+        protected = ("__protected__",) if self._protected_gold_red else ()
+        failing = breakers + active_red + protected
         return VariantScore(
-            f2p_passed=not breakers,
+            f2p_passed=not failing,
             p2p_passed=True,
-            failing_test_ids=breakers,
+            failing_test_ids=failing,
         )
 
-    async def score_variant(self, variant, extra_tests) -> VariantScore:  # type: ignore[no-untyped-def]
+    async def score_variant(self, variant, extra_tests, *, exclude=()) -> VariantScore:  # type: ignore[no-untyped-def]
         paths = {f.path for t in extra_tests for f in t.files}
+        excluded = set(exclude)
         self.variant_calls.append((variant.variant_id, tuple(sorted(paths))))
         killed = variant.variant_id in self._base_killed or bool(
             paths & self._kill_map.get(variant.variant_id, set())
         )
+        active_red = self._active_red(excluded)
+        # A red-on-gold discriminator fails on the variant too (it fails on
+        # everything), so it would spuriously "kill" the variant if not excluded.
         return VariantScore(
-            f2p_passed=not killed,
+            f2p_passed=not killed and not active_red,
             p2p_passed=True,
-            failing_test_ids=("killer",) if killed else (),
+            failing_test_ids=("killer",) if (killed or active_red) else (),
         )
 
     async def read_sources(self) -> dict[str, str]:
@@ -404,6 +431,140 @@ async def test_gold_not_green_rejects() -> None:
     assert outcome.reasons[0].startswith(REASON_DIFFERENTIAL_GOLD_NOT_GREEN)
     # never scored a variant once gold failed
     assert runner.variant_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# m6-differential-yield: mis-modeled synthesized discriminator is DISCARDED, not
+# counted as a differential_gold_not_green reject of the candidate.
+# --------------------------------------------------------------------------- #
+async def test_red_on_gold_synthesized_discriminator_is_discarded_not_rejected() -> (
+    None
+):
+    # An inherited SYNTHESIZED discriminator (a mutation-gate survivor-killer,
+    # NOT an established F2P) is red on gold because the teacher mis-modeled the
+    # target. The gate must DISCARD it and proceed -- never emit
+    # differential_gold_not_green -- and still separate the real variant.
+    bad = _test("tests/mut_survivor_k.py")
+    runner = FakeDifferentialRunner(
+        base_killed={"variant_1"},
+        discardable=[bad],
+        gold_red_ids={bad.test_id},
+    )
+    outcome = await assess_differential(
+        runner,
+        [_variant("variant_1")],
+        synthesizer=ScriptedVariantSynth([]),
+        context_template=_template(),
+    )
+    assert outcome.is_pass
+    assert outcome.differential_pass is True
+    assert not any(
+        r.startswith(REASON_DIFFERENTIAL_GOLD_NOT_GREEN) for r in outcome.reasons
+    )
+    # the mis-modeled discriminator's file is recorded as discarded
+    assert outcome.discarded_test_paths == ["tests/mut_survivor_k.py"]
+    assert outcome.details["discarded_discriminators"] == ["tests/mut_survivor_k.py"]
+
+
+async def test_discarded_discriminator_pruned_from_report_test_files() -> None:
+    bad = _test("tests/mut_survivor_k.py")
+    runner = FakeDifferentialRunner(
+        base_killed={"variant_1"},
+        discardable=[bad],
+        gold_red_ids={bad.test_id},
+    )
+    outcome = await assess_differential(
+        runner,
+        [_variant("variant_1")],
+        synthesizer=ScriptedVariantSynth([]),
+        context_template=_template(),
+    )
+    prior = _mutation_report(
+        [
+            OracleTestFile(path="tests/test_x.py", content="X", origin="provided"),
+            OracleTestFile(
+                path="tests/mut_survivor_k.py", content="K", origin="synthesized"
+            ),
+        ]
+    )
+    report = build_differential_report(_candidate(), prior, outcome)
+    assert report.verdict == "pass"
+    # the red-on-gold synthesized discriminator is pruned so the shipped suite
+    # stays gold=100%; the established F2P is retained.
+    assert [tf.path for tf in report.test_files] == ["tests/test_x.py"]
+    assert report.provenance.details["discarded_discriminators"] == [
+        "tests/mut_survivor_k.py"
+    ]
+
+
+async def test_genuine_gold_not_green_still_rejects_after_discards() -> None:
+    # gold is still red after discarding every discardable discriminator -> the
+    # failure is a PROTECTED test (established F2P / P2P): a genuine
+    # differential_gold_not_green, still a real reject (case B untouched).
+    bad = _test("tests/mut_survivor_k.py")
+    runner = FakeDifferentialRunner(
+        discardable=[bad],
+        gold_red_ids={bad.test_id},
+        protected_gold_red=True,
+    )
+    outcome = await assess_differential(
+        runner,
+        [_variant("variant_1")],
+        synthesizer=ScriptedVariantSynth([]),
+        context_template=_template(),
+    )
+    assert outcome.verdict == "reject"
+    assert outcome.differential_pass is False
+    assert outcome.reasons[0].startswith(REASON_DIFFERENTIAL_GOLD_NOT_GREEN)
+    # never scored a variant once gold could not be made green
+    assert runner.variant_calls == []
+
+
+async def test_indistinguishable_variant_still_rejects_with_discarded_discriminator() -> (
+    None
+):
+    # Even after discarding a mis-modeled discriminator, a genuinely
+    # indistinguishable variant must STILL reject (the gate's purpose is intact).
+    bad = _test("tests/mut_survivor_k.py")
+    runner = FakeDifferentialRunner(
+        discardable=[bad],
+        gold_red_ids={bad.test_id},
+        kill_map={"variant_1": set()},  # no valid test can separate it from gold
+    )
+    synth = ScriptedVariantSynth([[_test("tests/x.py")], [_test("tests/y.py")]])
+    outcome = await assess_differential(
+        runner,
+        [_variant("variant_1")],
+        synthesizer=synth,
+        context_template=_template(),
+        max_rounds=2,
+    )
+    assert outcome.verdict == "reject"
+    assert outcome.differential_pass is False
+    assert outcome.reasons[0].startswith(REASON_DIFFERENTIAL_SURVIVOR)
+    assert outcome.survivors == ["variant_1"]
+    # the mis-modeled discriminator was still discarded (not the cause of reject)
+    assert outcome.discarded_test_paths == ["tests/mut_survivor_k.py"]
+
+
+async def test_multiple_discriminators_only_red_ones_discarded() -> None:
+    # Two inherited discriminators; only one is red on gold. The gate discards the
+    # minimal set (just the red one) so the still-valid one keeps guarding.
+    good = _test("tests/mut_good_k.py")
+    bad = _test("tests/mut_bad_k.py")
+    runner = FakeDifferentialRunner(
+        base_killed={"variant_1"},
+        discardable=[good, bad],
+        gold_red_ids={bad.test_id},
+    )
+    outcome = await assess_differential(
+        runner,
+        [_variant("variant_1")],
+        synthesizer=ScriptedVariantSynth([]),
+        context_template=_template(),
+    )
+    assert outcome.is_pass
+    assert outcome.discarded_test_paths == ["tests/mut_bad_k.py"]
 
 
 async def test_synthesizer_set_without_template_raises() -> None:
