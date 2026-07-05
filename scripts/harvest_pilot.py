@@ -114,13 +114,33 @@ def read_progress() -> dict:
     return {}
 
 
+#: Last full progress state (without the volatile heartbeat fields), so the
+#: periodic heartbeat can refresh ``heartbeat_ts`` mid-batch without disturbing
+#: the budget/keep state machine -- a future worker polling across sessions can
+#: then tell "alive but mid-batch" from "hung".
+_last_progress: dict = {}
+
+
 def write_progress(data: dict) -> None:
-    data = dict(data)
-    data["heartbeat_ts"] = time.time()
-    data["heartbeat_iso"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    global _last_progress
+    _last_progress = dict(data)
+    out = dict(data)
+    out["heartbeat_ts"] = time.time()
+    out["heartbeat_iso"] = time.strftime("%Y-%m-%d %H:%M:%S")
     tmp = PROGRESS.with_name(PROGRESS.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
+    tmp.write_text(json.dumps(out, indent=2))
     os.replace(tmp, PROGRESS)
+
+
+async def _heartbeat(interval: float = 30.0) -> None:
+    """Refresh ``heartbeat_ts`` on the last full progress state every ``interval``s."""
+    while True:
+        await asyncio.sleep(interval)
+        if _last_progress:
+            try:
+                write_progress(_last_progress)
+            except Exception:
+                pass
 
 
 def _canonical_task_ids() -> set[str]:
@@ -281,6 +301,7 @@ async def amain() -> int:
         except (NotImplementedError, RuntimeError, ValueError):
             pass
 
+    heartbeat_task = asyncio.ensure_future(_heartbeat())
     final_status = "plans_exhausted"
     validated = False
 
@@ -420,6 +441,7 @@ async def amain() -> int:
             "finished_ts": time.time(),
         }
     )
+    heartbeat_task.cancel()
     log(
         f"HARVEST FINISHED status={final_status} spend=${spend:.2f} "
         f"shipped={shipped} gens={gen_bd} langs={lang_bd} candidates_done={candidates_done}"
