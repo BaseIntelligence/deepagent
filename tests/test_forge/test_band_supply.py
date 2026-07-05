@@ -24,6 +24,7 @@ from pathlib import Path
 from swe_forge.forge.adapters import PythonAdapter
 from swe_forge.forge.adapters.base import Symbol
 from swe_forge.forge.generators import BugCombinationGenerator, GenerationRequest
+from swe_forge.forge.generators import MultiFileGenerator
 from swe_forge.forge.generators._targeting import (
     PREFER_LARGEST,
     PREFER_PARSE,
@@ -196,6 +197,71 @@ def test_bug_combination_deterministic_for_fixed_params(tmp_path: Path) -> None:
     )
     assert first.mutation_patch == second.mutation_patch
     assert first.oracle_patch == second.oracle_patch
+
+
+# --------------------------------------------------------------------------- #
+# multi_file honours the SAME amplifier ladder (2nd in-band generator)
+# --------------------------------------------------------------------------- #
+def test_multi_file_records_difficulty_params(tmp_path: Path) -> None:
+    repo = _amplifier_repo(tmp_path)
+    candidate = MultiFileGenerator().generate(
+        GenerationRequest(
+            repo_root=repo,
+            seed=1,
+            params={"files": 2, "min_symbol_lines": 5, "prefer": "largest"},
+        ),
+        PythonAdapter(),
+    )
+    details = candidate.provenance.details
+    assert details["prefer"] == "largest"
+    assert details["min_symbol_lines"] == 5
+    # A large-symbol multi_file is an amplifier -> hard-band calibration budget.
+    assert candidate.difficulty_hint == "high"
+
+
+def test_multi_file_largest_targets_the_big_symbols(tmp_path: Path) -> None:
+    repo = _amplifier_repo(tmp_path)
+    candidate = MultiFileGenerator().generate(
+        GenerationRequest(
+            repo_root=repo,
+            seed=1,
+            params={"files": 2, "min_symbol_lines": 5, "prefer": "largest"},
+        ),
+        PythonAdapter(),
+    )
+    symbols = set(candidate.target.symbols)
+    assert symbols <= {"large", "large2"}
+    assert not (symbols & {"tiny", "tiny2"})
+
+
+def test_multi_file_defaults_preserve_medium_difficulty(tmp_path: Path) -> None:
+    # With no amplifier params the generator keeps its historical medium hint.
+    repo = _amplifier_repo(tmp_path)
+    candidate = MultiFileGenerator().generate(
+        GenerationRequest(repo_root=repo, seed=1, params={}),
+        PythonAdapter(),
+    )
+    assert candidate.difficulty_hint == "medium"
+    assert candidate.provenance.details["min_symbol_lines"] == 0
+
+
+def test_multi_file_difficulty_params_still_round_trip(tmp_path: Path) -> None:
+    from swe_forge.forge.adapters._diff import apply_multi_patch
+
+    repo = _amplifier_repo(tmp_path)
+    candidate = MultiFileGenerator().generate(
+        GenerationRequest(
+            repo_root=repo,
+            seed=2,
+            params={"files": 2, "min_symbol_lines": 5, "prefer": "largest"},
+        ),
+        PythonAdapter(),
+    )
+    originals = {rel: (repo / rel).read_bytes() for rel in candidate.target.files}
+    applied = apply_multi_patch(originals, candidate.mutation_patch)
+    restored = apply_multi_patch(applied, candidate.oracle_patch)
+    assert any(applied[rel] != originals[rel] for rel in originals)
+    assert restored == originals
 
 
 # --------------------------------------------------------------------------- #

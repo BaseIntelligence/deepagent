@@ -817,9 +817,15 @@ def _accumulate_panel_usage(art: CandidateArtifacts, report: CalibrationReport) 
 #: ``RepoSpec.structural_source`` in :func:`build_pilot_plans`. >=2 generators
 #: keeps VAL-CROSS-005.
 DEFAULT_GENERATORS_BY_LANGUAGE: dict[str, tuple[str, ...]] = {
-    "python": ("ast_mutation", "function_removal", "bug_combination", "lm_authored"),
-    "javascript": ("ast_mutation", "function_removal", "bug_combination"),
-    "go": ("ast_mutation", "function_removal", "bug_combination"),
+    "python": (
+        "ast_mutation",
+        "function_removal",
+        "bug_combination",
+        "multi_file",
+        "lm_authored",
+    ),
+    "javascript": ("ast_mutation", "function_removal", "bug_combination", "multi_file"),
+    "go": ("ast_mutation", "function_removal", "bug_combination", "multi_file"),
 }
 
 #: Difficulty amplifier ("m6-band-supply"). The m6-pilot-build measurement showed
@@ -843,9 +849,13 @@ DEFAULT_AMPLIFIER_LADDER: tuple[dict[str, object], ...] = (
     {"faults": 2, "min_symbol_lines": 30, "prefer": "largest"},
 )
 
-#: Structural generators the amplifier ladder is applied to (only the multi-fault
-#: amplifier reliably reaches calibration on the modular repos, per m6-pilot-build).
-AMPLIFIER_GENERATORS: frozenset[str] = frozenset({"bug_combination"})
+#: Structural generators the amplifier ladder is applied to. Both multi-fault
+#: amplifiers (``bug_combination`` and ``multi_file``) combine >=2 distinct-file
+#: faults through the same targeting, so the large-symbol rungs give each a
+#: needle that reliably reaches calibration on the modular repos and lets the
+#: band filter select in-band keeps from >1 generator (VAL-CROSS-005, per
+#: m6-pilot-build).
+AMPLIFIER_GENERATORS: frozenset[str] = frozenset({"bug_combination", "multi_file"})
 
 
 @dataclass
@@ -892,7 +902,8 @@ def build_pilot_plans(
       for every diversified MODULAR repo (:attr:`RepoSpec.structural_source`),
       enumerated over ``generator x seed`` cells.
 
-    The difficulty **amplifier** generators (``bug_combination``) are additionally
+    The difficulty **amplifier** generators (``bug_combination``, ``multi_file``)
+    are additionally
     swept over the :data:`DEFAULT_AMPLIFIER_LADDER` (``amplifier_ladder``
     override): each ``(generator, seed)`` cell is expanded to one plan per ladder
     rung, and the rung's ``{faults, min_symbol_lines, prefer}`` are threaded as

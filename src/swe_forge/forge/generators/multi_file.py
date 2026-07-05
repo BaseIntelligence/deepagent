@@ -20,6 +20,8 @@ from pathlib import Path
 
 from swe_forge.forge.adapters.base import LanguageAdapter
 from swe_forge.forge.generators._targeting import (
+    FAULT_PREFERENCES,
+    PREFER_PARSE,
     SingleFileFault,
     build_combined_patches,
     collect_distinct_file_faults,
@@ -57,6 +59,26 @@ def _resolve_count(request: GenerationRequest, minimum: int) -> int:
     return max(count, minimum)
 
 
+def _resolve_int_param(request: GenerationRequest, key: str, default: int) -> int:
+    """Read a non-negative int generation param (tolerant of str/bool)."""
+    raw = request.params.get(key, default)
+    if isinstance(raw, bool):
+        return default
+    if isinstance(raw, int):
+        return max(0, raw)
+    if isinstance(raw, str) and raw.strip().lstrip("-").isdigit():
+        return max(0, int(raw))
+    return default
+
+
+def _resolve_prefer(request: GenerationRequest) -> str:
+    """Read the fault-difficulty ``prefer`` param (``parse``/``largest``/...)."""
+    raw = request.params.get("prefer", PREFER_PARSE)
+    if isinstance(raw, str) and raw.strip() in FAULT_PREFERENCES:
+        return raw.strip()
+    return PREFER_PARSE
+
+
 class MultiFileGenerator(BugGenerator):
     """Coordinated multi-file fault generator (Python / JS-TS / Go)."""
 
@@ -79,6 +101,8 @@ class MultiFileGenerator(BugGenerator):
                 f"multi_file: unknown operator {request.op!r}"
             ) from None
         count = _resolve_count(request, _MIN_FILES)
+        min_symbol_lines = _resolve_int_param(request, "min_symbol_lines", 0)
+        prefer = _resolve_prefer(request)
 
         with contextlib.chdir(repo_root):
             files = discover_source_files(repo_root, adapter)
@@ -88,7 +112,13 @@ class MultiFileGenerator(BugGenerator):
                     f"files, found {len(files)} in {repo_root}"
                 )
             faults = collect_distinct_file_faults(
-                adapter, files, ops, seed=request.seed, count=count
+                adapter,
+                files,
+                ops,
+                seed=request.seed,
+                count=count,
+                min_symbol_lines=min_symbol_lines,
+                prefer=prefer,
             )
             if len(faults) < _MIN_FILES:
                 raise GenerationError(
@@ -108,6 +138,8 @@ class MultiFileGenerator(BugGenerator):
         ordered = sorted(faults, key=lambda fault: fault.rel)
         files = tuple(fault.rel for fault in ordered)
         symbols = tuple(fault.symbol.name for fault in ordered)
+        min_symbol_lines = _resolve_int_param(request, "min_symbol_lines", 0)
+        prefer = _resolve_prefer(request)
         provenance = Provenance(
             generator=self.name,
             seed=request.seed,
@@ -115,6 +147,8 @@ class MultiFileGenerator(BugGenerator):
             tool_versions=tool_versions(),
             details={
                 "operation": "multi_file",
+                "prefer": prefer,
+                "min_symbol_lines": min_symbol_lines,
                 "files": list(files),
                 "edits": [
                     {
@@ -136,6 +170,6 @@ class MultiFileGenerator(BugGenerator):
             target=CandidateTarget(files=files, symbols=symbols),
             mutation_patch=combined.mutation_patch,
             oracle_patch=combined.oracle_patch,
-            difficulty_hint="medium",
+            difficulty_hint="high" if min_symbol_lines > 0 else "medium",
             provenance=provenance,
         )
