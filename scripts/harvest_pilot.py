@@ -2,11 +2,14 @@
 """Self-budgeted, restart-safe background harvest driver for ``forge build --pilot``.
 
 The m6-pilot-build harvest sweeps MANY borderline candidates (the difficulty
-ladder x seeds x the modular band-producing repos boltons/jmespath, plus the
-mutation-adequate ``qs`` pr_mirror entries) and lets the UNCHANGED band filter
-select the in-band keeps. Because the harvest needs many hours and prior worker
-sessions died at the session-length limit before shipping a keep, the compute is
-run here as a DETACHED background OS process that outlives the worker session.
+ladder x seeds x the modular band-producing structural repos -- boltons/jmespath
+[python] and cast/mux [go] -- plus the mutation-adequate ``qs`` pr_mirror entries
+[js]) and lets the UNCHANGED band filter select the in-band keeps. The three
+languages are interleaved so every batch feeds python/js/go supply, because the
+shipped set must include >=1 keep per language (VAL-CROSS-010). Because the
+harvest needs many hours and prior worker sessions died at the session-length
+limit before shipping a keep, the compute is run here as a DETACHED background OS
+process that outlives the worker session.
 
 Guarantees implemented here:
 
@@ -59,26 +62,38 @@ LOG = OUT_DIR / "harvest.log"
 BUDGET_USD = float(os.environ.get("HARVEST_BUDGET_USD", "1400"))
 KEEP_TARGET = int(os.environ.get("HARVEST_KEEP_TARGET", "18"))
 KEEP_HARD_CAP = int(os.environ.get("HARVEST_KEEP_HARD_CAP", "30"))
-BATCH_SIZE = int(os.environ.get("HARVEST_BATCH_SIZE", "16"))
-CANDIDATE_CONCURRENCY = int(os.environ.get("HARVEST_CANDIDATE_CONCURRENCY", "8"))
+BATCH_SIZE = int(os.environ.get("HARVEST_BATCH_SIZE", "24"))
+CANDIDATE_CONCURRENCY = int(os.environ.get("HARVEST_CANDIDATE_CONCURRENCY", "12"))
 ROLLOUT_CONCURRENCY = int(os.environ.get("HARVEST_ROLLOUT_CONCURRENCY", "4"))
 K = int(os.environ.get("HARVEST_K", "6"))
 RESERVE_PER_CAND = float(os.environ.get("HARVEST_RESERVE_PER_CAND", "6.0"))
 SEEDS = int(os.environ.get("HARVEST_SEEDS", "44"))
 
-# Hard-band rungs only: ~25% of hard-rung oracle-passers land in-band vs ~17%
+# Python hard-band rungs: ~25% of hard-rung oracle-passers land in-band vs ~17%
 # overall (m6-band-supply), so restricting to the large-symbol needles maximizes
 # the in-band rate per (paid) candidate. faults stays 2 (the count that clears
 # the oracle cleanly); difficulty is centered on the fault-LOCATE axis.
-RUNGS: tuple[dict[str, object], ...] = (
+RUNGS_PY: tuple[dict[str, object], ...] = (
     {"faults": 2, "min_symbol_lines": 20, "prefer": "largest"},
     {"faults": 2, "min_symbol_lines": 30, "prefer": "largest"},
 )
+# Go rungs: cast/mux functions are SMALLER than boltons' utility funcs, so the
+# python 20/30-line floors filter out every Go symbol and no target is emitted.
+# Lower the floors (0/10) with prefer=largest so the largest Go functions (the
+# genuine needles) are tried first while a real target is always found.
+RUNGS_GO: tuple[dict[str, object], ...] = (
+    {"faults": 2, "min_symbol_lines": 0, "prefer": "largest"},
+    {"faults": 2, "min_symbol_lines": 10, "prefer": "largest"},
+)
 # Two amplifier generators so the kept set can span >=2 generators (VAL-CROSS-005).
 STRUCT_GENERATORS = ("bug_combination", "multi_file")
-# Modular band-producing repos (pure-logic; jmespath never hangs, boltons is the
-# best band producer). cachetools/socket/threading targets are avoided.
-STRUCT_REPO_IDS = ("mahmoud/boltons", "jmespath/jmespath.py")
+# Modular band-producing structural repos, interleaved py/go so EVERY batch has
+# Go supply (VAL-CROSS-010 requires >=1 keep per language). Python: boltons (best
+# band producer, pure-logic *utils) + jmespath (never hangs). Go: cast + mux
+# (pure-logic, DETERMINISTIC structural faults -> clear the flakiness gate, unlike
+# the timing-sensitive Go pr_mirror targets uuid/jwt).
+STRUCT_REPOS_PY = ("mahmoud/boltons", "jmespath/jmespath.py")
+STRUCT_REPOS_GO = ("spf13/cast", "gorilla/mux")
 # Mutation-adequate pr_mirror entries for JS + generator/language diversity.
 PR_MIRROR_REPO_IDS = ("ljharb/qs#555", "ljharb/qs#559")
 
@@ -202,20 +217,35 @@ def merge_and_rebuild() -> tuple[int, dict[str, int], dict[str, int]]:
 
 
 def build_plans() -> list:
-    """Weighted, interleaved candidate plan list (seed-outer for early diversity)."""
+    """Weighted, interleaved candidate plan list (seed-outer for early diversity).
+
+    Python and Go structural repos are interleaved (boltons, cast, jmespath, mux)
+    and each carries its own difficulty rungs (python large-symbol needles;
+    Go lower floors so its smaller functions still yield a target), so Go
+    candidates appear in EVERY batch rather than being left to the tail.
+    """
     from swe_forge.forge.pilot import CandidatePlan
     from swe_forge.forge.sources import build_source_registry
 
     src = build_source_registry()
     by_id = {r.repo_id: r for r in src.specs()}
-    struct_repos = [by_id[rid] for rid in STRUCT_REPO_IDS if rid in by_id]
+    py_repos = [by_id[rid] for rid in STRUCT_REPOS_PY if rid in by_id]
+    go_repos = [by_id[rid] for rid in STRUCT_REPOS_GO if rid in by_id]
     pr_repos = [by_id[rid] for rid in PR_MIRROR_REPO_IDS if rid in by_id]
+
+    # (repo, rungs) cells, interleaved py/go so a batch always spans both langs.
+    struct_cells: list[tuple[object, tuple[dict[str, object], ...]]] = []
+    for i in range(max(len(py_repos), len(go_repos))):
+        if i < len(py_repos):
+            struct_cells.append((py_repos[i], RUNGS_PY))
+        if i < len(go_repos):
+            struct_cells.append((go_repos[i], RUNGS_GO))
 
     plans: list = []
     for seed in range(SEEDS):
-        for repo in struct_repos:
+        for repo, rungs in struct_cells:
             for generator in STRUCT_GENERATORS:
-                for rung in RUNGS:
+                for rung in rungs:
                     plans.append(
                         CandidatePlan(
                             repo=repo,
@@ -310,7 +340,14 @@ async def amain() -> int:
         if state["stop"]:
             final_status = "stopped"
             break
-        if shipped >= min(KEEP_TARGET, KEEP_HARD_CAP):
+        # Language-aware stop: the shipped set must cover EACH of python/js/go
+        # (VAL-CROSS-010) AND reach the total target before the harvest is done;
+        # a missing language keeps the sweep going (bounded by the global budget)
+        # rather than declaring success at the total count alone. The absolute
+        # hard cap always stops the run.
+        required_langs = {"python", "javascript", "go"}
+        have_all_langs = required_langs.issubset(set(lang_bd))
+        if shipped >= KEEP_HARD_CAP or (shipped >= KEEP_TARGET and have_all_langs):
             final_status = "target_reached"
             break
         if spend + RESERVE_PER_CAND * BATCH_SIZE > BUDGET_USD:
