@@ -68,6 +68,11 @@ ROLLOUT_CONCURRENCY = int(os.environ.get("HARVEST_ROLLOUT_CONCURRENCY", "4"))
 K = int(os.environ.get("HARVEST_K", "6"))
 RESERVE_PER_CAND = float(os.environ.get("HARVEST_RESERVE_PER_CAND", "6.0"))
 SEEDS = int(os.environ.get("HARVEST_SEEDS", "44"))
+# LLM-outage circuit breaker: abort after this many CONSECUTIVE batches that
+# complete with the quota/endpoint-outage signature (no billed cost AND no oracle
+# pass). Prevents a repeat quota outage from silently burning the remaining plan
+# as no-ops (see the 2026-07-06 quota collapse in library/harvest-runbook.md).
+OUTAGE_BATCHES = int(os.environ.get("HARVEST_OUTAGE_BATCHES", "2"))
 
 # Python hard-band rungs: ~25% of hard-rung oracle-passers land in-band vs ~17%
 # overall (m6-band-supply), so restricting to the large-symbol needles maximizes
@@ -334,6 +339,7 @@ async def amain() -> int:
     heartbeat_task = asyncio.ensure_future(_heartbeat())
     final_status = "plans_exhausted"
     validated = False
+    consecutive_outage = 0
 
     while True:
         shipped = len(_canonical_task_ids())
@@ -427,12 +433,58 @@ async def amain() -> int:
 
         validated = True
         cost = float(outcome.usage.total_cost)
+        c = outcome.counts
+
+        # LLM-outage circuit breaker: a COMPLETED batch with NO billed cost AND
+        # NO oracle pass is the quota/endpoint-outage signature -- every
+        # completion 403'd / 'user quota is not enough' / APIConnectionError, so
+        # every candidate free-failed and the batch did no real work. Such a
+        # batch must NOT be billed and must NOT advance the sweep position (so the
+        # burned candidates re-run once quota returns); after OUTAGE_BATCHES
+        # consecutive such batches ABORT with a DISTINCT status so a monitor can
+        # tell "out of quota" from "done" (target_reached / plans_exhausted) and
+        # from "still working". Without this, a repeat outage silently burns the
+        # whole remaining plan as no-ops (2026-07-06 collapse; see runbook).
+        if cost == 0.0 and c.oracle_pass == 0:
+            consecutive_outage += 1
+            reserved = 0.0
+            shipped, gen_bd, lang_bd = merge_and_rebuild()
+            log(
+                f"batch {batches_done} LLM-OUTAGE signature "
+                f"(cost=$0.00, oracle_pass=0, synth={c.synthesized}); "
+                f"consecutive={consecutive_outage}/{OUTAGE_BATCHES}; "
+                f"sweep position HELD at batch {batches_done} for re-run"
+            )
+            write_progress(
+                {
+                    "status": "running",
+                    "pid": os.getpid(),
+                    "logfile": str(LOG),
+                    "progress_file": str(PROGRESS),
+                    "spend_usd": round(spend, 4),
+                    "reserved_usd": 0.0,
+                    "in_flight_batch": None,
+                    "shipped_keeps": shipped,
+                    "candidates_done": candidates_done,
+                    "batches_done": batches_done,
+                    "generator_breakdown": gen_bd,
+                    "language_breakdown": lang_bd,
+                    "budget_usd": BUDGET_USD,
+                    "keep_target": KEEP_TARGET,
+                    "consecutive_outage": consecutive_outage,
+                }
+            )
+            if consecutive_outage >= OUTAGE_BATCHES:
+                final_status = "aborted_llm_outage"
+                break
+            continue
+
+        consecutive_outage = 0
         spend += cost
         reserved = 0.0
         candidates_done += len(batch_plans)
         batches_done += 1
         shipped, gen_bd, lang_bd = merge_and_rebuild()
-        c = outcome.counts
         log(
             f"batch {batches_done - 1} done: cost=${cost:.2f} tokens={outcome.usage.total_tokens} "
             f"funnel[sourced={c.sourced} env={c.env_built} synth={c.synthesized} "
