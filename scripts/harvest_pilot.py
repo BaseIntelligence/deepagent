@@ -58,6 +58,13 @@ CANON_TASKS = OUT_DIR / "tasks"
 BATCHES_DIR = OUT_DIR / "batches"
 PROGRESS = OUT_DIR / "harvest_progress.json"
 LOG = OUT_DIR / "harvest.log"
+# Durable per-candidate ledger for diagnosing the in-band conversion rate: every
+# candidate's disposition (stage x band verdict x language x generator x repo,
+# plus the calibration per-tier pass@k + discrimination when calibration ran) is
+# appended here after each REAL batch. Observability only -- never read by the
+# pipeline/gates/band; the orchestrator reads it to decide whether to continue,
+# adjust the difficulty supply, or escalate.
+DISPOSITIONS = OUT_DIR / "dispositions.jsonl"
 
 BUDGET_USD = float(os.environ.get("HARVEST_BUDGET_USD", "1400"))
 KEEP_TARGET = int(os.environ.get("HARVEST_KEEP_TARGET", "18"))
@@ -219,6 +226,36 @@ def merge_and_rebuild() -> tuple[int, dict[str, int], dict[str, int]]:
     except Exception:
         pass
     return len(records), gen_bd, lang_bd
+
+
+def record_dispositions(batch_idx: int, outcome: object) -> str:
+    """Append every candidate disposition to ``dispositions.jsonl``; return a summary.
+
+    Each row is ``{batch, ...disposition.to_dict()}`` -- stage, oracle_verdict,
+    band_verdict, language, generator, repo_id, task_id, reason, and (when
+    calibration ran) the ``calibration`` snapshot (per-tier pass@k + frontier
+    pass@k + discrimination + band rule). The returned string is a compact
+    per-batch SUMMARY (counts by language x stage x band_verdict) for the run log
+    so the in-band conversion is visible batch-by-batch. Best-effort: an IO/attr
+    hiccup never aborts the harvest.
+    """
+    dispositions = list(getattr(outcome, "dispositions", []) or [])
+    summary: dict[str, int] = {}
+    try:
+        with DISPOSITIONS.open("a") as fh:
+            for d in dispositions:
+                row = {"batch": batch_idx}
+                row.update(d.to_dict())
+                fh.write(json.dumps(row) + "\n")
+                lang = row.get("language", "?")
+                stage = row.get("stage", "?")
+                band = row.get("band_verdict") or "-"
+                key = f"{lang}/{stage}" + (f"[{band}]" if stage == "calib_drop" else "")
+                summary[key] = summary.get(key, 0) + 1
+    except Exception:  # noqa: BLE001 - observability must never break the harvest
+        return ""
+    parts = [f"{k}={v}" for k, v in sorted(summary.items())]
+    return " ".join(parts)
 
 
 def build_plans() -> list:
@@ -485,12 +522,15 @@ async def amain() -> int:
         candidates_done += len(batch_plans)
         batches_done += 1
         shipped, gen_bd, lang_bd = merge_and_rebuild()
+        disp_summary = record_dispositions(batches_done - 1, outcome)
         log(
             f"batch {batches_done - 1} done: cost=${cost:.2f} tokens={outcome.usage.total_tokens} "
             f"funnel[sourced={c.sourced} env={c.env_built} synth={c.synthesized} "
             f"oracle_pass={c.oracle_pass} keep={c.calibration_keep}] "
             f"| cumulative spend=${spend:.2f} shipped={shipped} gens={gen_bd} langs={lang_bd}"
         )
+        if disp_summary:
+            log(f"batch {batches_done - 1} dispositions: {disp_summary}")
         write_progress(
             {
                 "status": "running",

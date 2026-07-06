@@ -283,6 +283,12 @@ class CandidateDisposition:
     band_verdict: str = ""
     task_id: str = ""
     reason: str = ""
+    # Observability only (never read by any gate/band/funnel logic): the per-tier
+    # pass@k + discrimination + applied band rule of the candidate's calibration
+    # run, present iff calibration ran (kept / calib_drop). Lets a harvest ledger
+    # tell a solve-all/too-easy drop from a solve-none/too-hard or a
+    # low-discrimination drop without re-parsing the free-text reason.
+    calibration: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -292,6 +298,7 @@ class CandidateDisposition:
             "band_verdict": self.band_verdict,
             "task_id": self.task_id,
             "reason": self.reason,
+            "calibration": self.calibration,
         }
 
 
@@ -1287,6 +1294,7 @@ async def run_pilot(
                         reason=calibration.reasons[0]
                         if calibration and calibration.reasons
                         else "",
+                        calibration=_calibration_summary(calibration),
                     )
                 )
                 continue
@@ -1300,6 +1308,7 @@ async def run_pilot(
                     "kept",
                     oracle_verdict=oracle.verdict,
                     band_verdict=calibration.band_verdict,
+                    calibration=_calibration_summary(calibration),
                 )
             )
 
@@ -1366,6 +1375,29 @@ def _require_spec(art: CandidateArtifacts) -> GeneratedSpec:
             f"kept candidate {art.plan.label!r} is missing its GeneratedSpec"
         )
     return art.spec
+
+
+def _calibration_summary(
+    report: CalibrationReport | None,
+) -> dict[str, object] | None:
+    """Observability snapshot of a calibration run (``None`` if none ran).
+
+    Surfaces the per-tier pass@k, the frontier pass@k, the fitted discrimination,
+    and the applied band rule so a run ledger can attribute WHY a candidate was
+    kept or calib-dropped (solve-all/too-easy vs solve-none/too-hard vs
+    low-discrimination) without re-parsing the free-text reason. Read-only: it
+    never influences the keep/drop decision.
+    """
+    if report is None:
+        return None
+    band = report.details.get("band_filter")
+    rule = band.get("rule") if isinstance(band, dict) else None
+    return {
+        "frontier_pass_at_k": report.frontier_pass_at_k(),
+        "tier_pass_rates": report.tier_pass_rates(),
+        "discrimination": report.irt_discrimination,
+        "band_rule": rule,
+    }
 
 
 def _attach_task_ids(
