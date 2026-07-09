@@ -1,0 +1,219 @@
+{
+  "shipped_count": 5,
+  "passed": true,
+  "counts": {
+    "tasks": 5,
+    "jsonl": 5,
+    "parquet": 5,
+    "reconciled": true
+  },
+  "gold": {
+    "measured": true,
+    "gold_count": 5,
+    "shipped_count": 5,
+    "gold_rate": 1.0,
+    "all_gold": true,
+    "deterministic": true
+  },
+  "gold_rate": 1.0,
+  "headline_a": {
+    "gold_rate": 1.0,
+    "gold_count": 5,
+    "shipped_count": 5,
+    "passed": true
+  },
+  "headline_b": {
+    "frontier_threshold": 0.5,
+    "frontier_solve_rate": 0.21666666666666667,
+    "below_threshold": true,
+    "nonzero": true,
+    "passed": true
+  },
+  "frontier_threshold": 0.5,
+  "frontier_solve_rate": 0.21666666666666667,
+  "per_model": [
+    {
+      "model": "openai/gpt-4o-mini",
+      "tier": "weak",
+      "tasks": 5,
+      "k_total": 30,
+      "solves_total": 0,
+      "solve_rate": 0.0
+    },
+    {
+      "model": "anthropic/claude-sonnet-4-6",
+      "tier": "mid",
+      "tasks": 5,
+      "k_total": 30,
+      "solves_total": 0,
+      "solve_rate": 0.0
+    },
+    {
+      "model": "anthropic/claude-opus-4-8",
+      "tier": "frontier",
+      "tasks": 5,
+      "k_total": 30,
+      "solves_total": 4,
+      "solve_rate": 0.13333333333333333
+    },
+    {
+      "model": "openai/gpt-5.5",
+      "tier": "frontier",
+      "tasks": 5,
+      "k_total": 30,
+      "solves_total": 9,
+      "solve_rate": 0.3
+    }
+  ],
+  "tier_solve_rates": {
+    "weak": 0.0,
+    "mid": 0.0,
+    "frontier": 0.21666666666666667
+  },
+  "tier_ordering_ok": true,
+  "gold_ge_frontier": true,
+  "irt": {
+    "difficulty": {
+      "mean": 1.3076134761705858,
+      "min": 1.1254084274703036,
+      "max": 1.6017609025022803
+    },
+    "discrimination": {
+      "mean": 4.897288131411245,
+      "min": 3.9917099231834565,
+      "max": 5.543563172834792
+    }
+  },
+  "generator_breakdown": {
+    "bug_combination": 3,
+    "multi_file": 2
+  },
+  "language_breakdown": {
+    "python": 5
+  },
+  "breakdown_reconciles": true,
+  "provenance_completeness": {
+    "checked": 5,
+    "complete": 5,
+    "passed": true,
+    "kill_threshold": 0.8,
+    "findings": []
+  },
+  "provenance_consistency": {
+    "checked": 5,
+    "consistent": 5,
+    "passed": true,
+    "band_high": 0.5,
+    "discrimination_threshold": 1.0,
+    "findings": []
+  },
+  "tasks": [
+    {
+      "task_id": "mahmoud-boltons__bug_combination__36590c523bdc",
+      "language": "python",
+      "generator": "bug_combination",
+      "oracle_verdict": "pass",
+      "band_verdict": "keep",
+      "irt_difficulty": 1.3427448117050205,
+      "irt_discrimination": 4.703802194101592,
+      "frontier_pass_at_k": 0.16666666666666666,
+      "mutants_total": 36,
+      "mutants_killed": 32
+    },
+    {
+      "task_id": "mahmoud-boltons__bug_combination__7bb4e61cc98c",
+      "language": "python",
+      "generator": "bug_combination",
+      "oracle_verdict": "pass",
+      "band_verdict": "keep",
+      "irt_difficulty": 1.3427448117050205,
+      "irt_discrimination": 4.703802194101592,
+      "frontier_pass_at_k": 0.16666666666666666,
+      "mutants_total": 59,
+      "mutants_killed": 59
+    },
+    {
+      "task_id": "mahmoud-boltons__bug_combination__a00c108c7c90",
+      "language": "python",
+      "generator": "bug_combination",
+      "oracle_verdict": "pass",
+      "band_verdict": "keep",
+      "irt_difficulty": 1.6017609025022803,
+      "irt_discrimination": 3.9917099231834565,
+      "frontier_pass_at_k": 0.16666666666666666,
+      "mutants_total": 76,
+      "mutants_killed": 76
+    },
+    {
+      "task_id": "mahmoud-boltons__multi_file__0ec95f5643b0",
+      "language": "python",
+      "generator": "multi_file",
+      "oracle_verdict": "pass",
+      "band_verdict": "keep",
+      "irt_difficulty": 1.1254084274703036,
+      "irt_discrimination": 5.543563172834792,
+      "frontier_pass_at_k": 0.5,
+      "mutants_total": 58,
+      "mutants_killed": 58
+    },
+    {
+      "task_id": "mahmoud-boltons__multi_file__673742034467",
+      "language": "python",
+      "generator": "multi_file",
+      "oracle_verdict": "pass",
+      "band_verdict": "keep",
+      "irt_difficulty": 1.1254084274703036,
+      "irt_discrimination": 5.543563172834792,
+      "frontier_pass_at_k": 0.5,
+      "mutants_total": 59,
+      "mutants_killed": 59
+    }
+  ],
+  "measured_yield": {
+    "scope": "engine_demonstrator (>=1 band-KEEP, target 1-5; no gate/band loosened)",
+    "candidates_processed": 560,
+    "batches_advanced": 24,
+    "shipped_keeps": 5,
+    "keep_rate": 0.0089,
+    "funnel_note": "per-batch sourced=24>=env=24>=synth=24>=oracle_pass>=keep; exported==kept==tasks==jsonl==parquet==5 (deduped by task_id)",
+    "disposition_ledger": {
+      "rows": 360,
+      "oracle_reject": 279,
+      "calib_drop": 77,
+      "kept": 4,
+      "note": "5th keep predates ledger; 77 band-drops = 75 too-easy(fpk>0.5)+2 too-hard(fpk==0)"
+    },
+    "per_language_funnel": {
+      "python": {
+        "oracle_pass": 79,
+        "kept": 5
+      },
+      "go": {
+        "repos": [
+          "spf13/cast",
+          "gorilla/mux"
+        ],
+        "oracle_pass": 2,
+        "kept": 0,
+        "note": "both band-dropped at calibration (too easy for frontier); no in-band Go keep within budget"
+      },
+      "javascript": {
+        "repos": [
+          "qs #555/#559 pr_mirror"
+        ],
+        "oracle_pass": 0,
+        "kept": 0,
+        "note": "all rejected at oracle gates"
+      }
+    }
+  },
+  "llm_usage_cost": {
+    "billed_batches": 49,
+    "total_tokens": 349737807,
+    "measured_api_cost_usd": 1061.92,
+    "cumulative_budget_spend_usd": 1301.8979,
+    "budget_ceiling_usd": 1400.0,
+    "terminal_status": "budget_exhausted",
+    "attribution": "teacher (synthesis/oracle proposals) + panel (weak/mid/frontier rollout), threaded per-call"
+  }
+}

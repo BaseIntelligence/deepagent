@@ -1,0 +1,70 @@
+task_id: mahmoud-boltons__bug_combination__36590c523bdc
+repo:
+  url: https://github.com/mahmoud/boltons.git
+  base_commit: 979fa9b613fa8c0a455ae16ea6f2ec91c11ecafe
+  path: /workspace/repo
+language: python
+prompt: 'Two utility modules expose helpers for reading files line-by-line in reverse
+  and for transforming filesystem paths.
+
+
+  The reverse line iterator, `reverse_iter_lines(file_obj, blocksize, preseek, encoding)`,
+  is expected to yield the lines of a file object starting from the last line and
+  proceeding toward the first. When iterated fully, the sequence of lines it produces
+  should match the file''s actual lines in reversed order. Currently, for at least
+  one file input, the iterator produces an incorrect result: the lines it yields do
+  not correspond to the file''s lines in reverse order, so consuming the iterator
+  and comparing against the expected reversed line sequence reveals a mismatch.
+
+
+  The solver must ensure `reverse_iter_lines` yields the file''s lines in correct
+  reverse order across the supported inputs (including varying block sizes, optional
+  pre-seek behavior, and both text and binary/encoded file objects). The companion
+  path helper `augpath(path, suffix, prefix, ext, base, dpath, multidot)` must be
+  available with the given signature.'
+requirements:
+- Consuming reverse_iter_lines over a file object yields that file's lines in reverse
+  order, matching the expected reversed sequence of lines rather than an incorrect
+  ordering or content.
+interface: 'Expected interface (implement these public symbols; signatures only -
+  bodies are up to you):
+
+  # boltons/jsonutils.py
+
+  - def reverse_iter_lines(file_obj, blocksize, preseek, encoding)  [function]  (boltons/jsonutils.py)
+
+  # boltons/pathutils.py
+
+  - def augpath(path, suffix, prefix, ext, base, dpath, multidot)  [function]  (boltons/pathutils.py)'
+environment:
+  image: swe-forge-env-mahmoud_boltons:979fa9b613fa
+  base_image: python:3.12-slim
+  repo_path: /workspace/repo
+  forge_path: /workspace/forge
+  tests_path: /workspace/forge/tests
+install:
+  commands:
+  - pip install -e .
+  - pip install pytest
+  working_dir: /workspace/repo
+tests:
+  fail_to_pass:
+  - python -m pytest test_augpath_multidot.py
+  pass_to_pass:
+  - python -m pytest -k 'not (test_reverse_iter_lines)'
+  working_dir: /workspace/repo
+solution:
+  path: /workspace/forge
+  patch_file: patch.diff
+  deletion_patch_file: deletion_patch.diff
+  tests_path: /workspace/forge/tests
+synthetic:
+  source_type: synthetic_bug_combination
+  deletion_patch_file: deletion_patch.diff
+  strategy: bug_combination
+  generator: bug_combination
+meta:
+  generator: bug_combination
+  band_verdict: keep
+  oracle_verdict: pass
+  created_at: '2026-07-05T12:18:49+00:00'

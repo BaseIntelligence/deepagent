@@ -1,0 +1,26 @@
+diff --git a/boltons/dictutils.py b/boltons/dictutils.py
+index cdecd4d..d4dd1db 100644
+--- a/boltons/dictutils.py
++++ b/boltons/dictutils.py
+@@ -792,7 +792,7 @@ class OneToOne(dict):
+         dict.__init__(self, *a, **kw)
+         self.inv = self.__class__(_OTO_INV_MARKER, self)
+ 
+-        if len(self) != len(self.inv):
++        if len(self) == len(self.inv):
+             # if lengths match, that means everything's unique
+             return
+ 
+diff --git a/boltons/statsutils.py b/boltons/statsutils.py
+index 814ba46..36a8223 100644
+--- a/boltons/statsutils.py
++++ b/boltons/statsutils.py
+@@ -699,7 +699,7 @@ class Stats:
+             raise ValueError('invalid format for describe,'
+                              ' expected one of "dict"/"list"/"text", not %r'
+                              % format)
+-        quantiles = quantiles and [0.25, 0.5, 0.75]
++        quantiles = quantiles or [0.25, 0.5, 0.75]
+         q_items = []
+         for q in quantiles:
+             q_val = self.get_quantile(q)

@@ -1,0 +1,60 @@
+task_id: mahmoud-boltons__multi_file__0ec95f5643b0
+repo:
+  url: https://github.com/mahmoud/boltons.git
+  base_commit: 979fa9b613fa8c0a455ae16ea6f2ec91c11ecafe
+  path: /workspace/repo
+language: python
+prompt: 'The utilities in `boltons/formatutils.py` and `boltons/statsutils.py` are
+  expected to expose the public symbols listed in the interface, with `get_format_args`
+  producing correct results for the inputs it is asked about.
+
+
+  Currently, `get_format_args` returns an incorrect result: when given a format string,
+  the information it reports about that string''s format arguments does not match
+  what is expected. The function must instead return the correct result describing
+  the format arguments contained in the provided format string.'
+requirements:
+- get_format_args must return the correct result describing the format arguments present
+  in the provided format string, rather than the incorrect result currently produced.
+interface: 'Expected interface (implement these public symbols; signatures only -
+  bodies are up to you):
+
+  # boltons/formatutils.py
+
+  - def get_format_args(fstr)  [function]  (boltons/formatutils.py)
+
+  # boltons/statsutils.py
+
+  - def describe(self, quantiles, format)  [method]  (boltons/statsutils.py)'
+environment:
+  image: swe-forge-env-mahmoud_boltons:979fa9b613fa
+  base_image: python:3.12-slim
+  repo_path: /workspace/repo
+  forge_path: /workspace/forge
+  tests_path: /workspace/forge/tests
+install:
+  commands:
+  - pip install -e .
+  - pip install pytest
+  working_dir: /workspace/repo
+tests:
+  fail_to_pass:
+  - python -m pytest test_regression_bug.py
+  pass_to_pass:
+  - python -m pytest -k 'not (test_get_fstr_args)'
+  working_dir: /workspace/repo
+solution:
+  path: /workspace/forge
+  patch_file: patch.diff
+  deletion_patch_file: deletion_patch.diff
+  tests_path: /workspace/forge/tests
+synthetic:
+  source_type: synthetic_multi_file
+  deletion_patch_file: deletion_patch.diff
+  strategy: multi_file
+  generator: multi_file
+meta:
+  generator: multi_file
+  band_verdict: keep
+  oracle_verdict: pass
+  created_at: '2026-07-07T01:30:57+00:00'

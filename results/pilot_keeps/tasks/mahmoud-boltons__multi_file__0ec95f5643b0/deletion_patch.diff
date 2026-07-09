@@ -1,0 +1,26 @@
+diff --git a/boltons/formatutils.py b/boltons/formatutils.py
+index 3034034..6b723ba 100644
+--- a/boltons/formatutils.py
++++ b/boltons/formatutils.py
+@@ -177,7 +177,7 @@ def get_format_args(fstr):
+         if fname is not None:
+             type_char = fspec[-1:]
+             fname_list = re.split('[.[]', fname)
+-            if len(fname_list) > 1:
++            if len(fname_list) >= 1:
+                 raise ValueError('encountered compound format arg: %r' % fname)
+             try:
+                 base_fname = fname_list[0]
+diff --git a/boltons/statsutils.py b/boltons/statsutils.py
+index 36a8223..814ba46 100644
+--- a/boltons/statsutils.py
++++ b/boltons/statsutils.py
+@@ -699,7 +699,7 @@ class Stats:
+             raise ValueError('invalid format for describe,'
+                              ' expected one of "dict"/"list"/"text", not %r'
+                              % format)
+-        quantiles = quantiles or [0.25, 0.5, 0.75]
++        quantiles = quantiles and [0.25, 0.5, 0.75]
+         q_items = []
+         for q in quantiles:
+             q_val = self.get_quantile(q)

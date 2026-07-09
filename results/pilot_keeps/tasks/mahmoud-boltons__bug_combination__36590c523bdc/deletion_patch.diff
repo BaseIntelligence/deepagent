@@ -1,0 +1,26 @@
+diff --git a/boltons/jsonutils.py b/boltons/jsonutils.py
+index bf61b03..a9bbe1b 100644
+--- a/boltons/jsonutils.py
++++ b/boltons/jsonutils.py
+@@ -73,7 +73,7 @@ def reverse_iter_lines(file_obj, blocksize=DEFAULT_BLOCKSIZE, preseek=True, enco
+     """
+     # This function is a bit of a pain because it attempts to be byte/text agnostic
+     try:
+-        encoding = encoding or file_obj.encoding
++        encoding = encoding and file_obj.encoding
+     except AttributeError:
+         # BytesIO
+         encoding = None
+diff --git a/boltons/pathutils.py b/boltons/pathutils.py
+index a8cb260..5b568e2 100644
+--- a/boltons/pathutils.py
++++ b/boltons/pathutils.py
+@@ -114,7 +114,7 @@ def augpath(path, suffix='', prefix='', ext=None, base=None, dpath=None,
+         # The first dot defines the extension
+         parts = fname.split('.', 1)
+         orig_base = parts[0]
+-        orig_ext = '' if len(parts) == 1 else '.' + parts[1]
++        orig_ext = '' if len(parts) != 1 else '.' + parts[1]
+     else:
+         # The last dot defines the extension
+         orig_base, orig_ext = splitext(fname)

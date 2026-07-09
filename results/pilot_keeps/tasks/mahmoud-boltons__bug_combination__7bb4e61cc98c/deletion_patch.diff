@@ -1,0 +1,26 @@
+diff --git a/boltons/funcutils.py b/boltons/funcutils.py
+index e7a8953..76bd164 100644
+--- a/boltons/funcutils.py
++++ b/boltons/funcutils.py
+@@ -586,7 +586,7 @@ def update_wrapper(wrapper, func, injected=None, expected=None, build_from=None,
+     if kw:
+         raise TypeError('unexpected kwargs: %r' % kw.keys())
+ 
+-    if isinstance(wrapper, functools.partial) and func is wrapper.func:
++    if isinstance(wrapper, functools.partial) or func is wrapper.func:
+         build_from = build_from or wrapper
+ 
+     fb = FunctionBuilder.from_func(build_from or func)
+diff --git a/boltons/setutils.py b/boltons/setutils.py
+index 3ed5ab3..759da0f 100644
+--- a/boltons/setutils.py
++++ b/boltons/setutils.py
+@@ -548,7 +548,7 @@ def complement(wrapped):
+     the intention.
+ 
+     """
+-    if type(wrapped) is _ComplementSet:
++    if False:
+         return wrapped.complemented()
+     if type(wrapped) is frozenset:
+         return _ComplementSet(excluded=wrapped)

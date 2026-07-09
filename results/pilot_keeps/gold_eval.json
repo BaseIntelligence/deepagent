@@ -1,0 +1,148 @@
+{
+  "tasks_dir": "results/pilot_final/tasks",
+  "shipped_count": 5,
+  "gold_count": 5,
+  "gold_rate": 1.0,
+  "all_gold": true,
+  "deterministic": true,
+  "passed": true,
+  "non_gold": [],
+  "flipped": [],
+  "results": [
+    {
+      "task_id": "mahmoud-boltons__bug_combination__36590c523bdc",
+      "image": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+      "gold": true,
+      "deterministic": true,
+      "phase1_passed": true,
+      "scores": [
+        1,
+        1
+      ],
+      "runs": [
+        {
+          "run_index": 0,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-3e5d239f"
+        },
+        {
+          "run_index": 1,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-e7eab989"
+        }
+      ]
+    },
+    {
+      "task_id": "mahmoud-boltons__bug_combination__7bb4e61cc98c",
+      "image": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+      "gold": true,
+      "deterministic": true,
+      "phase1_passed": true,
+      "scores": [
+        1,
+        1
+      ],
+      "runs": [
+        {
+          "run_index": 0,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-25ee582d"
+        },
+        {
+          "run_index": 1,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-55ab894f"
+        }
+      ]
+    },
+    {
+      "task_id": "mahmoud-boltons__bug_combination__a00c108c7c90",
+      "image": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+      "gold": true,
+      "deterministic": true,
+      "phase1_passed": true,
+      "scores": [
+        1,
+        1
+      ],
+      "runs": [
+        {
+          "run_index": 0,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-21d4223a"
+        },
+        {
+          "run_index": 1,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-1bf772da"
+        }
+      ]
+    },
+    {
+      "task_id": "mahmoud-boltons__multi_file__0ec95f5643b0",
+      "image": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+      "gold": true,
+      "deterministic": true,
+      "phase1_passed": true,
+      "scores": [
+        1,
+        1
+      ],
+      "runs": [
+        {
+          "run_index": 0,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__0ec-2b38b9cb"
+        },
+        {
+          "run_index": 1,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__0ec-a8020f1c"
+        }
+      ]
+    },
+    {
+      "task_id": "mahmoud-boltons__multi_file__673742034467",
+      "image": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+      "gold": true,
+      "deterministic": true,
+      "phase1_passed": true,
+      "scores": [
+        1,
+        1
+      ],
+      "runs": [
+        {
+          "run_index": 0,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__673-22a49829"
+        },
+        {
+          "run_index": 1,
+          "score": 1,
+          "phase1_passed": true,
+          "exit_code": 0,
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__673-2d6d0e7a"
+        }
+      ]
+    }
+  ]
+}

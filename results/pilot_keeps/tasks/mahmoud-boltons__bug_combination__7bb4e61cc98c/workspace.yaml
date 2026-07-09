@@ -1,0 +1,71 @@
+task_id: mahmoud-boltons__bug_combination__7bb4e61cc98c
+repo:
+  url: https://github.com/mahmoud/boltons.git
+  base_commit: 979fa9b613fa8c0a455ae16ea6f2ec91c11ecafe
+  path: /workspace/repo
+language: python
+prompt: 'Two utility helpers in the boltons library are not behaving as documented
+  by their usage examples.
+
+
+  The first helper, `update_wrapper(wrapper, func, injected, expected, build_from,
+  **kw)` in `boltons/funcutils.py`, is intended to transfer identifying metadata from
+  a source function onto a wrapper function so that the wrapper appears equivalent
+  to the original. Currently, exercising this helper produces an incorrect result:
+  the metadata that should be carried over to the wrapper does not match what is expected.
+
+
+  The second helper, `complement(wrapped)` in `boltons/setutils.py`, is expected to
+  be available as part of the public interface.
+
+
+  The solver must ensure `update_wrapper` yields the correct, expected result when
+  applied, matching the observable metadata/behavior of the source it is built from.'
+requirements:
+- Applying update_wrapper to transfer metadata from a source function to a wrapper
+  produces the correct expected result rather than an incorrect one, so the wrapper
+  reflects the source's identifying metadata.
+interface: 'Expected interface (implement these public symbols; signatures only -
+  bodies are up to you):
+
+  # boltons/funcutils.py
+
+  - def update_wrapper(wrapper, func, injected, expected, build_from, **kw)  [function]  (boltons/funcutils.py)
+
+  # boltons/setutils.py
+
+  - def complement(wrapped)  [function]  (boltons/setutils.py)'
+environment:
+  image: swe-forge-env-mahmoud_boltons:979fa9b613fa
+  base_image: python:3.12-slim
+  repo_path: /workspace/repo
+  forge_path: /workspace/forge
+  tests_path: /workspace/forge/tests
+install:
+  commands:
+  - pip install -e .
+  - pip install pytest
+  working_dir: /workspace/repo
+tests:
+  fail_to_pass:
+  - python -m pytest test_complement_bug.py
+  pass_to_pass:
+  - python -m pytest -k 'not (test_wraps_basic or test_wraps_injected or test_wraps_update_dict
+    or test_wraps_expected or test_wraps_py3 or test_remove_kwonly_arg or test_wraps_inner_kwarg_only
+    or test_wraps_async or test_wraps_hide_wrapped or test_complement_set)'
+  working_dir: /workspace/repo
+solution:
+  path: /workspace/forge
+  patch_file: patch.diff
+  deletion_patch_file: deletion_patch.diff
+  tests_path: /workspace/forge/tests
+synthetic:
+  source_type: synthetic_bug_combination
+  deletion_patch_file: deletion_patch.diff
+  strategy: bug_combination
+  generator: bug_combination
+meta:
+  generator: bug_combination
+  band_verdict: keep
+  oracle_verdict: pass
+  created_at: '2026-07-07T03:57:59+00:00'
