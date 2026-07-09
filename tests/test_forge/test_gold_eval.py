@@ -195,9 +195,51 @@ def test_task_not_gold_when_phase1_aborts(tmp_path: Path) -> None:
 
 def test_task_not_gold_when_gold_phase_fails(tmp_path: Path) -> None:
     d = _make_task_dir(tmp_path, "acme__ast__deadbeef0003")
-    result = evaluate_task_gold(d, runs=1, runner=_const_runner(_GOLD_FAIL_OUT))
+    result = evaluate_task_gold(d, runs=2, runner=_const_runner(_GOLD_FAIL_OUT))
     assert result.gold is False
     assert result.final_score == 0
+
+
+@pytest.mark.parametrize("runs", [0, 1])
+def test_library_rejects_fewer_than_two_runs_before_runner_execution(
+    tmp_path: Path, runs: int
+) -> None:
+    d = _make_task_dir(tmp_path, "acme__ast__minimumruns0001")
+    calls = 0
+
+    def runner(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return DockerExec(0, _GOLD_OUT, "")
+
+    with pytest.raises(GoldEvalError, match="runs must be >= 2"):
+        evaluate_task_gold(d, runs=runs, runner=runner)
+    assert calls == 0
+
+    with pytest.raises(GoldEvalError, match="runs must be >= 2"):
+        run_gold_eval(tmp_path, runs=runs, runner=runner)
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("stdout", "exit_code", "phase1"),
+    [
+        ('Phase 1 PASSED\n{"score": 1}\n', 1, True),
+        ('{"score": 1}\n', 0, False),
+        ("Phase 1 PASSED\n", 0, True),
+    ],
+)
+def test_score_one_is_not_a_strict_success_without_all_evidence(
+    tmp_path: Path, stdout: str, exit_code: int, phase1: bool
+) -> None:
+    d = _make_task_dir(tmp_path, "acme__ast__strictevidence01")
+    result = evaluate_task_gold(
+        d, runs=2, runner=_const_runner(stdout, exit_code=exit_code)
+    )
+
+    assert result.gold is False
+    assert result.deterministic is False
+    assert result.phase1_all is phase1
 
 
 # --------------------------------------------------------------------------- #
@@ -307,7 +349,54 @@ def test_missing_evaluate_script_raises(tmp_path: Path) -> None:
     d.mkdir()
     (d / "workspace.yaml").write_text(yaml.safe_dump({"environment": {"image": "x:y"}}))
     with pytest.raises(GoldEvalError):
-        evaluate_task_gold(d, runs=1, runner=_const_runner(_GOLD_OUT))
+        evaluate_task_gold(d, runs=2, runner=_const_runner(_GOLD_OUT))
+
+
+def test_all_immediate_task_directories_are_validated_before_docker_runs(
+    tmp_path: Path,
+) -> None:
+    tasks = tmp_path / "tasks"
+    _make_task_dir(tasks, "valid")
+
+    no_workspace = tasks / "missing-workspace"
+    no_workspace.mkdir()
+    (no_workspace / "evaluate.sh").write_text("#!/bin/bash\n")
+    (no_workspace / "evaluate.sh").chmod(0o755)
+
+    no_script = tasks / "missing-script"
+    no_script.mkdir()
+    (no_script / "workspace.yaml").write_text(
+        yaml.safe_dump({"environment": {"image": "x:y"}})
+    )
+
+    malformed_workspace = tasks / "malformed-workspace"
+    malformed_workspace.mkdir()
+    (malformed_workspace / "evaluate.sh").write_text("#!/bin/bash\n")
+    (malformed_workspace / "evaluate.sh").chmod(0o755)
+    (malformed_workspace / "workspace.yaml").write_text("environment: [\n")
+
+    non_executable = _make_task_dir(tasks, "not-executable")
+    (non_executable / "evaluate.sh").chmod(0o644)
+
+    calls = 0
+
+    def runner(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return DockerExec(0, _GOLD_OUT, "")
+
+    with pytest.raises(GoldEvalError) as error:
+        run_gold_eval(tasks, runs=2, image="override:latest", runner=runner)
+
+    message = str(error.value)
+    for name in (
+        "missing-workspace",
+        "missing-script",
+        "malformed-workspace",
+        "not-executable",
+    ):
+        assert name in message
+    assert calls == 0
 
 
 def test_empty_set_does_not_pass(tmp_path: Path) -> None:
@@ -357,6 +446,24 @@ def test_cli_gold_eval_fails_on_non_gold(
 
     res = CliRunner().invoke(app, ["gold-eval", "--tasks-dir", str(tasks)])
     assert res.exit_code == 1
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["gold-eval", "--tasks-dir", "/missing", "--runs", "1"],
+        ["report", "--out-dir", "/missing", "--run-gold-eval", "--gold-runs", "1"],
+        ["build", "--out", "/missing", "--gold-runs", "1"],
+    ],
+)
+def test_cli_rejects_fewer_than_two_gold_runs(args: list[str]) -> None:
+    from typer.testing import CliRunner
+
+    from swe_forge.forge.cli import app
+
+    result = CliRunner().invoke(app, args)
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output
 
 
 # --------------------------------------------------------------------------- #

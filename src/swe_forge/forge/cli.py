@@ -3182,7 +3182,7 @@ def gold_eval_cmd(
     runs: int = typer.Option(
         DEFAULT_DETERMINISM_RUNS,
         "--runs",
-        min=1,
+        min=DEFAULT_DETERMINISM_RUNS,
         help="Independent --rm container runs per task (>=2 proves determinism).",
     ),
     image: str | None = typer.Option(
@@ -3291,7 +3291,7 @@ def report_cmd(
     gold_runs: int = typer.Option(
         DEFAULT_DETERMINISM_RUNS,
         "--gold-runs",
-        min=1,
+        min=DEFAULT_DETERMINISM_RUNS,
         help="gold-eval --rm runs per task (with --run-gold-eval).",
     ),
     timeout: float = typer.Option(
@@ -3337,7 +3337,7 @@ def report_cmd(
     (VAL-EXPORT-017), and reconciles the shipped count with the jsonl/parquet/
     tasks counts (VAL-EXPORT-019). Exit 0 iff every check passes.
     """
-    gold: GoldSummary | dict[str, object] | None = None
+    gold: GoldEvalReport | GoldSummary | dict[str, object] | None = None
     if gold_json is not None:
         gpath = Path(gold_json)
         if not gpath.is_file():
@@ -3360,7 +3360,7 @@ def report_cmd(
             )
         except GoldEvalError as exc:
             _fail(str(exc))
-        gold = GoldSummary.from_gold_eval(gold_report)
+        gold = gold_report
 
     try:
         report = build_benchmark_report(
@@ -3507,7 +3507,10 @@ def build(
         help="Determinism repeats in fresh containers (clamped up to 3).",
     ),
     gold_runs: int = typer.Option(
-        2, "--gold-runs", min=1, help="gold-eval --rm runs per shipped task."
+        DEFAULT_DETERMINISM_RUNS,
+        "--gold-runs",
+        min=DEFAULT_DETERMINISM_RUNS,
+        help="gold-eval --rm runs per shipped task.",
     ),
     run_gold: bool = typer.Option(
         True,

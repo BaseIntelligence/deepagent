@@ -51,7 +51,15 @@ from swe_forge.forge.calibrate.filter import (
     DEFAULT_BAND_HIGH,
     BandFilterConfig,
 )
-from swe_forge.forge.gold_eval import GoldEvalError, GoldEvalReport, resolve_tasks_root
+from swe_forge.forge.gold_eval import (
+    DEFAULT_DETERMINISM_RUNS,
+    EvalRun,
+    GoldEvalError,
+    GoldEvalReport,
+    TaskGoldResult,
+    discover_task_dirs,
+    resolve_tasks_root,
+)
 from swe_forge.forge.models import (
     GENERATOR_NAMES,
     PANEL_TIERS,
@@ -90,20 +98,6 @@ class ReportError(RuntimeError):
 # --------------------------------------------------------------------------- #
 def _is_number(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _as_int(value: object, default: int = 0) -> int:
-    """Best-effort int coercion for tolerant dict loaders."""
-    if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, (int, float)):
-        return int(value)
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return default
-    return default
 
 
 def _parse_timestamp(value: object) -> bool:
@@ -586,10 +580,30 @@ class GoldSummary:
     shipped_count: int
     all_gold: bool
     deterministic: bool
+    results: tuple[TaskGoldResult, ...] = ()
 
     @property
     def gold_rate(self) -> float:
-        return self.gold_count / self.shipped_count if self.shipped_count else 0.0
+        return self.gold_count / self.shipped_count if self.strict_proof else 0.0
+
+    @property
+    def strict_proof(self) -> bool:
+        """Whether the retained records prove every task twice, strictly."""
+        return (
+            self.measured
+            and self.shipped_count > 0
+            and self.shipped_count == len(self.results)
+            and self.gold_count == self.shipped_count
+            and self.all_gold
+            and self.deterministic
+            and len({result.task_id for result in self.results}) == len(self.results)
+            and all(
+                len(result.runs) >= DEFAULT_DETERMINISM_RUNS
+                and result.gold
+                and result.deterministic
+                for result in self.results
+            )
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -599,6 +613,8 @@ class GoldSummary:
             "gold_rate": self.gold_rate,
             "all_gold": self.all_gold,
             "deterministic": self.deterministic,
+            "strict_proof": self.strict_proof,
+            "results": [result.to_dict() for result in self.results],
         }
 
     @classmethod
@@ -609,6 +625,7 @@ class GoldSummary:
             shipped_count=0,
             all_gold=False,
             deterministic=False,
+            results=(),
         )
 
     @classmethod
@@ -621,18 +638,88 @@ class GoldSummary:
                 shipped_count=report.shipped_count,
                 all_gold=report.all_gold,
                 deterministic=report.deterministic,
+                results=tuple(report.results),
             )
-        gold_count = _as_int(report.get("gold_count", 0))
-        shipped = _as_int(report.get("shipped_count", 0))
+        parsed = _parse_gold_results(report.get("results"))
+        gold_count = sum(1 for result in parsed if result.gold)
+        shipped = len(parsed)
         return cls(
             measured=True,
             gold_count=gold_count,
             shipped_count=shipped,
-            all_gold=bool(
-                report.get("all_gold", gold_count == shipped and shipped > 0)
-            ),
-            deterministic=bool(report.get("deterministic", False)),
+            all_gold=bool(parsed) and gold_count == shipped,
+            deterministic=bool(parsed)
+            and all(result.deterministic for result in parsed),
+            results=tuple(parsed),
         )
+
+
+def _parse_gold_results(value: object) -> list[TaskGoldResult]:
+    """Decode saved Headline A proof records, rejecting aggregate-only claims."""
+    if not isinstance(value, list):
+        return []
+    results: list[TaskGoldResult] = []
+    for item in value:
+        if not isinstance(item, dict):
+            return []
+        task_id = item.get("task_id")
+        image = item.get("image")
+        raw_runs = item.get("runs")
+        if not isinstance(task_id, str) or not task_id or not isinstance(image, str):
+            return []
+        if not isinstance(raw_runs, list):
+            return []
+        runs: list[EvalRun] = []
+        for raw_run in raw_runs:
+            if not isinstance(raw_run, dict):
+                return []
+            run_task_id = raw_run.get("task_id", task_id)
+            run_index = raw_run.get("run_index")
+            score = raw_run.get("score")
+            phase1 = raw_run.get("phase1_passed")
+            exit_code = raw_run.get("exit_code")
+            container_name = raw_run.get("container_name")
+            if (
+                not isinstance(run_task_id, str)
+                or run_task_id != task_id
+                or not isinstance(run_index, int)
+                or isinstance(run_index, bool)
+                or (
+                    score is not None
+                    and (
+                        not isinstance(score, int)
+                        or isinstance(score, bool)
+                        or score not in (0, 1)
+                    )
+                )
+                or not isinstance(phase1, bool)
+                or not isinstance(exit_code, int)
+                or isinstance(exit_code, bool)
+                or not isinstance(container_name, str)
+                or not container_name
+            ):
+                return []
+            runs.append(
+                EvalRun(
+                    task_id=task_id,
+                    run_index=run_index,
+                    score=score,
+                    phase1_passed=phase1,
+                    exit_code=exit_code,
+                    container_name=container_name,
+                )
+            )
+        if len({run.run_index for run in runs}) != len(runs):
+            return []
+        results.append(
+            TaskGoldResult(
+                task_id=task_id,
+                task_dir=Path(task_id),
+                image=image,
+                runs=runs,
+            )
+        )
+    return results
 
 
 # --------------------------------------------------------------------------- #
@@ -787,9 +874,9 @@ class BenchmarkReport:
     def headline_a_pass(self) -> bool:
         """gold == 100% across the shipped set (VAL-EXPORT-016)."""
         return (
-            self.gold.measured
-            and self.gold.all_gold
-            and self.gold.gold_count == self.shipped_count
+            self.gold.strict_proof
+            and {result.task_id for result in self.gold.results}
+            == {prov.task_id for prov in self.provenances}
             and self.shipped_count > 0
         )
 
@@ -846,6 +933,7 @@ class BenchmarkReport:
                 "gold_rate": self.gold.gold_rate,
                 "gold_count": self.gold.gold_count,
                 "shipped_count": self.shipped_count,
+                "strict_proof": self.gold.strict_proof,
                 "passed": self.headline_a_pass,
             },
             "headline_b": {
@@ -1002,14 +1090,13 @@ class BenchmarkReport:
 # Build
 # --------------------------------------------------------------------------- #
 def load_task_provenances(tasks_root: Path | str) -> list[TaskProvenance]:
-    """Load the provenance of every ``tasks/<id>/`` (those carrying a workspace)."""
+    """Load provenance from every structurally valid immediate task workspace."""
     root = Path(tasks_root)
-    if not root.is_dir():
-        raise ReportError(f"not a directory: {root}")
-    dirs = sorted(
-        p for p in root.iterdir() if p.is_dir() and (p / "workspace.yaml").is_file()
-    )
-    return [TaskProvenance.load(p) for p in dirs]
+    try:
+        dirs = discover_task_dirs(root)
+    except GoldEvalError as exc:
+        raise ReportError(str(exc)) from exc
+    return [TaskProvenance.load(task_dir) for task_dir in dirs]
 
 
 def build_benchmark_report(

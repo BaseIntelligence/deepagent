@@ -106,7 +106,6 @@ from swe_forge.forge.panel import (
 from swe_forge.forge.report import (
     DEFAULT_FRONTIER_THRESHOLD,
     BenchmarkReport,
-    GoldSummary,
     build_benchmark_report,
     write_report,
 )
@@ -1163,6 +1162,17 @@ class PilotConfig:
     run_gold_eval: bool = True
     write_report: bool = True
 
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        """Require two fresh Docker proofs before Headline A can be claimed."""
+        if self.gold_eval_runs < 2:
+            raise PilotError(
+                "gold_eval_runs must be >= 2 for strict Headline A proof; "
+                f"got {self.gold_eval_runs}"
+            )
+
 
 def build_pilot_plans(
     *,
@@ -1269,6 +1279,7 @@ def default_pilot_config(
     for key, value in overrides.items():
         if hasattr(config, key):
             setattr(config, key, value)
+    config.validate()
     return config
 
 
@@ -1553,6 +1564,7 @@ async def run_pilot(
     valid; off-limits containers are never named, so they are never touched. Host
     temp dirs are always cleaned up.
     """
+    config.validate()
     if processor is None:
         processor = _live_processor(config)
 
@@ -1896,13 +1908,10 @@ def _build_report(
     funnel: dict[str, object] | None = None,
     source_capacity: list[dict[str, object]] | None = None,
 ) -> BenchmarkReport | None:
-    gold_summary: GoldSummary | None = (
-        GoldSummary.from_gold_eval(gold) if gold is not None else None
-    )
     try:
         return build_benchmark_report(
             config.out_dir,
-            gold=gold_summary,
+            gold=gold,
             frontier_threshold=config.frontier_threshold,
             band_config=config.band_config,
             kill_threshold=config.kill_threshold,

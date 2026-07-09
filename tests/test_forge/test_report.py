@@ -31,7 +31,11 @@ import pytest
 
 from swe_forge.forge.calibrate.filter import BandFilterConfig, DEFAULT_BAND_HIGH
 from swe_forge.forge.export import ExportRequest, export_batch
-from swe_forge.forge.gold_eval import GoldEvalReport
+from swe_forge.forge.gold_eval import (
+    EvalRun,
+    GoldEvalReport,
+    TaskGoldResult,
+)
 from swe_forge.forge.models import (
     CalibrationReport,
     Candidate,
@@ -294,14 +298,91 @@ def exported(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _gold_all(shipped: int) -> GoldSummary:
-    return GoldSummary(
-        measured=True,
-        gold_count=shipped,
-        shipped_count=shipped,
-        all_gold=True,
-        deterministic=True,
-    )
+def _gold_all(exported: Path) -> GoldEvalReport:
+    tasks = exported / "tasks"
+    results = [
+        TaskGoldResult(
+            task_id=task_dir.name,
+            task_dir=task_dir,
+            image="swe-forge-env:demo",
+            runs=[
+                EvalRun(
+                    task_id=task_dir.name,
+                    run_index=index,
+                    score=1,
+                    phase1_passed=True,
+                    exit_code=0,
+                    container_name=f"gold-{task_dir.name}-{index}",
+                )
+                for index in range(2)
+            ],
+        )
+        for task_dir in sorted(tasks.iterdir())
+        if task_dir.is_dir()
+    ]
+    return GoldEvalReport(tasks_dir=tasks, results=results)
+
+
+def _strict_gold_payload(exported: Path) -> dict[str, object]:
+    return _gold_all(exported).to_dict()
+
+
+def _assert_strict_gold_proof(payload: dict[str, object], expected_count: int) -> None:
+    results = payload["results"]
+    assert isinstance(results, list)
+    assert len(results) == expected_count
+    for result in results:
+        assert isinstance(result, dict)
+        runs = result["runs"]
+        assert isinstance(runs, list)
+        assert len(runs) >= 2
+        assert all(
+            isinstance(run, dict)
+            and run["score"] == 1
+            and run["phase1_passed"] is True
+            and run["exit_code"] == 0
+            for run in runs
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Strict Headline A proof
+# --------------------------------------------------------------------------- #
+def test_gold_summary_round_trips_two_strict_runs_per_exported_task(
+    exported: Path,
+) -> None:
+    report = build_benchmark_report(exported, gold=_strict_gold_payload(exported))
+
+    assert report.headline_a_pass
+    payload = report.to_dict()["gold"]
+    assert isinstance(payload, dict)
+    _assert_strict_gold_proof(payload, expected_count=5)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload.pop("results"),
+        lambda payload: payload["results"][0]["runs"].pop(),  # type: ignore[index]
+        lambda payload: payload["results"][0]["runs"][0].update(  # type: ignore[index]
+            {"phase1_passed": False}
+        ),
+        lambda payload: payload["results"][0]["runs"][0].update(  # type: ignore[index]
+            {"exit_code": 1}
+        ),
+        lambda payload: payload["results"][0].update({"task_id": "other-task"}),  # type: ignore[index]
+    ],
+)
+def test_report_fails_closed_for_missing_or_invalid_gold_proof(
+    exported: Path, mutate
+) -> None:  # type: ignore[no-untyped-def]
+    payload = _strict_gold_payload(exported)
+    mutate(payload)
+
+    report = build_benchmark_report(exported, gold=payload)
+
+    assert not report.headline_a_pass
+    assert not report.passed
 
 
 # --------------------------------------------------------------------------- #
@@ -504,14 +585,14 @@ def test_aggregate_panel_pools_per_model_and_per_tier(exported: Path) -> None:
 # VAL-EXPORT-016/017/018/019: the benchmark report
 # --------------------------------------------------------------------------- #
 def test_report_headline_a_gold_100(exported: Path) -> None:
-    report = build_benchmark_report(exported, gold=_gold_all(5))
+    report = build_benchmark_report(exported, gold=_gold_all(exported))
     assert report.gold.gold_rate == 1.0
     assert report.gold.gold_count == report.shipped_count == 5
     assert report.headline_a_pass
 
 
 def test_report_per_model_irt_breakdown(exported: Path) -> None:
-    report = build_benchmark_report(exported, gold=_gold_all(5))
+    report = build_benchmark_report(exported, gold=_gold_all(exported))
     # Per-model + tier ordering weak <= mid <= frontier < gold(100%).
     assert report.per_model
     assert report.tier_ordering_ok
@@ -534,7 +615,7 @@ def test_report_per_model_irt_breakdown(exported: Path) -> None:
 
 
 def test_report_headline_b_frontier_below_threshold(exported: Path) -> None:
-    report = build_benchmark_report(exported, gold=_gold_all(5))
+    report = build_benchmark_report(exported, gold=_gold_all(exported))
     assert report.frontier_threshold == DEFAULT_FRONTIER_THRESHOLD
     assert 0.0 < report.frontier_solve_rate < report.frontier_threshold
     assert report.headline_b_pass
@@ -548,7 +629,7 @@ def test_default_headline_threshold_exceeds_inclusive_keep_edge(tmp_path: Path) 
     )
     assert len(result.shipped) == 1
 
-    report = build_benchmark_report(tmp_path, gold=_gold_all(1))
+    report = build_benchmark_report(tmp_path, gold=_gold_all(tmp_path))
 
     assert report.frontier_solve_rate == DEFAULT_BAND_HIGH
     assert report.frontier_threshold > DEFAULT_BAND_HIGH
@@ -556,7 +637,7 @@ def test_default_headline_threshold_exceeds_inclusive_keep_edge(tmp_path: Path) 
 
 
 def test_report_counts_reconcile_and_json_complete(exported: Path) -> None:
-    report = build_benchmark_report(exported, gold=_gold_all(5))
+    report = build_benchmark_report(exported, gold=_gold_all(exported))
     assert report.counts.tasks == 5
     assert report.counts.jsonl == 5
     assert report.counts.parquet == 5
@@ -581,7 +662,7 @@ def test_report_counts_reconcile_and_json_complete(exported: Path) -> None:
 
 
 def test_report_overall_pass(exported: Path) -> None:
-    report = build_benchmark_report(exported, gold=_gold_all(5))
+    report = build_benchmark_report(exported, gold=_gold_all(exported))
     assert report.passed
 
 
@@ -600,14 +681,59 @@ def test_report_gold_unmeasured_marks_headline_a_fail(exported: Path) -> None:
     assert not report.headline_a_pass
 
 
-def test_report_from_gold_eval_report_object(exported: Path) -> None:
-    # A GoldEvalReport (Headline A) with no failures injects gold=100%.
-    gold_report = GoldEvalReport(tasks_dir=exported / "tasks", results=[])
-    summary = GoldSummary.from_gold_eval(
-        {"gold_count": 5, "shipped_count": 5, "all_gold": True, "deterministic": True}
+def test_aggregate_only_gold_json_cannot_claim_headline_a(exported: Path) -> None:
+    report = build_benchmark_report(
+        exported,
+        gold={
+            "gold_count": 5,
+            "shipped_count": 5,
+            "all_gold": True,
+            "deterministic": True,
+        },
     )
-    assert summary.gold_rate == 1.0
-    assert isinstance(gold_report, GoldEvalReport)
+
+    assert report.gold.gold_rate == 0.0
+    assert not report.headline_a_pass
+
+
+def test_report_cli_rejects_aggregate_only_gold_json(exported: Path) -> None:
+    from typer.testing import CliRunner
+
+    from swe_forge.forge.cli import app
+
+    gold_json = exported / "aggregate-only-gold.json"
+    gold_json.write_text(
+        json.dumps(
+            {
+                "gold_count": 5,
+                "shipped_count": 5,
+                "all_gold": True,
+                "deterministic": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = CliRunner().invoke(
+        app,
+        ["report", "--out-dir", str(exported), "--gold-json", str(gold_json), "--json"],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["headline_a"]["passed"] is False
+
+
+def test_report_rejects_an_immediate_invalid_task_workspace(exported: Path) -> None:
+    invalid = exported / "tasks" / "missing-evaluator"
+    invalid.mkdir()
+    (invalid / "workspace.yaml").write_text(
+        "environment:\n  image: example:latest\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReportError, match="missing-evaluator: missing evaluate.sh"):
+        build_benchmark_report(exported, gold=_gold_all(exported))
 
 
 # --------------------------------------------------------------------------- #
@@ -650,7 +776,7 @@ def test_report_band_config_threads_consistency(exported: Path) -> None:
     # A stricter discrimination threshold makes the kept tasks inconsistent.
     report = build_benchmark_report(
         exported,
-        gold=_gold_all(5),
+        gold=_gold_all(exported),
         band_config=BandFilterConfig(band_high=0.5, discrimination_threshold=2.0),
     )
     assert not report.consistency.passed
@@ -667,7 +793,7 @@ def test_count_helpers(exported: Path) -> None:
 
 
 def test_write_report_emits_md_and_json(exported: Path) -> None:
-    report = build_benchmark_report(exported, gold=_gold_all(5))
+    report = build_benchmark_report(exported, gold=_gold_all(exported))
     md_path, json_path = write_report(report, exported)
     assert md_path.is_file() and json_path.is_file()
     assert "SWE-Forge Benchmark Report" in md_path.read_text()

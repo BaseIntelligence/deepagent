@@ -63,6 +63,7 @@ from swe_forge.forge.pilot import (
     CandidateArtifacts,
     CandidatePlan,
     PilotConfig,
+    PilotError,
     PilotOutcome,
     StageCounts,
     StructuralF2PProtection,
@@ -568,6 +569,16 @@ def test_default_pilot_config_wires_plans_and_overrides() -> None:
     assert config.plans
     assert config.run_gold_eval is False
     assert config.gold_eval_runs == 3
+
+
+def test_pilot_config_rejects_fewer_than_two_gold_runs(tmp_path: Path) -> None:
+    with pytest.raises(PilotError, match="gold_eval_runs must be >= 2"):
+        PilotConfig(
+            plans=[],
+            out_dir=tmp_path,
+            gold_eval_runs=1,
+            run_gold_eval=False,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1439,6 +1450,9 @@ def test_provenance_present_and_agrees_with_report(tmp_path: Path) -> None:
     report = outcome.report
     # Every shipped task carries provenance; the report audits pass.
     assert len(report.provenances) == outcome.shipped_count
+    assert outcome.gold is not None
+    assert report.gold.results == tuple(outcome.gold.results)
+    assert report.gold.strict_proof is True
     assert report.completeness.passed is True
     assert report.consistency.passed is True
     # Generator/language breakdown reconciles to the shipped count.
