@@ -28,12 +28,18 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+import signal
+import shutil
+import subprocess
+import sys
+import threading
+import time
 
 import pytest
 
 from swe_forge.export.jsonl import import_jsonl
 from swe_forge.export.parquet import import_parquet
-from swe_forge.forge.export import assemble_forge_task
+from swe_forge.forge.export import ExportRequest, assemble_forge_task
 from swe_forge.forge.gold_eval import EvalRun, GoldEvalReport, TaskGoldResult
 from swe_forge.forge.models import (
     CalibrationReport,
@@ -57,6 +63,7 @@ from swe_forge.forge.pilot import (
     CandidateArtifacts,
     CandidatePlan,
     PilotConfig,
+    PilotOutcome,
     StageCounts,
     StructuralF2PProtection,
     StructuralF2PProtectionError,
@@ -1654,3 +1661,318 @@ def test_keep_export_request_only_for_pass_and_keep() -> None:
         oracle_report=_oracle_reject(keep_plan),
     )
     assert _keep_export_request(art_reject) is None
+
+
+# --------------------------------------------------------------------------- #
+# Checkpoint shutdown safety (m6-pilot-checkpoint-shutdown-safety)
+# --------------------------------------------------------------------------- #
+def test_checkpoint_closes_admission_and_drains_accepted_keeps_in_plan_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SIGTERM-style closure drains prior admissions before their source cleanup.
+
+    The first admitted keep blocks inside publication while the second one queues.
+    Closing admission rejects a later keep, and the asynchronous drain must finish
+    the queued pair in deterministic plan-index order before either source path is
+    eligible for deletion.
+    """
+    from swe_forge.forge import checkpoint as checkpoint_mod
+
+    plans = _mixed_plans()
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+    processor = FakeProcessor()
+    sources = [tmp_path / "sources" / str(index) for index in range(3)]
+    for source in sources:
+        source.mkdir(parents=True)
+        (source / "marker.txt").write_text(source.name)
+        (source / ".gitignore").write_text(".git/\n")
+
+    async def _request(index: int) -> ExportRequest:
+        art = await processor.process(plans[index], tmp_path / f"work-{index}")
+        request = _keep_export_request(art)
+        assert request is not None
+        request.broken_tree = sources[index]
+        return request
+
+    started = threading.Event()
+    release = threading.Event()
+    order: list[int] = []
+    copied_sources: list[int] = []
+    original = checkpoint._record_keep_sync
+    original_export = checkpoint_mod.export_forge_task
+
+    def _blocking(index: int, request: ExportRequest):
+        order.append(index)
+        if index == 2:
+            started.set()
+            assert release.wait(timeout=5)
+        return original(index, request)
+
+    monkeypatch.setattr(checkpoint, "_record_keep_sync", _blocking)
+
+    def _source_aware_export(*args: object, **kwargs: object):
+        broken = kwargs.get("broken_tree")
+        assert isinstance(broken, Path) and broken.is_dir()
+        copied_sources.append(int(broken.name))
+        shutil.copytree(broken, tmp_path / "copied-sources" / broken.name)
+        # The fixture source is intentionally not a full checkout. The existing
+        # export tests cover copytree; this shutdown test isolates source lifetime.
+        kwargs["broken_tree"] = None
+        return original_export(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "swe_forge.forge.checkpoint.export_forge_task", _source_aware_export
+    )
+
+    async def _drive() -> None:
+        requests = await asyncio.gather(*[_request(index) for index in range(3)])
+        assert checkpoint.admit_keep(2, requests[2]) is None
+        first = asyncio.create_task(checkpoint.drain(indexes=(2,)))
+        assert await asyncio.to_thread(started.wait, 5)
+
+        # These were accepted before closure and must remain in the pending
+        # ledger. The later candidate is refused without scheduling copy I/O.
+        assert checkpoint.admit_keep(0, requests[0]) is None
+        assert checkpoint.admit_keep(1, requests[1]) is None
+        checkpoint.close_admission()
+        refused = checkpoint.admit_keep(3, requests[2])
+        assert refused is not None and refused.status == "refused"
+
+        drain = asyncio.create_task(checkpoint.drain())
+        await asyncio.sleep(0.05)
+        assert sources[0].exists() and sources[1].exists() and sources[2].exists()
+        release.set()
+        await first
+        await drain
+
+    asyncio.run(_drive())
+
+    assert checkpoint.accepted_indexes == (0, 1, 2)
+    assert checkpoint.pending_indexes == ()
+    assert order == [2, 0, 1]
+    # Every admitted broken tree was still available when the exporter started.
+    assert copied_sources == [2, 0, 1]
+    assert len(_task_dirs(tmp_path)) == 3
+
+
+def test_shutdown_drain_continues_after_a_failed_accepted_keep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed copy never strands a later accepted keep before cleanup."""
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+    plans = _mixed_plans()
+
+    async def _requests() -> list[ExportRequest]:
+        processor = FakeProcessor()
+        result: list[ExportRequest] = []
+        for index in (0, 1):
+            art = await processor.process(plans[index], tmp_path / f"work-{index}")
+            request = _keep_export_request(art)
+            assert request is not None
+            result.append(request)
+        return result
+
+    requests = asyncio.run(_requests())
+    original = checkpoint._record_keep_sync
+
+    def _fail_first(index: int, request: ExportRequest):
+        if index == 0:
+            raise OSError("induced checkpoint write failure")
+        return original(index, request)
+
+    monkeypatch.setattr(checkpoint, "_record_keep_sync", _fail_first)
+
+    async def _drain() -> dict[int, object]:
+        assert checkpoint.admit_keep(0, requests[0]) is None
+        assert checkpoint.admit_keep(1, requests[1]) is None
+        result = await checkpoint.drain(continue_on_error=True)
+        assert isinstance(result, dict)
+        return result
+
+    results = asyncio.run(_drain())
+    assert results[0].status == "failed"  # type: ignore[union-attr]
+    assert results[1].status == "shipped"  # type: ignore[union-attr]
+    assert checkpoint.pending_indexes == ()
+    assert len(_task_dirs(tmp_path)) == 1
+
+
+def test_shutdown_drain_defers_cancellation_until_all_io_has_settled() -> None:
+    """A follow-up cancellation cannot expose cleanup while checkpoint I/O runs."""
+    from swe_forge.forge.pilot import _drain_checkpoint_before_cleanup
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowCheckpoint:
+        async def drain(self, *, continue_on_error: bool) -> dict[int, object]:
+            assert continue_on_error is True
+            started.set()
+            await release.wait()
+            return {}
+
+    async def _drive() -> None:
+        task = asyncio.create_task(_drain_checkpoint_before_cleanup(SlowCheckpoint()))  # type: ignore[arg-type]
+        await asyncio.wait_for(started.wait(), timeout=5)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        release.set()
+        assert await task is True
+
+    asyncio.run(_drive())
+
+
+def test_sigterm_drains_accepted_keep_before_run_root_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The real signal hook closes admission, drains, then safely cleans sources."""
+    from swe_forge.forge import checkpoint as checkpoint_mod
+
+    plan = _mixed_plans()[0]
+    source_seen_during_copy: list[bool] = []
+    copied_markers: list[str] = []
+    sources: list[Path] = []
+    copy_started = threading.Event()
+    original_export = checkpoint_mod.export_forge_task
+
+    def _slow_export(*args: object, **kwargs: object):
+        broken = kwargs.get("broken_tree")
+        assert isinstance(broken, Path)
+        source_seen_during_copy.append(broken.is_dir())
+        copied_markers.append(
+            shutil.copytree(broken, tmp_path / "signal-copy" / broken.name)
+            .joinpath("marker.txt")
+            .read_text()
+        )
+        copy_started.set()
+        time.sleep(0.1)
+        kwargs["broken_tree"] = None
+        return original_export(*args, **kwargs)
+
+    monkeypatch.setattr("swe_forge.forge.checkpoint.export_forge_task", _slow_export)
+
+    async def _drive() -> PilotOutcome:
+        class KeepThenBlock(FakeProcessor):
+            async def process(
+                self, candidate_plan: CandidatePlan, workdir: Path
+            ) -> CandidateArtifacts:
+                if candidate_plan.label != plan.label:
+                    await asyncio.Event().wait()
+                art = await super().process(candidate_plan, workdir)
+                source = workdir / "broken-source"
+                source.mkdir()
+                (source / "marker.txt").write_text("accepted")
+                (source / ".gitignore").write_text(".git/\n")
+                art.broken_tree = source
+                art.cleanup_paths.append(source)
+                sources.append(source)
+                return art
+
+        task = asyncio.create_task(
+            run_pilot(
+                PilotConfig(
+                    plans=[plan, _mixed_plans()[1]],
+                    out_dir=tmp_path,
+                    candidate_concurrency=1,
+                    run_gold_eval=False,
+                    write_report=False,
+                ),
+                processor=KeepThenBlock(),
+                handle_signals=True,
+            )
+        )
+        assert await asyncio.to_thread(copy_started.wait, 5)
+        # The callback is publishing its accepted keep. Deliver the actual signal
+        # to the installed handler while Stage 5 copy I/O is active.
+        signal.raise_signal(signal.SIGTERM)
+        outcome = await asyncio.wait_for(task, timeout=10)
+        return outcome
+
+    outcome = asyncio.run(_drive())
+
+    assert source_seen_during_copy == [True]
+    assert copied_markers == ["accepted"]
+    assert sources and not sources[0].exists()
+    assert outcome.shipped_count == 1
+    assert len(_task_dirs(tmp_path)) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected_count"),
+    [
+        ("before_generation_rename", 1),
+        ("after_generation_rename", 1),
+        ("before_pointer_replace", 1),
+        ("after_pointer_replace", 2),
+    ],
+)
+def test_sigkill_publication_boundaries_recover_complete_generation(
+    tmp_path: Path, boundary: str, expected_count: int
+) -> None:
+    """A hard kill exposes only the old or complete new publication generation."""
+    from tests.test_forge.test_export import _request as export_request
+
+    first = export_batch([export_request()], tmp_path, overwrite=True)
+    original_ids = {task.id for task in import_jsonl(first.jsonl_path)}
+    # The child reconstructs a valid request from the test fixture and kills
+    # itself at a real os.replace publication boundary. It never touches Docker.
+    script = r"""
+import os
+import sys
+from pathlib import Path
+from tests.test_forge.test_export import _request, _candidate
+from swe_forge.forge import publication
+from swe_forge.forge.export import export_batch
+
+out = Path(sys.argv[1])
+boundary = sys.argv[2]
+original = publication.os.replace
+
+def replace(source, destination):
+    destination = Path(destination)
+    if boundary == "before_generation_rename" and destination.parent.name == "generations":
+        os.kill(os.getpid(), 9)
+    if boundary == "before_pointer_replace" and destination.name == "current":
+        os.kill(os.getpid(), 9)
+    result = original(source, destination)
+    if boundary == "after_generation_rename" and destination.parent.name == "generations":
+        os.kill(os.getpid(), 9)
+    if boundary == "after_pointer_replace" and destination.name == "current":
+        os.kill(os.getpid(), 9)
+    return result
+
+publication.os.replace = replace
+export_batch(
+    [_request(), _request(candidate=_candidate(seed=313), repo_url="https://github.com/acme/second.git")],
+    out,
+    overwrite=True,
+)
+"""
+    child = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path), boundary],
+        cwd="/projects/Agent-SWE",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert child.returncode == -signal.SIGKILL
+
+    from swe_forge.forge.publication import load_published_generation
+
+    generation = load_published_generation(tmp_path)
+    assert generation is not None
+    task_ids = {task_dir.name for task_dir in _task_dirs(tmp_path)}
+    jsonl_ids = {task.id for task in import_jsonl(tmp_path / "dataset.jsonl")}
+    parquet_ids = {
+        str(row["id"]) for row in import_parquet(tmp_path / "dataset.parquet")
+    }
+    assert task_ids == jsonl_ids == parquet_ids
+    assert len(task_ids) == expected_count
+    assert original_ids <= task_ids
+
+    # Restarting after every boundary can continue publishing from the committed
+    # generation; abandoned staging/final directories remain invisible.
+    restarted = PilotCheckpoint(tmp_path, overwrite=True)
+    assert restarted.kept_count == expected_count

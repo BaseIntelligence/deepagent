@@ -1341,6 +1341,7 @@ async def _process_plans(
     concurrency: int,
     on_complete: Callable[[int, CandidatePlan, CandidateArtifacts], Awaitable[None]]
     | None = None,
+    can_start: Callable[[], bool] | None = None,
 ) -> list[CandidateArtifacts]:
     """Run Stage 1-4 for every plan, returning artifacts in plan order.
 
@@ -1368,6 +1369,8 @@ async def _process_plans(
         # unexpected extra keep after a budget/time interruption.
         sequential_results: list[CandidateArtifacts] = []
         for index, plan in enumerate(plans):
+            if can_start is not None and not can_start():
+                break
             workdir = run_root / f"cand-{index:04d}"
             workdir.mkdir(parents=True, exist_ok=True)
             art = await processor.process(plan, workdir)
@@ -1380,9 +1383,13 @@ async def _process_plans(
     results: list[CandidateArtifacts | None] = [None] * len(plans)
 
     async def _one(index: int, plan: CandidatePlan) -> None:
+        if can_start is not None and not can_start():
+            return
         workdir = run_root / f"cand-{index:04d}"
         workdir.mkdir(parents=True, exist_ok=True)
         async with semaphore:
+            if can_start is not None and not can_start():
+                return
             art = await processor.process(plan, workdir)
             results[index] = art
             if on_complete is not None:
@@ -1397,6 +1404,40 @@ async def _process_plans(
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
     return [art for art in results if art is not None]
+
+
+@dataclass
+class _PilotShutdown:
+    """Coordinates signal admission closure with the checkpoint writer drain."""
+
+    checkpoint: PilotCheckpoint
+    requested: bool = False
+
+    def request(self) -> bool:
+        """Close keep admission once, returning whether this is the first signal."""
+        if self.requested:
+            return False
+        self.requested = True
+        self.checkpoint.close_admission()
+        return True
+
+
+async def _drain_checkpoint_before_cleanup(checkpoint: PilotCheckpoint) -> bool:
+    """Drain all accepted checkpoint I/O, deferring cancellation until it settles.
+
+    ``asyncio.shield`` alone protects the inner task but still raises
+    ``CancelledError`` in the outer task. Re-await the same drain task until it
+    completes so a follow-up cancellation can never let source cleanup race a
+    background ``copytree``. Returns whether cancellation was deferred.
+    """
+    drain = asyncio.create_task(checkpoint.drain(continue_on_error=True))
+    deferred_cancellation = False
+    while True:
+        try:
+            await asyncio.shield(drain)
+            return deferred_cancellation
+        except asyncio.CancelledError:
+            deferred_cancellation = True
 
 
 def _keep_export_request(art: CandidateArtifacts) -> ExportRequest | None:
@@ -1430,17 +1471,16 @@ def _keep_export_request(art: CandidateArtifacts) -> ExportRequest | None:
     )
 
 
-def _install_shutdown_handlers() -> Callable[[], None]:
-    """Cancel the running pilot task on SIGTERM/SIGINT for a clean shutdown.
+def _install_shutdown_handlers(shutdown: _PilotShutdown) -> Callable[[], None]:
+    """Close keep admission then cancel the running pilot on SIGTERM/SIGINT.
 
-    A ceiling/SIGTERM cancels the in-flight sweep; the ``CancelledError``
-    propagates through every stage's ``async with DockerSandbox(...)`` so its
-    throwaway container is torn down by id (off-limits containers are never named,
-    so they are never touched), and the checkpoint's already-written dataset stays
-    valid (every keep found so far is shipped). Best-effort: a platform without
-    ``add_signal_handler`` (or a non-main thread) simply runs without the hook, and
-    the incremental checkpoint still preserves every keep even on a hard kill.
-    Returns a no-arg remover to uninstall the handlers.
+    The first signal closes checkpoint admission *before* cancelling the sweep.
+    This creates a stable boundary: every keep admitted before the signal is
+    drained by ``run_pilot``'s cleanup path, and a keep completing after it cannot
+    enter a new copy/publication. Repeated signals are ignored while the drain is
+    in progress so they cannot interrupt source-tree protection. Best-effort: a
+    platform without ``add_signal_handler`` (or a non-main thread) simply runs
+    without the hook.
     """
     try:
         loop = asyncio.get_running_loop()
@@ -1453,7 +1493,10 @@ def _install_shutdown_handlers() -> Callable[[], None]:
     installed: list[signal.Signals] = []
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(sig, task.cancel)
+            loop.add_signal_handler(
+                sig,
+                lambda: task.cancel() if shutdown.request() else None,
+            )
             installed.append(sig)
         except (NotImplementedError, RuntimeError, ValueError):  # pragma: no cover
             continue
@@ -1508,25 +1551,62 @@ async def run_pilot(
     # jsonl/parquet row + provenance) the instant it is found, reusing the export
     # path unchanged, so an interruption never loses the keeps found so far.
     checkpoint = PilotCheckpoint(config.out_dir, overwrite=True)
+    shutdown = _PilotShutdown(checkpoint)
+    completed: dict[int, CandidateArtifacts] = {}
+    deferred_cancellation = False
 
     async def _on_complete(
         index: int, plan: CandidatePlan, art: CandidateArtifacts
     ) -> None:
+        # Record finished candidates before awaiting checkpoint I/O.  A signal can
+        # cancel that await, but the checkpoint admission/pending ledger still
+        # retains a keep that entered before the shutdown boundary.
+        completed[index] = art
         cleanup.extend(art.cleanup_paths)
         request = _keep_export_request(art)
         if request is not None:
-            await checkpoint.record_keep(index, request)
+            # Admission has no await boundary, so SIGTERM either closes the gate
+            # before this keep enters it or the keep is durably represented in the
+            # pending ledger before cancellation can reach checkpoint I/O.
+            if checkpoint.admit_keep(index, request) is None:
+                await checkpoint.drain(indexes=(index,))
 
-    remove_signals = _install_shutdown_handlers() if handle_signals else (lambda: None)
+    remove_signals = (
+        _install_shutdown_handlers(shutdown) if handle_signals else (lambda: None)
+    )
     try:
-        artifacts = await _process_plans(
-            config.plans,
-            processor,
-            run_root,
-            getattr(config, "candidate_concurrency", 1) or 1,
-            _on_complete,
-        )
-        for plan, art in zip(config.plans, artifacts):
+        interrupted = False
+        try:
+            artifacts = await _process_plans(
+                config.plans,
+                processor,
+                run_root,
+                getattr(config, "candidate_concurrency", 1) or 1,
+                _on_complete,
+                lambda: checkpoint.accepting,
+            )
+        except asyncio.CancelledError:
+            # Only the installed signal hook converts cancellation into a
+            # graceful checkpoint drain. Direct caller cancellation retains the
+            # normal CancelledError contract, while ``finally`` still protects
+            # any already-admitted copy from source cleanup.
+            if not shutdown.requested:
+                raise
+            interrupted = True
+        else:
+            for index, art in enumerate(artifacts):
+                completed.setdefault(index, art)
+
+        # Admission is now closed for both graceful interruption and ordinary
+        # completion. Shield the deterministic writer drain from a follow-up
+        # cancellation before deleting the run root or any cleanup path used as a
+        # source by copytree/export_forge_task.
+        checkpoint.close_admission()
+        deferred_cancellation = await _drain_checkpoint_before_cleanup(checkpoint)
+
+        for index in sorted(completed):
+            plan = config.plans[index]
+            art = completed[index]
             counts.sourced += 1
             usage.add(art)
 
@@ -1579,8 +1659,23 @@ async def run_pilot(
                 )
                 continue
 
-            # Oracle pass AND band keep -> already checkpointed (workspace +
-            # dataset row + provenance) by ``_on_complete`` the moment it was found.
+            # Oracle pass AND band keep is retained only if it crossed the
+            # checkpoint admission boundary. A SIGTERM may let an in-flight
+            # candidate finish calculation, but it cannot add a new keep after
+            # admission has closed.
+            if not checkpoint.was_accepted(index):
+                dispositions.append(
+                    CandidateDisposition(
+                        plan,
+                        "shutdown_rejected",
+                        oracle_verdict=oracle.verdict,
+                        band_verdict=calibration.band_verdict,
+                        reason="checkpoint admission closed before keep acceptance",
+                        calibration=_calibration_summary(calibration),
+                    )
+                )
+                continue
+
             counts.calibration_keep += 1
             dispositions.append(
                 CandidateDisposition(
@@ -1601,15 +1696,15 @@ async def run_pilot(
         _attach_task_ids(dispositions, export_result)
 
         gold: GoldEvalReport | None = None
-        if config.run_gold_eval and export_result.shipped:
+        if not interrupted and config.run_gold_eval and export_result.shipped:
             evaluate = gold_eval_fn or run_gold_eval
             try:
                 gold = evaluate(config.out_dir, runs=config.gold_eval_runs)
             except GoldEvalError:
                 gold = None
 
-        report = _build_report(config, gold)
-        if config.write_report and report is not None:
+        report = _build_report(config, gold) if not interrupted else None
+        if not interrupted and config.write_report and report is not None:
             write_report(report, config.out_dir)
 
         return PilotOutcome(
@@ -1622,9 +1717,20 @@ async def run_pilot(
             report=report,
         )
     finally:
-        remove_signals()
-        for path in cleanup:
-            shutil.rmtree(path, ignore_errors=True)
+        # This final drain also covers direct task cancellation.  It is essential
+        # that all accepted worker-thread copies settle before deleting run_root
+        # or processor-provided cleanup paths that can be their broken_tree source.
+        checkpoint.close_admission()
+        try:
+            deferred_cancellation = (
+                await _drain_checkpoint_before_cleanup(checkpoint)
+            ) or deferred_cancellation
+        finally:
+            remove_signals()
+            for path in cleanup:
+                shutil.rmtree(path, ignore_errors=True)
+            if deferred_cancellation and not shutdown.requested:
+                raise asyncio.CancelledError
 
 
 def _live_processor(config: PilotConfig) -> LiveCandidateProcessor:

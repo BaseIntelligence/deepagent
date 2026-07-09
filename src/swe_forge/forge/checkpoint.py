@@ -88,6 +88,16 @@ class PilotCheckpoint:
         self._overwrite = overwrite
         self._adapter = adapter
         self._lock = asyncio.Lock()
+        # Admission and persistence are deliberately separate.  A keep is
+        # admitted synchronously on the event loop before any blocking copy work
+        # begins, then remains in this ledger until the checkpoint writer has
+        # reached a terminal result for it.  This lets a graceful shutdown close
+        # admission first, then drain every accepted keep without racing the
+        # source-tree cleanup in the pilot orchestrator.
+        self._accepting = True
+        self._accepted: dict[int, ExportRequest] = {}
+        self._pending: dict[int, ExportRequest] = {}
+        self._writes: dict[int, asyncio.Task[TaskExportResult]] = {}
         # Kept ForgeTasks and per-candidate export results, keyed by plan index so
         # the datasets + result ledger are always emitted in plan order regardless
         # of the (possibly concurrent) completion order.
@@ -123,15 +133,147 @@ class PilotCheckpoint:
     def kept_count(self) -> int:
         return len(self._kept)
 
-    async def record_keep(self, index: int, request: ExportRequest) -> TaskExportResult:
-        """Checkpoint one keep now (assemble -> write workspace -> update datasets).
+    @property
+    def accepting(self) -> bool:
+        """Whether new calibrated keeps may enter this checkpoint."""
+        return self._accepting
 
-        Serialized by an ``asyncio.Lock`` so concurrent candidates never race a
-        dataset rewrite; the blocking file I/O runs in a worker thread so the event
-        loop keeps driving the other in-flight candidates.
+    @property
+    def accepted_indexes(self) -> tuple[int, ...]:
+        """All plan indexes admitted during this process, in plan order."""
+        return tuple(sorted(self._accepted))
+
+    @property
+    def pending_indexes(self) -> tuple[int, ...]:
+        """Accepted keeps whose checkpoint I/O has not reached a terminal result."""
+        return tuple(sorted(self._pending))
+
+    def close_admission(self) -> None:
+        """Stop accepting new keeps while retaining every prior admission."""
+        self._accepting = False
+
+    def was_accepted(self, index: int) -> bool:
+        """Return whether a keep was admitted before checkpoint shutdown."""
+        return index in self._accepted
+
+    def admit_keep(self, index: int, request: ExportRequest) -> TaskExportResult | None:
+        """Record a keep before scheduling copy/publication I/O.
+
+        Returns a terminal refusal when admission is closed, otherwise ``None``.
+        Repeated calls for an already-admitted plan index preserve the original
+        request, which is the only source tree the subsequent drain may copy.
+        """
+        if index in self._accepted:
+            return None
+        if not self._accepting:
+            return TaskExportResult(
+                task_id=request.task_id or request._fallback_id(),
+                status="refused",
+                reason="checkpoint admission is closed",
+            )
+        self._accepted[index] = request
+        self._pending[index] = request
+        return None
+
+    async def record_keep(self, index: int, request: ExportRequest) -> TaskExportResult:
+        """Admit and checkpoint one keep.
+
+        Admission happens before awaiting I/O.  Once admitted, a cancellation of
+        the caller cannot make the request disappear: :meth:`drain` will finish it
+        in deterministic plan order before the pilot cleans its source trees.
+        """
+        refused = self.admit_keep(index, request)
+        if refused is not None:
+            return refused
+        result = await self.drain(indexes=(index,))
+        assert isinstance(result, TaskExportResult)
+        return result
+
+    async def drain(
+        self,
+        *,
+        indexes: tuple[int, ...] | None = None,
+        continue_on_error: bool = False,
+    ) -> TaskExportResult | dict[int, TaskExportResult]:
+        """Flush accepted keeps in deterministic plan-index order.
+
+        The lock serializes the publication generation.  ``asyncio.shield`` keeps
+        the thread-backed write alive if a caller is cancelled; a later drain,
+        normally from ``run_pilot``'s ``finally``, waits for the same write before
+        source cleanup.  All accepted requests are therefore either committed or
+        have a terminal refusal/failure result before their broken tree can vanish.
+        A shutdown drain uses ``continue_on_error`` so a failure at one index cannot
+        strand later admitted keeps behind it.
         """
         async with self._lock:
-            return await asyncio.to_thread(self._record_keep_sync, index, request)
+            targets = (
+                tuple(sorted(self._pending))
+                if indexes is None
+                else tuple(sorted(index for index in indexes if index in self._pending))
+            )
+            for pending_index in targets:
+                request = self._pending[pending_index]
+                write = self._writes.get(pending_index)
+                if write is None:
+                    write = asyncio.create_task(
+                        asyncio.to_thread(
+                            self._record_keep_sync, pending_index, request
+                        )
+                    )
+                    self._writes[pending_index] = write
+                try:
+                    result = await asyncio.shield(write)
+                except asyncio.CancelledError:
+                    # Do not orphan the worker-thread publication.  The task owns
+                    # no source-tree cleanup and remains represented in
+                    # ``_pending`` until the shutdown drain observes its result.
+                    def _settle(
+                        task: asyncio.Future[TaskExportResult], *, plan_index: int
+                    ) -> None:
+                        if task.cancelled():
+                            return
+                        try:
+                            settled = task.result()
+                        except Exception:
+                            return
+                        self._results[plan_index] = settled
+                        self._pending.pop(plan_index, None)
+                        self._writes.pop(plan_index, None)
+
+                    def _on_done(task: asyncio.Future[TaskExportResult]) -> None:
+                        _settle(task, plan_index=pending_index)
+
+                    write.add_done_callback(_on_done)
+                    raise
+                except Exception as exc:
+                    self._requests.pop(request.task_id or request._fallback_id(), None)
+                    result = TaskExportResult(
+                        task_id=request.task_id or request._fallback_id(),
+                        status="failed",
+                        reason=f"checkpoint publication failed: {exc}",
+                    )
+                    self._results[pending_index] = result
+                    self._pending.pop(pending_index, None)
+                    self._writes.pop(pending_index, None)
+                    if not continue_on_error:
+                        raise
+                    continue
+                self._results[pending_index] = result
+                self._pending.pop(pending_index, None)
+                self._writes.pop(pending_index, None)
+
+            if indexes is not None:
+                index = indexes[0]
+                return self._results.get(
+                    index,
+                    TaskExportResult(
+                        task_id=self._accepted[index].task_id
+                        or self._accepted[index]._fallback_id(),
+                        status="failed",
+                        reason="checkpoint write did not reach a terminal result",
+                    ),
+                )
+            return {index: self._results[index] for index in sorted(self._results)}
 
     def _record_keep_sync(self, index: int, request: ExportRequest) -> TaskExportResult:
         try:
