@@ -35,6 +35,7 @@ instead of shipping it.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from pathlib import Path
 
 from swe_forge.forge.adapters import LanguageAdapter
@@ -47,7 +48,12 @@ from swe_forge.forge.export import (
     export_dataset,
     export_forge_task,
 )
-from swe_forge.forge.models import ExportGateError, ForgeTask
+from swe_forge.forge.models import (
+    ExportGateError,
+    ForgeTask,
+    InstanceGrant,
+    RepoSpec,
+)
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
 from swe_forge.forge.publication import (
     PublicationEntry,
@@ -80,6 +86,7 @@ class PilotCheckpoint:
         adapter: LanguageAdapter | None = None,
         jsonl_name: str = "dataset.jsonl",
         parquet_name: str = "dataset.parquet",
+        source_specs: Iterable[RepoSpec] = (),
     ) -> None:
         self._out_dir = Path(out_dir)
         self._tasks_dir = self._out_dir / "tasks"
@@ -104,6 +111,14 @@ class PilotCheckpoint:
         self._kept: dict[int, ForgeTask] = {}
         self._results: dict[int, TaskExportResult] = {}
         self._requests: dict[str, ExportRequest] = {}
+        # Capacity is admitted in this checkpoint, not in concurrent candidate
+        # workers. Keep the first spec for each repo as the canonical
+        # SourceRegistry-backed counter and synchronize any same-id aliases so
+        # manually constructed plans cannot race independent ``used`` values.
+        self._capacity_specs: dict[str, RepoSpec] = {}
+        self._capacity_aliases: dict[str, list[RepoSpec]] = {}
+        self._capacity_grants: dict[int, InstanceGrant] = {}
+        self._released_capacity: set[int] = set()
 
         existing = load_published_generation(self._out_dir)
         if existing is None:
@@ -120,6 +135,8 @@ class PilotCheckpoint:
                     path=self._tasks_dir / entry.task.task_id,
                     reason="recovered from committed publication",
                 )
+        for spec in source_specs:
+            self._register_source(spec)
 
     @property
     def out_dir(self) -> Path:
@@ -132,6 +149,11 @@ class PilotCheckpoint:
     @property
     def kept_count(self) -> int:
         return len(self._kept)
+
+    @property
+    def committed_indexes(self) -> tuple[int, ...]:
+        """Plan indexes already selected by the recovered generation."""
+        return tuple(sorted(self._kept))
 
     @property
     def accepting(self) -> bool:
@@ -148,6 +170,26 @@ class PilotCheckpoint:
         """Accepted keeps whose checkpoint I/O has not reached a terminal result."""
         return tuple(sorted(self._pending))
 
+    def capacity_grant(self, index: int) -> InstanceGrant | None:
+        """Return the serialized source-cap decision for one qualified keep."""
+        return self._capacity_grants.get(index)
+
+    def result_for(self, index: int) -> TaskExportResult | None:
+        """Return the terminal checkpoint outcome for one plan index."""
+        return self._results.get(index)
+
+    def capacity_snapshot(self) -> list[dict[str, object]]:
+        """Return current per-repo capacity accounting in deterministic order."""
+        return [
+            {
+                "repo_id": repo_id,
+                "cap": spec.instance_cap,
+                "used": spec.used,
+                "remaining": spec.remaining,
+            }
+            for repo_id, spec in sorted(self._capacity_specs.items())
+        ]
+
     def close_admission(self) -> None:
         """Stop accepting new keeps while retaining every prior admission."""
         self._accepting = False
@@ -156,33 +198,132 @@ class PilotCheckpoint:
         """Return whether a keep was admitted before checkpoint shutdown."""
         return index in self._accepted
 
-    def admit_keep(self, index: int, request: ExportRequest) -> TaskExportResult | None:
+    def _published_count(self, repo_id: str) -> int:
+        """Count committed tasks for one source in the recovered generation."""
+        return sum(
+            1 for task in self._kept.values() if task.env_image.repo_id == repo_id
+        )
+
+    def _register_source(self, spec: RepoSpec) -> RepoSpec:
+        """Restore and share capacity accounting for a source id."""
+        canonical = self._capacity_specs.get(spec.repo_id)
+        if canonical is None:
+            recovered = self._published_count(spec.repo_id)
+            if recovered > spec.instance_cap:
+                raise RuntimeError(
+                    f"checkpoint has {recovered} committed tasks for "
+                    f"{spec.repo_id!r}, exceeding instance_cap "
+                    f"{spec.instance_cap}"
+                )
+            if spec.used < recovered:
+                spec.used = recovered
+            canonical = spec
+            self._capacity_specs[spec.repo_id] = canonical
+            self._capacity_aliases[spec.repo_id] = [spec]
+        else:
+            if canonical.instance_cap != spec.instance_cap:
+                raise RuntimeError(
+                    f"conflicting instance_cap for source {spec.repo_id!r}: "
+                    f"{canonical.instance_cap} != {spec.instance_cap}"
+                )
+            aliases = self._capacity_aliases[spec.repo_id]
+            if all(alias is not spec for alias in aliases):
+                aliases.append(spec)
+            if spec.used > canonical.used:
+                canonical.used = spec.used
+
+        if canonical.used > canonical.instance_cap:
+            raise RuntimeError(
+                f"source {canonical.repo_id!r} has used={canonical.used} above "
+                f"instance_cap={canonical.instance_cap}"
+            )
+        for alias in self._capacity_aliases[canonical.repo_id]:
+            alias.used = canonical.used
+        return canonical
+
+    def _sync_source_usage(self, repo_id: str) -> None:
+        canonical = self._capacity_specs[repo_id]
+        for alias in self._capacity_aliases[repo_id]:
+            alias.used = canonical.used
+
+    def _release_capacity(self, index: int) -> None:
+        """Return a one-shot grant when its Stage-5 export did not ship."""
+        if index in self._released_capacity:
+            return
+        grant = self._capacity_grants.get(index)
+        if grant is None or not grant.accepted:
+            return
+        spec = self._capacity_specs[grant.repo_id]
+        spec.release(grant)
+        self._sync_source_usage(grant.repo_id)
+        self._released_capacity.add(index)
+
+    def admit_keep(
+        self,
+        index: int,
+        request: ExportRequest,
+        *,
+        source: RepoSpec | None = None,
+    ) -> TaskExportResult | None:
         """Record a keep before scheduling copy/publication I/O.
 
-        Returns a terminal refusal when admission is closed, otherwise ``None``.
-        Repeated calls for an already-admitted plan index preserve the original
-        request, which is the only source tree the subsequent drain may copy.
+        The source cap is acquired synchronously before a request enters the
+        pending publication ledger, so concurrent completions cannot oversubscribe
+        it and a cap-rejected keep has no workspace or dataset row. Returns a
+        terminal refusal/rejection when admission is closed or capacity is
+        exhausted, otherwise ``None``. Repeated calls for an already-admitted
+        plan index preserve the original request, which is the only source tree
+        the subsequent drain may copy.
         """
         if index in self._accepted:
             return None
+        if index in self._kept:
+            # A recovered plan index must pass through the normal payload
+            # comparison in _record_keep_sync, but it already owns a committed
+            # source slot. Queue it without taking a second RepoSpec grant.
+            self._accepted[index] = request
+            self._pending[index] = request
+            return None
+        prior = self._results.get(index)
+        if prior is not None and prior.status == "cap_rejected":
+            return prior
         if not self._accepting:
             return TaskExportResult(
                 task_id=request.task_id or request._fallback_id(),
                 status="refused",
                 reason="checkpoint admission is closed",
             )
+        if source is not None:
+            spec = self._register_source(source)
+            grant = spec.acquire()
+            self._capacity_grants[index] = grant
+            self._sync_source_usage(spec.repo_id)
+            if not grant.accepted:
+                result = TaskExportResult(
+                    task_id=request.task_id or request._fallback_id(),
+                    status="cap_rejected",
+                    reason=grant.reason,
+                )
+                self._results[index] = result
+                return result
         self._accepted[index] = request
         self._pending[index] = request
         return None
 
-    async def record_keep(self, index: int, request: ExportRequest) -> TaskExportResult:
+    async def record_keep(
+        self,
+        index: int,
+        request: ExportRequest,
+        *,
+        source: RepoSpec | None = None,
+    ) -> TaskExportResult:
         """Admit and checkpoint one keep.
 
         Admission happens before awaiting I/O.  Once admitted, a cancellation of
         the caller cannot make the request disappear: :meth:`drain` will finish it
         in deterministic plan order before the pilot cleans its source trees.
         """
-        refused = self.admit_keep(index, request)
+        refused = self.admit_keep(index, request, source=source)
         if refused is not None:
             return refused
         result = await self.drain(indexes=(index,))
@@ -237,6 +378,8 @@ class PilotCheckpoint:
                         except Exception:
                             return
                         self._results[plan_index] = settled
+                        if settled.status not in _KEPT_STATUSES:
+                            self._release_capacity(plan_index)
                         self._pending.pop(plan_index, None)
                         self._writes.pop(plan_index, None)
 
@@ -252,6 +395,7 @@ class PilotCheckpoint:
                         status="failed",
                         reason=f"checkpoint publication failed: {exc}",
                     )
+                    self._release_capacity(pending_index)
                     self._results[pending_index] = result
                     self._pending.pop(pending_index, None)
                     self._writes.pop(pending_index, None)
@@ -259,6 +403,8 @@ class PilotCheckpoint:
                         raise
                     continue
                 self._results[pending_index] = result
+                if result.status not in _KEPT_STATUSES:
+                    self._release_capacity(pending_index)
                 self._pending.pop(pending_index, None)
                 self._writes.pop(pending_index, None)
 

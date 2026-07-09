@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -699,6 +699,11 @@ class BenchmarkReport:
     counts: CountReconciliation
     completeness: ProvenanceCompletenessResult
     consistency: ProvenanceConsistencyResult
+    # The pilot passes its full eligibility/admission funnel and current
+    # SourceRegistry snapshots here. Standalone report builds intentionally leave
+    # these empty, because they only have published artifacts to inspect.
+    funnel: dict[str, int] = field(default_factory=dict)
+    source_capacity: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def shipped_count(self) -> int:
@@ -721,6 +726,54 @@ class BenchmarkReport:
             sum(self.generator_breakdown.values()) == self.shipped_count
             and sum(self.language_breakdown.values()) == self.shipped_count
         )
+
+    @property
+    def funnel_reconciles(self) -> bool:
+        """Validate calibrated keeps separately from cap-admitted exports."""
+        if not self.funnel:
+            return True
+        required = (
+            "sourced",
+            "env_built",
+            "synthesized",
+            "oracle_pass",
+            "calibration_keep",
+            "cap_admitted",
+            "exported",
+            "export_refused",
+        )
+        if any(key not in self.funnel for key in required):
+            return False
+        values = [self.funnel[key] for key in required]
+        if any(value < 0 for value in values):
+            return False
+        return (
+            values[0] >= values[1] >= values[2] >= values[3] >= values[4] >= values[5]
+            and values[5] == values[6] == self.shipped_count
+            and values[7] == 0
+        )
+
+    @property
+    def capacity_reconciles(self) -> bool:
+        """Used source capacity equals the cap-admitted published task set."""
+        if not self.source_capacity:
+            return True
+        used = 0
+        for snapshot in self.source_capacity:
+            cap = snapshot.get("cap")
+            current = snapshot.get("used")
+            remaining = snapshot.get("remaining")
+            if not (
+                isinstance(cap, int)
+                and isinstance(current, int)
+                and isinstance(remaining, int)
+                and 0 <= current <= cap
+                and remaining == cap - current
+            ):
+                return False
+            used += current
+        expected = self.funnel.get("cap_admitted", self.shipped_count)
+        return used == expected
 
     @property
     def frontier_below_threshold(self) -> bool:
@@ -756,6 +809,8 @@ class BenchmarkReport:
             and self.gold_ge_frontier
             and self.breakdown_reconciles
             and self.counts.reconciled
+            and self.funnel_reconciles
+            and self.capacity_reconciles
             and self.completeness.passed
             and self.consistency.passed
         )
@@ -813,6 +868,10 @@ class BenchmarkReport:
             "generator_breakdown": dict(self.generator_breakdown),
             "language_breakdown": dict(self.language_breakdown),
             "breakdown_reconciles": self.breakdown_reconciles,
+            "funnel": dict(self.funnel),
+            "funnel_reconciles": self.funnel_reconciles,
+            "source_capacity": [dict(snapshot) for snapshot in self.source_capacity],
+            "capacity_reconciles": self.capacity_reconciles,
             "provenance_completeness": self.completeness.to_dict(),
             "provenance_consistency": self.consistency.to_dict(),
             "tasks": self._task_rows(),
@@ -899,6 +958,21 @@ class BenchmarkReport:
         lines.append(f"- breakdown sums to shipped total: {self.breakdown_reconciles}")
         lines.append("")
 
+        if self.funnel:
+            lines.append("## Pilot capacity funnel")
+            lines.append(
+                "- sourced={sourced}, env={env_built}, synth={synthesized}, "
+                "oracle_pass={oracle_pass}, calibrated_keep={calibration_keep}, "
+                "cap_admitted={cap_admitted}, exported={exported}, "
+                "export_refused={export_refused} "
+                "(reconciled: {reconciled})".format(
+                    **self.funnel,
+                    reconciled=self.funnel_reconciles,
+                )
+            )
+            lines.append(f"- source capacity reconciled: {self.capacity_reconciles}")
+            lines.append("")
+
         lines.append("## Counts reconciliation")
         lines.append(
             f"- tasks/*/ = {self.counts.tasks}, jsonl = {self.counts.jsonl}, "
@@ -947,6 +1021,8 @@ def build_benchmark_report(
     frontier_threshold: float = DEFAULT_FRONTIER_THRESHOLD,
     band_config: BandFilterConfig | None = None,
     kill_threshold: float = DEFAULT_KILL_THRESHOLD,
+    funnel: Mapping[str, object] | None = None,
+    source_capacity: Sequence[Mapping[str, object]] | None = None,
 ) -> BenchmarkReport:
     """Assemble the benchmark report from an exported pilot ``out_dir``.
 
@@ -1002,6 +1078,13 @@ def build_benchmark_report(
         parquet=count_parquet_rows(parquet),
     )
 
+    parsed_funnel = {
+        str(key): int(value)
+        for key, value in (funnel or {}).items()
+        if isinstance(value, int) and not isinstance(value, bool)
+    }
+    parsed_capacity = [dict(snapshot) for snapshot in (source_capacity or ())]
+
     return BenchmarkReport(
         tasks_dir=tasks_root,
         provenances=provenances,
@@ -1019,6 +1102,8 @@ def build_benchmark_report(
             provenances, kill_threshold=kill_threshold
         ),
         consistency=check_provenance_consistency(provenances, config=cfg),
+        funnel=parsed_funnel,
+        source_capacity=parsed_capacity,
     )
 
 

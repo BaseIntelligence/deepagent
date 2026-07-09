@@ -95,7 +95,9 @@ def _structural_protection() -> StructuralF2PProtection:
 # --------------------------------------------------------------------------- #
 # Fixtures: plans + per-stage artifacts (one ForgeTask's worth, offline)
 # --------------------------------------------------------------------------- #
-def _repo(repo_id: str, language: str = "python") -> RepoSpec:
+def _repo(
+    repo_id: str, language: str = "python", *, instance_cap: int = 10
+) -> RepoSpec:
     return RepoSpec(
         repo_id=repo_id,
         url=f"https://github.com/acme/{repo_id}.git",
@@ -103,7 +105,7 @@ def _repo(repo_id: str, language: str = "python") -> RepoSpec:
         commit_date="2024-01-01T00:00:00+00:00",
         language=language,
         license="MIT",
-        instance_cap=10,
+        instance_cap=instance_cap,
     )
 
 
@@ -357,6 +359,7 @@ def test_stage_counts_monotone_true() -> None:
         synthesized=7,
         oracle_pass=5,
         calibration_keep=3,
+        cap_admitted=3,
         exported=3,
     )
     assert counts.monotone is True
@@ -1084,6 +1087,245 @@ def test_pilot_funnel_monotone_and_reconciled(tmp_path: Path) -> None:
     assert outcome.report.shipped_count == counts.exported
 
 
+def test_instance_cap_admission_serializes_concurrent_keeps(tmp_path: Path) -> None:
+    """Only cap-admitted keeps publish when concurrent candidates share a source."""
+    # Deliberately use distinct objects for the same source id. The checkpoint,
+    # not object identity or candidate completion order, owns the shared cap.
+    sources = [_repo("acme/capped", instance_cap=2) for _ in range(4)]
+    plans = [
+        CandidatePlan(repo=source, generator="ast_mutation", seed=seed)
+        for seed, source in enumerate(sources)
+    ]
+
+    outcome = _run(
+        PilotConfig(
+            plans=plans,
+            out_dir=tmp_path,
+            candidate_concurrency=4,
+            run_gold_eval=False,
+        ),
+        FakeProcessor(),
+    )
+
+    assert outcome.counts.calibration_keep == 4
+    assert outcome.counts.cap_admitted == outcome.counts.exported == 2
+    assert outcome.counts.monotone is True
+    assert {source.used for source in sources} == {2}
+    assert {source.remaining for source in sources} == {0}
+
+    cap_rejected = [d for d in outcome.dispositions if d.stage == "cap_rejected"]
+    assert len(cap_rejected) == 2
+    for disposition in cap_rejected:
+        assert disposition.cap_grant is not None
+        assert disposition.cap_grant["accepted"] is False
+        assert disposition.cap_grant["cap"] == 2
+        assert "per-repo cap reached" in disposition.reason
+
+    assert len(_task_dirs(tmp_path)) == 2
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 2
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 2
+    assert outcome.report is not None
+    payload = outcome.report.to_dict()
+    assert payload["funnel"] == {
+        key: value
+        for key, value in outcome.counts.to_dict().items()
+        if key != "monotone"
+    }
+    assert payload["funnel_reconciles"] is True
+    assert payload["capacity_reconciles"] is True
+    assert payload["source_capacity"] == [
+        {"repo_id": "acme/capped", "cap": 2, "used": 2, "remaining": 0}
+    ]
+
+
+def test_non_qualified_candidates_do_not_consume_source_capacity(
+    tmp_path: Path,
+) -> None:
+    """Only an oracle-pass, band-keep candidate reaches RepoSpec.acquire."""
+    source = _repo("acme/capped", instance_cap=1)
+    plans = [
+        CandidatePlan(repo=source, generator="ast_mutation", seed=seed)
+        for seed in range(5)
+    ]
+    outcomes = {
+        plans[0].label: "env_failed",
+        plans[1].label: "synth_failed",
+        plans[2].label: "oracle_reject",
+        plans[3].label: "calib_drop",
+    }
+
+    outcome = _run(
+        PilotConfig(plans=plans, out_dir=tmp_path, run_gold_eval=False),
+        FakeProcessor(outcomes),
+    )
+
+    assert outcome.counts.calibration_keep == 1
+    assert outcome.counts.cap_admitted == outcome.counts.exported == 1
+    assert source.used == 1
+    assert source.remaining == 0
+    assert {d.stage for d in outcome.dispositions} == {
+        "env_failed",
+        "synth_failed",
+        "oracle_reject",
+        "calib_drop",
+        "kept",
+    }
+
+
+def test_refused_export_releases_capacity_without_silencing_the_failure(
+    tmp_path: Path,
+) -> None:
+    """A Stage-5 refusal does not spend a slot, but the failed run is visible."""
+    source = _repo("acme/capped", instance_cap=1)
+    leaking = CandidatePlan(repo=source, generator="ast_mutation", seed=0)
+    replacement = CandidatePlan(repo=source, generator="function_removal", seed=1)
+
+    outcome = _run(
+        PilotConfig(
+            plans=[leaking, replacement],
+            out_dir=tmp_path,
+            run_gold_eval=False,
+        ),
+        FakeProcessor({leaking.label: "leak"}),
+    )
+
+    assert outcome.counts.calibration_keep == 2
+    assert outcome.counts.cap_admitted == outcome.counts.exported == 1
+    assert outcome.counts.export_refused == 1
+    assert outcome.counts.monotone is False
+    assert outcome.ok is False
+    assert source.used == 1
+    assert [d.stage for d in outcome.dispositions] == ["export_refused", "kept"]
+    assert len(_task_dirs(tmp_path)) == 1
+
+
+def test_checkpoint_restart_restores_source_capacity_before_new_publication(
+    tmp_path: Path,
+) -> None:
+    """Published keeps reconstruct used capacity for a fresh RepoSpec on restart."""
+    first_source = _repo("acme/capped", instance_cap=1)
+    first_plan = CandidatePlan(repo=first_source, generator="ast_mutation", seed=0)
+    restarted_source = _repo("acme/capped", instance_cap=1)
+    second_plan = CandidatePlan(
+        repo=restarted_source, generator="function_removal", seed=1
+    )
+
+    async def _drive() -> None:
+        processor = FakeProcessor()
+        checkpoint = PilotCheckpoint(
+            tmp_path, overwrite=True, source_specs=(first_source,)
+        )
+        first = await processor.process(first_plan, tmp_path / "first")
+        first_request = _keep_export_request(first)
+        assert first_request is not None
+        assert (
+            await checkpoint.record_keep(0, first_request, source=first_source)
+        ).status == "shipped"
+
+        restarted = PilotCheckpoint(
+            tmp_path, overwrite=True, source_specs=(restarted_source,)
+        )
+        assert restarted_source.used == 1
+        assert restarted_source.remaining == 0
+        second = await processor.process(second_plan, tmp_path / "second")
+        second_request = _keep_export_request(second)
+        assert second_request is not None
+        refused = await restarted.record_keep(
+            1, second_request, source=restarted_source
+        )
+        assert refused.status == "cap_rejected"
+        assert "per-repo cap reached" in refused.reason
+
+    asyncio.run(_drive())
+    assert len(_task_dirs(tmp_path)) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
+
+
+def test_checkpoint_replay_does_not_acquire_a_second_source_slot(
+    tmp_path: Path,
+) -> None:
+    """A recovered plan index stays idempotent through PilotCheckpoint's API."""
+    initial_source = _repo("acme/capped", instance_cap=1)
+    initial_plan = CandidatePlan(repo=initial_source, generator="ast_mutation", seed=0)
+    replay_source = _repo("acme/capped", instance_cap=1)
+    replay_plan = CandidatePlan(repo=replay_source, generator="ast_mutation", seed=0)
+
+    async def _drive() -> None:
+        processor = FakeProcessor()
+        first_checkpoint = PilotCheckpoint(
+            tmp_path, overwrite=True, source_specs=(initial_source,)
+        )
+        initial_artifacts = await processor.process(initial_plan, tmp_path / "first")
+        initial_request = _keep_export_request(initial_artifacts)
+        assert initial_request is not None
+        assert (
+            await first_checkpoint.record_keep(
+                0, initial_request, source=initial_source
+            )
+        ).status == "shipped"
+
+        restarted = PilotCheckpoint(
+            tmp_path, overwrite=True, source_specs=(replay_source,)
+        )
+        replay_artifacts = await processor.process(replay_plan, tmp_path / "replay")
+        replay_request = _keep_export_request(replay_artifacts)
+        assert replay_request is not None
+        result = await restarted.record_keep(0, replay_request, source=replay_source)
+        assert result.status == "skipped"
+        assert replay_source.used == 1
+        assert replay_source.remaining == 0
+
+    asyncio.run(_drive())
+    assert len(_task_dirs(tmp_path)) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+
+
+def test_pilot_restart_reuses_committed_funnel_without_new_cap_acquisition(
+    tmp_path: Path,
+) -> None:
+    """A replayed plan is counted from the committed generation, not re-admitted."""
+    initial_source = _repo("acme/capped", instance_cap=1)
+    initial_plan = CandidatePlan(repo=initial_source, generator="ast_mutation", seed=0)
+    first = _run(
+        PilotConfig(
+            plans=[initial_plan],
+            out_dir=tmp_path,
+            run_gold_eval=False,
+        ),
+        FakeProcessor(),
+    )
+    assert first.counts.cap_admitted == first.counts.exported == 1
+
+    restarted_source = _repo("acme/capped", instance_cap=1)
+    replay = CandidatePlan(repo=restarted_source, generator="ast_mutation", seed=0)
+    restarted = _run(
+        PilotConfig(
+            plans=[replay],
+            out_dir=tmp_path,
+            run_gold_eval=False,
+        ),
+        FakeProcessor(),
+    )
+
+    assert restarted.dispositions == []
+    assert restarted.counts.to_dict() == {
+        "sourced": 1,
+        "env_built": 1,
+        "synthesized": 1,
+        "oracle_pass": 1,
+        "calibration_keep": 1,
+        "cap_admitted": 1,
+        "exported": 1,
+        "export_refused": 0,
+        "monotone": True,
+    }
+    assert restarted_source.used == 1
+    assert restarted_source.remaining == 0
+    assert len(_task_dirs(tmp_path)) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+
+
 def test_pilot_ships_across_all_three_languages_with_two_generators(
     tmp_path: Path,
 ) -> None:
@@ -1666,6 +1908,57 @@ def test_keep_export_request_only_for_pass_and_keep() -> None:
 # --------------------------------------------------------------------------- #
 # Checkpoint shutdown safety (m6-pilot-checkpoint-shutdown-safety)
 # --------------------------------------------------------------------------- #
+def test_cancelled_refused_checkpoint_write_releases_source_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cancelled drain settles a refused write without retaining its source slot."""
+    from swe_forge.forge.export import TaskExportResult
+
+    source = _repo("acme/capped", instance_cap=1)
+    plan = CandidatePlan(repo=source, generator="ast_mutation", seed=0)
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True, source_specs=(source,))
+    started = threading.Event()
+    release = threading.Event()
+
+    def _refuse(index: int, request: ExportRequest) -> TaskExportResult:
+        assert index == 0
+        started.set()
+        assert release.wait(timeout=5)
+        return TaskExportResult(
+            task_id=request._fallback_id(),
+            status="refused",
+            reason="induced leak refusal",
+        )
+
+    monkeypatch.setattr(checkpoint, "_record_keep_sync", _refuse)
+
+    async def _drive() -> None:
+        artifacts = await FakeProcessor().process(plan, tmp_path / "work")
+        request = _keep_export_request(artifacts)
+        assert request is not None
+        assert checkpoint.admit_keep(0, request, source=source) is None
+        assert source.used == 1
+
+        drain = asyncio.create_task(checkpoint.drain(indexes=(0,)))
+        assert await asyncio.to_thread(started.wait, 5)
+        drain.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await drain
+
+        for _ in range(50):
+            if not checkpoint.pending_indexes:
+                break
+            await asyncio.sleep(0.01)
+
+    asyncio.run(_drive())
+    assert checkpoint.pending_indexes == ()
+    assert source.used == 0
+    assert source.remaining == 1
+    assert _task_dirs(tmp_path) == []
+
+
 def test_checkpoint_closes_admission_and_drains_accepted_keeps_in_plan_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

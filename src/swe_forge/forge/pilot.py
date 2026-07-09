@@ -313,7 +313,9 @@ class StageCounts:
 
     Each gate only reduces or holds the population, and the terminal stage equals
     the exported workspace count: ``sourced >= env_built >= synthesized >=
-    oracle_pass >= calibration_keep == exported`` (VAL-CROSS-013).
+    oracle_pass >= calibration_keep >= cap_admitted == exported``. A refused
+    Stage-5 export intentionally breaks the final equality so the run fails
+    closed instead of hiding an artifact/publication defect.
     """
 
     sourced: int = 0
@@ -322,17 +324,21 @@ class StageCounts:
     oracle_pass: int = 0
     calibration_keep: int = 0
     exported: int = 0
+    cap_admitted: int = 0
+    export_refused: int = 0
 
     @property
     def monotone(self) -> bool:
-        """``True`` iff the funnel is non-increasing and keep == exported."""
+        """``True`` iff eligibility, cap admission, and publication reconcile."""
         return (
             self.sourced
             >= self.env_built
             >= self.synthesized
             >= self.oracle_pass
             >= self.calibration_keep
-            and self.calibration_keep == self.exported
+            >= self.cap_admitted
+            and self.cap_admitted == self.exported
+            and self.export_refused == 0
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -342,7 +348,9 @@ class StageCounts:
             "synthesized": self.synthesized,
             "oracle_pass": self.oracle_pass,
             "calibration_keep": self.calibration_keep,
+            "cap_admitted": self.cap_admitted,
             "exported": self.exported,
+            "export_refused": self.export_refused,
             "monotone": self.monotone,
         }
 
@@ -457,11 +465,15 @@ class CandidateDisposition:
     """Where one candidate exited the funnel (one row of the run ledger)."""
 
     plan: CandidatePlan
-    stage: str  # env_failed | synth_failed | oracle_reject | calib_drop | kept
+    stage: str  # env_failed | synth_failed | oracle_reject | calib_drop | cap_rejected | kept
     oracle_verdict: str = ""
     band_verdict: str = ""
     task_id: str = ""
     reason: str = ""
+    # The serialized RepoSpec.acquire decision for a calibrated keep. This is
+    # present for cap-admitted and cap-rejected dispositions only, letting the
+    # ledger prove capacity without turning a rejection into an artifact.
+    cap_grant: dict[str, object] | None = None
     # Observability only (never read by any gate/band/funnel logic): the per-tier
     # pass@k + discrimination + applied band rule of the candidate's calibration
     # run, present iff calibration ran (kept / calib_drop). Lets a harvest ledger
@@ -477,6 +489,7 @@ class CandidateDisposition:
             "band_verdict": self.band_verdict,
             "task_id": self.task_id,
             "reason": self.reason,
+            "cap_grant": self.cap_grant,
             "calibration": self.calibration,
         }
 
@@ -1273,6 +1286,7 @@ class PilotOutcome:
     export_result: BatchExportResult | None = None
     gold: GoldEvalReport | None = None
     report: BenchmarkReport | None = None
+    capacity: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def shipped_count(self) -> int:
@@ -1326,6 +1340,7 @@ class PilotOutcome:
             "headline_a_pass": self.headline_a_pass,
             "headline_b_pass": self.headline_b_pass,
             "report": self.report.to_dict() if self.report is not None else None,
+            "capacity": [dict(snapshot) for snapshot in self.capacity],
             "dispositions": [d.to_dict() for d in self.dispositions],
             "ok": self.ok,
         }
@@ -1541,7 +1556,6 @@ async def run_pilot(
     if processor is None:
         processor = _live_processor(config)
 
-    counts = StageCounts()
     usage = PilotUsage()
     dispositions: list[CandidateDisposition] = []
     run_root = Path(tempfile.mkdtemp(prefix="forge-pilot-run-"))
@@ -1550,7 +1564,26 @@ async def run_pilot(
     # Stage 5 is now INCREMENTAL: each band-keep is materialized (workspace +
     # jsonl/parquet row + provenance) the instant it is found, reusing the export
     # path unchanged, so an interruption never loses the keeps found so far.
-    checkpoint = PilotCheckpoint(config.out_dir, overwrite=True)
+    checkpoint = PilotCheckpoint(
+        config.out_dir,
+        overwrite=True,
+        source_specs=(plan.repo for plan in config.plans),
+    )
+    recovered = checkpoint.kept_count
+    # A continuation starts from the committed generation selected by the
+    # publication pointer. These tasks were already oracle-pass, calibration-
+    # keep, and cap-admitted, so their baseline funnel count must match the
+    # restored source usage before new completions are processed.
+    counts = StageCounts(
+        sourced=recovered,
+        env_built=recovered,
+        synthesized=recovered,
+        oracle_pass=recovered,
+        calibration_keep=recovered,
+        cap_admitted=recovered,
+        exported=recovered,
+    )
+    recovered_indexes = frozenset(checkpoint.committed_indexes)
     shutdown = _PilotShutdown(checkpoint)
     completed: dict[int, CandidateArtifacts] = {}
     deferred_cancellation = False
@@ -1563,12 +1596,17 @@ async def run_pilot(
         # retains a keep that entered before the shutdown boundary.
         completed[index] = art
         cleanup.extend(art.cleanup_paths)
+        # A process restart may replay the full plan list. A task already in the
+        # committed generation is part of the recovered funnel baseline, so do
+        # not acquire capacity or publish it a second time.
+        if index in recovered_indexes:
+            return
         request = _keep_export_request(art)
         if request is not None:
             # Admission has no await boundary, so SIGTERM either closes the gate
             # before this keep enters it or the keep is durably represented in the
             # pending ledger before cancellation can reach checkpoint I/O.
-            if checkpoint.admit_keep(index, request) is None:
+            if checkpoint.admit_keep(index, request, source=plan.repo) is None:
                 await checkpoint.drain(indexes=(index,))
 
     remove_signals = (
@@ -1605,6 +1643,8 @@ async def run_pilot(
         deferred_cancellation = await _drain_checkpoint_before_cleanup(checkpoint)
 
         for index in sorted(completed):
+            if index in recovered_indexes:
+                continue
             plan = config.plans[index]
             art = completed[index]
             counts.sourced += 1
@@ -1659,6 +1699,22 @@ async def run_pilot(
                 )
                 continue
 
+            counts.calibration_keep += 1
+            cap_grant = checkpoint.capacity_grant(index)
+            if cap_grant is not None and not cap_grant.accepted:
+                dispositions.append(
+                    CandidateDisposition(
+                        plan,
+                        "cap_rejected",
+                        oracle_verdict=oracle.verdict,
+                        band_verdict=calibration.band_verdict,
+                        reason=cap_grant.reason,
+                        cap_grant=cap_grant.to_dict(),
+                        calibration=_calibration_summary(calibration),
+                    )
+                )
+                continue
+
             # Oracle pass AND band keep is retained only if it crossed the
             # checkpoint admission boundary. A SIGTERM may let an in-flight
             # candidate finish calculation, but it cannot add a new keep after
@@ -1676,13 +1732,37 @@ async def run_pilot(
                 )
                 continue
 
-            counts.calibration_keep += 1
+            checkpoint_result = checkpoint.result_for(index)
+            if checkpoint_result is not None and checkpoint_result.status not in (
+                "shipped",
+                "skipped",
+            ):
+                counts.export_refused += 1
+                dispositions.append(
+                    CandidateDisposition(
+                        plan,
+                        "export_refused",
+                        oracle_verdict=oracle.verdict,
+                        band_verdict=calibration.band_verdict,
+                        reason=checkpoint_result.reason,
+                        cap_grant=cap_grant.to_dict()
+                        if cap_grant is not None
+                        else None,
+                        calibration=_calibration_summary(calibration),
+                    )
+                )
+                continue
+
+            # An accepted SourceRegistry grant was serialized before any
+            # checkpoint I/O. Only these cap-admitted keeps may publish.
+            counts.cap_admitted += 1
             dispositions.append(
                 CandidateDisposition(
                     plan,
                     "kept",
                     oracle_verdict=oracle.verdict,
                     band_verdict=calibration.band_verdict,
+                    cap_grant=cap_grant.to_dict() if cap_grant is not None else None,
                     calibration=_calibration_summary(calibration),
                 )
             )
@@ -1703,7 +1783,17 @@ async def run_pilot(
             except GoldEvalError:
                 gold = None
 
-        report = _build_report(config, gold) if not interrupted else None
+        capacity = checkpoint.capacity_snapshot()
+        report = (
+            _build_report(
+                config,
+                gold,
+                funnel=counts.to_dict(),
+                source_capacity=capacity,
+            )
+            if not interrupted
+            else None
+        )
         if not interrupted and config.write_report and report is not None:
             write_report(report, config.out_dir)
 
@@ -1715,6 +1805,7 @@ async def run_pilot(
             export_result=export_result,
             gold=gold,
             report=report,
+            capacity=capacity,
         )
     finally:
         # This final drain also covers direct task cancellation.  It is essential
@@ -1799,7 +1890,11 @@ def _attach_task_ids(
 
 
 def _build_report(
-    config: PilotConfig, gold: GoldEvalReport | None
+    config: PilotConfig,
+    gold: GoldEvalReport | None,
+    *,
+    funnel: dict[str, object] | None = None,
+    source_capacity: list[dict[str, object]] | None = None,
 ) -> BenchmarkReport | None:
     gold_summary: GoldSummary | None = (
         GoldSummary.from_gold_eval(gold) if gold is not None else None
@@ -1811,6 +1906,8 @@ def _build_report(
             frontier_threshold=config.frontier_threshold,
             band_config=config.band_config,
             kill_threshold=config.kill_threshold,
+            funnel=funnel,
+            source_capacity=source_capacity,
         )
     except Exception:  # noqa: BLE001 - a report build failure is surfaced as None
         return None

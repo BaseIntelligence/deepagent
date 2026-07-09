@@ -886,7 +886,7 @@ class TaskExportResult:
     """Outcome of exporting one task's workspace."""
 
     task_id: str
-    status: str  # "shipped" | "skipped" | "refused" | "failed"
+    status: str  # "shipped" | "skipped" | "refused" | "cap_rejected" | "failed"
     path: Path | None = None
     reason: str = ""
     leak_findings: list[str] = field(default_factory=list)
@@ -1036,7 +1036,9 @@ class BatchExportResult:
 
     @property
     def refused(self) -> list[TaskExportResult]:
-        return [r for r in self.results if r.status in ("refused", "failed")]
+        return [
+            r for r in self.results if r.status in ("refused", "cap_rejected", "failed")
+        ]
 
     def to_dict(self) -> dict[str, object]:
         return {

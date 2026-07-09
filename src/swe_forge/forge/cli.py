@@ -3399,9 +3399,17 @@ def _print_pilot_outcome(outcome) -> None:  # type: ignore[no-untyped-def]
         "  funnel: "
         f"sourced={counts.sourced} >= env={counts.env_built} >= "
         f"synth={counts.synthesized} >= oracle_pass={counts.oracle_pass} >= "
-        f"keep={counts.calibration_keep} == exported={counts.exported} "
+        f"calibrated_keep={counts.calibration_keep} >= "
+        f"cap_admitted={counts.cap_admitted} == exported={counts.exported} "
         f"(monotone: {counts.monotone})"
     )
+    if outcome.capacity:
+        capacity = ", ".join(
+            f"{row['repo_id']}: used={row['used']}/{row['cap']} "
+            f"remaining={row['remaining']}"
+            for row in outcome.capacity
+        )
+        console.print(f"  source capacity: {capacity}")
     console.print(
         f"  generators: {outcome.generators_used}  "
         f"languages: {outcome.languages_shipped}"

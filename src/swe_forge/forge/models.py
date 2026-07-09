@@ -278,6 +278,27 @@ class RepoSpec:
             instance_index=self.used,
         )
 
+    def release(self, grant: InstanceGrant) -> None:
+        """Release a previously accepted instance after its export is refused.
+
+        Capacity is consumed by shipped tasks, not by a candidate that passed
+        calibration but was refused during Stage 5 (for example by the leak
+        audit). The checkpoint owns the one-shot lifecycle of a grant and calls
+        this only for a terminal non-shipped export result.
+        """
+        if not grant.accepted:
+            raise ModelError("cannot release a rejected instance grant")
+        if grant.repo_id != self.repo_id:
+            raise ModelError(
+                f"instance grant repo {grant.repo_id!r} does not match "
+                f"RepoSpec {self.repo_id!r}"
+            )
+        if self.used < 1:
+            raise ModelError(
+                f"RepoSpec.used underflow while releasing {self.repo_id!r}"
+            )
+        self.used -= 1
+
     def reset_usage(self) -> None:
         """Reset the usage counter to zero (e.g. for a fresh pipeline run)."""
         self.used = 0
