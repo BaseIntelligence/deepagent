@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from swe_forge.execution.docker_client import DockerClient
+from swe_forge.execution.docker_client import DockerClient, DockerError
 from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
 
 _IMAGE = "python:3.12-slim"
@@ -109,3 +109,73 @@ async def test_normal_command_contract_unchanged_under_wrapper():
         slept = await sandbox.run_command("sleep 1; echo done", timeout=8.0)
         assert slept.exit_code == 0
         assert "done" in slept.stdout
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_target_exit_124_and_137_are_not_timeout_provenance():
+    """Both APIs preserve target-owned conventional timeout exit statuses."""
+    client = DockerClient()
+    config = SandboxConfig(
+        name="swe-forge-exec-timeout-it-target-exits",
+        image=_IMAGE,
+        command_timeout=10.0,
+    )
+    async with DockerSandbox(client, config) as sandbox:
+        container_id = sandbox.container_id
+        assert container_id is not None
+
+        for exit_code in (124, 137):
+            command = [
+                "sh",
+                "-c",
+                f"sleep 2; printf target-{exit_code}; exit {exit_code}",
+            ]
+
+            via_commands = await sandbox.run_command(command, timeout=3.0)
+            assert via_commands.exit_code == exit_code
+            assert via_commands.stdout == f"target-{exit_code}"
+
+            via_client = await client.exec(container_id, command, timeout=3.0)
+            assert via_client.exit_code == exit_code
+            assert via_client.stdout == f"target-{exit_code}"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_docker_client_reaps_hung_process_tree():
+    """DockerClient.exec applies the same watchdog/reaping contract directly."""
+    client = DockerClient()
+    config = SandboxConfig(
+        name="swe-forge-docker-client-timeout-it",
+        image=_IMAGE,
+        command_timeout=3.0,
+    )
+    async with DockerSandbox(client, config) as sandbox:
+        container_id = sandbox.container_id
+        assert container_id is not None
+
+        hung = (
+            "rm -f /tmp/direct-hb; "
+            "(while true; do echo a >> /tmp/direct-hb; sleep 0.2; done) & "
+            "(while true; do echo b >> /tmp/direct-hb; sleep 0.2; done) & "
+            "wait"
+        )
+        start = time.monotonic()
+        with pytest.raises(DockerError, match="timed out"):
+            await client.exec(container_id, ["sh", "-c", hung], timeout=2.0)
+        assert time.monotonic() - start < 20.0
+
+        first = await client.exec(
+            container_id,
+            ["sh", "-c", "wc -l < /tmp/direct-hb 2>/dev/null || echo 0"],
+            timeout=10.0,
+        )
+        await asyncio.sleep(1.0)
+        second = await client.exec(
+            container_id,
+            ["sh", "-c", "wc -l < /tmp/direct-hb 2>/dev/null || echo 0"],
+            timeout=10.0,
+        )
+        assert first.stdout.strip() == second.stdout.strip()
+        assert "sleep 0.2" not in _docker_top(container_id)

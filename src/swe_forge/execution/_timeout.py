@@ -1,53 +1,78 @@
-"""Shared in-container timeout enforcement for the Docker exec paths.
+"""Shared timeout provenance and process-tree reaping for Docker execs.
 
-The async Docker exec helpers (``commands.exec_in_container`` and
-``DockerClient.exec``) stream their output over an HTTP read that can block
-indefinitely and is not reliably cancellable. To make the requested ``timeout``
-actually enforcing -- and to reap the in-container process *tree* rather than
-leaving a hung command running -- we wrap the in-container command under
-coreutils ``timeout --signal=KILL <t>``. The Docker daemon launches ``timeout``
-as the exec's main process; on expiry it SIGKILLs its whole process group,
-killing the entire tree at the kernel level even when the Python-side read is
-uncancellable. coreutils ``timeout`` exits with 124/137 on expiry, which the
-caller detects to surface a clean timeout instead of a misleading result.
+Exit statuses are target-owned data.  In particular, a target can intentionally
+return 124 or 137, so neither exec path may infer a timeout from an exit code
+or elapsed duration.  Instead, the wrapper starts the target in a new session
+and its watchdog emits one opaque marker immediately before killing that session.
+Only that marker establishes deadline provenance.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from uuid import uuid4
 
-# coreutils ``timeout`` exit statuses meaning the command was forcibly stopped
-# because it ran past the deadline:
-#   124 -> timed out and was signalled (the default TERM path)
-#   137 -> sent SIGKILL (128 + 9); always the case with ``--signal=KILL``
-TIMEOUT_EXIT_CODES = frozenset({124, 137})
-
-# Deadlocked / busy-loop processes ignore SIGTERM, so we send SIGKILL, which the
-# kernel cannot block, guaranteeing the in-container tree is reaped on expiry.
-_KILL_SIGNAL = "KILL"
+# The random suffix makes an accidental target-produced marker infeasible. The
+# marker is a complete stderr line, removed before normal output is returned.
+TIMEOUT_MARKER_PREFIX = "__SWE_FORGE_EXEC_TIMEOUT__:"
 
 # Extra wall-clock budget beyond the requested timeout before the async read is
-# force-abandoned. The in-container coreutils ``timeout`` reaps the process at
-# the deadline and the stream then closes on its own, so this grace only bounds
-# the pathological case where the HTTP read itself never returns after the reap.
+# force-closed. The watchdog reaps the session at the deadline and the stream
+# normally closes on its own. This only bounds a broken HTTP stream.
 EXEC_TIMEOUT_GRACE_SECONDS = 5.0
 
-# Fraction of the requested timeout a forcibly-stopped command must have run for
-# before a 124/137 exit is attributed to the injected timeout (rather than an
-# unrelated OOM / external ``kill -9``). A coreutils-reaped command runs for
-# roughly the full timeout, so it comfortably clears this floor.
-_TIMEOUT_DURATION_FRACTION = 0.5
+
+def new_timeout_marker() -> str:
+    """Return one opaque marker that only this invocation's watchdog emits."""
+    return f"{TIMEOUT_MARKER_PREFIX}{uuid4().hex}"
 
 
-def wrap_command_with_timeout(cmd: Sequence[str], timeout: float) -> list[str]:
-    """Prefix ``cmd`` with coreutils ``timeout --signal=KILL <timeout>``.
+def wrap_command_with_timeout(
+    cmd: Sequence[str], timeout: float, *, marker: str | None = None
+) -> list[str]:
+    """Wrap ``cmd`` in a new session with a marker-emitting kill watchdog.
 
-    On expiry ``timeout`` SIGKILLs its whole process group, reaping the
-    in-container process tree at the kernel level. For a command that finishes
-    in time ``timeout`` is transparent (it forwards stdout/stderr and the
-    command's own exit code), so the normal, non-timeout contract is unchanged.
+    A supervising shell launches the target under ``setsid --wait`` and records
+    the target's session-leader PID. Its watchdog prints ``marker`` before
+    SIGKILLing that target process group on expiry, reaping the direct command
+    and ordinary descendants without killing the watchdog before it can publish
+    provenance. The exact marker, not a target exit status, is the timeout
+    proof. ``cmd`` remains positional arguments after ``--`` so no target
+    argument is shell-expanded.
     """
-    return ["timeout", "--signal", _KILL_SIGNAL, _format_duration(timeout), *cmd]
+    watchdog_marker = marker or new_timeout_marker()
+    script = "".join(
+        (
+            "marker=$1 timeout=$2 pidfile=$3; shift 3; ",
+            'rm -f "$pidfile"; ',
+            "setsid --wait sh -c "
+            '\'echo "$$" > "$1"; shift; exec "$@"\' '
+            '"swe-forge-exec-target" "$pidfile" "$@" & ',
+            "runner=$!; ",
+            'until [ -s "$pidfile" ] || ! kill -0 "$runner" 2>/dev/null; do '
+            "sleep 0.01; done; ",
+            'if [ ! -s "$pidfile" ]; then wait "$runner"; exit $?; fi; ',
+            'target_pid=$(cat "$pidfile"); ',
+            '(sleep "$timeout"; printf "%s\\n" "$marker" >&2; '
+            'kill -KILL -"$target_pid" 2>/dev/null || :) & ',
+            "watchdog=$!; ",
+            'wait "$runner"; status=$?; ',
+            'kill "$watchdog" 2>/dev/null || :; ',
+            'wait "$watchdog" 2>/dev/null || :; ',
+            'rm -f "$pidfile"; ',
+            'exit "$status"',
+        )
+    )
+    return [
+        "sh",
+        "-c",
+        script,
+        "swe-forge-exec-watchdog",
+        watchdog_marker,
+        _format_duration(timeout),
+        f"/tmp/.swe-forge-exec-{watchdog_marker}.pid",
+        *cmd,
+    ]
 
 
 def outer_read_deadline(timeout: float) -> float:
@@ -55,17 +80,11 @@ def outer_read_deadline(timeout: float) -> float:
     return timeout + EXEC_TIMEOUT_GRACE_SECONDS
 
 
-def is_timeout_exit(exit_code: int, duration: float, timeout: float) -> bool:
-    """Return True if the exit code + elapsed time indicate the timeout fired.
-
-    Requires both a coreutils-``timeout`` exit status (124/137) *and* that the
-    command actually ran for a meaningful fraction of the deadline, so an early
-    OOM / external kill that happens to share exit 137 is not misread as a
-    timeout.
-    """
-    if exit_code not in TIMEOUT_EXIT_CODES:
-        return False
-    return duration >= timeout * _TIMEOUT_DURATION_FRACTION
+def remove_timeout_marker(output: str, marker: str) -> tuple[str, bool]:
+    """Remove watchdog marker lines and report whether this watchdog fired."""
+    lines = output.splitlines(keepends=True)
+    kept = [line for line in lines if line.rstrip("\r\n") != marker]
+    return "".join(kept), len(kept) != len(lines)
 
 
 def _format_duration(timeout: float) -> str:

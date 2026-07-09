@@ -161,12 +161,12 @@ class TestExecInContainer:
             assert result.duration >= 0
 
             assert mock_docker._query_called_with is not None
-            # The command is wrapped under coreutils ``timeout --signal=KILL``
-            # so the daemon reaps the in-container process tree on expiry; the
-            # original command is preserved verbatim as the wrapper's tail.
+            # The command starts in a new session with a marker-emitting
+            # watchdog, so the complete in-container process tree is reaped
+            # on deadline while the original command remains the argument tail.
             sent_cmd = mock_docker._query_called_with["data"]["Cmd"]
-            assert sent_cmd[0] == "timeout"
-            assert "KILL" in sent_cmd
+            assert sent_cmd[:2] == ["sh", "-c"]
+            assert "setsid --wait" in sent_cmd[2]
             assert sent_cmd[-2:] == ["echo", "hello world"]
 
     @pytest.mark.asyncio

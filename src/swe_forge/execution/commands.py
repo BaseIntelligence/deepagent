@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import time
 from dataclasses import dataclass
@@ -12,14 +13,15 @@ from typing import TYPE_CHECKING
 from aiodocker import Docker
 
 from swe_forge.execution._timeout import (
-    is_timeout_exit,
+    new_timeout_marker,
     outer_read_deadline,
+    remove_timeout_marker,
     wrap_command_with_timeout,
 )
 
 
-def demultiplex_docker_stream(data: bytes) -> str:
-    """Demultiplex Docker's multiplexed stream output.
+def split_docker_stream(data: bytes) -> tuple[str, str]:
+    """Demultiplex Docker's stdout/stderr frames.
 
     Docker exec with Tty=False returns frames with 8-byte headers:
     - 1 byte: Stream type (1=stdout, 2=stderr)
@@ -27,9 +29,10 @@ def demultiplex_docker_stream(data: bytes) -> str:
     - 4 bytes: payload size (big-endian uint32)
     """
     if not data:
-        return ""
+        return "", ""
 
-    result = []
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
     offset = 0
 
     while offset + 8 <= len(data):
@@ -43,13 +46,24 @@ def demultiplex_docker_stream(data: bytes) -> str:
             break
 
         chunk = data[offset : offset + payload_size]
-        result.append(chunk.decode("utf-8", errors="replace"))
+        decoded = chunk.decode("utf-8", errors="replace")
+        if stream_type == 1:
+            stdout_chunks.append(decoded)
+        else:
+            stderr_chunks.append(decoded)
         offset += payload_size
 
-    if not result and data:
-        return data.decode("utf-8", errors="replace")
+    if offset != len(data) or not (stdout_chunks or stderr_chunks):
+        # Unit fakes and older daemon paths can provide an unframed payload.
+        return data.decode("utf-8", errors="replace"), ""
 
-    return "".join(result)
+    return "".join(stdout_chunks), "".join(stderr_chunks)
+
+
+def demultiplex_docker_stream(data: bytes) -> str:
+    """Return combined output for callers retaining the legacy helper contract."""
+    stdout, stderr = split_docker_stream(data)
+    return stdout + stderr
 
 
 if TYPE_CHECKING:
@@ -126,11 +140,11 @@ async def exec_in_container(
     docker, own_connection = _get_docker_instance(client)
 
     try:
-        # Wrap under coreutils ``timeout --signal=KILL`` so the daemon reaps the
-        # whole in-container process tree at the deadline even if the HTTP read
-        # below is uncancellable.
+        marker = new_timeout_marker()
+        # The session watchdog emits ``marker`` immediately before reaping the
+        # tree. That is explicit timeout provenance, unlike target exit codes.
         exec_options = _build_exec_options(
-            wrap_command_with_timeout(cmd, timeout), cwd, env, user
+            wrap_command_with_timeout(cmd, timeout, marker=marker), cwd, env, user
         )
 
         async with docker._query(
@@ -146,7 +160,9 @@ async def exec_in_container(
             docker, exec_id, container_id, timeout
         )
 
-        stdout_str = demultiplex_docker_stream(output_bytes)
+        stdout_str, stderr_str = split_docker_stream(output_bytes)
+        stdout_str, stdout_timed_out = remove_timeout_marker(stdout_str, marker)
+        stderr_str, stderr_timed_out = remove_timeout_marker(stderr_str, marker)
 
         async with docker._query(
             f"exec/{exec_id}/json",
@@ -155,19 +171,17 @@ async def exec_in_container(
             exec_info = await inspect_response.json()
         exit_code = exec_info.get("ExitCode", -1)
 
-        duration = time.monotonic() - start_time
-
-        if is_timeout_exit(exit_code, duration, timeout):
+        if stdout_timed_out or stderr_timed_out:
             raise asyncio.TimeoutError(
                 f"command in container {container_id} exceeded its {timeout}s "
-                f"timeout and was reaped (exit {exit_code})"
+                "timeout and was reaped"
             )
 
         return ExecResult(
             stdout=stdout_str,
-            stderr="",
+            stderr=stderr_str,
             exit_code=exit_code,
-            duration=duration,
+            duration=time.monotonic() - start_time,
         )
 
     finally:
@@ -183,42 +197,54 @@ async def _start_and_read_output(
 ) -> bytes:
     """Start the exec and read its full output, bounded by ``timeout`` + grace.
 
-    The in-container command is wrapped under coreutils ``timeout``, so a hung
-    command is reaped at the deadline and the stream closes on its own. This
-    grace window only guards the pathological case where the HTTP read never
-    returns after the reap: the reader task is cancelled/awaited and an
-    ``asyncio.TimeoutError`` is raised so the caller never blocks indefinitely.
+    The watchdog reaps a hung command at the deadline and the stream should
+    close on its own. This grace window guards a broken HTTP response: its
+    response is closed, its reader cancelled and awaited, and then a timeout is
+    raised. The same cleanup happens if the outer caller cancels this coroutine.
     """
+    start_response: object | None = None
 
     async def _read() -> bytes:
+        nonlocal start_response
         async with docker._query(
             f"exec/{exec_id}/start",
             method="POST",
             headers={"Content-Type": "application/json"},
             data=json.dumps({"Detach": False, "Tty": False}),
-        ) as start_response:
-            return await start_response.read()
+        ) as response:
+            start_response = response
+            return await response.read()
 
-    read_task = asyncio.ensure_future(_read())
-    done, _pending = await asyncio.wait(
-        {read_task}, timeout=outer_read_deadline(timeout)
-    )
-    if read_task not in done:
-        await _abandon_reader(read_task)
-        raise asyncio.TimeoutError(
-            f"command in container {container_id} exceeded its {timeout}s "
-            f"timeout; in-container process tree reaped, read abandoned"
+    read_task = asyncio.create_task(_read())
+    try:
+        done, _pending = await asyncio.wait(
+            {read_task}, timeout=outer_read_deadline(timeout)
         )
-    return read_task.result()
+        if read_task not in done:
+            raise asyncio.TimeoutError(
+                f"command in container {container_id} exceeded its {timeout}s "
+                "timeout; in-container process tree reaped, response closed"
+            )
+        return read_task.result()
+    finally:
+        await _close_response_and_wait_for_reader(start_response, read_task)
 
 
-async def _abandon_reader(read_task: asyncio.Future) -> None:
-    """Cancel a still-pending reader task and drain it without blocking."""
-    read_task.cancel()
-    finished, _pending = await asyncio.wait({read_task}, timeout=5.0)
-    for task in finished:
-        with contextlib.suppress(BaseException):
-            task.result()
+async def _close_response_and_wait_for_reader(
+    response: object | None, read_task: asyncio.Task[bytes]
+) -> None:
+    """Close an exec-start response, then cancel and await its reader task."""
+    if response is not None:
+        close = getattr(response, "close", None)
+        if close is not None:
+            closed = close()
+            if inspect.isawaitable(closed):
+                await closed
+
+    if not read_task.done():
+        read_task.cancel()
+    with contextlib.suppress(BaseException):
+        await read_task
 
 
 async def stream_exec(
