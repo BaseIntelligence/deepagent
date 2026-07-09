@@ -1,5 +1,5 @@
 {
-  "tasks_dir": "results/pilot_final/tasks",
+  "tasks_dir": "results/pilot_keeps/tasks",
   "shipped_count": 5,
   "gold_count": 5,
   "gold_rate": 1.0,
@@ -25,14 +25,14 @@
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-3e5d239f"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-1ebf0b4d"
         },
         {
           "run_index": 1,
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-e7eab989"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-7a10afe5"
         }
       ]
     },
@@ -52,14 +52,14 @@
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-25ee582d"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-cc47ea13"
         },
         {
           "run_index": 1,
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-55ab894f"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-45f9dfa0"
         }
       ]
     },
@@ -79,14 +79,14 @@
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-21d4223a"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-0742d6ea"
         },
         {
           "run_index": 1,
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-1bf772da"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__bug_combination-42b508dd"
         }
       ]
     },
@@ -106,14 +106,14 @@
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__0ec-2b38b9cb"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__0ec-1e5c0e7b"
         },
         {
           "run_index": 1,
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__0ec-a8020f1c"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__0ec-9848d67b"
         }
       ]
     },
@@ -133,14 +133,14 @@
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__673-22a49829"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__673-2ac4cf99"
         },
         {
           "run_index": 1,
           "score": 1,
           "phase1_passed": true,
           "exit_code": 0,
-          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__673-2d6d0e7a"
+          "container_name": "swe-forge-goldeval-mahmoud-boltons__multi_file__673-091996b7"
         }
       ]
     }

@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 import textwrap
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,44 @@ def _make_task_dir(
         )
     )
     return d
+
+
+def _load_finalize_gold_eval_script():
+    script = Path(__file__).parents[2] / "scripts" / "finalize_gold_eval.py"
+    spec = spec_from_file_location("finalize_gold_eval_test", script)
+    assert spec is not None
+    assert spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_finalize_gold_eval_defaults_to_canonical_pilot_keeps() -> None:
+    script = _load_finalize_gold_eval_script()
+
+    assert script.parse_args([]).out_dir == Path("results/pilot_keeps")
+
+
+def test_finalize_gold_eval_anchors_default_to_repository_root() -> None:
+    script = _load_finalize_gold_eval_script()
+
+    assert script.resolve_out_dir(script.parse_args([]).out_dir) == (
+        Path(__file__).parents[2] / "results" / "pilot_keeps"
+    )
+    assert (
+        script.display_tasks_dir(
+            Path(__file__).parents[2] / "results" / "pilot_keeps" / "tasks"
+        )
+        == "results/pilot_keeps/tasks"
+    )
+
+
+def test_finalize_gold_eval_accepts_an_explicit_output_directory() -> None:
+    script = _load_finalize_gold_eval_script()
+
+    assert script.parse_args(["--out-dir", "results/custom"]).out_dir == Path(
+        "results/custom"
+    )
 
 
 # --------------------------------------------------------------------------- #
