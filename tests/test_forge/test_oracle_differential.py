@@ -26,6 +26,7 @@ from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     ModelError,
     OracleReport,
     OracleTestFile,
@@ -495,6 +496,44 @@ async def test_discarded_discriminator_pruned_from_report_test_files() -> None:
     assert report.provenance.details["discarded_discriminators"] == [
         "tests/mut_survivor_k.py"
     ]
+
+
+async def test_pruning_invalidates_prior_final_mutation_evidence() -> None:
+    bad = _test("tests/mut_survivor_k.py")
+    runner = FakeDifferentialRunner(
+        base_killed={"variant_1"},
+        discardable=[bad],
+        gold_red_ids={bad.test_id},
+    )
+    outcome = await assess_differential(
+        runner,
+        [_variant("variant_1")],
+        synthesizer=ScriptedVariantSynth([]),
+        context_template=_template(),
+    )
+    prior = _mutation_report(
+        [
+            OracleTestFile(path="tests/test_x.py", content="X", origin="provided"),
+            OracleTestFile(
+                path="tests/mut_survivor_k.py", content="K", origin="synthesized"
+            ),
+        ]
+    )
+    prior.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint="a" * 64,
+        mutants_total=10,
+        mutants_killed=10,
+        threshold=0.8,
+        tool="fake-tool",
+    )
+
+    report = build_differential_report(_candidate(), prior, outcome)
+
+    assert report.final_mutation_evidence is None
+    assert report.details["mutation_evidence_invalidated"] == {
+        "stage": "differential",
+        "reason": "hidden_suite_changed",
+    }
 
 
 async def test_genuine_gold_not_green_still_rejects_after_discards() -> None:

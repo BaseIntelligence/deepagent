@@ -20,6 +20,7 @@ manual integration check and the user-testing validator.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -46,6 +47,7 @@ from swe_forge.forge.models import (
     CandidateTarget,
     EnvImage,
     ExportGateError,
+    FinalMutationEvidence,
     ForgeTask,
     GeneratedSpec,
     ModelSolveRecord,
@@ -54,6 +56,7 @@ from swe_forge.forge.models import (
     Provenance,
 )
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -147,6 +150,13 @@ def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
+        final_mutation_evidence=FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=10,
+            mutants_killed=10,
+            threshold=0.8,
+            tool="fake-tool",
+        ),
         provenance=_provenance(),
     )
 
@@ -255,6 +265,90 @@ def test_assemble_refuses_calibration_drop() -> None:
         )
 
 
+def test_assemble_refuses_stale_final_mutation_evidence() -> None:
+    report = _oracle_pass()
+    report.test_files.append(
+        OracleTestFile(path="tests/hidden/test_later.py", content="assert True\n")
+    )
+
+    with pytest.raises(ExportRefusedError, match="final mutation evidence"):
+        assemble_forge_task(
+            candidate=_candidate(),
+            spec=_spec(),
+            oracle_report=report,
+            calibration_report=_calibration(keep=True),
+            env_image=_env_image(),
+            repo_url="https://github.com/acme/demo.git",
+        )
+
+
+def test_assemble_accepts_nondefault_final_mutation_threshold() -> None:
+    report = _oracle_pass()
+    evidence = report.final_mutation_evidence
+    assert evidence is not None
+    report.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint=evidence.suite_fingerprint,
+        mutants_total=evidence.mutants_total,
+        mutants_killed=evidence.mutants_killed,
+        threshold=0.9,
+        tool=evidence.tool,
+    )
+
+    task = assemble_forge_task(
+        candidate=_candidate(),
+        spec=_spec(),
+        oracle_report=report,
+        calibration_report=_calibration(keep=True),
+        env_image=_env_image(),
+        repo_url="https://github.com/acme/demo.git",
+    )
+
+    assert task.oracle_report.final_mutation_evidence.threshold == 0.9
+
+
+def test_direct_export_refuses_evidence_mismatched_after_assembly(
+    tmp_path: Path,
+) -> None:
+    task = _task()
+    # Defend the actual write boundary too, in case a task object is mutated or
+    # deserialized after its initial assembly check.
+    task.oracle_report.test_files.append(
+        OracleTestFile(path="tests/hidden/test_later.py", content="assert True\n")
+    )
+
+    result = export_forge_task(task, tmp_path / "tasks")
+
+    assert result.status == "refused"
+    assert "final mutation evidence" in result.reason
+    assert not (tmp_path / "tasks" / task.task_id).exists()
+
+
+def test_exported_test_bytes_match_final_mutation_fingerprint(tmp_path: Path) -> None:
+    report = _oracle_pass()
+    report.test_files[0].content = "assert True"
+    report.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint=final_suite_fingerprint(report.test_files),
+        mutants_total=report.mutants_total,
+        mutants_killed=report.mutants_killed,
+        threshold=0.8,
+        tool="fake-tool",
+    )
+
+    result = export_batch([_request(oracle_report=report)], tmp_path)
+    task_dir = result.shipped[0].path
+    assert task_dir is not None
+    exported = task_dir / "tests" / report.test_files[0].path
+    assert exported.read_bytes() == b"assert True\n"
+    assert report.final_mutation_evidence.suite_fingerprint == final_suite_fingerprint(
+        [
+            OracleTestFile(
+                path=report.test_files[0].path,
+                content=exported.read_text(),
+            )
+        ]
+    )
+
+
 def test_forgetask_direct_construction_enforces_gate() -> None:
     with pytest.raises(ExportGateError):
         ForgeTask(
@@ -316,6 +410,16 @@ def test_qualified_task_exports_full_workspace(tmp_path: Path) -> None:
     assert data["tests"]["fail_to_pass"] and data["tests"]["pass_to_pass"]
     assert data["synthetic"]["deletion_patch_file"] == "deletion_patch.diff"
     assert data["synthetic"]["strategy"] == "ast_mutation"
+    assert (
+        data["meta"]["final_mutation_suite_fingerprint"]
+        == _oracle_pass().final_mutation_evidence.suite_fingerprint
+    )
+
+    provenance = json.loads((task_dir / "provenance.json").read_text())
+    assert (
+        provenance["details"]["final_mutation_suite_fingerprint"]
+        == _oracle_pass().final_mutation_evidence.suite_fingerprint
+    )
 
     # VAL-EXPORT-020: solution/tests under forge_path, repo under repo_path.
     assert data["environment"]["repo_path"] == "/workspace/repo"

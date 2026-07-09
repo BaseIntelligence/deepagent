@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import hashlib
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -49,6 +51,7 @@ from swe_forge.forge.adapters import (
 from swe_forge.forge.models import (
     Candidate,
     EnvImage,
+    FinalMutationEvidence,
     OracleReport,
     OracleTestFile,
     Provenance,
@@ -550,6 +553,136 @@ def build_mutation_report(
     )
 
 
+def final_suite_fingerprint(test_files: Sequence[OracleTestFile]) -> str:
+    """Return a canonical SHA-256 fingerprint for exported hidden test bodies.
+
+    Export writes only non-empty hidden test files and does not preserve their
+    in-memory ordering. The fingerprint therefore sorts by path and hashes each
+    exact body, making it stable under ordering changes but sensitive to every
+    exported test path/content change. Duplicate paths are ambiguous and reject
+    before an evidence claim can be trusted.
+    """
+    files: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for test_file in test_files:
+        if not test_file.content:
+            continue
+        if test_file.path in seen:
+            raise MutationError(
+                "cannot fingerprint final hidden suite with duplicate test path "
+                f"{test_file.path!r}"
+            )
+        seen.add(test_file.path)
+        # ``write_workspace`` appends exactly one newline when a non-empty test
+        # body lacks one. Fingerprint the same canonical bytes that export writes.
+        content = (
+            test_file.content
+            if test_file.content.endswith("\n")
+            else test_file.content + "\n"
+        )
+        files.append(
+            {
+                "path": test_file.path,
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            }
+        )
+    canonical = json.dumps(
+        sorted(files, key=lambda item: item["path"]),
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def build_final_mutation_report(
+    candidate: Candidate,
+    prior_report: OracleReport,
+    outcome: MutationOutcome,
+    *,
+    threshold: float,
+    env_image: EnvImage | None = None,
+) -> OracleReport:
+    """Replace mutation evidence after suite-mutating oracle gates complete.
+
+    The initial mutation gate may synthesize tests, and the differential or
+    alt-correct gates can later add or prune them. This final measurement is
+    deliberately no-synthesis: it records whether the *already final* suite is
+    adequate without changing the suite it certifies.
+    """
+    if outcome.added_tests:
+        raise MutationError(
+            "final mutation remeasurement must not synthesize or append test files"
+        )
+    if outcome.threshold != threshold:
+        raise MutationError(
+            "final mutation remeasurement threshold does not match configured "
+            f"threshold ({outcome.threshold} != {threshold})"
+        )
+
+    evidence = FinalMutationEvidence(
+        suite_fingerprint=final_suite_fingerprint(prior_report.test_files),
+        mutants_total=outcome.mutants_total,
+        mutants_killed=outcome.mutants_killed,
+        threshold=threshold,
+        tool=outcome.tool,
+    )
+    details = dict(prior_report.details)
+    details["mutation_final"] = {
+        "no_synthesis": True,
+        "suite_fingerprint": evidence.suite_fingerprint,
+        "replacement_counts": {
+            "total": outcome.mutants_total,
+            "killed": outcome.mutants_killed,
+            "kill_ratio": round(outcome.kill_ratio, 4),
+            "tool": outcome.tool,
+        },
+        "threshold": threshold,
+        "measurement": outcome.details,
+    }
+    details.pop("mutation_evidence_invalidated", None)
+    if env_image is not None:
+        details.setdefault("env_image", env_image.image_tag)
+
+    base_prov = prior_report.provenance
+    provenance = Provenance(
+        generator=candidate.generator,
+        seed=candidate.provenance.seed,
+        language=candidate.language,
+        tool_versions={
+            **(base_prov.tool_versions if base_prov else _tool_versions()),
+            **({outcome.tool: ""} if outcome.tool else {}),
+        },
+        details={
+            "stage": "oracle.mutation.final",
+            "final_mutation_suite_fingerprint": evidence.suite_fingerprint,
+            "mutants_total": outcome.mutants_total,
+            "mutants_killed": outcome.mutants_killed,
+            "threshold": threshold,
+            "mutation_tool": outcome.tool,
+            "no_synthesis": True,
+        },
+    )
+    return OracleReport(
+        language=prior_report.language,
+        generator=prior_report.generator,
+        verdict=outcome.verdict,
+        reasons=list(outcome.reasons),
+        fail_to_pass=list(prior_report.fail_to_pass),
+        pass_to_pass=list(prior_report.pass_to_pass),
+        test_files=list(prior_report.test_files),
+        flakiness_runs=prior_report.flakiness_runs,
+        mutants_total=outcome.mutants_total,
+        mutants_killed=outcome.mutants_killed,
+        final_mutation_evidence=evidence,
+        differential_pass=prior_report.differential_pass,
+        alt_correct_accepted=prior_report.alt_correct_accepted,
+        leak_audit=prior_report.leak_audit,
+        provenance=provenance,
+        details=details,
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Docker-backed runner + top-level gate
 # --------------------------------------------------------------------------- #
@@ -710,3 +843,46 @@ async def run_mutation_gate(
         max_rounds=max_rounds,
     )
     return build_mutation_report(candidate, prior_report, outcome, env_image=env_image)
+
+
+async def run_final_mutation_gate(
+    candidate: Candidate,
+    env_image: EnvImage,
+    prior_report: OracleReport,
+    *,
+    threshold: float = DEFAULT_KILL_THRESHOLD,
+    adapter: LanguageAdapter | None = None,
+    docker_client: "DockerClient | None" = None,
+    command_timeout: float = 1200.0,
+) -> OracleReport:
+    """Re-measure adequacy against the final suite without synthesizing tests."""
+    require_green_baseline(env_image)
+    if prior_report.verdict != "pass":
+        raise MutationError(
+            "final mutation remeasurement requires a passing prior report; got "
+            f"verdict {prior_report.verdict!r}"
+        )
+
+    if adapter is None:
+        adapter = build_default_registry().get(candidate.language)
+    runner = DockerMutationRunner(
+        candidate,
+        env_image,
+        adapter,
+        base_tests=reconstruct_base_tests(prior_report.test_files),
+        command_timeout=command_timeout,
+        docker_client=docker_client,
+    )
+    outcome = await assess_mutation(
+        runner,
+        synthesizer=None,
+        threshold=threshold,
+        max_rounds=0,
+    )
+    return build_final_mutation_report(
+        candidate,
+        prior_report,
+        outcome,
+        threshold=threshold,
+        env_image=env_image,
+    )

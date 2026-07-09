@@ -23,6 +23,7 @@ from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     ModelError,
     OracleReport,
     OracleTestFile,
@@ -396,6 +397,42 @@ async def test_build_report_relax_removes_dropped_test_files() -> None:
     # the over-fit F2P id and its test file are removed; the surviving F2P remains
     assert report.fail_to_pass == [f2p]
     assert [tf.path for tf in report.test_files] == ["tests/test_x.py"]
+
+
+async def test_relaxation_invalidates_prior_final_mutation_evidence() -> None:
+    overfit = "python -m pytest tests/overfit.py"
+    f2p = "python -m pytest tests/test_x.py"
+    runner = FakeAltCorrectRunner(alt_failures={"alt_1": {overfit}})
+    outcome = await assess_alt_correct(
+        runner, [_alt("alt_1")], fail_to_pass=[f2p, overfit], relax=True
+    )
+    prior = _differential_report(
+        [
+            OracleTestFile(path="tests/test_x.py", content="X"),
+            OracleTestFile(path="tests/overfit.py", content="O"),
+        ],
+        fail_to_pass=[f2p, overfit],
+    )
+    prior.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint="b" * 64,
+        mutants_total=10,
+        mutants_killed=10,
+        threshold=0.8,
+        tool="fake-tool",
+    )
+
+    report = build_alt_correct_report(
+        _candidate(),
+        prior,
+        outcome,
+        base_tests=[_test("tests/test_x.py"), _test("tests/overfit.py")],
+    )
+
+    assert report.final_mutation_evidence is None
+    assert report.details["mutation_evidence_invalidated"] == {
+        "stage": "alt_correct",
+        "reason": "hidden_suite_changed",
+    }
 
 
 # --------------------------------------------------------------------------- #

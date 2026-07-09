@@ -524,6 +524,7 @@ def build_leak_report(
         flakiness_runs=prior_report.flakiness_runs,
         mutants_total=prior_report.mutants_total,
         mutants_killed=prior_report.mutants_killed,
+        final_mutation_evidence=prior_report.final_mutation_evidence,
         differential_pass=prior_report.differential_pass,
         alt_correct_accepted=prior_report.alt_correct_accepted,
         leak_audit=outcome.leak_audit,

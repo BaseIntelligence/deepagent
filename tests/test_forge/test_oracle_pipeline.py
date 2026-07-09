@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import pytest
 
+import swe_forge.forge.oracle.pipeline as pipeline_module
 from swe_forge.forge.models import (
     BaselineNotGreenError,
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     OracleReport,
     OracleTestFile,
     Provenance,
@@ -44,6 +46,7 @@ from swe_forge.forge.oracle.pipeline import (
     run_oracle_pipeline,
     verify_pass_consistency,
 )
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 
 _FIXED_TS = "2026-01-01T00:00:00+00:00"
 _F2P = ["python -m pytest tests/hidden/test_total.py"]
@@ -95,6 +98,7 @@ def _provenance() -> Provenance:
 
 def _pass_report(**overrides: object) -> OracleReport:
     """A fully consistent pass report (the shape the final leak gate yields)."""
+    test_files = [OracleTestFile(path="tests/hidden/test_total.py", content="x = 1\n")]
     fields: dict[str, object] = {
         "language": "python",
         "generator": "ast_mutation",
@@ -102,15 +106,20 @@ def _pass_report(**overrides: object) -> OracleReport:
         "reasons": [],
         "fail_to_pass": list(_F2P),
         "pass_to_pass": ["python -m pytest"],
-        "test_files": [
-            OracleTestFile(path="tests/hidden/test_total.py", content="x = 1\n")
-        ],
+        "test_files": test_files,
         "flakiness_runs": 3,
         "mutants_total": 10,
         "mutants_killed": 10,
         "differential_pass": True,
         "alt_correct_accepted": True,
         "leak_audit": "clean",
+        "final_mutation_evidence": FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=10,
+            mutants_killed=10,
+            threshold=0.8,
+            tool="fake-tool",
+        ),
         "provenance": _provenance(),
     }
     fields.update(overrides)
@@ -183,6 +192,16 @@ async def test_all_gates_pass_yields_pass() -> None:
         {"flakiness_runs": 2},
         {"mutants_total": 0, "mutants_killed": 0},
         {"mutants_total": 10, "mutants_killed": 3},
+        {"final_mutation_evidence": None},
+        {
+            "final_mutation_evidence": FinalMutationEvidence(
+                suite_fingerprint="f" * 64,
+                mutants_total=10,
+                mutants_killed=10,
+                threshold=0.8,
+                tool="fake-tool",
+            )
+        },
         {"differential_pass": False},
         {"alt_correct_accepted": False},
         {"leak_audit": "leak: src/x.py"},
@@ -203,6 +222,30 @@ async def test_inconsistent_pass_is_demoted_to_reject(bad: dict[str, object]) ->
 
 def test_verify_pass_consistency_clean() -> None:
     assert verify_pass_consistency(_pass_report()) == []
+
+
+def test_custom_final_mutation_threshold_is_exportable() -> None:
+    report = _pass_report()
+    evidence = report.final_mutation_evidence
+    assert evidence is not None
+    report.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint=evidence.suite_fingerprint,
+        mutants_total=evidence.mutants_total,
+        mutants_killed=evidence.mutants_killed,
+        threshold=0.9,
+        tool=evidence.tool,
+    )
+
+    assert verify_pass_consistency(report, kill_threshold=0.9) == []
+    ensure_oracle_exportable(report, calibration_kept=True)
+
+
+def test_verify_pass_consistency_rejects_stale_final_mutation_counts() -> None:
+    report = _pass_report()
+    report.mutants_killed = 9
+    assert any(
+        "replacement counts" in problem for problem in verify_pass_consistency(report)
+    )
 
 
 def test_verify_pass_consistency_ignores_reject() -> None:
@@ -306,6 +349,47 @@ async def test_run_pipeline_reject_through_injected_gates() -> None:
     )
     assert report.verdict == "reject"
     assert any("leak" in r for r in report.reasons)
+
+
+async def test_default_pipeline_final_remeasures_after_alt_correct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def stub(name: str):
+        async def _run(*_args: object, **_kwargs: object) -> OracleReport:
+            calls.append(name)
+            return _pass_report()
+
+        return _run
+
+    async def final_mutation(*_args: object, **kwargs: object) -> OracleReport:
+        calls.append("final_mutation")
+        # The final gate deliberately has no synthesis parameter, so additions
+        # cannot alter the suite after it is fingerprinted.
+        assert "synthesizer" not in kwargs
+        return _pass_report()
+
+    monkeypatch.setattr(pipeline_module, "run_establish_gate", stub("establish"))
+    monkeypatch.setattr(pipeline_module, "run_flakiness_gate", stub("flakiness"))
+    monkeypatch.setattr(pipeline_module, "run_mutation_gate", stub("mutation"))
+    monkeypatch.setattr(pipeline_module, "run_differential_gate", stub("differential"))
+    monkeypatch.setattr(pipeline_module, "run_alt_correct_gate", stub("alt_correct"))
+    monkeypatch.setattr(pipeline_module, "run_final_mutation_gate", final_mutation)
+    monkeypatch.setattr(pipeline_module, "run_leak_gate", stub("leak"))
+
+    report = await run_oracle_pipeline(_candidate(), _env_image())
+
+    assert report.verdict == "pass"
+    assert calls == [
+        "establish",
+        "flakiness",
+        "mutation",
+        "differential",
+        "alt_correct",
+        "final_mutation",
+        "leak",
+    ]
 
 
 async def test_run_pipeline_requires_green_baseline() -> None:

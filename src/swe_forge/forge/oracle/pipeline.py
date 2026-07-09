@@ -68,6 +68,8 @@ from swe_forge.forge.oracle.mutation import (
     DEFAULT_KILL_THRESHOLD,
     DEFAULT_MAX_SYNTHESIS_ROUNDS,
     MutationTestSynthesizer,
+    final_suite_fingerprint,
+    run_final_mutation_gate,
     run_mutation_gate,
 )
 
@@ -134,6 +136,41 @@ def verify_pass_consistency(
         problems.append(
             f"mutation: kill ratio {ratio:.2f} < threshold {kill_threshold:.2f}"
         )
+    evidence = report.final_mutation_evidence
+    if evidence is None:
+        problems.append("mutation: final mutation evidence is missing")
+    else:
+        try:
+            expected_fingerprint = final_suite_fingerprint(report.test_files)
+        except Exception as exc:  # noqa: BLE001 - fail closed on malformed suites
+            problems.append(
+                "mutation: final mutation evidence cannot fingerprint final "
+                f"hidden suite ({type(exc).__name__}: {exc})"
+            )
+        else:
+            if evidence.suite_fingerprint != expected_fingerprint:
+                problems.append(
+                    "mutation: final mutation evidence suite fingerprint does not "
+                    "match final hidden tests"
+                )
+        if (evidence.mutants_total, evidence.mutants_killed) != (
+            report.mutants_total,
+            report.mutants_killed,
+        ):
+            problems.append(
+                "mutation: final mutation evidence replacement counts do not "
+                "match OracleReport mutants_total/mutants_killed"
+            )
+        if evidence.threshold != kill_threshold:
+            problems.append(
+                "mutation: final mutation evidence threshold "
+                f"{evidence.threshold:.2f} != configured threshold {kill_threshold:.2f}"
+            )
+        elif evidence.kill_ratio < evidence.threshold:
+            problems.append(
+                "mutation: final mutation evidence kill ratio "
+                f"{evidence.kill_ratio:.2f} < threshold {evidence.threshold:.2f}"
+            )
     if not report.differential_pass:
         problems.append("differential: differential_pass is false")
     if not report.alt_correct_accepted:
@@ -303,10 +340,24 @@ def build_default_gates(
 
     async def leak(prior: OracleReport | None) -> OracleReport:
         assert prior is not None
-        return await run_leak_gate(
+        # Differential can strengthen or prune tests, and alt-correct can relax
+        # them. Re-measure the finalized suite before marking a report pass,
+        # never synthesizing new tests after this point.
+        final_mutation = await run_final_mutation_gate(
             candidate,
             env_image,
             prior,
+            threshold=kill_threshold,
+            adapter=adapter,
+            docker_client=docker_client,
+            command_timeout=mutation_timeout,
+        )
+        if final_mutation.verdict != "pass":
+            return final_mutation
+        return await run_leak_gate(
+            candidate,
+            env_image,
+            final_mutation,
             adapter=adapter,
             sanitize=sanitize,
             docker_client=docker_client,
@@ -397,11 +448,21 @@ def is_oracle_exportable(report: OracleReport) -> bool:
     must also keep the candidate. Use :func:`ensure_oracle_exportable` to enforce
     both at the export boundary.
     """
-    return report.verdict == "pass"
+    threshold = (
+        report.final_mutation_evidence.threshold
+        if report.final_mutation_evidence is not None
+        else DEFAULT_KILL_THRESHOLD
+    )
+    return report.verdict == "pass" and not verify_pass_consistency(
+        report, kill_threshold=threshold
+    )
 
 
 def ensure_oracle_exportable(
-    report: OracleReport, *, calibration_kept: bool | None = None
+    report: OracleReport,
+    *,
+    calibration_kept: bool | None = None,
+    kill_threshold: float | None = None,
 ) -> None:
     """Raise :class:`ExportRefusedError` unless the candidate may be exported.
 
@@ -415,6 +476,21 @@ def ensure_oracle_exportable(
         raise ExportRefusedError(
             f"export refused: oracle verdict is {report.verdict!r} "
             f"(reasons={list(report.reasons)}); a rejected candidate is never exported"
+        )
+    final_threshold = kill_threshold
+    if final_threshold is None:
+        final_threshold = (
+            report.final_mutation_evidence.threshold
+            if report.final_mutation_evidence is not None
+            else DEFAULT_KILL_THRESHOLD
+        )
+    consistency_problems = verify_pass_consistency(
+        report, kill_threshold=final_threshold
+    )
+    if consistency_problems:
+        raise ExportRefusedError(
+            "export refused: final mutation evidence or oracle gate consistency "
+            "is invalid (" + "; ".join(consistency_problems) + ")"
         )
     if calibration_kept is False:
         raise ExportRefusedError(

@@ -38,6 +38,7 @@ from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     OracleReport,
     OracleTestFile,
     Provenance,
@@ -51,7 +52,9 @@ from swe_forge.forge.oracle.mutation import (
     MutationSynthesisContext,
     NullMutationSynthesizer,
     assess_mutation,
+    build_final_mutation_report,
     build_mutation_report,
+    final_suite_fingerprint,
     reconstruct_base_tests,
     run_mutation_gate,
 )
@@ -257,7 +260,7 @@ FAIL "/tmp/x/calc.go.1"
 PASS "/tmp/x/calc.go.2" with checksum
 The mutation score is 0.667 (2 passed, 1 failed, 0 duration, 0 skipped)
 """
-    counts = parse_gomutesting(output)
+    counts = parse_gomutesting(output, exit_code=0)
     assert counts.total == 3
     assert counts.killed == 2
     assert counts.survived == 1
@@ -367,6 +370,16 @@ def test_parse_gomutesting_real_new_summary_format() -> None:
     assert counts.survived == 39
 
 
+@pytest.mark.parametrize("exit_code", [-9, 1, 124, 137])
+def test_parse_gomutesting_nonzero_summary_is_untrusted(exit_code: int) -> None:
+    output = (
+        "The mutation score is 1.000000 "
+        "(4 passed, 0 failed, 0 duplicated, 0 skipped, total is 4)\n"
+    )
+    with pytest.raises(MutationToolError):
+        parse_gomutesting(output, exit_code=exit_code)
+
+
 def test_parse_gomutesting_zero_eligible_is_sound_not_a_crash() -> None:
     # go-mutesting prints this (with a non-zero exit) when the target has nothing
     # to mutate: a SOUND 0/0 measurement (the gate rejects 0 mutants as
@@ -382,19 +395,19 @@ def test_parse_gomutesting_zero_eligible_is_sound_not_a_crash() -> None:
     assert counts.kill_ratio == 0.0
 
 
-def test_parse_gomutesting_truncated_run_counts_completed_mutants() -> None:
-    # A run killed before the summary line (e.g. timeout) still has real per-mutant
-    # verdicts; each PASS/FAIL line is a completed measurement.
+@pytest.mark.parametrize("exit_code", [None, 1, 124, 137])
+def test_parse_gomutesting_truncated_or_unsuccessful_run_rejects(
+    exit_code: int | None,
+) -> None:
+    # Partial per-mutant output is never adequate evidence: a timeout, signal,
+    # nonzero exit, or output with no terminal score summary could omit survivors.
     output = (
         'PASS "/tmp/go-mutesting-1/version7.go.0" with checksum a\n'
         'FAIL "/tmp/go-mutesting-1/version7.go.1" with checksum b\n'
         'PASS "/tmp/go-mutesting-1/version7.go.2" with checksum c\n'
     )
-    counts = parse_gomutesting(output, exit_code=124)
-    assert counts.total == 3
-    assert counts.killed == 2
-    assert counts.survived == 1
-    assert counts.survivors == ("/tmp/go-mutesting-1/version7.go.1",)
+    with pytest.raises(MutationToolError):
+        parse_gomutesting(output, exit_code=exit_code)
 
 
 def test_parse_gomutesting_genuine_crash_raises() -> None:
@@ -742,6 +755,89 @@ async def test_build_report_reject_carries_reason() -> None:
     assert report.mutants_killed == 7
     # reject invariant survives (de)serialization
     assert OracleReport.from_dict(report.to_dict()).verdict == "reject"
+
+
+# --------------------------------------------------------------------------- #
+# Final-suite mutation evidence (m6-mutation-evidence-integrity)
+# --------------------------------------------------------------------------- #
+def test_final_suite_fingerprint_is_canonical_and_content_bound() -> None:
+    first = [
+        OracleTestFile(path="tests/z.py", content="assert z\n"),
+        OracleTestFile(path="tests/a.py", content="assert a\n"),
+    ]
+    reordered = list(reversed(first))
+    changed = [
+        OracleTestFile(path="tests/a.py", content="assert a + 1\n"),
+        OracleTestFile(path="tests/z.py", content="assert z\n"),
+    ]
+
+    assert final_suite_fingerprint(first) == final_suite_fingerprint(reordered)
+    assert final_suite_fingerprint(first) != final_suite_fingerprint(changed)
+
+
+def test_final_suite_fingerprint_matches_exported_newline_normalization() -> None:
+    # Export normalizes non-empty test files to one trailing newline. Evidence
+    # must bind those exact exported bytes, not only the in-memory input text.
+    raw = [OracleTestFile(path="tests/test_x.py", content="assert True")]
+    exported = [OracleTestFile(path="tests/test_x.py", content="assert True\n")]
+
+    assert final_suite_fingerprint(raw) == final_suite_fingerprint(exported)
+
+
+async def test_final_remeasurement_replaces_stale_counts_and_binds_suite() -> None:
+    # The first mutation pass could have measured a suite that differential or
+    # alt-correct subsequently pruned. The final measurement replaces those
+    # counts and records the exact surviving hidden-suite fingerprint.
+    tests = [OracleTestFile(path="tests/test_x.py", content="X")]
+    prior = _flakiness_report(tests)
+    prior.mutants_total = 10
+    prior.mutants_killed = 10
+    prior.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint="0" * 64,
+        mutants_total=10,
+        mutants_killed=10,
+        threshold=0.8,
+        tool="stale-tool",
+    )
+
+    runner = FakeMutationRunner(
+        total=10,
+        base_survivors={"s1", "s2"},
+        tool="fresh-tool",
+    )
+    outcome = await assess_mutation(runner, threshold=0.8)
+    report = build_final_mutation_report(_candidate(), prior, outcome, threshold=0.8)
+
+    assert report.verdict == "pass"
+    assert (report.mutants_total, report.mutants_killed) == (10, 8)
+    assert report.final_mutation_evidence == FinalMutationEvidence(
+        suite_fingerprint=final_suite_fingerprint(tests),
+        mutants_total=10,
+        mutants_killed=8,
+        threshold=0.8,
+        tool="fresh-tool",
+    )
+    assert report.details["mutation_final"]["no_synthesis"] is True
+    assert runner.measure_calls == [()]
+    assert OracleReport.from_dict(report.to_dict()).final_mutation_evidence == (
+        report.final_mutation_evidence
+    )
+
+
+async def test_final_remeasurement_rejects_when_pruned_suite_falls_below_threshold() -> (
+    None
+):
+    prior = _flakiness_report([OracleTestFile(path="tests/test_x.py", content="X")])
+    outcome = await assess_mutation(
+        FakeMutationRunner(total=10, base_survivors={"s1", "s2", "s3"}),
+        threshold=0.8,
+    )
+    report = build_final_mutation_report(_candidate(), prior, outcome, threshold=0.8)
+
+    assert report.verdict == "reject"
+    assert report.reasons[0].startswith(REASON_MUTATION_INADEQUATE)
+    assert report.final_mutation_evidence is not None
+    assert (report.mutants_total, report.mutants_killed) == (10, 7)
 
 
 # --------------------------------------------------------------------------- #

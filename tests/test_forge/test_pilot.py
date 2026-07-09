@@ -40,6 +40,7 @@ from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     GeneratedSpec,
     ModelSolveRecord,
     OracleReport,
@@ -48,6 +49,7 @@ from swe_forge.forge.models import (
     RepoSpec,
 )
 from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
 from swe_forge.forge.sources import build_source_registry
 from swe_forge.forge.pilot import (
@@ -173,6 +175,15 @@ def _spec(plan: CandidatePlan, *, problem: str = "") -> GeneratedSpec:
 
 
 def _oracle_pass(plan: CandidatePlan) -> OracleReport:
+    test_files = [
+        OracleTestFile(
+            path="tests/hidden/test_total.py",
+            content=(
+                "from src.m import total\n\n\n"
+                "def test_total():\n    assert total([100], 0.1) == 110\n"
+            ),
+        )
+    ]
     return OracleReport(
         language=plan.language,
         generator=plan.generator,
@@ -180,18 +191,17 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
         reasons=[],
         fail_to_pass=["python -m pytest tests/hidden/test_total.py"],
         pass_to_pass=["python -m pytest -q"],
-        test_files=[
-            OracleTestFile(
-                path="tests/hidden/test_total.py",
-                content=(
-                    "from src.m import total\n\n\n"
-                    "def test_total():\n    assert total([100], 0.1) == 110\n"
-                ),
-            )
-        ],
+        test_files=test_files,
         flakiness_runs=3,
         mutants_total=10,
         mutants_killed=10,
+        final_mutation_evidence=FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=10,
+            mutants_killed=10,
+            threshold=0.8,
+            tool="fake-tool",
+        ),
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",

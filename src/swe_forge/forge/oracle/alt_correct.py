@@ -461,6 +461,13 @@ def build_alt_correct_report(
     """
     details: dict[str, object] = dict(prior_report.details)
     details["alt_correct"] = outcome.details
+    # A relaxation removes hidden tests. Do not let counts from a prior suite
+    # survive it; final pipeline remeasurement must bind the retained suite.
+    if prior_report.final_mutation_evidence is not None:
+        details["mutation_evidence_invalidated"] = {
+            "stage": "alt_correct",
+            "reason": "hidden_suite_changed",
+        }
     if env_image is not None:
         details.setdefault("env_image", env_image.image_tag)
     if extra_details:
@@ -503,6 +510,7 @@ def build_alt_correct_report(
         flakiness_runs=prior_report.flakiness_runs,
         mutants_total=prior_report.mutants_total,
         mutants_killed=prior_report.mutants_killed,
+        final_mutation_evidence=None,
         differential_pass=prior_report.differential_pass,
         alt_correct_accepted=outcome.alt_correct_accepted,
         leak_audit=prior_report.leak_audit,

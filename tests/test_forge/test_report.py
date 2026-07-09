@@ -36,10 +36,12 @@ from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     GeneratedSpec,
     ModelSolveRecord,
     Provenance,
 )
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.report import (
     DEFAULT_FRONTIER_THRESHOLD,
     BenchmarkReport,
@@ -121,6 +123,16 @@ def _spec(*, language: str) -> GeneratedSpec:
 def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-def]
     from swe_forge.forge.models import OracleReport, OracleTestFile
 
+    test_files = [
+        OracleTestFile(
+            path="tests/hidden/test_total.py",
+            content=(
+                "from src.m import total\n\n\n"
+                "def test_total():\n    assert total([100], 0.1) == 110\n"
+            ),
+        )
+    ]
+
     return OracleReport(
         language=language,
         generator=generator,
@@ -128,18 +140,17 @@ def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-d
         reasons=[],
         fail_to_pass=["python -m pytest tests/hidden/test_total.py"],
         pass_to_pass=["python -m pytest -q"],
-        test_files=[
-            OracleTestFile(
-                path="tests/hidden/test_total.py",
-                content=(
-                    "from src.m import total\n\n\n"
-                    "def test_total():\n    assert total([100], 0.1) == 110\n"
-                ),
-            )
-        ],
+        test_files=test_files,
         flakiness_runs=3,
         mutants_total=10,
         mutants_killed=10,
+        final_mutation_evidence=FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=10,
+            mutants_killed=10,
+            threshold=0.8,
+            tool="fake-tool",
+        ),
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",

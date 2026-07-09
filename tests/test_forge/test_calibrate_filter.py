@@ -38,11 +38,13 @@ from swe_forge.forge.calibrate.filter import (
 from swe_forge.forge.calibrate.irt import build_calibration_report, pass_at_k
 from swe_forge.forge.models import (
     CalibrationReport,
+    FinalMutationEvidence,
     ModelError,
     ModelSolveRecord,
     OracleReport,
     OracleTestFile,
 )
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
 
 
@@ -313,18 +315,24 @@ def test_custom_thresholds_change_verdict() -> None:
 # Export wiring: keep necessary, drop blocks export (VAL-CAL-021)
 # --------------------------------------------------------------------------- #
 def _passing_oracle() -> OracleReport:
+    test_files = [OracleTestFile(path="tests/test_x.py", content="def test_a(): ...")]
     return OracleReport(
         language="python",
         generator="ast_mutation",
         verdict="pass",
         fail_to_pass=["tests/test_x.py::test_a"],
         pass_to_pass=["tests/test_x.py::test_b"],
-        test_files=[
-            OracleTestFile(path="tests/test_x.py", content="def test_a(): ...")
-        ],
+        test_files=test_files,
         flakiness_runs=3,
         mutants_total=10,
         mutants_killed=10,
+        final_mutation_evidence=FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=10,
+            mutants_killed=10,
+            threshold=0.8,
+            tool="fake-tool",
+        ),
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",

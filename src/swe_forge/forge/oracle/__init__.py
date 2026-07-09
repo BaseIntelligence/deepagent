@@ -53,8 +53,11 @@ from swe_forge.forge.oracle.mutation import (
     MutationTestSynthesizer,
     NullMutationSynthesizer,
     assess_mutation,
+    build_final_mutation_report,
     build_mutation_report,
+    final_suite_fingerprint,
     reconstruct_base_tests,
+    run_final_mutation_gate,
     run_mutation_gate,
 )
 from swe_forge.forge.oracle.differential import (
@@ -232,10 +235,12 @@ __all__ = [
     "build_differential_report",
     "build_establish_report",
     "build_flakiness_report",
+    "build_final_mutation_report",
     "build_leak_report",
     "build_mutation_report",
     "establish_oracle",
     "normalize_agent_tree",
+    "final_suite_fingerprint",
     "reconstruct_base_tests",
     "reconstruct_hidden_tests",
     "reconstruct_suite_tests",
@@ -244,6 +249,7 @@ __all__ = [
     "run_establish_gate",
     "run_flakiness_gate",
     "run_leak_gate",
+    "run_final_mutation_gate",
     "run_mutation_gate",
     "sanitize_leaks",
 ]

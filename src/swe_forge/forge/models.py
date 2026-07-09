@@ -687,6 +687,64 @@ class OracleTestFile:
         )
 
 
+@dataclass(frozen=True)
+class FinalMutationEvidence:
+    """Mutation-adequacy evidence bound to the exact shipped hidden suite.
+
+    Mutation counts are meaningful only for the tests that were actually present
+    when the tool completed. The final mutation remeasurement records the
+    canonical hidden-suite fingerprint together with its replacement counts so
+    every downstream consumer can reject stale evidence after later oracle gates
+    add or remove tests.
+    """
+
+    suite_fingerprint: str
+    mutants_total: int
+    mutants_killed: int
+    threshold: float
+    tool: str = ""
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", self.suite_fingerprint):
+            raise ModelError(
+                "FinalMutationEvidence.suite_fingerprint must be a SHA-256 hex digest"
+            )
+        if self.mutants_total < 0:
+            raise ModelError("FinalMutationEvidence.mutants_total must be >= 0")
+        if not 0 <= self.mutants_killed <= self.mutants_total:
+            raise ModelError(
+                "FinalMutationEvidence.mutants_killed must satisfy 0 <= killed <= total"
+            )
+        if not 0.0 < self.threshold <= 1.0:
+            raise ModelError(
+                "FinalMutationEvidence.threshold must be in (0, 1]; "
+                f"got {self.threshold}"
+            )
+
+    @property
+    def kill_ratio(self) -> float:
+        return self.mutants_killed / self.mutants_total if self.mutants_total else 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "suite_fingerprint": self.suite_fingerprint,
+            "mutants_total": self.mutants_total,
+            "mutants_killed": self.mutants_killed,
+            "threshold": self.threshold,
+            "tool": self.tool,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> FinalMutationEvidence:
+        return cls(
+            suite_fingerprint=str(data["suite_fingerprint"]),
+            mutants_total=_coerce_int(data.get("mutants_total", 0)),
+            mutants_killed=_coerce_int(data.get("mutants_killed", 0)),
+            threshold=_coerce_float(data.get("threshold", 0.0)),
+            tool=str(data.get("tool", "")),
+        )
+
+
 @dataclass
 class OracleReport:
     """Stage 3 artifact: the oracle-hardening verdict + evidence for a Candidate.
@@ -715,6 +773,7 @@ class OracleReport:
     flakiness_runs: int = 0
     mutants_total: int = 0
     mutants_killed: int = 0
+    final_mutation_evidence: FinalMutationEvidence | None = None
     differential_pass: bool = False
     alt_correct_accepted: bool = False
     leak_audit: str = ""
@@ -766,6 +825,9 @@ class OracleReport:
             "flakiness_runs": self.flakiness_runs,
             "mutants_total": self.mutants_total,
             "mutants_killed": self.mutants_killed,
+            "final_mutation_evidence": self.final_mutation_evidence.to_dict()
+            if self.final_mutation_evidence
+            else None,
             "differential_pass": self.differential_pass,
             "alt_correct_accepted": self.alt_correct_accepted,
             "leak_audit": self.leak_audit,
@@ -781,6 +843,7 @@ class OracleReport:
         f2p = data.get("fail_to_pass", [])
         p2p = data.get("pass_to_pass", [])
         details = data.get("details", {})
+        final_mutation_evidence = data.get("final_mutation_evidence")
         return cls(
             language=str(data["language"]),
             generator=str(data.get("generator", "")),
@@ -798,6 +861,11 @@ class OracleReport:
             flakiness_runs=_coerce_int(data.get("flakiness_runs", 0)),
             mutants_total=_coerce_int(data.get("mutants_total", 0)),
             mutants_killed=_coerce_int(data.get("mutants_killed", 0)),
+            final_mutation_evidence=FinalMutationEvidence.from_dict(
+                final_mutation_evidence
+            )
+            if isinstance(final_mutation_evidence, dict)
+            else None,
             differential_pass=bool(data.get("differential_pass", False)),
             alt_correct_accepted=bool(data.get("alt_correct_accepted", False)),
             leak_audit=str(data.get("leak_audit", "")),

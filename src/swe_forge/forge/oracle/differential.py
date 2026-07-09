@@ -488,6 +488,14 @@ def build_differential_report(
     """
     details: dict[str, object] = dict(prior_report.details)
     details["differential"] = outcome.details
+    # Differential may append survivor-killers or prune a red-on-gold inherited
+    # discriminator. Either change invalidates the earlier mutation evidence;
+    # the pipeline must remeasure the final suite without synthesis.
+    if prior_report.final_mutation_evidence is not None:
+        details["mutation_evidence_invalidated"] = {
+            "stage": "differential",
+            "reason": "hidden_suite_changed",
+        }
     if env_image is not None:
         details.setdefault("env_image", env_image.image_tag)
     if extra_details:
@@ -536,6 +544,7 @@ def build_differential_report(
         flakiness_runs=prior_report.flakiness_runs,
         mutants_total=prior_report.mutants_total,
         mutants_killed=prior_report.mutants_killed,
+        final_mutation_evidence=None,
         differential_pass=outcome.differential_pass,
         provenance=provenance,
         details=details,

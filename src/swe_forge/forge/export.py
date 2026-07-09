@@ -239,6 +239,16 @@ def _build_provenance(
         "band_verdict": calibration_report.band_verdict,
         "mutants_total": oracle_report.mutants_total,
         "mutants_killed": oracle_report.mutants_killed,
+        "final_mutation_suite_fingerprint": (
+            oracle_report.final_mutation_evidence.suite_fingerprint
+            if oracle_report.final_mutation_evidence
+            else ""
+        ),
+        "final_mutation_threshold": (
+            oracle_report.final_mutation_evidence.threshold
+            if oracle_report.final_mutation_evidence
+            else 0.0
+        ),
         "flakiness_runs": oracle_report.flakiness_runs,
         "differential_pass": oracle_report.differential_pass,
         "alt_correct_accepted": oracle_report.alt_correct_accepted,
@@ -358,6 +368,11 @@ def forge_task_to_swe_task(task: ForgeTask) -> SweTask:
         "irt_discrimination": repr(cal.irt_discrimination),
         "frontier_pass_at_k": repr(cal.frontier_pass_at_k()),
         "image_tag": task.env_image.image_tag,
+        "final_mutation_suite_fingerprint": (
+            task.oracle_report.final_mutation_evidence.suite_fingerprint
+            if task.oracle_report.final_mutation_evidence
+            else ""
+        ),
         "created_at": task.created_at,
     }
     return SweTask(
@@ -629,6 +644,11 @@ def _workspace_data(task: ForgeTask) -> dict[str, object]:
             "generator": task.generator,
             "band_verdict": task.calibration_report.band_verdict,
             "oracle_verdict": task.oracle_report.verdict,
+            "final_mutation_suite_fingerprint": (
+                task.oracle_report.final_mutation_evidence.suite_fingerprint
+                if task.oracle_report.final_mutation_evidence
+                else ""
+            ),
             "created_at": task.created_at,
         },
     }
@@ -839,6 +859,17 @@ def export_forge_task(
     shipped as the agent-facing ``repo/`` with its history stripped to a single
     orphan commit.
     """
+    try:
+        ensure_oracle_exportable(
+            task.oracle_report, calibration_kept=task.calibration_report.is_keep
+        )
+    except ExportRefusedError as exc:
+        return TaskExportResult(
+            task_id=task.task_id,
+            status="refused",
+            reason=str(exc),
+        )
+
     tasks_root = Path(tasks_root)
     final_dir = tasks_root / task.task_id
 

@@ -361,10 +361,8 @@ def gomutesting_command(target: str) -> str:
 _GO_SCORE_RE = re.compile(
     r"mutation score is\s+[\d.]+\s*\((\d+)\s+passed,\s*(\d+)\s+failed", re.IGNORECASE
 )
-# go-mutesting's own per-mutant verdict lines are quoted: ``PASS "<tmp>/f.go.N"``
-# (killed) / ``FAIL "<tmp>/f.go.N" ...`` (survived). Anchoring on the quote avoids
-# miscounting an interleaved ``go test`` ``FAIL\tpkg`` line.
-_GO_PASS_LINE_RE = re.compile(r'^\s*PASS\s+"', re.MULTILINE)
+# go-mutesting's own per-mutant surviving verdict lines are quoted. Anchoring on
+# the quote avoids miscounting an interleaved ``go test`` ``FAIL\tpkg`` line.
 _GO_FAIL_LINE_RE = re.compile(r'^\s*FAIL\s+"([^"]+)"', re.MULTILINE)
 # Emitted (with a non-zero exit) when a target has no buildable Go source / nothing
 # to mutate: a SOUND "0 eligible mutants" result, NOT a tool crash.
@@ -379,41 +377,38 @@ def parse_gomutesting(output: str, *, exit_code: int | None = None) -> ToolCount
 
     go-mutesting prints ``PASS`` when a mutant is caught (killed) and ``FAIL``
     when it survives, ending with ``The mutation score is X (P passed, F failed,
-    ...)`` (``passed`` == killed, ``failed`` == survived). A *complete* run always
-    prints that summary, even with zero mutants (``0 passed, 0 failed``), so a
-    missing summary means the run did not finish normally. This parser tolerates
-    the edge cases and keeps "0 eligible mutants" distinct from "tool crashed":
+    ...)`` (``passed`` == killed, ``failed`` == survived). Trusted adequacy
+    counts require a *completed exit-zero run* with that terminal summary. A
+    partial stream can omit remaining survivors, so PASS/FAIL lines alone are
+    never admissible as a measurement, whether the process timed out, was
+    signaled, or exited nonzero.
 
-    1. summary present -> use its counts (also covers a clean 0/0 run);
-    2. no summary but per-mutant ``PASS``/``FAIL`` lines present -> count those
-       (a real, if truncated, measurement);
-    3. no summary, no results, but a benign "nothing to mutate" signal ->
-       ``ToolCounts(0, 0)`` (the gate rejects 0 mutants as under-determined, a
-       sound number-based verdict rather than a crash);
-    4. otherwise -> :class:`MutationToolError` (a genuine tool failure).
+    The one exception is the tool's recognized "no suitable Go source" output:
+    that is a sound zero-eligible-mutants result even though the tool may return
+    nonzero. It becomes ``ToolCounts(0, 0)`` and the adequacy gate rejects it as
+    under-determined rather than treating it as a tool crash.
     """
-    survivors = tuple(m.group(1).strip() for m in _GO_FAIL_LINE_RE.finditer(output))
-
-    match = _GO_SCORE_RE.search(output)
-    if match:
-        killed = int(match.group(1))
-        survived = int(match.group(2))
-        return ToolCounts(total=killed + survived, killed=killed, survivors=survivors)
-
-    pass_count = len(_GO_PASS_LINE_RE.findall(output))
-    fail_count = len(survivors)
-    if pass_count + fail_count > 0:
-        return ToolCounts(
-            total=pass_count + fail_count, killed=pass_count, survivors=survivors
+    if exit_code is None or exit_code < 0 or exit_code == 124 or exit_code >= 128:
+        raise MutationToolError(
+            "untrusted go-mutesting result: missing, timed-out, or signaled "
+            f"execution (exit={exit_code}): {output.strip()[-400:]}"
         )
 
     lowered = output.lower()
     if any(signal in lowered for signal in _GO_NO_MUTANTS_SIGNALS):
         return ToolCounts(total=0, killed=0)
 
+    match = _GO_SCORE_RE.search(output)
+    if exit_code == 0 and match:
+        survivors = tuple(m.group(1).strip() for m in _GO_FAIL_LINE_RE.finditer(output))
+        killed = int(match.group(1))
+        survived = int(match.group(2))
+        return ToolCounts(total=killed + survived, killed=killed, survivors=survivors)
+
     raise MutationToolError(
-        "could not parse go-mutesting output (no 'mutation score' summary, no "
-        f"per-mutant results; exit={exit_code}): {output.strip()[-400:]}"
+        "untrusted go-mutesting result: require a completed exit-zero run with "
+        f"a terminal 'mutation score' summary (exit={exit_code}): "
+        f"{output.strip()[-400:]}"
     )
 
 
