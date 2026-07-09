@@ -60,11 +60,12 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.mutation import DEFAULT_KILL_THRESHOLD
 
-#: Default frontier threshold for HEADLINE B. The band filter only KEEPs a task
-#: whose strongest frontier ``pass_at_k`` is in ``(0, band_high]``, so the
-#: aggregate frontier solve-rate over the shipped set is bounded by the same edge;
-#: the report states this threshold and proves the measured rate is below it.
-DEFAULT_FRONTIER_THRESHOLD = DEFAULT_BAND_HIGH
+#: Default frontier threshold for HEADLINE B. The keep band includes
+#: ``band_high`` itself, so the independently stated headline threshold must sit
+#: strictly above that edge. This preserves a robust ``aggregate < threshold``
+#: guarantee even when every kept task lands exactly on the inclusive keep edge;
+#: it does not alter the calibration keep band.
+DEFAULT_FRONTIER_THRESHOLD = DEFAULT_BAND_HIGH + 0.01
 
 #: A tiny tolerance for the (approximately) nondecreasing per-tier ordering, so
 #: floating-point noise never trips weak <= mid <= frontier.

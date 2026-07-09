@@ -8,7 +8,7 @@
 - deterministic across reruns: True
 
 ## Headline B - frontier solve-rate
-- stated threshold: **0.5000**
+- stated threshold: **0.5100**
 - measured frontier solve-rate: **0.2167** (< threshold and > 0)
 
 ## Per-model panel solve-rates

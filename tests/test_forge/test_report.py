@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from swe_forge.forge.calibrate.filter import BandFilterConfig
+from swe_forge.forge.calibrate.filter import BandFilterConfig, DEFAULT_BAND_HIGH
 from swe_forge.forge.export import ExportRequest, export_batch
 from swe_forge.forge.gold_eval import GoldEvalReport
 from swe_forge.forge.models import (
@@ -470,6 +470,21 @@ def test_report_headline_b_frontier_below_threshold(exported: Path) -> None:
     report = build_benchmark_report(exported, gold=_gold_all(5))
     assert report.frontier_threshold == DEFAULT_FRONTIER_THRESHOLD
     assert 0.0 < report.frontier_solve_rate < report.frontier_threshold
+    assert report.headline_b_pass
+
+
+def test_default_headline_threshold_exceeds_inclusive_keep_edge(tmp_path: Path) -> None:
+    """A keep at the inclusive band edge must still satisfy Headline B strictly."""
+    result = export_batch(
+        [_request(frontier_solves=2, mid_solves=0, weak_solves=0)],
+        tmp_path,
+    )
+    assert len(result.shipped) == 1
+
+    report = build_benchmark_report(tmp_path, gold=_gold_all(1))
+
+    assert report.frontier_solve_rate == DEFAULT_BAND_HIGH
+    assert report.frontier_threshold > DEFAULT_BAND_HIGH
     assert report.headline_b_pass
 
 

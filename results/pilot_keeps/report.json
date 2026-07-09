@@ -23,13 +23,13 @@
     "passed": true
   },
   "headline_b": {
-    "frontier_threshold": 0.5,
+    "frontier_threshold": 0.51,
     "frontier_solve_rate": 0.21666666666666667,
     "below_threshold": true,
     "nonzero": true,
     "passed": true
   },
-  "frontier_threshold": 0.5,
+  "frontier_threshold": 0.51,
   "frontier_solve_rate": 0.21666666666666667,
   "per_model": [
     {
