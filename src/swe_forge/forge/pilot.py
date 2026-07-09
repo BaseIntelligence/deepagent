@@ -1096,6 +1096,21 @@ async def _process_plans(
     ``finally`` still cleans up), but every keep already checkpointed stays shipped.
     """
     width = max(1, int(concurrency))
+    if width == 1:
+        # Do not pre-schedule the next candidate in sequential mode.  Releasing a
+        # semaphore while a failing task unwinds lets the next waiter start before
+        # ``gather`` observes the exception and cancels it, which can checkpoint an
+        # unexpected extra keep after a budget/time interruption.
+        sequential_results: list[CandidateArtifacts] = []
+        for index, plan in enumerate(plans):
+            workdir = run_root / f"cand-{index:04d}"
+            workdir.mkdir(parents=True, exist_ok=True)
+            art = await processor.process(plan, workdir)
+            if on_complete is not None:
+                await on_complete(index, plan, art)
+            sequential_results.append(art)
+        return sequential_results
+
     semaphore = asyncio.Semaphore(width)
     results: list[CandidateArtifacts | None] = [None] * len(plans)
 
