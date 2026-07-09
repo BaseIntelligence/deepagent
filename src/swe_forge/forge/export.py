@@ -42,13 +42,14 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml  # type: ignore[import-untyped]
 
@@ -67,6 +68,12 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.leak import audit_agent_tree
 from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
+from swe_forge.forge.publication import (
+    PublicationEntry,
+    PublicationError,
+    canonical_task_payload,
+    publish_generation,
+)
 from swe_forge.swe.models import (
     SweTask,
     SweTaskStatus,
@@ -172,6 +179,43 @@ class HiddenRun:
     command: str
 
 
+def canonical_hidden_test_path(path: str) -> str:
+    """Return a canonical, workspace-contained POSIX hidden-test path.
+
+    Hidden tests are copied to ``tasks/<id>/tests/<path>`` and then rendered
+    into ``evaluate.sh``.  Accepting an absolute path, traversal component, or
+    non-canonical spelling would let a malicious oracle artifact write outside
+    the workspace or make the evaluator address a different file.  Validate at
+    the export boundary rather than relying on a previous oracle gate.
+    """
+    raw = str(path)
+    if not raw or raw.strip() != raw:
+        raise ExportError(
+            "hidden test path must be a non-empty canonical relative path"
+        )
+    if "\\" in raw:
+        raise ExportError(f"hidden test path must use POSIX separators: {raw!r}")
+    candidate = PurePosixPath(raw)
+    if candidate.is_absolute() or not candidate.parts:
+        raise ExportError(f"hidden test path must be relative: {raw!r}")
+    if any(part in ("", ".", "..") for part in candidate.parts):
+        raise ExportError(f"hidden test path may not traverse directories: {raw!r}")
+    canonical = candidate.as_posix()
+    if raw != canonical:
+        raise ExportError(f"hidden test path must be canonical: {raw!r}")
+    return canonical
+
+
+def validate_hidden_test_paths(test_files: Sequence[OracleTestFile]) -> None:
+    """Reject unsafe or duplicate hidden-test destinations before any write."""
+    seen: set[str] = set()
+    for test_file in test_files:
+        path = canonical_hidden_test_path(test_file.path)
+        if path in seen:
+            raise ExportError(f"duplicate hidden test path: {path!r}")
+        seen.add(path)
+
+
 def hidden_runs(
     adapter: LanguageAdapter,
     fail_to_pass: Sequence[str],
@@ -185,18 +229,20 @@ def hidden_runs(
     command via the adapter so the whole hidden suite is enforced -- not just the
     original F2P.
     """
+    validate_hidden_test_paths(test_files)
     runs: list[HiddenRun] = []
     for tf in test_files:
         if not tf.content:
             continue
+        path = canonical_hidden_test_path(tf.path)
         command: str | None = None
         for cmd in fail_to_pass:
-            if tf.path and tf.path in cmd:
+            if path and path in cmd and shlex.quote(path) == path:
                 command = cmd
                 break
         if command is None:
-            command = adapter.test_command((tf.path,))
-        runs.append(HiddenRun(path=tf.path, content=tf.content, command=command))
+            command = adapter.test_command((path,))
+        runs.append(HiddenRun(path=path, content=tf.content, command=command))
     return runs
 
 
@@ -420,6 +466,9 @@ def export_dataset(
     from swe_forge.export.jsonl import export_jsonl
     from swe_forge.export.parquet import export_parquet
 
+    task_ids = [task.task_id for task in tasks]
+    if len(task_ids) != len(set(task_ids)):
+        raise ExportError("refusing dataset export with duplicate task ids")
     records = [forge_task_to_swe_task(task) for task in tasks]
     export_jsonl(records, jsonl_path, append=False)
     export_parquet(records, parquet_path)
@@ -467,8 +516,10 @@ def _render_evaluate_script(
         lines: list[str] = []
         for run in runs:
             parent = os.path.dirname(run.path)
+            source = f'"$FORGE_PATH/tests"/{shlex.quote(run.path)}'
+            destination = f'"$REPO_PATH"/{shlex.quote(run.path)}'
             mkdir = (
-                f'  mkdir -p "$REPO_PATH/{parent}" 2>/dev/null || true\n'
+                f'  mkdir -p "$REPO_PATH"/{shlex.quote(parent)} 2>/dev/null || true\n'
                 if parent
                 else ""
             )
@@ -481,12 +532,12 @@ def _render_evaluate_script(
             lines.append(
                 f"  {purge}\n"
                 f"{mkdir}"
-                f'  cp "$FORGE_PATH/tests/{run.path}" "$REPO_PATH/{run.path}"\n'
+                f"  cp {source} {destination}\n"
                 f"  {cond}\n"
-                f'    echo "FAIL: hidden test should {should}: {run.command}"\n'
+                f"    echo {shlex.quote(f'FAIL: hidden test should {should}: {run.command}')}\n"
                 f"    SCORE=0\n"
                 f"  fi\n"
-                f'  rm -f "$REPO_PATH/{run.path}"'
+                f"  rm -f {destination}"
             )
         return "\n".join(lines)
 
@@ -529,10 +580,10 @@ echo "Repo path: $REPO_PATH"
 if [ ! -d "$REPO_PATH/.git" ]; then
   echo "Cloning repository..."
   rm -rf "$REPO_PATH"
-  git clone {repo_url} "$REPO_PATH" 2>/dev/null
+git clone {shlex.quote(repo_url)} "$REPO_PATH" 2>/dev/null
 fi
 cd "$REPO_PATH" || {{ echo '{{"score": 0}}'; exit 0; }}
-git checkout {base_commit} --force 2>/dev/null || true
+git checkout {shlex.quote(base_commit)} --force 2>/dev/null || true
 git clean -fdx 2>/dev/null || true
 
 # -- Apply the mutation/deletion patch (robust: straight apply -> --3way) ----
@@ -1022,13 +1073,16 @@ def export_batch(
     tasks_dir = out_path / "tasks"
     jsonl_path = out_path / jsonl_name
     parquet_path = out_path / parquet_name
-    out_path.mkdir(parents=True, exist_ok=True)
-    tasks_dir.mkdir(parents=True, exist_ok=True)
 
-    results: list[TaskExportResult] = []
-    kept_tasks: list[ForgeTask] = []
+    results_by_index: dict[int, TaskExportResult] = {}
+    unique_entries: list[PublicationEntry] = []
+    duplicate_of: dict[int, int] = {}
+    canonical_by_id: dict[str, str] = {}
+    entry_index_by_id: dict[str, int] = {}
 
-    for request in requests:
+    # Assemble and deduplicate the whole request set BEFORE opening a generation
+    # for write.  A same-id conflict is therefore a no-mutation error.
+    for index, request in enumerate(requests):
         try:
             task = assemble_forge_task(
                 candidate=request.candidate,
@@ -1042,28 +1096,72 @@ def export_batch(
                 task_id=request.task_id,
                 adapter=adapter,
             )
-        except (ExportRefusedError, ExportGateError) as exc:
-            results.append(
-                TaskExportResult(
-                    task_id=request.task_id or request._fallback_id(),
-                    status="refused",
-                    reason=str(exc),
-                )
+        except (ExportRefusedError, ExportGateError, ExportError) as exc:
+            results_by_index[index] = TaskExportResult(
+                task_id=request.task_id or request._fallback_id(),
+                status="refused",
+                reason=str(exc),
             )
             continue
 
-        result = export_forge_task(
-            task,
-            tasks_dir,
-            overwrite=overwrite,
-            adapter=adapter,
-            broken_tree=request.broken_tree,
-        )
-        results.append(result)
-        if result.status in ("shipped", "skipped"):
-            kept_tasks.append(task)
+        payload = canonical_task_payload(task)
+        previous_payload = canonical_by_id.get(task.task_id)
+        if previous_payload is not None:
+            if previous_payload != payload:
+                raise ExportError(
+                    f"conflicting duplicate task_id {task.task_id!r}; "
+                    "all same-id payloads must be identical"
+                )
+            duplicate_of[index] = entry_index_by_id[task.task_id]
+            continue
+        canonical_by_id[task.task_id] = payload
+        entry_index_by_id[task.task_id] = index
+        unique_entries.append(PublicationEntry(index=index, task=task))
 
-    export_dataset(kept_tasks, jsonl_path, parquet_path)
+    def _write_workspace(task: ForgeTask, stage_tasks: Path) -> TaskExportResult:
+        request = next(
+            item for item in unique_entries if item.task.task_id == task.task_id
+        )
+        source_request = requests[request.index]
+        return export_forge_task(
+            task,
+            stage_tasks,
+            overwrite=False,
+            adapter=adapter,
+            broken_tree=source_request.broken_tree,
+        )
+
+    try:
+        _generation, outcomes = publish_generation(
+            out_path,
+            unique_entries,
+            workspace_writer=_write_workspace,
+            dataset_writer=export_dataset,
+            overwrite=overwrite,
+        )
+    except PublicationError as exc:
+        raise ExportError(str(exc)) from exc
+
+    for outcome in outcomes:
+        results_by_index[outcome.index] = TaskExportResult(
+            task_id=outcome.task_id,
+            status=outcome.status,
+            path=tasks_dir / outcome.task_id if outcome.kept else None,
+            reason=outcome.reason,
+            leak_findings=list(outcome.leak_findings),
+        )
+    for duplicate_index, original_index in duplicate_of.items():
+        original = results_by_index.get(original_index)
+        if original is None:
+            raise ExportError("duplicate task export lost its original result")
+        results_by_index[duplicate_index] = TaskExportResult(
+            task_id=original.task_id,
+            status="deduplicated",
+            path=original.path,
+            reason=f"identical to request at index {original_index}",
+        )
+
+    results = [results_by_index[index] for index in range(len(requests))]
 
     return BatchExportResult(
         out_dir=out_path,

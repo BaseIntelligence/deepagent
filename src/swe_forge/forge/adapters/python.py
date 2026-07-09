@@ -192,7 +192,7 @@ class PythonAdapter(LanguageAdapter):
     def test_command(self, selection: Sequence[str] | None = None) -> str:
         base = "python -m pytest"
         if selection:
-            return f"{base} {' '.join(selection)}"
+            return f"{base} {' '.join(shlex.quote(path) for path in selection)}"
         return base
 
     def baseline_install_commands(self, repo_path: PathLike) -> list[str]:

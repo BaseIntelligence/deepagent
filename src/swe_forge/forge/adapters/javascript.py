@@ -85,7 +85,7 @@ class JavaScriptAdapter(LanguageAdapter):
     def test_command(self, selection: Sequence[str] | None = None) -> str:
         base = "node --test"
         if selection:
-            return f"{base} {' '.join(selection)}"
+            return f"{base} {' '.join(shlex.quote(path) for path in selection)}"
         return base
 
     def baseline_test_command(self, repo_path: PathLike) -> str:

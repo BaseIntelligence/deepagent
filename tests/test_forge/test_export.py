@@ -680,3 +680,115 @@ def test_forgetask_round_trips_through_dict() -> None:
     assert restored.fail_to_pass == task.fail_to_pass
     assert restored.oracle_report.verdict == "pass"
     assert restored.calibration_report.band_verdict == "keep"
+
+
+# --------------------------------------------------------------------------- #
+# Transactional publication safety (m6-export-publication-safety)
+# --------------------------------------------------------------------------- #
+def _set_hidden_test_path(report: OracleReport, path: str) -> None:
+    """Keep the fixture's final-suite evidence valid after replacing its path."""
+    original = report.test_files[0]
+    report.test_files[0] = OracleTestFile(
+        path=path, content=original.content, origin=original.origin
+    )
+    evidence = report.final_mutation_evidence
+    assert evidence is not None
+    report.final_mutation_evidence = FinalMutationEvidence(
+        suite_fingerprint=final_suite_fingerprint(report.test_files),
+        mutants_total=evidence.mutants_total,
+        mutants_killed=evidence.mutants_killed,
+        threshold=evidence.threshold,
+        tool=evidence.tool,
+    )
+
+
+@pytest.mark.parametrize("path", ["/tmp/forge-escape.py", "../forge-escape.py"])
+def test_unsafe_hidden_test_paths_refuse_before_any_workspace_write(
+    tmp_path: Path, path: str
+) -> None:
+    report = _oracle_pass()
+    outside = tmp_path / "forge-escape.py"
+    _set_hidden_test_path(report, str(outside) if path.startswith("/") else path)
+
+    result = export_batch([_request(oracle_report=report)], tmp_path / "out")
+
+    assert len(result.refused) == 1
+    assert result.refused[0].status in ("refused", "failed")
+    assert not outside.exists()
+    assert not (tmp_path / "out" / "tasks" / result.refused[0].task_id).exists()
+
+
+def test_evaluator_quotes_a_canonical_hidden_path_with_spaces(tmp_path: Path) -> None:
+    report = _oracle_pass()
+    path = "tests/hidden/test total.py"
+    _set_hidden_test_path(report, path)
+    result = export_batch([_request(oracle_report=report)], tmp_path)
+
+    task_dir = result.shipped[0].path
+    assert task_dir is not None
+    script = (task_dir / "evaluate.sh").read_text(encoding="utf-8")
+    assert "'tests/hidden/test total.py'" in script
+    assert "python -m pytest 'tests/hidden/test total.py'" in script
+
+
+def test_identical_duplicate_task_ids_ship_exactly_one_artifact_row(
+    tmp_path: Path,
+) -> None:
+    result = export_batch([_request(), _request()], tmp_path, overwrite=True)
+
+    assert [entry.status for entry in result.results] == ["shipped", "deduplicated"]
+    assert len(result.kept) == 1
+    assert len(list((tmp_path / "tasks").iterdir())) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
+
+
+def test_conflicting_duplicate_task_id_aborts_without_mutating_output(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    first = _request(task_id="duplicate-task")
+    second = _request(
+        task_id="duplicate-task",
+        candidate=_candidate(seed=999),
+    )
+
+    with pytest.raises(export_mod.ExportError, match="conflicting duplicate task_id"):
+        export_batch([first, second], out, overwrite=True)
+
+    assert not out.exists()
+
+
+def test_failed_generation_keeps_the_prior_complete_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from swe_forge.forge import publication
+
+    first = export_batch([_request()], tmp_path, overwrite=True)
+    before = publication.load_published_generation(tmp_path)
+    assert before is not None
+    before_ids = {task.id for task in import_jsonl(first.jsonl_path)}
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("injected generation validation failure")
+
+    monkeypatch.setattr(publication, "_validate_staged_generation", _boom)
+    with pytest.raises(OSError, match="injected generation validation failure"):
+        export_batch(
+            [
+                _request(),
+                _request(
+                    candidate=_candidate(seed=8),
+                    repo_url="https://github.com/acme/two.git",
+                ),
+            ],
+            tmp_path,
+            overwrite=True,
+        )
+
+    monkeypatch.undo()
+    after = publication.load_published_generation(tmp_path)
+    assert after is not None
+    assert after.generation_id == before.generation_id
+    assert {task.id for task in import_jsonl(tmp_path / "dataset.jsonl")} == before_ids
+    assert not list((tmp_path / ".forge-publications").glob(".staging-*"))

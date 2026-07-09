@@ -14,11 +14,10 @@ layers three whole-pipeline guarantees on top:
 * **Incremental materialization.** :meth:`PilotCheckpoint.record_keep` ships one
   keep's ``tasks/<id>/`` workspace + jsonl/parquet row + provenance immediately,
   so a stopped run keeps everything shipped so far rather than 0.
-* **Crash-safe writes.** The datasets are regenerated to sibling temp files and
-  ``os.replace``-d into place, so a mid-write interruption never leaves a corrupt
-  jsonl/parquet -- only the previous valid file or the new valid file is ever
-  observed. Workspace writes inherit :func:`export_forge_task`'s own
-  temp-then-rename atomicity (a failed mid-write leaves no partial ``tasks/<id>/``).
+* **Crash-safe writes.** Workspaces, JSONL, and Parquet are staged as one
+  generation, validated against one ID set, and made visible through one
+  recoverable publication pointer. An interruption therefore exposes only the
+  prior complete generation or the new complete generation, never a mixed set.
 * **Byte-identical final artifact.** The datasets are always regenerated from the
   FULL kept set in PLAN ORDER (keyed by candidate index, not completion order),
   so a completed incremental run produces a dataset byte-identical to a single
@@ -36,13 +35,12 @@ instead of shipping it.
 from __future__ import annotations
 
 import asyncio
-import os
-import uuid
 from pathlib import Path
 
 from swe_forge.forge.adapters import LanguageAdapter
 from swe_forge.forge.export import (
     BatchExportResult,
+    ExportError,
     ExportRequest,
     TaskExportResult,
     assemble_forge_task,
@@ -51,31 +49,16 @@ from swe_forge.forge.export import (
 )
 from swe_forge.forge.models import ExportGateError, ForgeTask
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
+from swe_forge.forge.publication import (
+    PublicationEntry,
+    PublicationError,
+    PublicationOutcome,
+    canonical_task_payload,
+    load_published_generation,
+    publish_generation,
+)
 
 _KEPT_STATUSES = ("shipped", "skipped")
-
-
-def _atomic_write_dataset(
-    tasks: list[ForgeTask], jsonl_path: Path, parquet_path: Path
-) -> None:
-    """Regenerate the jsonl + parquet datasets crash-safely (temp-then-rename).
-
-    Reuses :func:`export_dataset` to serialize the FULL kept set into sibling temp
-    files, then ``os.replace``-s each into place (atomic on POSIX). A failure
-    while serializing removes the temp files and leaves BOTH originals untouched,
-    so a mid-write interruption never corrupts an already-shipped dataset.
-    """
-    suffix = f".ckpt-{uuid.uuid4().hex[:8]}.tmp"
-    jsonl_tmp = jsonl_path.with_name(jsonl_path.name + suffix)
-    parquet_tmp = parquet_path.with_name(parquet_path.name + suffix)
-    try:
-        export_dataset(tasks, jsonl_tmp, parquet_tmp)
-    except BaseException:
-        jsonl_tmp.unlink(missing_ok=True)
-        parquet_tmp.unlink(missing_ok=True)
-        raise
-    os.replace(jsonl_tmp, jsonl_path)
-    os.replace(parquet_tmp, parquet_path)
 
 
 class PilotCheckpoint:
@@ -110,11 +93,23 @@ class PilotCheckpoint:
         # of the (possibly concurrent) completion order.
         self._kept: dict[int, ForgeTask] = {}
         self._results: dict[int, TaskExportResult] = {}
+        self._requests: dict[str, ExportRequest] = {}
 
-        self._out_dir.mkdir(parents=True, exist_ok=True)
-        self._tasks_dir.mkdir(parents=True, exist_ok=True)
-        # A stop before the first keep still leaves valid empty artifacts.
-        self._write_dataset()
+        existing = load_published_generation(self._out_dir)
+        if existing is None:
+            # A stop before the first keep still exposes one valid empty
+            # generation.  The same shared publisher is used here and for every
+            # subsequent checkpoint update.
+            self._publish()
+        else:
+            for entry in existing.entries:
+                self._kept[entry.index] = entry.task
+                self._results[entry.index] = TaskExportResult(
+                    task_id=entry.task.task_id,
+                    status="skipped",
+                    path=self._tasks_dir / entry.task.task_id,
+                    reason="recovered from committed publication",
+                )
 
     @property
     def out_dir(self) -> Path:
@@ -152,7 +147,7 @@ class PilotCheckpoint:
                 task_id=request.task_id,
                 adapter=self._adapter,
             )
-        except (ExportRefusedError, ExportGateError) as exc:
+        except (ExportRefusedError, ExportGateError, ExportError) as exc:
             # Fail-fast gate: a mis-routed oracle-reject / calibration-drop never
             # materializes anything (should not reach here, but re-checked).
             result = TaskExportResult(
@@ -163,33 +158,107 @@ class PilotCheckpoint:
             self._results[index] = result
             return result
 
-        result = export_forge_task(
-            task,
-            self._tasks_dir,
-            overwrite=self._overwrite,
-            adapter=self._adapter,
-            broken_tree=request.broken_tree,
+        prior_at_index = self._kept.get(index)
+        if prior_at_index is not None:
+            if canonical_task_payload(prior_at_index) != canonical_task_payload(task):
+                return TaskExportResult(
+                    task_id=task.task_id,
+                    status="failed",
+                    reason=f"conflicting checkpoint payload at plan index {index}",
+                )
+            return self._results.get(
+                index,
+                TaskExportResult(
+                    task_id=task.task_id,
+                    status="skipped",
+                    path=self._tasks_dir / task.task_id,
+                    reason="checkpoint retry already committed",
+                ),
+            )
+
+        for existing_index, existing in self._kept.items():
+            if existing.task_id != task.task_id:
+                continue
+            if canonical_task_payload(existing) != canonical_task_payload(task):
+                return TaskExportResult(
+                    task_id=task.task_id,
+                    status="failed",
+                    reason=(
+                        f"conflicting duplicate task_id {task.task_id!r} "
+                        f"against checkpoint plan index {existing_index}"
+                    ),
+                )
+            result = TaskExportResult(
+                task_id=task.task_id,
+                status="deduplicated",
+                path=self._tasks_dir / task.task_id,
+                reason=f"identical to checkpoint plan index {existing_index}",
+            )
+            self._results[index] = result
+            return result
+
+        self._requests[task.task_id] = request
+        pending = dict(self._kept)
+        pending[index] = task
+        try:
+            outcomes = self._publish(pending)
+        except PublicationError as exc:
+            self._requests.pop(task.task_id, None)
+            raise RuntimeError(f"checkpoint publication failed: {exc}") from exc
+
+        outcome = outcomes[index]
+        result = TaskExportResult(
+            task_id=outcome.task_id,
+            status=outcome.status,
+            path=self._tasks_dir / outcome.task_id
+            if outcome.status in _KEPT_STATUSES
+            else None,
+            reason=outcome.reason,
         )
         self._results[index] = result
-        if result.status in _KEPT_STATUSES:
-            self._kept[index] = task
-            self._write_dataset()
+        self._requests.pop(task.task_id, None)
         return result
 
-    def _write_dataset(self) -> None:
-        tasks = [self._kept[index] for index in sorted(self._kept)]
-        _atomic_write_dataset(tasks, self._jsonl_path, self._parquet_path)
+    def _publish(
+        self, pending: dict[int, ForgeTask] | None = None
+    ) -> dict[int, PublicationOutcome]:
+        """Commit a complete checkpoint generation through the shared publisher."""
+        proposed = pending if pending is not None else self._kept
+        entries = [
+            PublicationEntry(index=index, task=proposed[index])
+            for index in sorted(proposed)
+        ]
+
+        def _write_workspace(task: ForgeTask, stage_tasks: Path) -> TaskExportResult:
+            request = self._requests.get(task.task_id)
+            if request is None:
+                raise PublicationError(
+                    f"missing checkpoint request for newly staged task {task.task_id!r}"
+                )
+            return export_forge_task(
+                task,
+                stage_tasks,
+                overwrite=False,
+                adapter=self._adapter,
+                broken_tree=request.broken_tree,
+            )
+
+        generation, outcomes = publish_generation(
+            self._out_dir,
+            entries,
+            workspace_writer=_write_workspace,
+            dataset_writer=export_dataset,
+            overwrite=self._overwrite,
+        )
+        self._kept = {entry.index: entry.task for entry in generation.entries}
+        return {outcome.index: outcome for outcome in outcomes}
 
     def finalize(self) -> BatchExportResult:
-        """Regenerate the plan-ordered datasets and return the batch result.
+        """Return the plan-ordered batch result for the committed generation.
 
-        Idempotent: rewrites the same bytes the last incremental write produced
-        (the full kept set in plan order), so a completed run's dataset is
-        byte-identical to a single all-at-once export. Safe to call once on
-        completion; the incremental writes already keep the on-disk dataset valid
-        if the run is interrupted before finalize.
+        Idempotent: the last record_keep call already committed the full kept set
+        in plan order, so finalize never exposes a new partial artifact set.
         """
-        self._write_dataset()
         results = [self._results[index] for index in sorted(self._results)]
         return BatchExportResult(
             out_dir=self._out_dir,

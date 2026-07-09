@@ -1577,6 +1577,51 @@ def test_handle_signals_does_not_change_the_happy_path(tmp_path: Path) -> None:
     assert without.shipped_count == with_hook.shipped_count
 
 
+def test_checkpoint_restart_recovers_complete_generation_and_ignores_staging(
+    tmp_path: Path,
+) -> None:
+    """A restarted checkpoint resumes the committed generation, not staging data."""
+    plans = _mixed_plans()
+
+    async def _drive() -> None:
+        processor = FakeProcessor()
+        first = await processor.process(plans[0], tmp_path / "w0")
+        checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+        first_result = await checkpoint.record_keep(
+            0,
+            _keep_export_request(first),  # type: ignore[arg-type]
+        )
+        assert first_result.status == "shipped"
+
+        # Simulate a hard-killed publisher that left uncommitted staging bytes.
+        abandoned = tmp_path / ".forge-publications" / ".staging-abandoned"
+        abandoned.mkdir(parents=True)
+        (abandoned / "dataset.jsonl").write_text('{"id":"not-committed"}\n')
+
+        restarted = PilotCheckpoint(tmp_path, overwrite=True)
+        assert restarted.kept_count == 1
+        assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+        assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
+
+        second = await processor.process(plans[3], tmp_path / "w1")
+        second_result = await restarted.record_keep(
+            3,
+            _keep_export_request(second),  # type: ignore[arg-type]
+        )
+        assert second_result.status == "shipped"
+
+    asyncio.run(_drive())
+    task_dirs = _task_dirs(tmp_path)
+    jsonl = import_jsonl(tmp_path / "dataset.jsonl")
+    parquet = import_parquet(tmp_path / "dataset.parquet")
+    assert len(task_dirs) == len(jsonl) == len(parquet) == 2
+    assert (
+        {task.id for task in jsonl}
+        == {row["id"] for row in parquet}
+        == {task_dir.name for task_dir in task_dirs}
+    )
+
+
 def test_keep_export_request_only_for_pass_and_keep() -> None:
     """The checkpoint gate mirrors the funnel: only oracle-pass AND band-keep."""
     keep_plan = _plan("iniconfig", "ast_mutation", 0)
