@@ -1,7 +1,8 @@
 """Oracle pipeline: orchestrate the hardening gates into one OracleReport.
 
 The final Stage 3 step (architecture S6, Stage 3 "pipeline"). The individual
-gates - establish, flakiness, mutation, differential, alt-correct, leak - each
+gates - establish, flakiness, mutation, differential, alt-correct, multifault,
+ leak - each
 extend a running :class:`~swe_forge.forge.models.OracleReport`; this module runs
 them **in that fixed order** and decides the terminal verdict:
 
@@ -72,6 +73,10 @@ from swe_forge.forge.oracle.mutation import (
     run_final_mutation_gate,
     run_mutation_gate,
 )
+from swe_forge.forge.oracle.multifault import (
+    run_multifault_completeness_gate,
+    verify_multifault_evidence,
+)
 
 if TYPE_CHECKING:
     from swe_forge.execution.docker_client import DockerClient
@@ -85,6 +90,7 @@ GATE_ORDER: tuple[str, ...] = (
     "mutation",
     "differential",
     "alt_correct",
+    "multifault",
     "leak",
 )
 
@@ -171,6 +177,7 @@ def verify_pass_consistency(
                 "mutation: final mutation evidence kill ratio "
                 f"{evidence.kill_ratio:.2f} < threshold {evidence.threshold:.2f}"
             )
+    problems.extend(verify_multifault_evidence(report))
     if not report.differential_pass:
         problems.append("differential: differential_pass is false")
     if not report.alt_correct_accepted:
@@ -338,11 +345,12 @@ def build_default_gates(
             command_timeout=command_timeout,
         )
 
-    async def leak(prior: OracleReport | None) -> OracleReport:
+    async def multifault(prior: OracleReport | None) -> OracleReport:
         assert prior is not None
         # Differential can strengthen or prune tests, and alt-correct can relax
-        # them. Re-measure the finalized suite before marking a report pass,
-        # never synthesizing new tests after this point.
+        # them. Re-measure the finalized suite before proving every multi-fault
+        # constituent is independently required, never synthesizing new tests
+        # after this point.
         final_mutation = await run_final_mutation_gate(
             candidate,
             env_image,
@@ -354,10 +362,21 @@ def build_default_gates(
         )
         if final_mutation.verdict != "pass":
             return final_mutation
-        return await run_leak_gate(
+        return await run_multifault_completeness_gate(
             candidate,
             env_image,
             final_mutation,
+            adapter=adapter,
+            docker_client=docker_client,
+            command_timeout=command_timeout,
+        )
+
+    async def leak(prior: OracleReport | None) -> OracleReport:
+        assert prior is not None
+        return await run_leak_gate(
+            candidate,
+            env_image,
+            prior,
             adapter=adapter,
             sanitize=sanitize,
             docker_client=docker_client,
@@ -370,6 +389,7 @@ def build_default_gates(
         ("mutation", mutation),
         ("differential", differential),
         ("alt_correct", alt_correct),
+        ("multifault", multifault),
         ("leak", leak),
     ]
 
@@ -441,7 +461,9 @@ async def run_oracle_pipeline(
     return await orchestrate_gates(gates, kill_threshold=kill_threshold)
 
 
-def is_oracle_exportable(report: OracleReport) -> bool:
+def is_oracle_exportable(
+    report: OracleReport, *, candidate: Candidate | None = None
+) -> bool:
     """``True`` iff the oracle verdict permits export (a necessary condition).
 
     An oracle pass is *necessary* for export but not *sufficient*: calibration
@@ -453,14 +475,17 @@ def is_oracle_exportable(report: OracleReport) -> bool:
         if report.final_mutation_evidence is not None
         else DEFAULT_KILL_THRESHOLD
     )
-    return report.verdict == "pass" and not verify_pass_consistency(
-        report, kill_threshold=threshold
+    return (
+        report.verdict == "pass"
+        and not verify_pass_consistency(report, kill_threshold=threshold)
+        and not verify_multifault_evidence(report, candidate=candidate)
     )
 
 
 def ensure_oracle_exportable(
     report: OracleReport,
     *,
+    candidate: Candidate | None = None,
     calibration_kept: bool | None = None,
     kill_threshold: float | None = None,
 ) -> None:
@@ -487,6 +512,7 @@ def ensure_oracle_exportable(
     consistency_problems = verify_pass_consistency(
         report, kill_threshold=final_threshold
     )
+    consistency_problems.extend(verify_multifault_evidence(report, candidate=candidate))
     if consistency_problems:
         raise ExportRefusedError(
             "export refused: final mutation evidence or oracle gate consistency "

@@ -253,6 +253,14 @@ def _build_provenance(
         "differential_pass": oracle_report.differential_pass,
         "alt_correct_accepted": oracle_report.alt_correct_accepted,
         "leak_audit": oracle_report.leak_audit,
+        # Keep the final per-constituent proof in the shipped provenance. A
+        # report consumer can therefore audit every leave-one-broken verdict
+        # without access to hidden tests or inverse patch bodies.
+        "multifault_completeness": (
+            oracle_report.multifault_evidence.to_dict()
+            if oracle_report.multifault_evidence
+            else None
+        ),
         "irt_difficulty": calibration_report.irt_difficulty,
         "irt_discrimination": calibration_report.irt_discrimination,
         "frontier_pass_at_k": calibration_report.frontier_pass_at_k(),
@@ -294,7 +302,11 @@ def assemble_forge_task(
     """
     # Fail-fast: oracle pass is necessary but NOT sufficient -- pass the band
     # verdict so an oracle-pass + calibration-drop candidate is refused here.
-    ensure_oracle_exportable(oracle_report, calibration_kept=calibration_report.is_keep)
+    ensure_oracle_exportable(
+        oracle_report,
+        candidate=candidate,
+        calibration_kept=calibration_report.is_keep,
+    )
 
     if adapter is None:
         adapter = build_default_registry().get(candidate.language)
@@ -861,7 +873,9 @@ def export_forge_task(
     """
     try:
         ensure_oracle_exportable(
-            task.oracle_report, calibration_kept=task.calibration_report.is_keep
+            task.oracle_report,
+            candidate=task.candidate,
+            calibration_kept=task.calibration_report.is_keep,
         )
     except ExportRefusedError as exc:
         return TaskExportResult(

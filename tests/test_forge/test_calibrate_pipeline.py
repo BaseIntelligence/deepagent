@@ -46,11 +46,14 @@ from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
     EnvImage,
+    FinalMutationEvidence,
     GeneratedSpec,
     OracleReport,
     OracleTestFile,
     Provenance,
 )
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
+from swe_forge.forge.calibrate.runner import CalibrationRunnerError
 from swe_forge.forge.panel import ModelValidation, PanelModel
 from swe_forge.forge.teacher import Usage
 
@@ -61,15 +64,19 @@ F2P = "python -m pytest tests/test_subtract.py"
 # --------------------------------------------------------------------------- #
 # Fixtures
 # --------------------------------------------------------------------------- #
-def _candidate(language: str = "python", difficulty_hint: str = "medium") -> Candidate:
+def _candidate(
+    language: str = "python",
+    difficulty_hint: str = "medium",
+    generator: str = "ast_mutation",
+) -> Candidate:
     return Candidate(
         language=language,
-        generator="ast_mutation",
+        generator=generator,
         target=CandidateTarget(files=("calc.py",), symbols=("subtract",)),
         mutation_patch="diff --git a/calc.py b/calc.py\n",
         oracle_patch="diff --git a/calc.py b/calc.py\n",
         difficulty_hint=difficulty_hint,
-        provenance=Provenance(generator="ast_mutation", seed=7, language=language),
+        provenance=Provenance(generator=generator, seed=7, language=language),
     )
 
 
@@ -102,18 +109,33 @@ def _spec(language: str = "python") -> GeneratedSpec:
     )
 
 
-def _oracle_report(language: str = "python") -> OracleReport:
+def _oracle_report(
+    language: str = "python",
+    generator: str = "ast_mutation",
+) -> OracleReport:
+    test_files = [
+        OracleTestFile(path="tests/test_subtract.py", content="x", origin="provided")
+    ]
     return OracleReport(
         language=language,
-        generator="ast_mutation",
+        generator=generator,
         verdict="pass",
         fail_to_pass=[F2P],
         pass_to_pass=[P2P],
-        test_files=[
-            OracleTestFile(
-                path="tests/test_subtract.py", content="x", origin="provided"
-            )
-        ],
+        test_files=test_files,
+        flakiness_runs=3,
+        mutants_total=10,
+        mutants_killed=10,
+        final_mutation_evidence=FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=10,
+            mutants_killed=10,
+            threshold=0.8,
+            tool="fake",
+        ),
+        differential_pass=True,
+        alt_correct_accepted=True,
+        leak_audit="clean",
     )
 
 
@@ -275,6 +297,21 @@ async def test_invalid_id_billed_for_its_probe_but_no_rollout_burst() -> None:
     # ... but contributes NO rollout burst
     assert "anthropic/claude-sonnet-4-6" not in models_in_rollouts
     assert accounting["rollout"]["calls"] == 2 * 4
+
+
+async def test_calibration_refuses_multifault_without_final_constituent_proof() -> None:
+    """No panel call may start when a multi-fault oracle proof is incomplete."""
+    with pytest.raises(CalibrationRunnerError, match="multifault"):
+        await run_calibration(
+            _candidate(generator="bug_combination"),
+            _env_image(),
+            _spec(),
+            _oracle_report(generator="bug_combination"),
+            _panel(),
+            k=1,
+            validator=FakeProbe(),
+            rollout_fn=FakeRollouts(_DISCRIMINATING),
+        )
 
 
 def test_build_usage_accounting_handles_missing_validation_usage() -> None:

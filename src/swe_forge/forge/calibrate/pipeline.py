@@ -45,12 +45,16 @@ from swe_forge.forge.calibrate.filter import (
 from swe_forge.forge.calibrate.irt import build_calibration_report
 from swe_forge.forge.calibrate.runner import (
     DEFAULT_BUDGET,
+    CalibrationRunnerError,
     CalibrationRun,
     RolloutBudget,
     RolloutFn,
     ValidatorFn,
     run_panel_calibration,
 )
+from swe_forge.forge.oracle.multifault import verify_multifault_evidence
+from swe_forge.forge.oracle.mutation import DEFAULT_KILL_THRESHOLD
+from swe_forge.forge.oracle.pipeline import verify_pass_consistency
 from swe_forge.forge.calibrate.solver import DEFAULT_MAX_TOKENS, DEFAULT_MAX_TURNS
 from swe_forge.forge.models import (
     CalibrationReport,
@@ -264,6 +268,26 @@ async def run_calibration(
     ``rollout_fn`` are injectable seams for deterministic offline tests; the
     defaults drive the live panel endpoint + the throwaway Docker scorer.
     """
+    if oracle_report.verdict != "pass":
+        raise CalibrationRunnerError(
+            "calibration refused: oracle verdict must be 'pass'; got "
+            f"{oracle_report.verdict!r}"
+        )
+    threshold = (
+        oracle_report.final_mutation_evidence.threshold
+        if oracle_report.final_mutation_evidence is not None
+        else DEFAULT_KILL_THRESHOLD
+    )
+    problems = [
+        *verify_pass_consistency(oracle_report, kill_threshold=threshold),
+        *verify_multifault_evidence(oracle_report, candidate=candidate),
+    ]
+    if problems:
+        raise CalibrationRunnerError(
+            "calibration refused: final oracle evidence is inconsistent ("
+            + "; ".join(dict.fromkeys(problems))
+            + ")"
+        )
     run = await run_panel_calibration(
         candidate,
         env_image,

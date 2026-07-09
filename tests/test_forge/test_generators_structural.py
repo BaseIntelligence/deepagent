@@ -287,6 +287,12 @@ def test_multi_file_touches_two_files_and_target_matches(tmp_path: Path) -> None
     assert _count_diff_sections(candidate.mutation_patch) >= 2
     # Each edit records its enclosing-symbol line span (mutation-gate scoping).
     edits = candidate.provenance.details["edits"]
+    constituents = candidate.provenance.details["constituents"]
+    assert [record["index"] for record in constituents] == list(
+        range(len(constituents))
+    )
+    assert all(record["inverse_patch"].strip() for record in constituents)
+    assert all(record["mutation_patch"].strip() for record in constituents)
     assert all(
         isinstance(e["start_line"], int) and e["end_line"] >= e["start_line"] >= 1
         for e in edits
@@ -334,7 +340,16 @@ def test_bug_combination_encodes_two_distinct_faults(tmp_path: Path) -> None:
     )
     assert candidate.generator == "bug_combination"
     faults = candidate.provenance.details["faults"]
+    constituents = candidate.provenance.details["constituents"]
     assert isinstance(faults, list) and len(faults) >= 2
+    assert constituents == faults
+    assert [record["index"] for record in constituents] == list(
+        range(len(constituents))
+    )
+    assert all(
+        record["inverse_patch"] == record["single_fault_revert"]
+        for record in constituents
+    )
     # Distinct symbols across distinct files; non-adjacent hunks.
     assert len({f["file"] for f in faults}) >= 2
     assert len({f["symbol"] for f in faults}) >= 2

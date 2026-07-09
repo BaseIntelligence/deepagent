@@ -23,6 +23,7 @@ gold-eval suite; here it is injected as a :class:`GoldSummary`.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -42,6 +43,10 @@ from swe_forge.forge.models import (
     Provenance,
 )
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
+from swe_forge.forge.oracle.multifault import (
+    ConstituentVerdict,
+    MultiFaultCompletenessEvidence,
+)
 from swe_forge.forge.report import (
     DEFAULT_FRONTIER_THRESHOLD,
     BenchmarkReport,
@@ -71,10 +76,25 @@ _BASE_IMAGE = {
 # Export fixtures (build a real tasks/<id>/ tree with provenance.json)
 # --------------------------------------------------------------------------- #
 def _candidate(*, language: str, generator: str, seed: int) -> Candidate:
+    files = ("src/m.py",)
+    symbols = ("total",)
+    details: dict[str, object] = {}
+    if generator in {"bug_combination", "multi_file"}:
+        files = ("src/alpha.py", "src/beta.py")
+        symbols = ("alpha", "beta")
+        details["constituents"] = [
+            {
+                "index": index,
+                "file": path,
+                "mutation_patch": f"mutation {path}",
+                "inverse_patch": f"inverse {path}",
+            }
+            for index, path in enumerate(files)
+        ]
     return Candidate(
         language=language,
         generator=generator,
-        target=CandidateTarget(files=("src/m.py",), symbols=("total",)),
+        target=CandidateTarget(files=files, symbols=symbols),
         mutation_patch=(
             "--- a/src/m.py\n+++ b/src/m.py\n@@ -1,2 +1,2 @@\n"
             " def total(items, tax_rate):\n"
@@ -89,7 +109,11 @@ def _candidate(*, language: str, generator: str, seed: int) -> Candidate:
         ),
         difficulty_hint="medium",
         provenance=Provenance(
-            generator=generator, seed=seed, language=language, created_at=_TS
+            generator=generator,
+            seed=seed,
+            language=language,
+            created_at=_TS,
+            details=details,
         ),
     )
 
@@ -133,6 +157,31 @@ def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-d
         )
     ]
 
+    multifault_evidence = None
+    if generator in {"bug_combination", "multi_file"}:
+        multifault_evidence = MultiFaultCompletenessEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            p2p_command="python -m pytest -q",
+            constituents=tuple(
+                ConstituentVerdict(
+                    index=index,
+                    file=path,
+                    inverse_patch_sha256=hashlib.sha256(
+                        f"inverse {path}".encode("utf-8")
+                    ).hexdigest(),
+                    repaired_indices=tuple(
+                        other for other in range(2) if other != index
+                    ),
+                    other_inverse_patches_applied=True,
+                    p2p_passed=True,
+                    failed_f2p_test_ids=(
+                        "python -m pytest tests/hidden/test_total.py",
+                    ),
+                    verdict="pass",
+                )
+                for index, path in enumerate(("src/alpha.py", "src/beta.py"))
+            ),
+        )
     return OracleReport(
         language=language,
         generator=generator,
@@ -151,6 +200,7 @@ def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-d
             threshold=0.8,
             tool="fake-tool",
         ),
+        multifault_evidence=multifault_evidence,
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
@@ -274,6 +324,12 @@ def test_provenance_complete_for_all_shipped(exported: Path) -> None:
         assert prov.difficulty is not None
         assert prov.discrimination is not None
         assert prov.panel_tiers() == {"weak", "mid", "frontier"}
+    multifault = next(prov for prov in provs if prov.generator == "multi_file")
+    evidence = multifault.details["multifault_completeness"]
+    assert isinstance(evidence, dict)
+    records = evidence["constituents"]
+    assert isinstance(records, list) and len(records) == 2
+    assert all(record["verdict"] == "pass" for record in records)
 
 
 def test_completeness_detects_missing_field() -> None:

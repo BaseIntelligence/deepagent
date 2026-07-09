@@ -282,6 +282,21 @@ def test_assemble_refuses_stale_final_mutation_evidence() -> None:
         )
 
 
+def test_assemble_refuses_multifault_without_constituent_metadata_or_proof() -> None:
+    report = _oracle_pass()
+    report.generator = "multi_file"
+
+    with pytest.raises(ExportRefusedError, match="multifault"):
+        assemble_forge_task(
+            candidate=_candidate(generator="multi_file"),
+            spec=_spec(),
+            oracle_report=report,
+            calibration_report=_calibration(keep=True),
+            env_image=_env_image(),
+            repo_url="https://github.com/acme/demo.git",
+        )
+
+
 def test_assemble_accepts_nondefault_final_mutation_threshold() -> None:
     report = _oracle_pass()
     evidence = report.final_mutation_evidence

@@ -59,6 +59,11 @@ from swe_forge.forge.models import (
     ModelSolveRecord,
 )
 from swe_forge.forge.oracle.mutation import DEFAULT_KILL_THRESHOLD
+from swe_forge.forge.oracle.multifault import (
+    MULTIFAULT_GENERATORS,
+    MultiFaultCompletenessEvidence,
+    MultiFaultError,
+)
 
 #: Default frontier threshold for HEADLINE B. The keep band includes
 #: ``band_high`` itself, so the independently stated headline threshold must sit
@@ -336,8 +341,39 @@ def _completeness_missing(prov: TaskProvenance, kill_threshold: float) -> list[s
                 missing.append(f"panel:{tier}")
     if prov.frontier_rate is None:
         missing.append("frontier_pass_at_k")
+    missing.extend(_multifault_evidence_issues(prov))
 
     return missing
+
+
+def _multifault_evidence_issues(prov: TaskProvenance) -> list[str]:
+    """Return completeness failures for a multi-fault task's shipped proof."""
+
+    if prov.generator not in MULTIFAULT_GENERATORS:
+        return []
+    raw = prov.details.get("multifault_completeness")
+    if not isinstance(raw, dict):
+        return ["multifault_completeness"]
+    try:
+        evidence = MultiFaultCompletenessEvidence.from_dict(raw)
+    except (KeyError, TypeError, ValueError, MultiFaultError):
+        return ["multifault_completeness"]
+    if not evidence.p2p_command.strip():
+        return ["multifault_completeness:p2p_command"]
+    issues: list[str] = []
+    expected = list(range(len(evidence.constituents)))
+    actual = [record.index for record in evidence.constituents]
+    if actual != expected:
+        issues.append("multifault_completeness:indexes")
+    for record in evidence.constituents:
+        if (
+            record.verdict != "pass"
+            or not record.other_inverse_patches_applied
+            or not record.p2p_passed
+            or not record.failed_f2p_test_ids
+        ):
+            issues.append(f"multifault_completeness:constituent:{record.index}")
+    return issues
 
 
 def check_provenance_completeness(
@@ -422,6 +458,7 @@ def _consistency_issues(prov: TaskProvenance, config: BandFilterConfig) -> list[
             f"irt_discrimination {discrimination:.4f} < keep threshold "
             f"{config.discrimination_threshold:.4f}"
         )
+    issues.extend(_multifault_evidence_issues(prov))
     return issues
 
 

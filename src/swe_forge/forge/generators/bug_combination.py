@@ -158,6 +158,10 @@ class BugCombinationGenerator(BugGenerator):
                 "end_line": fault.symbol.end_line,
                 "operator": fault.op.value if fault.op else "",
                 "mutation_patch": fault.mutation_patch,
+                # Canonical multi-fault contract: this inverse is executable
+                # against the fully broken tree and restores exactly this
+                # constituent while every other fault remains broken.
+                "inverse_patch": fault.oracle_patch,
                 "single_fault_revert": fault.oracle_patch,
                 "original_sha256": sha256_bytes(fault.original),
                 "mutated_sha256": sha256_bytes(fault.mutated),
@@ -175,6 +179,10 @@ class BugCombinationGenerator(BugGenerator):
                 "prefer": prefer,
                 "min_symbol_lines": _resolve_int_param(request, "min_symbol_lines", 0),
                 "files": list(files),
+                # The oracle completeness gate consumes this canonical,
+                # indexed format. Keep ``faults`` for existing provenance
+                # readers and mutation-scoping evidence.
+                "constituents": fault_records,
                 "faults": fault_records,
             },
         )

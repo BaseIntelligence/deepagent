@@ -17,6 +17,10 @@ import math
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from swe_forge.forge.oracle.multifault import MultiFaultCompletenessEvidence
 
 #: Languages the forge pipeline supports end to end.
 SUPPORTED_LANGUAGES: tuple[str, ...] = ("python", "javascript", "go")
@@ -774,6 +778,7 @@ class OracleReport:
     mutants_total: int = 0
     mutants_killed: int = 0
     final_mutation_evidence: FinalMutationEvidence | None = None
+    multifault_evidence: MultiFaultCompletenessEvidence | None = None
     differential_pass: bool = False
     alt_correct_accepted: bool = False
     leak_audit: str = ""
@@ -828,6 +833,9 @@ class OracleReport:
             "final_mutation_evidence": self.final_mutation_evidence.to_dict()
             if self.final_mutation_evidence
             else None,
+            "multifault_evidence": self.multifault_evidence.to_dict()
+            if self.multifault_evidence
+            else None,
             "differential_pass": self.differential_pass,
             "alt_correct_accepted": self.alt_correct_accepted,
             "leak_audit": self.leak_audit,
@@ -844,6 +852,21 @@ class OracleReport:
         p2p = data.get("pass_to_pass", [])
         details = data.get("details", {})
         final_mutation_evidence = data.get("final_mutation_evidence")
+        multifault_evidence = data.get("multifault_evidence")
+        if multifault_evidence is not None and not isinstance(
+            multifault_evidence, dict
+        ):
+            raise ModelError(
+                "OracleReport.multifault_evidence must be an object or null"
+            )
+        if isinstance(multifault_evidence, dict):
+            from swe_forge.forge.oracle.multifault import MultiFaultCompletenessEvidence
+
+            parsed_multifault_evidence = MultiFaultCompletenessEvidence.from_dict(
+                multifault_evidence
+            )
+        else:
+            parsed_multifault_evidence = None
         return cls(
             language=str(data["language"]),
             generator=str(data.get("generator", "")),
@@ -866,6 +889,7 @@ class OracleReport:
             )
             if isinstance(final_mutation_evidence, dict)
             else None,
+            multifault_evidence=parsed_multifault_evidence,
             differential_pass=bool(data.get("differential_pass", False)),
             alt_correct_accepted=bool(data.get("alt_correct_accepted", False)),
             leak_audit=str(data.get("leak_audit", "")),

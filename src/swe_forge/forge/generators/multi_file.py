@@ -140,6 +140,24 @@ class MultiFileGenerator(BugGenerator):
         symbols = tuple(fault.symbol.name for fault in ordered)
         min_symbol_lines = _resolve_int_param(request, "min_symbol_lines", 0)
         prefer = _resolve_prefer(request)
+        constituent_records = [
+            {
+                "index": index,
+                "file": fault.rel,
+                "symbol": fault.symbol.name,
+                "start_line": fault.symbol.start_line,
+                "end_line": fault.symbol.end_line,
+                "operator": fault.op.value if fault.op else "",
+                # The canonical inverse is directly applicable to the fully
+                # broken tree, repairing only this distinct-file constituent.
+                "mutation_patch": fault.mutation_patch,
+                "inverse_patch": fault.oracle_patch,
+                "single_fault_revert": fault.oracle_patch,
+                "original_sha256": sha256_bytes(fault.original),
+                "mutated_sha256": sha256_bytes(fault.mutated),
+            }
+            for index, fault in enumerate(ordered)
+        ]
         provenance = Provenance(
             generator=self.name,
             seed=request.seed,
@@ -150,18 +168,11 @@ class MultiFileGenerator(BugGenerator):
                 "prefer": prefer,
                 "min_symbol_lines": min_symbol_lines,
                 "files": list(files),
-                "edits": [
-                    {
-                        "file": fault.rel,
-                        "symbol": fault.symbol.name,
-                        "start_line": fault.symbol.start_line,
-                        "end_line": fault.symbol.end_line,
-                        "operator": fault.op.value if fault.op else "",
-                        "original_sha256": sha256_bytes(fault.original),
-                        "mutated_sha256": sha256_bytes(fault.mutated),
-                    }
-                    for fault in ordered
-                ],
+                # ``constituents`` is the shared multi-fault oracle contract.
+                # Retain ``edits`` for existing provenance and mutation-region
+                # readers, with the same executable indexed records.
+                "constituents": constituent_records,
+                "edits": constituent_records,
             },
         )
         return Candidate(
