@@ -46,7 +46,7 @@ import subprocess
 import tempfile
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from swe_forge.forge.adapters import (
@@ -82,8 +82,11 @@ from swe_forge.forge.oracle import (
     DEFAULT_FLAKINESS_RUNS,
     DEFAULT_KILL_THRESHOLD,
     STRUCTURAL_GENERATORS,
+    DockerOracleRecipe,
     HiddenTest,
     P2PDerivation,
+    SynthesisContext,
+    TreeState,
     derive_structural_p2p_exclusions,
     run_oracle_pipeline,
 )
@@ -124,6 +127,181 @@ from swe_forge.forge.teacher import (
 
 class PilotError(RuntimeError):
     """Raised for an unrecoverable failure while orchestrating the pilot."""
+
+
+class StructuralF2PProtectionError(PilotError):
+    """Raised when a structural F2P cannot be protected without ambiguity."""
+
+
+@dataclass(frozen=True)
+class StructuralF2PProtection:
+    """A pre-P2P, broken-tree-verified structural F2P proposal.
+
+    Structural P2P derivation runs before establish. Its file- and name-level
+    collateral exclusions therefore need the identity of every F2P the establish
+    gate will later confirm. This immutable bundle carries the exact proposal
+    objects, their safely discovered test paths, and every parser-derived test
+    name. An empty or ambiguous identity is rejected before derivation, never
+    treated as permission to weaken the P2P suite.
+    """
+
+    tests: tuple[HiddenTest, ...]
+    protected_names: tuple[str, ...]
+    protected_files: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.tests:
+            raise StructuralF2PProtectionError(
+                "structural F2P protection requires at least one proposed test"
+            )
+        if not self.protected_files:
+            raise StructuralF2PProtectionError(
+                "structural F2P protection is missing every test-file path"
+            )
+        if any(test.origin != "provided" for test in self.tests):
+            raise StructuralF2PProtectionError(
+                "structural F2P protection must retain every proposal as intended"
+            )
+        for path in self.protected_files:
+            candidate = PurePosixPath(path)
+            if (
+                not path
+                or candidate.is_absolute()
+                or ".." in candidate.parts
+                or path != candidate.as_posix()
+            ):
+                raise StructuralF2PProtectionError(
+                    f"structural F2P protection has an unsafe test path {path!r}"
+                )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "test_ids": [test.test_id for test in self.tests],
+            "protected_names": list(self.protected_names),
+            "protected_files": list(self.protected_files),
+            "preflight": "failed_on_broken",
+        }
+
+
+@dataclass(frozen=True)
+class _StructuralF2PObservation:
+    """One preflight run used to derive fail-closed F2P protection metadata."""
+
+    test: HiddenTest
+    failed_on_broken: bool
+    stdout: str
+    stderr: str
+
+
+def _dedupe_nonempty(values: Sequence[str]) -> tuple[str, ...]:
+    """Normalize non-empty strings in first-seen order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return tuple(result)
+
+
+def _matches_protected_file(path: str, protected_files: Sequence[str]) -> bool:
+    """Match the same path/basename policy used by P2P collection protection."""
+    candidate = PurePosixPath(path.strip())
+    if not candidate.name:
+        return False
+    for protected in protected_files:
+        known = PurePosixPath(protected)
+        if candidate.as_posix() == known.as_posix() or candidate.name == known.name:
+            return True
+    return False
+
+
+def _build_structural_f2p_protection(
+    observations: Sequence[_StructuralF2PObservation], adapter: LanguageAdapter
+) -> StructuralF2PProtection:
+    """Validate preflight observations into the metadata P2P derivation consumes.
+
+    Every proposed structural F2P must fail on the broken tree, identify at least
+    one parser-recognized test name or collection file, and use only its own
+    declared test paths for any collection error. Unknown output or a collection
+    path outside the proposal is ambiguous metadata, so it rejects before the
+    P2P command can be narrowed.
+    """
+    if not observations:
+        raise StructuralF2PProtectionError(
+            "structural F2P synthesis produced no test proposals"
+        )
+
+    tests: list[HiddenTest] = []
+    names: list[str] = []
+    files: list[str] = []
+    seen_test_ids: set[str] = set()
+    for observation in observations:
+        test = observation.test
+        if not test.test_id.strip():
+            raise StructuralF2PProtectionError(
+                "structural F2P proposal has an empty test command"
+            )
+        if test.test_id in seen_test_ids:
+            raise StructuralF2PProtectionError(
+                f"structural F2P proposal is duplicated: {test.test_id!r}"
+            )
+        seen_test_ids.add(test.test_id)
+        if not test.files:
+            raise StructuralF2PProtectionError(
+                f"structural F2P proposal {test.test_id!r} has no test file"
+            )
+        proposal_files = _dedupe_nonempty([file.path for file in test.files])
+        if len(proposal_files) != len(test.files):
+            raise StructuralF2PProtectionError(
+                f"structural F2P proposal {test.test_id!r} has ambiguous test paths"
+            )
+        for path in proposal_files:
+            parsed = PurePosixPath(path)
+            if (
+                parsed.is_absolute()
+                or ".." in parsed.parts
+                or path != parsed.as_posix()
+            ):
+                raise StructuralF2PProtectionError(
+                    f"structural F2P proposal has an unsafe test path {path!r}"
+                )
+
+        if not observation.failed_on_broken:
+            raise StructuralF2PProtectionError(
+                f"structural F2P proposal {test.test_id!r} passed on the broken tree"
+            )
+        output = "\n".join(
+            part for part in (observation.stdout, observation.stderr) if part
+        )
+        parsed_names = _dedupe_nonempty(adapter.parse_test_failures(output))
+        collection_files = _dedupe_nonempty(
+            adapter.parse_collection_error_files(output)
+        )
+        if not parsed_names and not collection_files:
+            raise StructuralF2PProtectionError(
+                f"structural F2P proposal {test.test_id!r} failed with "
+                "unparseable protection metadata"
+            )
+        for path in collection_files:
+            if not _matches_protected_file(path, proposal_files):
+                raise StructuralF2PProtectionError(
+                    f"structural F2P collection error {path!r} is not owned by "
+                    f"proposal {test.test_id!r}"
+                )
+
+        tests.append(
+            HiddenTest(test_id=test.test_id, files=test.files, origin="provided")
+        )
+        names.extend(parsed_names)
+        files.extend(proposal_files)
+
+    return StructuralF2PProtection(
+        tests=tuple(tests),
+        protected_names=_dedupe_nonempty(names),
+        protected_files=_dedupe_nonempty(files),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -268,6 +446,7 @@ class CandidateArtifacts:
     teacher_cost: float = 0.0
     panel_usage: Usage = field(default_factory=Usage)
     panel_cost: float = 0.0
+    structural_f2p_protection: StructuralF2PProtection | None = None
     p2p_derivation: P2PDerivation | None = None
     failure_reason: str = ""
     cleanup_paths: list[Path] = field(default_factory=list)
@@ -551,6 +730,7 @@ class LiveCandidateProcessor:
         provided_tests = _pr_mirror_provided_tests(
             candidate, adapter, plan.repo, baseline_command
         )
+        establish_synthesizer: AgenticTestSynthesizer | None = AgenticTestSynthesizer()
 
         # Per-candidate P2P exclusions for STRUCTURAL faults: a structural
         # mutation breaks the target's OWN existing tests as collateral damage,
@@ -561,15 +741,29 @@ class LiveCandidateProcessor:
         # broken -- never the synthesized F2P, never a gate loosening. The derived
         # baseline threads through establish -> pass_to_pass -> calibration/export.
         if candidate.generator in STRUCTURAL_GENERATORS:
+            # Propose structural F2P tests BEFORE observing and narrowing the
+            # broken P2P. Their parser-derived names and declared file paths are
+            # the protection boundary for name/file collateral derivation. A
+            # missing, unparseable, or ambiguously owned proposal raises and the
+            # outer process records a dropped candidate, never a weakened suite.
+            protection = await self._propose_structural_f2p(
+                candidate, art.env_image, adapter
+            )
+            art.structural_f2p_protection = protection
+            provided_tests = list(protection.tests)
+            # The exact pre-P2P proposal set must be confirmed by establish. Do
+            # not generate a different fallback set after derivation because it
+            # would no longer be protected metadata for the baseline we derived.
+            establish_synthesizer = None
             art.env_image = await self._apply_structural_p2p_exclusions(
-                candidate, art.env_image, adapter, art
+                candidate, art.env_image, adapter, art, protection
             )
 
         oracle = await run_oracle_pipeline(
             candidate,
             art.env_image,
             provided_tests=provided_tests,
-            establish_synthesizer=AgenticTestSynthesizer(),
+            establish_synthesizer=establish_synthesizer,
             mutation_synthesizer=MutationKillSynthesizer(),
             variant_generator=TeacherVariantGenerator(),
             differential_synthesizer=DifferentialKillSynthesizer(),
@@ -609,12 +803,76 @@ class LiveCandidateProcessor:
             art.broken_tree = broken
         return art
 
+    async def _propose_structural_f2p(
+        self,
+        candidate: Candidate,
+        env_image: EnvImage,
+        adapter: LanguageAdapter,
+    ) -> StructuralF2PProtection:
+        """Propose and identify structural F2P tests before P2P derivation.
+
+        The proposal runs only on the broken tree in a disposable sandbox. It is
+        not accepted as an oracle test yet, because establish must independently
+        verify the required broken-fails/gold-passes transition after P2P
+        derivation. It does, however, provide the only safe source of protected
+        F2P paths/names for derivation. Any unknown or ambiguous identity fails
+        closed before the derived P2P command could exclude a module.
+        """
+        from swe_forge.execution.docker_client import DockerClient
+        from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
+
+        sandbox = DockerSandbox(
+            DockerClient(),
+            SandboxConfig(
+                name="swe-forge-oracle-f2p-propose",
+                image=env_image.image_tag,
+                workspace_dir=env_image.workspace_dir,
+                command_timeout=self._command_timeout,
+            ),
+        )
+        async with sandbox:
+            recipe = DockerOracleRecipe(
+                sandbox,
+                language=candidate.language,
+                workspace_dir=env_image.workspace_dir,
+                mutation_patch=candidate.mutation_patch,
+                oracle_patch=candidate.oracle_patch,
+                p2p_command=env_image.baseline_test_command,
+                command_timeout=self._command_timeout,
+            )
+            await recipe.set_state(TreeState.BROKEN)
+            proposals = await AgenticTestSynthesizer()(
+                SynthesisContext(
+                    candidate=candidate,
+                    env_image=env_image,
+                    adapter=adapter,
+                    recipe=recipe,
+                )
+            )
+            observations: list[_StructuralF2PObservation] = []
+            for test in proposals:
+                await recipe.write_test(test)
+                try:
+                    run = await recipe.run_test(test)
+                finally:
+                    await recipe.remove_test(test)
+                observations.append(
+                    _StructuralF2PObservation(
+                        test=test,
+                        failed_on_broken=not run.passed,
+                        stdout=run.stdout,
+                        stderr=run.stderr,
+                    )
+                )
+        return _build_structural_f2p_protection(observations, adapter)
+
     async def _apply_structural_p2p_exclusions(
         self,
         candidate: Candidate,
         env_image: EnvImage,
         adapter: LanguageAdapter,
         art: CandidateArtifacts,
+        protection: StructuralF2PProtection | None = None,
     ) -> EnvImage:
         """Derive a structural candidate's collateral P2P exclusions; bake them in.
 
@@ -627,16 +885,23 @@ class LiveCandidateProcessor:
         collateral is real), never weakening a gate. The exclusions are recorded
         on the artifact and the derived image provenance for audit.
         """
+        if protection is None:
+            raise StructuralF2PProtectionError(
+                "structural P2P derivation requires validated F2P protection metadata"
+            )
         try:
             derivation = await derive_structural_p2p_exclusions(
                 candidate,
                 env_image,
                 adapter,
                 baseline_command=env_image.baseline_test_command,
+                protected_names=protection.protected_names,
+                protected_files=protection.protected_files,
                 command_timeout=self._command_timeout,
             )
         except (EstablishError, PilotError):
             return env_image
+        derivation.details["structural_f2p_protection"] = protection.to_dict()
         art.p2p_derivation = derivation
         if derivation.has_protected_conflict:
             # An un-importable module IS (or contains) the F2P's own module: a

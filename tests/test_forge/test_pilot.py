@@ -47,6 +47,7 @@ from swe_forge.forge.models import (
     Provenance,
     RepoSpec,
 )
+from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
 from swe_forge.forge.sources import build_source_registry
 from swe_forge.forge.pilot import (
@@ -55,6 +56,8 @@ from swe_forge.forge.pilot import (
     CandidatePlan,
     PilotConfig,
     StageCounts,
+    StructuralF2PProtection,
+    StructuralF2PProtectionError,
     build_pilot_plans,
     default_pilot_config,
     run_pilot,
@@ -64,6 +67,20 @@ from swe_forge.forge.teacher import Usage
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
 _BROKEN_LINE = "    return sum(items)"
+
+
+def _structural_protection() -> StructuralF2PProtection:
+    return StructuralF2PProtection(
+        tests=(
+            HiddenTest(
+                test_id="python -m pytest tests/hidden/test_f2p.py",
+                files=(HiddenTestFile(path="tests/hidden/test_f2p.py", content="x"),),
+                origin="provided",
+            ),
+        ),
+        protected_names=("test_f2p",),
+        protected_files=("tests/hidden/test_f2p.py",),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -602,10 +619,312 @@ def test_apply_structural_p2p_exclusions_bakes_derived_exclusions(monkeypatch) -
     monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _fake_derive)
     processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
     derived = asyncio.run(
-        processor._apply_structural_p2p_exclusions(candidate, env, adapter, art)
+        processor._apply_structural_p2p_exclusions(
+            candidate, env, adapter, art, _structural_protection()
+        )
     )
     assert "not (slugify)" in derived.baseline_test_command
     assert art.p2p_derivation is derivation
+
+
+def test_apply_structural_p2p_exclusions_threads_f2p_protection(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """Live derivation receives every previously discovered F2P path and name."""
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
+    from swe_forge.forge.oracle.p2p_derive import P2PDerivation
+    from swe_forge.forge.pilot import StructuralF2PProtection
+
+    plan = _plan("boltons", "function_removal", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    adapter = build_default_registry().get("python")
+    art = CandidateArtifacts(plan=plan)
+    protection = StructuralF2PProtection(
+        tests=(
+            HiddenTest(
+                test_id="python -m pytest tests/hidden/test_slugify.py",
+                files=(
+                    HiddenTestFile(
+                        path="tests/hidden/test_slugify.py",
+                        content="def test_slugify(): ...",
+                    ),
+                ),
+                origin="provided",
+            ),
+        ),
+        protected_names=("test_slugify",),
+        protected_files=("tests/hidden/test_slugify.py",),
+    )
+    captured: dict[str, object] = {}
+
+    async def _fake_derive(*args: object, **kw: object) -> P2PDerivation:
+        captured.update(kw)
+        return P2PDerivation(exclusions=("collateral",))
+
+    monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _fake_derive)
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    derived = asyncio.run(
+        processor._apply_structural_p2p_exclusions(
+            candidate, env, adapter, art, protection
+        )
+    )
+
+    assert captured["protected_names"] == ("test_slugify",)
+    assert captured["protected_files"] == ("tests/hidden/test_slugify.py",)
+    assert "not (collateral)" in derived.baseline_test_command
+    assert derived.provenance["per_candidate_p2p_exclusions"]["details"][
+        "structural_f2p_protection"
+    ]["protected_files"] == ["tests/hidden/test_slugify.py"]
+
+
+def test_apply_structural_p2p_exclusions_rejects_protected_import_conflict(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    """A protected F2P import error never lets the live path weaken P2P."""
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
+    from swe_forge.forge.oracle.p2p_derive import P2PDerivation
+    from swe_forge.forge.pilot import StructuralF2PProtection
+
+    plan = _plan("boltons", "function_removal", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    adapter = build_default_registry().get("python")
+    art = CandidateArtifacts(plan=plan)
+    protection = StructuralF2PProtection(
+        tests=(
+            HiddenTest(
+                test_id="python -m pytest tests/test_f2p.py",
+                files=(HiddenTestFile(path="tests/test_f2p.py", content="x"),),
+                origin="provided",
+            ),
+        ),
+        protected_names=("test_f2p",),
+        protected_files=("tests/test_f2p.py",),
+    )
+
+    async def _fake_derive(*args: object, **kw: object) -> P2PDerivation:
+        assert kw["protected_files"] == protection.protected_files
+        return P2PDerivation(
+            file_exclusions=("tests/test_non_f2p.py",),
+            protected_file_conflicts=("tests/test_f2p.py",),
+            p2p_green_on_broken=False,
+        )
+
+    monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _fake_derive)
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    derived = asyncio.run(
+        processor._apply_structural_p2p_exclusions(
+            candidate, env, adapter, art, protection
+        )
+    )
+
+    assert derived == env
+    assert art.p2p_derivation is not None
+    assert art.p2p_derivation.has_protected_conflict is True
+
+
+def test_structural_f2p_protection_rejects_unparseable_or_unowned_metadata() -> None:
+    """Preflight only protects parser-proven F2P identities owned by its proposal."""
+    from swe_forge.forge.adapters import build_default_registry
+    from swe_forge.forge.pilot import (
+        _StructuralF2PObservation,
+        _build_structural_f2p_protection,
+    )
+
+    adapter = build_default_registry().get("python")
+    f2p = HiddenTest(
+        test_id="python -m pytest tests/hidden/test_f2p.py",
+        files=(HiddenTestFile(path="tests/hidden/test_f2p.py", content="x"),),
+    )
+
+    protection = _build_structural_f2p_protection(
+        [
+            _StructuralF2PObservation(
+                test=f2p,
+                failed_on_broken=True,
+                stdout="FAILED tests/hidden/test_f2p.py::test_f2p\n",
+                stderr="",
+            )
+        ],
+        adapter,
+    )
+    assert protection.protected_names == ("test_f2p",)
+    assert protection.protected_files == ("tests/hidden/test_f2p.py",)
+    assert protection.tests[0].origin == "provided"
+
+    with pytest.raises(StructuralF2PProtectionError, match="unparseable"):
+        _build_structural_f2p_protection(
+            [
+                _StructuralF2PObservation(
+                    test=f2p,
+                    failed_on_broken=True,
+                    stdout="truncated runner output",
+                    stderr="",
+                )
+            ],
+            adapter,
+        )
+
+    foreign_collection = (
+        "=== ERRORS ===\nERROR tests/test_non_f2p.py\n=== short test summary info ===\n"
+    )
+    with pytest.raises(StructuralF2PProtectionError, match="not owned"):
+        _build_structural_f2p_protection(
+            [
+                _StructuralF2PObservation(
+                    test=f2p,
+                    failed_on_broken=True,
+                    stdout=foreign_collection,
+                    stderr="",
+                )
+            ],
+            adapter,
+        )
+
+
+def test_process_proposes_structural_f2p_before_derivation_and_reuses_it(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """The same structural F2P proposal protects derivation and is established."""
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
+    from swe_forge.forge.pilot import StructuralF2PProtection
+
+    plan = _plan("boltons", "ast_mutation", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    protection = StructuralF2PProtection(
+        tests=(
+            HiddenTest(
+                test_id="python -m pytest tests/hidden/test_total.py",
+                files=(
+                    HiddenTestFile(
+                        path="tests/hidden/test_total.py",
+                        content="def test_total(): ...",
+                    ),
+                ),
+                origin="provided",
+            ),
+        ),
+        protected_names=("test_total",),
+        protected_files=("tests/hidden/test_total.py",),
+    )
+    calls: list[str] = []
+    captured: dict[str, object] = {}
+
+    class _Generator:
+        def generate(self, request: object, adapter: object) -> Candidate:
+            return candidate
+
+    class _Generators:
+        def get(self, name: str) -> _Generator:
+            assert name == candidate.generator
+            return _Generator()
+
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    processor._generators = _Generators()  # type: ignore[assignment]
+
+    monkeypatch.setattr(pilot_mod, "_checkout_repo", lambda repo, dest: None)
+    monkeypatch.setattr(pilot_mod, "_author_spec", lambda *args: _spec(plan))
+
+    async def _fake_env(plan_arg: object, checkout: object) -> tuple[EnvImage, str]:
+        return env, ""
+
+    async def _fake_propose(
+        candidate_arg: Candidate, env_arg: EnvImage, adapter_arg: object
+    ) -> StructuralF2PProtection:
+        assert candidate_arg is candidate
+        assert env_arg is env
+        calls.append("propose")
+        return protection
+
+    async def _fake_derive(
+        candidate_arg: Candidate,
+        env_arg: EnvImage,
+        adapter_arg: object,
+        art: CandidateArtifacts,
+        received: StructuralF2PProtection,
+    ) -> EnvImage:
+        assert received is protection
+        calls.append("derive")
+        return env_arg
+
+    async def _fake_oracle(*args: object, **kw: object) -> OracleReport:
+        calls.append("establish")
+        captured["provided_tests"] = kw["provided_tests"]
+        captured["establish_synthesizer"] = kw["establish_synthesizer"]
+        return _oracle_reject(plan)
+
+    monkeypatch.setattr(processor, "_acquire_env_image", _fake_env)
+    monkeypatch.setattr(processor, "_propose_structural_f2p", _fake_propose)
+    monkeypatch.setattr(processor, "_apply_structural_p2p_exclusions", _fake_derive)
+    monkeypatch.setattr(pilot_mod, "run_oracle_pipeline", _fake_oracle)
+
+    art = asyncio.run(processor._process(plan, tmp_path, CandidateArtifacts(plan=plan)))
+
+    assert calls == ["propose", "derive", "establish"]
+    assert captured["provided_tests"] == list(protection.tests)
+    assert captured["establish_synthesizer"] is None
+    assert art.oracle_report is not None
+    assert art.oracle_report.is_pass is False
+
+
+def test_process_rejects_ambiguous_structural_f2p_before_derivation(
+    tmp_path: Path, monkeypatch
+) -> None:  # type: ignore[no-untyped-def]
+    """Unknown protection metadata drops the candidate rather than weakening P2P."""
+    import swe_forge.forge.pilot as pilot_mod
+    from swe_forge.forge.pilot import StructuralF2PProtectionError
+
+    plan = _plan("boltons", "ast_mutation", 0)
+    candidate = _candidate(plan)
+    env = _env_image(plan)
+    derived = False
+
+    class _Generator:
+        def generate(self, request: object, adapter: object) -> Candidate:
+            return candidate
+
+    class _Generators:
+        def get(self, name: str) -> _Generator:
+            return _Generator()
+
+    processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
+    processor._generators = _Generators()  # type: ignore[assignment]
+    monkeypatch.setattr(pilot_mod, "_checkout_repo", lambda repo, dest: None)
+    monkeypatch.setattr(pilot_mod, "_author_spec", lambda *args: _spec(plan))
+
+    async def _fake_env(plan_arg: object, checkout: object) -> tuple[EnvImage, str]:
+        return env, ""
+
+    async def _ambiguous(
+        candidate_arg: Candidate, env_arg: EnvImage, adapter_arg: object
+    ) -> object:
+        raise StructuralF2PProtectionError("no unambiguous F2P paths")
+
+    async def _should_not_derive(*args: object, **kw: object) -> EnvImage:
+        nonlocal derived
+        derived = True
+        return env
+
+    monkeypatch.setattr(processor, "_acquire_env_image", _fake_env)
+    monkeypatch.setattr(processor, "_propose_structural_f2p", _ambiguous)
+    monkeypatch.setattr(
+        processor, "_apply_structural_p2p_exclusions", _should_not_derive
+    )
+
+    art = asyncio.run(processor.process(plan, tmp_path))
+
+    assert derived is False
+    assert art.oracle_report is None
+    assert (
+        "StructuralF2PProtectionError: no unambiguous F2P paths" in art.failure_reason
+    )
 
 
 def test_apply_structural_p2p_exclusions_noop_when_no_collateral(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -625,7 +944,9 @@ def test_apply_structural_p2p_exclusions_noop_when_no_collateral(monkeypatch) ->
     monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _fake_derive)
     processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
     derived = asyncio.run(
-        processor._apply_structural_p2p_exclusions(candidate, env, adapter, art)
+        processor._apply_structural_p2p_exclusions(
+            candidate, env, adapter, art, _structural_protection()
+        )
     )
     # No collateral -> the baseline command is left untouched (no loosening).
     assert derived.baseline_test_command == env.baseline_test_command
@@ -650,7 +971,9 @@ def test_apply_structural_p2p_exclusions_best_effort_on_docker_error(
     monkeypatch.setattr(pilot_mod, "derive_structural_p2p_exclusions", _boom)
     processor = pilot_mod.LiveCandidateProcessor(panel=[], validate_models=False)
     derived = asyncio.run(
-        processor._apply_structural_p2p_exclusions(candidate, env, adapter, art)
+        processor._apply_structural_p2p_exclusions(
+            candidate, env, adapter, art, _structural_protection()
+        )
     )
     # A derivation failure never weakens a gate: the baseline is untouched and the
     # establish gate will reject p2p_not_green_on_broken if the collateral is real.
