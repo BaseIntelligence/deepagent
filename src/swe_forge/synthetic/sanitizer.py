@@ -5,33 +5,22 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from swe_forge.artifacts import (
+    GENERATED_ARTIFACT_DIRECTORY_NAMES,
+    GENERATED_ARTIFACT_FILE_SUFFIXES,
+    is_generated_artifact,
+)
 from swe_forge.synthetic.models import SanitizerResult
 
-ARTIFACT_NAMES = {
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".tox",
-    ".nox",
-    "build",
-    "dist",
-    "target",
-    ".gradle",
-}
-
-ARTIFACT_SUFFIXES = {
-    ".pyc",
-    ".pyo",
-    ".class",
-    ".jar",
-    ".log",
-}
+# Compatibility aliases. The policy itself lives in ``swe_forge.artifacts`` so
+# calibration and sanitization cannot silently diverge.
+ARTIFACT_NAMES = GENERATED_ARTIFACT_DIRECTORY_NAMES
+ARTIFACT_SUFFIXES = GENERATED_ARTIFACT_FILE_SUFFIXES
 
 
 def is_leaky_artifact(path: Path) -> bool:
     """Return whether a path is a cache/build artifact that can leak answers."""
-    return path.name in ARTIFACT_NAMES or path.suffix in ARTIFACT_SUFFIXES
+    return is_generated_artifact(path)
 
 
 def sanitize_tree(root: Path | str, *, dry_run: bool = False) -> SanitizerResult:

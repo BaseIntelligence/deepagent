@@ -810,13 +810,246 @@ async def test_capture_patch_excludes_regenerated_pyc(tmp_path) -> None:
 async def test_setup_broken_baseline_reinit_appends_artifact_ignores() -> None:
     # Fast, git-free structural guard: the re-init must append the build-artifact
     # ignore patterns to `.gitignore` BEFORE the single `git add -A`/commit.
+    from swe_forge.artifacts import GENERATED_ARTIFACT_GITIGNORE_PATTERNS
     from swe_forge.forge.calibrate.solver import _setup_broken_baseline
 
     sandbox = FakeSandbox()
     await _setup_broken_baseline(sandbox, _candidate(), timeout=30.0)
     commit_cmd = next(str(c["cmd"]) for c in sandbox.calls if "commit" in str(c["cmd"]))
     assert ".gitignore" in commit_cmd
-    for pattern in ("__pycache__/", "*.pyc", "*.egg-info/", "node_modules/"):
+    for pattern in GENERATED_ARTIFACT_GITIGNORE_PATTERNS:
         assert pattern in commit_cmd
     # The ignore write must precede `git add -A`.
     assert commit_cmd.index(".gitignore") < commit_cmd.index("add -A")
+
+
+@pytest.mark.parametrize(
+    "artifact_paths",
+    [
+        (
+            "__pycache__/calc.cpython-312.pyc",
+            ".pytest_cache/v/cache/nodeids",
+            "calc.egg-info/PKG-INFO",
+            "coverage/.coverage",
+        ),
+        (
+            "node_modules/pkg/index.js",
+            ".nyc_output/out.json",
+            "dist/bundle.js",
+            "package.test",
+        ),
+        (
+            "coverage.out",
+            "bin/calc.test",
+            "target/classes/App.class",
+            ".gradle/caches/modules.bin",
+        ),
+    ],
+    ids=("python", "javascript", "go_java_gradle"),
+)
+async def test_capture_patch_excludes_cross_language_regenerated_artifacts(
+    tmp_path, artifact_paths: tuple[str, ...]
+) -> None:
+    """The orphan baseline and captured patch retain the source fix only."""
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    sandbox = await _make_gold_repo(tmp_path)
+    for artifact in artifact_paths:
+        await sandbox.write_file(artifact, "BASELINE-ARTIFACT")
+
+    await _setup_broken_baseline(sandbox, _history_candidate(), timeout=60.0)
+    tracked = await sandbox.run_command("git ls-files")
+    assert tracked.exit_code == 0
+    for artifact in artifact_paths:
+        assert artifact not in tracked.stdout
+
+    # Model code execution regenerates each artifact while it restores the real
+    # tracked source edit. The captured patch must remain portable and source-only.
+    await sandbox.write_file("calc.py", GOLD_CALC)
+    for artifact in artifact_paths:
+        await sandbox.write_file(artifact, "REGENERATED-ARTIFACT")
+
+    patch = await capture_workspace_patch(sandbox, timeout=60.0)
+    assert "calc.py" in patch
+    assert "return a - b" in patch
+    for artifact in artifact_paths:
+        assert artifact not in patch
+
+    await sandbox.run_command("git reset --hard -q HEAD")
+    await sandbox.write_file(".captured.patch", patch)
+    applied = await sandbox.run_command("git apply --whitespace=nowarn .captured.patch")
+    assert applied.exit_code == 0, applied.stderr
+    assert (tmp_path / "calc.py").read_text() == GOLD_CALC
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    (
+        "language",
+        "image",
+        "source_path",
+        "gold_source",
+        "mutation_patch",
+        "test_command",
+        "extra_files",
+        "artifact_paths",
+    ),
+    [
+        (
+            "python",
+            "python:3.12-slim",
+            "calc.py",
+            GOLD_CALC,
+            _MUTATION_DIFF,
+            "python -c 'from calc import subtract; assert subtract(5, 3) == 2'",
+            (),
+            (
+                "__pycache__/calc.cpython-312.pyc",
+                ".pytest_cache/v/cache/nodeids",
+                "calc.egg-info/PKG-INFO",
+                "coverage/.coverage",
+            ),
+        ),
+        (
+            "javascript",
+            "node:22-slim",
+            "calc.js",
+            "function subtract(a, b) { return a - b; }\nmodule.exports = { subtract };\n",
+            (
+                "diff --git a/calc.js b/calc.js\n"
+                "--- a/calc.js\n"
+                "+++ b/calc.js\n"
+                "@@ -1,2 +1,2 @@\n"
+                "-function subtract(a, b) { return a - b; }\n"
+                "+function subtract(a, b) { return a + b; }\n"
+                " module.exports = { subtract };\n"
+            ),
+            "node -e \"const { subtract } = require('./calc'); "
+            'if (subtract(5, 3) !== 2) process.exit(1)"',
+            (),
+            (
+                "node_modules/pkg/index.js",
+                ".nyc_output/out.json",
+                "dist/bundle.js",
+                "package.test",
+            ),
+        ),
+        (
+            "go",
+            "golang:1.22",
+            "calc.go",
+            "package calc\n\nfunc Subtract(a, b int) int {\n\treturn a - b\n}\n",
+            (
+                "diff --git a/calc.go b/calc.go\n"
+                "--- a/calc.go\n"
+                "+++ b/calc.go\n"
+                "@@ -1,5 +1,5 @@\n"
+                " package calc\n"
+                " \n"
+                " func Subtract(a, b int) int {\n"
+                "-\treturn a - b\n"
+                "+\treturn a + b\n"
+                " }\n"
+            ),
+            "GOMAXPROCS=2 go test -p 1 ./...",
+            (
+                ("go.mod", "module example.com/calibration-artifact\n\ngo 1.22\n"),
+                (
+                    "calc_test.go",
+                    'package calc\n\nimport "testing"\n\n'
+                    "func TestSubtract(t *testing.T) {\n"
+                    "\tif got := Subtract(5, 3); got != 2 {\n"
+                    '\t\tt.Fatalf("Subtract() = %d, want 2", got)\n'
+                    "\t}\n"
+                    "}\n",
+                ),
+            ),
+            (
+                "coverage.out",
+                "bin/calc.test",
+                "target/classes/App.class",
+                ".gradle/caches/modules.bin",
+            ),
+        ),
+    ],
+    ids=("python", "javascript", "go_java_gradle"),
+)
+async def test_docker_baseline_keeps_cross_language_artifacts_out_of_patch(
+    language: str,
+    image: str,
+    source_path: str,
+    gold_source: str,
+    mutation_patch: str,
+    test_command: str,
+    extra_files: tuple[tuple[str, str], ...],
+    artifact_paths: tuple[str, ...],
+) -> None:
+    """Docker fixtures prove generated artifacts cannot corrupt a source fix."""
+    from swe_forge.execution.docker_client import DockerClient
+    from swe_forge.execution.sandbox import DockerSandbox, SandboxConfig
+    from swe_forge.forge.calibrate.solver import _setup_broken_baseline
+
+    candidate = Candidate(
+        language=language,
+        generator="ast_mutation",
+        target=CandidateTarget(files=(source_path,), symbols=("subtract",)),
+        mutation_patch=mutation_patch,
+        # The test drives the broken-baseline/capture seam only. Candidate
+        # validation still requires the normally supplied inverse patch.
+        oracle_patch=mutation_patch,
+        difficulty_hint="easy",
+        provenance=Provenance(generator="ast_mutation", seed=1, language=language),
+    )
+    config = SandboxConfig(
+        name="swe-forge-cal-artifact-baseline",
+        image=image,
+        workspace_dir="/workspace/repo",
+        command_timeout=120.0,
+        pids_limit=1024,
+    )
+    client = DockerClient()
+    async with DockerSandbox(client, config) as sandbox:
+        git = await sandbox.run_command(
+            "command -v git >/dev/null || "
+            "(apt-get update -qq && apt-get install -y -qq git)",
+            timeout=120.0,
+        )
+        assert git.exit_code == 0, git.stderr
+
+        await sandbox.write_file(source_path, gold_source)
+        for path, content in extra_files:
+            await sandbox.write_file(path, content)
+        init = await sandbox.run_command(
+            f"git init -q && git {_TEST_IDENT} add -A && "
+            f"git {_TEST_IDENT} commit -q -m gold",
+            timeout=60.0,
+        )
+        assert init.exit_code == 0, init.stderr
+        for artifact in artifact_paths:
+            await sandbox.write_file(artifact, "BASELINE-ARTIFACT")
+
+        await _setup_broken_baseline(sandbox, candidate, timeout=120.0)
+        tracked = await sandbox.run_command("git ls-files", timeout=60.0)
+        assert tracked.exit_code == 0, tracked.stderr
+        assert all(artifact not in tracked.stdout for artifact in artifact_paths)
+        broken = await sandbox.run_command(test_command, timeout=60.0)
+        assert broken.exit_code != 0
+
+        await sandbox.write_file(source_path, gold_source)
+        for artifact in artifact_paths:
+            await sandbox.write_file(artifact, "REGENERATED-ARTIFACT")
+        patch = await capture_workspace_patch(sandbox, timeout=120.0)
+
+        assert source_path in patch
+        assert all(artifact not in patch for artifact in artifact_paths)
+
+        reset = await sandbox.run_command("git reset --hard -q HEAD", timeout=60.0)
+        assert reset.exit_code == 0, reset.stderr
+        await sandbox.write_file(".captured.patch", patch)
+        applied = await sandbox.run_command(
+            "git apply --whitespace=nowarn .captured.patch", timeout=60.0
+        )
+        assert applied.exit_code == 0, applied.stderr
+        passed = await sandbox.run_command(test_command, timeout=60.0)
+        assert passed.exit_code == 0, passed.stderr
+        assert (await sandbox.read_file(source_path)) == gold_source

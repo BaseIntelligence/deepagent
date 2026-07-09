@@ -42,6 +42,7 @@ from logging import getLogger
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from swe_forge.artifacts import generated_artifact_gitignore_patterns
 from swe_forge.forge.adapters import LanguageAdapter, build_default_registry
 from swe_forge.forge.models import (
     Candidate,
@@ -84,35 +85,9 @@ _SOLVER_PATCH_REL = f"{_SOLVER_DIR}/solver.patch"
 # throwaway container.
 _GIT_IDENT = "-c user.email=forge@localhost -c user.name=forge"
 
-# Build/cache artifacts an EnvImage's baseline run may leave in the working tree
-# (CPython ``__pycache__``/``*.pyc``, ``*.egg-info`` packaging metadata, Python
-# tool caches, JS ``node_modules``). They must never enter the orphan
-# broken-baseline commit: if the candidate repo ships no ``.gitignore`` and they
-# get TRACKED, the model *running* the code regenerates one (e.g. a ``.pyc`` whose
-# embedded source hash/mtime changes) and the ``git add -u`` capture folds a stale
-# binary diff into the submitted patch -- so the deterministic scorer's
-# ``git apply`` fails and a genuine solve is mis-scored ``apply_failed``. We ignore
-# them BEFORE ``git add -A`` so the baseline (and every captured patch) is
-# source-only. Only unambiguous build/cache artifacts are listed -- never anything
-# that could be real source -- so a fix the model makes is always captured.
-_BUILD_ARTIFACT_IGNORES = (
-    "__pycache__/",
-    "*.pyc",
-    "*.pyo",
-    "*.egg-info/",
-    ".pytest_cache/",
-    ".mypy_cache/",
-    ".ruff_cache/",
-    ".tox/",
-    ".nox/",
-    ".coverage",
-    "htmlcov/",
-    "node_modules/",
-)
-
 
 def _gitignore_append_command() -> str:
-    """Shell snippet appending the build-artifact ignores to ``.gitignore``.
+    """Append the canonical generated-artifact ignores to ``.gitignore``.
 
     Runs before ``git add -A`` in the broken-baseline re-init so artifacts are
     never staged. ``printf`` creates ``.gitignore`` when absent; ``>>`` preserves
@@ -120,7 +95,7 @@ def _gitignore_append_command() -> str:
     on its own line even if an existing file lacked a trailing newline. Duplicate
     patterns (when the repo already ignores them) are harmless.
     """
-    body = "\\n" + "\\n".join(_BUILD_ARTIFACT_IGNORES) + "\\n"
+    body = "\\n" + "\\n".join(generated_artifact_gitignore_patterns()) + "\\n"
     return f"printf '{body}' >> .gitignore"
 
 
@@ -746,10 +721,10 @@ async def _setup_broken_baseline(
     they legitimately keep gold history for oracle scoring.
 
     To keep that capture source-only even when the candidate repo ships no
-    ``.gitignore``, the common build/cache artifact patterns (``__pycache__/``,
-    ``*.pyc``, ``*.egg-info/``, ``node_modules/``, ...) are appended to
-    ``.gitignore`` BEFORE ``git add -A`` (see :data:`_BUILD_ARTIFACT_IGNORES`), so
-    artifacts an EnvImage's baseline run generated never enter the baseline commit.
+    ``.gitignore``, the canonical generated-artifact policy (Python, JS/TS, Go,
+    Java/Gradle, coverage, logs, and binary outputs) is appended BEFORE
+    ``git add -A``. Thus artifacts an EnvImage's baseline run generated never
+    enter the baseline commit.
     Otherwise a tracked ``.pyc`` the model regenerates by running code would fold a
     stale binary diff into the submitted patch and make the scorer's ``git apply``
     fail (a real solve then mis-scored ``apply_failed``).
