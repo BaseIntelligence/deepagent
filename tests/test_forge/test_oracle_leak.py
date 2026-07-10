@@ -228,6 +228,36 @@ def test_audit_detects_hidden_test_body_in_source(tmp_path: Path) -> None:
     assert not body[0].removable
 
 
+def test_audit_ignores_partial_overlap_with_baseline_test(tmp_path: Path) -> None:
+    """One ordinary assertion overlap is not a copied hidden test body.
+
+    A synthesized test can exercise a public behavior already covered by the
+    repository's agent-visible regression suite.  Flagging a single shared
+    assertion would reject a clean tree, while a complete hidden-test body is
+    still detected below.
+    """
+    _clean_tree(tmp_path)
+    shared = "assert clamp(5, 3, 3) == 3"
+    _write(tmp_path, "tests/test_mathutils.py", f"def test_existing():\n    {shared}\n")
+    hidden = [
+        OracleTestFile(
+            path="tests/hidden/test_clamp.py",
+            content=(
+                "def test_clamp_equal_bounds():\n"
+                f"    {shared}\n"
+                "    assert clamp(1, 3, 3) == 3\n"
+            ),
+            origin="synthesized",
+        )
+    ]
+
+    audit = audit_agent_tree(
+        tmp_path, oracle_patch=_ORACLE_PATCH, hidden_test_files=hidden
+    )
+
+    assert not [f for f in audit.findings if f.marker == "hidden_test_body"]
+
+
 # --------------------------------------------------------------------------- #
 # normalize_agent_tree + sanitize_leaks
 # --------------------------------------------------------------------------- #

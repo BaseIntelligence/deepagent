@@ -301,7 +301,13 @@ def _scan_hidden_tests(
         except OSError:
             continue
         for test_rel, lines in body_lines.items():
-            if any(line and line in text for line in lines):
+            # Agent-visible regression tests can legitimately share a generic
+            # assertion with a generated hidden test. A hidden-test *body* leak
+            # means its complete meaningful body was copied into the agent tree,
+            # so require every non-boilerplate line rather than rejecting on a
+            # single incidental overlap. A one-line hidden test remains fully
+            # protected, and a copied multi-line test still fails closed.
+            if lines and all(line and line in text for line in lines):
                 findings.append(
                     LeakFinding(
                         path=rel,
