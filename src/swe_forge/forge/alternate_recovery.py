@@ -856,6 +856,7 @@ async def run_final_alternate_recovery(
         )
         await verify_unfiltered_public_gold(alternate)
         oracle = await run_normal_oracle_gates(alternate, ledger=ledger)
+        _write_json(work / "oracle-report.json", oracle.to_dict())
         if not oracle.is_pass:
             raise AlternateRecoveryError(
                 "normal oracle gates rejected: " + "; ".join(oracle.reasons)
