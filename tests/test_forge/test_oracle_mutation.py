@@ -370,6 +370,45 @@ def test_parse_gomutesting_real_new_summary_format() -> None:
     assert counts.survived == 39
 
 
+def test_parse_gomutesting_accepts_crlf_whitespace_after_terminal_summary() -> None:
+    output = (
+        "The mutation score is 0.506329 "
+        "(40 passed, 39 failed, 0 duplicated, 0 skipped, total is 79)\r\n"
+        "\t \r\n"
+    )
+    counts = parse_gomutesting(output, exit_code=0)
+    assert counts.total == 79
+    assert counts.killed == 40
+
+
+def test_parse_gomutesting_accepts_summary_without_leading_article() -> None:
+    output = "mutation score is 1.000000 (1 passed, 0 failed)\n"
+    counts = parse_gomutesting(output, exit_code=0)
+    assert counts.total == 1
+    assert counts.killed == 1
+
+
+@pytest.mark.parametrize(
+    "trailing_output",
+    [
+        'FAIL "/tmp/go-mutesting-1308782064/version7.go.40"\n',
+        "go test diagnostic emitted after summary\n",
+        "The mutation score is 1.000000 "
+        "(1 passed, 0 failed, 0 duplicated, 0 skipped, total is 1)\n",
+    ],
+)
+def test_parse_gomutesting_rejects_nonterminal_or_duplicate_summary(
+    trailing_output: str,
+) -> None:
+    output = (
+        "The mutation score is 0.506329 "
+        "(40 passed, 39 failed, 0 duplicated, 0 skipped, total is 79)\n"
+        + trailing_output
+    )
+    with pytest.raises(MutationToolError, match="terminal"):
+        parse_gomutesting(output, exit_code=0)
+
+
 @pytest.mark.parametrize("exit_code", [-9, 1, 124, 137])
 def test_parse_gomutesting_nonzero_summary_is_untrusted(exit_code: int) -> None:
     output = (
@@ -521,6 +560,25 @@ async def test_go_mutation_tool_run_green_baseline_measures_real_ratio() -> None
         i for i, c in enumerate(executor.commands) if "go-mutesting version7.go" in c
     )
     assert baseline_idx < mutest_idx
+
+
+async def test_go_mutation_tool_run_rejects_summary_followed_by_stderr() -> None:
+    from swe_forge.forge.adapters import GoAdapter
+
+    executor = _ScriptedGoExecutor(
+        [
+            ("go install", (0, "", "")),
+            ("go test", (0, "ok  \tgithub.com/google/uuid\t0.01s", "")),
+            (
+                "go-mutesting",
+                (0, _GO_REAL_SUMMARY, "unexpected diagnostic after completion\n"),
+            ),
+        ]
+    )
+    with pytest.raises(MutationToolError, match="terminal"):
+        await GoAdapter().mutation_tool_run(
+            executor, target_files=("version7.go",), timeout=30.0
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -359,7 +359,9 @@ def gomutesting_command(target: str) -> str:
 
 
 _GO_SCORE_RE = re.compile(
-    r"mutation score is\s+[\d.]+\s*\((\d+)\s+passed,\s*(\d+)\s+failed", re.IGNORECASE
+    r"^[ \t]*(?:the\s+)?mutation score is\s+[\d.]+\s*\("
+    r"(\d+)\s+passed,\s*(\d+)\s+failed(?:,[^\r\n]*)?\)",
+    re.IGNORECASE | re.MULTILINE,
 )
 # go-mutesting's own per-mutant surviving verdict lines are quoted. Anchoring on
 # the quote avoids miscounting an interleaved ``go test`` ``FAIL\tpkg`` line.
@@ -378,10 +380,10 @@ def parse_gomutesting(output: str, *, exit_code: int | None = None) -> ToolCount
     go-mutesting prints ``PASS`` when a mutant is caught (killed) and ``FAIL``
     when it survives, ending with ``The mutation score is X (P passed, F failed,
     ...)`` (``passed`` == killed, ``failed`` == survived). Trusted adequacy
-    counts require a *completed exit-zero run* with that terminal summary. A
-    partial stream can omit remaining survivors, so PASS/FAIL lines alone are
-    never admissible as a measurement, whether the process timed out, was
-    signaled, or exited nonzero.
+    counts require a completed exit-zero run with exactly one terminal summary
+    followed only by whitespace. A partial stream can omit remaining survivors,
+    so PASS/FAIL lines alone are never admissible as a measurement, whether the
+    process timed out, was signaled, or exited nonzero.
 
     The one exception is the tool's recognized "no suitable Go source" output:
     that is a sound zero-eligible-mutants result even though the tool may return
@@ -398,8 +400,13 @@ def parse_gomutesting(output: str, *, exit_code: int | None = None) -> ToolCount
     if any(signal in lowered for signal in _GO_NO_MUTANTS_SIGNALS):
         return ToolCounts(total=0, killed=0)
 
-    match = _GO_SCORE_RE.search(output)
-    if exit_code == 0 and match:
+    summaries = tuple(_GO_SCORE_RE.finditer(output))
+    if (
+        exit_code == 0
+        and len(summaries) == 1
+        and not output[summaries[0].end() :].strip()
+    ):
+        match = summaries[0]
         survivors = tuple(m.group(1).strip() for m in _GO_FAIL_LINE_RE.finditer(output))
         killed = int(match.group(1))
         survived = int(match.group(2))
