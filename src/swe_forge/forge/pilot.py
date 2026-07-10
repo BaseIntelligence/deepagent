@@ -98,6 +98,7 @@ from swe_forge.forge.oracle.differential_synth import (
 )
 from swe_forge.forge.oracle.mutation_synth import MutationKillSynthesizer
 from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
+from swe_forge.forge.oracle.teacher_evidence import aggregate_teacher_gate_usage
 from swe_forge.forge.panel import (
     PanelModel,
     build_panel_from_env,
@@ -788,6 +789,7 @@ class LiveCandidateProcessor:
             mutation_timeout=self._mutation_timeout,
         )
         art.oracle_report = oracle
+        _accumulate_oracle_usage(art, oracle)
         if not oracle.is_pass:
             return art
 
@@ -1067,6 +1069,13 @@ def _accumulate_spec_usage(art: CandidateArtifacts, spec: GeneratedSpec) -> None
         cost = teacher.get("cost")
         if isinstance(cost, (int, float)):
             art.teacher_cost += float(cost)
+
+
+def _accumulate_oracle_usage(art: CandidateArtifacts, report: OracleReport) -> None:
+    """Add every recorded oracle teacher call, including rejected candidates."""
+    usage, cost = aggregate_teacher_gate_usage(report.details)
+    art.teacher_usage = art.teacher_usage + usage
+    art.teacher_cost += cost
 
 
 def _accumulate_panel_usage(art: CandidateArtifacts, report: CalibrationReport) -> None:

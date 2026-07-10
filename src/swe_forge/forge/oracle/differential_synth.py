@@ -27,7 +27,8 @@ from swe_forge.forge.oracle.differential import (
     VariantGenerationContext,
 )
 from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
-from swe_forge.forge.teacher import TeacherClient
+from swe_forge.forge.oracle.teacher_evidence import TeacherGateCallEvidence
+from swe_forge.forge.teacher import LLMResult, TeacherClient, Usage
 
 logger = getLogger(__name__)
 
@@ -90,6 +91,17 @@ def _primary_target(ctx_files: tuple[str, ...], gold_sources: dict[str, str]) ->
     return ""
 
 
+def _implements_target(ctx: VariantGenerationContext, content: str) -> bool:
+    """Reject fenced prose or a replacement that omits the published target."""
+    required = {
+        part
+        for symbol in ctx.candidate.target.symbols
+        for part in symbol.split(".")
+        if part and part != "__init__"
+    }
+    return bool(content.strip()) and all(name in content for name in required)
+
+
 def _kill_test_path(language: str, round_index: int) -> str:
     if language == "go":
         return f"swe_forge_diff_{round_index}_test.go"
@@ -109,6 +121,7 @@ class TeacherVariantGenerator:
     ) -> None:
         self._client = client
         self._max_tokens = max_tokens
+        self.teacher_calls: list[TeacherGateCallEvidence] = []
 
     def _resolve_client(self) -> TeacherClient:
         if self._client is None:
@@ -116,11 +129,34 @@ class TeacherVariantGenerator:
         return self._client
 
     async def __call__(self, ctx: VariantGenerationContext) -> list[Variant]:
+        self.teacher_calls = []
         target = _primary_target(ctx.candidate.target.files, ctx.gold_sources)
         if not target:
+            self.teacher_calls.append(
+                TeacherGateCallEvidence(
+                    gate="differential",
+                    call_kind="proposal",
+                    real_teacher=False,
+                    status="not_called",
+                    response_kind="source_unavailable",
+                    requested_proposals=ctx.num_variants,
+                    invalid_proposals=1,
+                )
+            )
             return []
         gold = ctx.gold_sources.get(target, "")
         if not gold.strip():
+            self.teacher_calls.append(
+                TeacherGateCallEvidence(
+                    gate="differential",
+                    call_kind="proposal",
+                    real_teacher=False,
+                    status="not_called",
+                    response_kind="source_unavailable",
+                    requested_proposals=ctx.num_variants,
+                    invalid_proposals=1,
+                )
+            )
             return []
 
         try:
@@ -130,12 +166,42 @@ class TeacherVariantGenerator:
                 max_tokens=self._max_tokens,
             )
         except Exception as exc:  # pragma: no cover - network/endpoint failures
-            logger.warning("variant generation aborted: %s", exc)
+            self.teacher_calls.append(
+                TeacherGateCallEvidence(
+                    gate="differential",
+                    call_kind="proposal",
+                    real_teacher=True,
+                    status="error",
+                    response_kind="error",
+                    model=_teacher_model(self._resolve_client()),
+                    requested_proposals=ctx.num_variants,
+                    error_type=type(exc).__name__,
+                )
+            )
+            logger.warning("variant generation aborted (%s)", type(exc).__name__)
             return []
 
         variants: list[Variant] = []
-        for index, block in enumerate(_extract_blocks(result.text)[: ctx.num_variants]):
+        raw_blocks = _CODE_FENCE_RE.findall(result.text)
+        response_kind = "content"
+        if not result.text.strip():
+            response_kind = "empty"
+        elif not raw_blocks:
+            response_kind = "unparseable"
+        identical = 0
+        invalid = 0
+        parsed = 0
+        for index, raw_block in enumerate(raw_blocks[: ctx.num_variants]):
+            block = raw_block.strip()
+            if not block:
+                invalid += 1
+                continue
+            if not _implements_target(ctx, block):
+                invalid += 1
+                continue
+            parsed += 1
             if block == gold.strip():
+                identical += 1
                 continue
             variants.append(
                 Variant(
@@ -144,7 +210,30 @@ class TeacherVariantGenerator:
                     description=f"teacher plausible-wrong variant #{index + 1}",
                 )
             )
+        if parsed and parsed == identical:
+            response_kind = "identical"
+        elif raw_blocks and not parsed:
+            response_kind = "invalid"
+        self.teacher_calls.append(
+            _proposal_evidence(
+                "differential",
+                result,
+                model=_teacher_model(self._resolve_client()),
+                response_kind=response_kind,
+                requested=ctx.num_variants,
+                received=len(raw_blocks[: ctx.num_variants]),
+                parsed=parsed,
+                identical=identical,
+                invalid=invalid,
+                discarded=0,
+            )
+        )
         return variants
+
+    @property
+    def last_call(self) -> TeacherGateCallEvidence | None:
+        """Most recent call evidence, useful to diagnostic CLI/test consumers."""
+        return self.teacher_calls[-1] if self.teacher_calls else None
 
     def _user_message(
         self, ctx: VariantGenerationContext, target: str, gold: str
@@ -173,6 +262,7 @@ class DifferentialKillSynthesizer:
     ) -> None:
         self._client = client
         self._max_tokens = max_tokens
+        self.teacher_calls: list[TeacherGateCallEvidence] = []
 
     def _resolve_client(self) -> TeacherClient:
         if self._client is None:
@@ -193,10 +283,44 @@ class DifferentialKillSynthesizer:
                 max_tokens=self._max_tokens,
             )
         except Exception as exc:  # pragma: no cover - network/endpoint failures
-            logger.warning("differential-kill synthesis aborted: %s", exc)
+            self.teacher_calls.append(
+                TeacherGateCallEvidence(
+                    gate="differential",
+                    call_kind="strengthen",
+                    real_teacher=True,
+                    status="error",
+                    response_kind="error",
+                    model=_teacher_model(self._resolve_client()),
+                    requested_proposals=1,
+                    error_type=type(exc).__name__,
+                )
+            )
+            logger.warning(
+                "differential-kill synthesis aborted (%s)", type(exc).__name__
+            )
             return []
 
         content = _extract_code(result.text)
+        self.teacher_calls.append(
+            _proposal_evidence(
+                "differential",
+                result,
+                model=_teacher_model(self._resolve_client()),
+                response_kind=(
+                    "empty"
+                    if not result.text.strip()
+                    else "content"
+                    if _CODE_FENCE_RE.search(result.text)
+                    else "unparseable"
+                ),
+                requested=1,
+                received=1 if _CODE_FENCE_RE.search(result.text) else 0,
+                parsed=1 if content.strip() else 0,
+                call_kind="strengthen",
+                invalid=0 if content.strip() else 1,
+                discarded=0 if content.strip() else 1,
+            )
+        )
         if not content.strip():
             return []
         test_id = ctx.adapter.test_command((path,))
@@ -228,6 +352,51 @@ class DifferentialKillSynthesizer:
             "Write ONE test that PASSES on gold and FAILS on the wrong variant. "
             "Return ONLY the complete test file in one fenced code block."
         )
+
+    @property
+    def last_call(self) -> TeacherGateCallEvidence | None:
+        """Most recent call evidence, useful to diagnostic CLI/test consumers."""
+        return self.teacher_calls[-1] if self.teacher_calls else None
+
+
+def _proposal_evidence(
+    gate: str,
+    result: LLMResult,
+    *,
+    model: str,
+    response_kind: str,
+    requested: int,
+    received: int,
+    parsed: int,
+    call_kind: str = "proposal",
+    identical: int = 0,
+    invalid: int = 0,
+    discarded: int = 0,
+) -> TeacherGateCallEvidence:
+    """Build a source-free metadata record from a teacher result."""
+    return TeacherGateCallEvidence(
+        gate=gate,
+        call_kind=call_kind,
+        real_teacher=True,
+        status="success",
+        response_kind=response_kind,
+        model=model,
+        usage=getattr(result, "usage", Usage()),
+        cost=float(getattr(result, "cost", 0.0) or 0.0),
+        finish_reason=getattr(result, "finish_reason", None),
+        requested_proposals=requested,
+        received_proposals=received,
+        parsed_proposals=parsed,
+        identical_proposals=identical,
+        invalid_proposals=invalid,
+        discarded_proposals=discarded,
+    )
+
+
+def _teacher_model(client: object) -> str:
+    """Read a model id without making lightweight parser fakes implement it."""
+    model = getattr(client, "model", "")
+    return model.strip() if isinstance(model, str) else ""
 
 
 __all__ = ["DifferentialKillSynthesizer", "TeacherVariantGenerator"]

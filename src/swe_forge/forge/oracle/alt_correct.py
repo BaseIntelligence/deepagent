@@ -58,6 +58,12 @@ from swe_forge.forge.oracle.establish import (
     HiddenTest,
     TreeState,
 )
+from swe_forge.forge.oracle.teacher_evidence import (
+    append_execution,
+    evidence_calls,
+    gate_evidence,
+    teacher_gate_failure_reason,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -71,6 +77,7 @@ DEFAULT_NUM_ALTERNATIVES = 2
 # begin with ``alt_correct`` so a reject is always traceable to this gate.
 REASON_ALT_CORRECT_OVERFIT = "alt_correct_overfit"
 REASON_ALT_CORRECT_GOLD_NOT_GREEN = "alt_correct_gold_not_green"
+REASON_ALT_CORRECT_NO_EXECUTABLE = "alt_correct_no_executable_teacher_proposals"
 
 
 class AltCorrectError(RuntimeError):
@@ -260,6 +267,19 @@ async def assess_alt_correct(
             ],
             alt_correct_accepted=False,
             alternatives_total=len(alternatives),
+            alternatives_accepted=0,
+            details=details,
+        )
+
+    if not alternatives:
+        return AltCorrectOutcome(
+            verdict="reject",
+            reasons=[
+                f"{REASON_ALT_CORRECT_NO_EXECUTABLE}: no genuinely-correct "
+                "teacher alternative was executable through the alt-correct gate"
+            ],
+            alt_correct_accepted=False,
+            alternatives_total=0,
             alternatives_accepted=0,
             details=details,
         )
@@ -471,7 +491,19 @@ def build_alt_correct_report(
     if env_image is not None:
         details.setdefault("env_image", env_image.image_tag)
     if extra_details:
-        details.update(extra_details)
+        teacher_gates = extra_details.get("teacher_gates")
+        if isinstance(teacher_gates, dict):
+            inherited = details.get("teacher_gates")
+            merged = dict(inherited) if isinstance(inherited, dict) else {}
+            merged.update(teacher_gates)
+            details["teacher_gates"] = merged
+        details.update(
+            {
+                key: value
+                for key, value in extra_details.items()
+                if key != "teacher_gates"
+            }
+        )
 
     fail_to_pass = list(prior_report.fail_to_pass)
     test_files = list(prior_report.test_files)
@@ -688,6 +720,7 @@ async def run_alt_correct_gate(
     )
 
     alternatives: list[AltImpl] = []
+    teacher_calls = []
     if alt_generator is not None:
         gold_sources = await runner.read_sources()
         gen_ctx = AltCorrectGenerationContext(
@@ -698,6 +731,7 @@ async def run_alt_correct_gate(
             num_alternatives=num_alternatives,
         )
         alternatives = await alt_generator(gen_ctx)
+        teacher_calls.extend(evidence_calls(alt_generator))
 
     outcome = await assess_alt_correct(
         runner,
@@ -705,6 +739,20 @@ async def run_alt_correct_gate(
         fail_to_pass=prior_report.fail_to_pass,
         relax=relax,
     )
+    append_execution(
+        teacher_calls,
+        call_kind="proposal",
+        attempted=outcome.alternatives_total,
+        completed=outcome.alternatives_total,
+        executable=outcome.alternatives_total,
+    )
+    if not alternatives:
+        outcome.reasons = [teacher_gate_failure_reason("alt_correct", teacher_calls)]
     return build_alt_correct_report(
-        candidate, prior_report, outcome, env_image=env_image, base_tests=base_tests
+        candidate,
+        prior_report,
+        outcome,
+        env_image=env_image,
+        base_tests=base_tests,
+        extra_details={"teacher_gates": {"alt_correct": gate_evidence(teacher_calls)}},
     )

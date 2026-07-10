@@ -56,6 +56,12 @@ from swe_forge.forge.oracle.establish import (
     HiddenTestFile,
     TreeState,
 )
+from swe_forge.forge.oracle.teacher_evidence import (
+    append_execution,
+    evidence_calls,
+    gate_evidence,
+    teacher_gate_failure_reason,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -71,6 +77,7 @@ DEFAULT_NUM_VARIANTS = 3
 # begin with ``differential`` so a reject is always traceable to this gate.
 REASON_DIFFERENTIAL_SURVIVOR = "differential_indistinguishable_variant"
 REASON_DIFFERENTIAL_GOLD_NOT_GREEN = "differential_gold_not_green"
+REASON_DIFFERENTIAL_NO_EXECUTABLE = "differential_no_executable_teacher_proposals"
 
 
 class DifferentialError(RuntimeError):
@@ -362,6 +369,20 @@ async def assess_differential(
         "per_variant": {vid: s.summary() for vid, s in variant_scores.items()},
     }
 
+    if not variants:
+        return DifferentialOutcome(
+            verdict="reject",
+            reasons=[
+                f"{REASON_DIFFERENTIAL_NO_EXECUTABLE}: no plausible-but-wrong "
+                "teacher proposal was executable through the differential gate"
+            ],
+            differential_pass=False,
+            variants_total=0,
+            variants_killed=0,
+            discarded_test_paths=discarded,
+            details=details,
+        )
+
     if survivors and synthesizer is not None:
         if context_template is None:
             raise DifferentialError(
@@ -499,7 +520,19 @@ def build_differential_report(
     if env_image is not None:
         details.setdefault("env_image", env_image.image_tag)
     if extra_details:
-        details.update(extra_details)
+        teacher_gates = extra_details.get("teacher_gates")
+        if isinstance(teacher_gates, dict):
+            inherited = details.get("teacher_gates")
+            merged = dict(inherited) if isinstance(inherited, dict) else {}
+            merged.update(teacher_gates)
+            details["teacher_gates"] = merged
+        details.update(
+            {
+                key: value
+                for key, value in extra_details.items()
+                if key != "teacher_gates"
+            }
+        )
 
     discarded = set(outcome.discarded_test_paths)
     test_files = [tf for tf in prior_report.test_files if tf.path not in discarded]
@@ -777,6 +810,7 @@ async def run_differential_gate(
     )
 
     variants: list[Variant] = []
+    teacher_calls = []
     if variant_generator is not None:
         gold_sources = await runner.read_sources()
         gen_ctx = VariantGenerationContext(
@@ -786,6 +820,7 @@ async def run_differential_gate(
             num_variants=num_variants,
         )
         variants = await variant_generator(gen_ctx)
+        teacher_calls.extend(evidence_calls(variant_generator))
 
     template = DifferentialSynthesisContext(
         candidate=candidate,
@@ -801,6 +836,20 @@ async def run_differential_gate(
         context_template=template,
         max_rounds=max_rounds,
     )
+    teacher_calls.extend(evidence_calls(synthesizer))
+    append_execution(
+        teacher_calls,
+        call_kind="proposal",
+        attempted=outcome.variants_total,
+        completed=outcome.variants_total,
+        executable=outcome.variants_total,
+    )
+    if not variants:
+        outcome.reasons = [teacher_gate_failure_reason("differential", teacher_calls)]
     return build_differential_report(
-        candidate, prior_report, outcome, env_image=env_image
+        candidate,
+        prior_report,
+        outcome,
+        env_image=env_image,
+        extra_details={"teacher_gates": {"differential": gate_evidence(teacher_calls)}},
     )

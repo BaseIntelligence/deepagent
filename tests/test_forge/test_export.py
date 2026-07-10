@@ -119,6 +119,41 @@ def _spec(*, problem: str = "") -> GeneratedSpec:
     )
 
 
+def _teacher_gate_evidence() -> dict[str, object]:
+    def call(gate: str) -> dict[str, object]:
+        return {
+            "gate": gate,
+            "call_kind": "proposal",
+            "real_teacher": True,
+            "status": "success",
+            "response_kind": "content",
+            "model": "anthropic/test-teacher",
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+            "cost": 0.0,
+            "finish_reason": "stop",
+            "requested_proposals": 1,
+            "received_proposals": 1,
+            "parsed_proposals": 1,
+            "identical_proposals": 0,
+            "invalid_proposals": 0,
+            "discarded_proposals": 0,
+            "execution_attempted": 1,
+            "execution_completed": 1,
+            "execution_errors": 0,
+            "executable_proposals": 1,
+            "error_type": "",
+        }
+
+    return {
+        "differential": {"calls": [call("differential")]},
+        "alt_correct": {"calls": [call("alt_correct")]},
+    }
+
+
 def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
     test_files = [
         OracleTestFile(
@@ -158,6 +193,7 @@ def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
             tool="fake-tool",
         ),
         provenance=_provenance(),
+        details={"teacher_gates": _teacher_gate_evidence()},
     )
 
 

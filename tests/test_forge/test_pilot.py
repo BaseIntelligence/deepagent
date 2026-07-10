@@ -68,6 +68,7 @@ from swe_forge.forge.pilot import (
     StageCounts,
     StructuralF2PProtection,
     StructuralF2PProtectionError,
+    _accumulate_oracle_usage,
     build_pilot_plans,
     default_pilot_config,
     run_pilot,
@@ -184,6 +185,41 @@ def _spec(plan: CandidatePlan, *, problem: str = "") -> GeneratedSpec:
     )
 
 
+def _teacher_gate_evidence() -> dict[str, object]:
+    def call(gate: str) -> dict[str, object]:
+        return {
+            "gate": gate,
+            "call_kind": "proposal",
+            "real_teacher": True,
+            "status": "success",
+            "response_kind": "content",
+            "model": "anthropic/test-teacher",
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+            "cost": 0.0,
+            "finish_reason": "stop",
+            "requested_proposals": 1,
+            "received_proposals": 1,
+            "parsed_proposals": 1,
+            "identical_proposals": 0,
+            "invalid_proposals": 0,
+            "discarded_proposals": 0,
+            "execution_attempted": 1,
+            "execution_completed": 1,
+            "execution_errors": 0,
+            "executable_proposals": 1,
+            "error_type": "",
+        }
+
+    return {
+        "differential": {"calls": [call("differential")]},
+        "alt_correct": {"calls": [call("alt_correct")]},
+    }
+
+
 def _oracle_pass(plan: CandidatePlan) -> OracleReport:
     test_files = [
         OracleTestFile(
@@ -215,6 +251,7 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
+        details={"teacher_gates": _teacher_gate_evidence()},
         provenance=_provenance(plan),
     )
 
@@ -1438,6 +1475,16 @@ def test_usage_and_cost_surfaced(tmp_path: Path) -> None:
     )
     surfaced = outcome.to_dict()["usage"]
     assert surfaced["total_tokens"] == outcome.usage.total_tokens  # type: ignore[index]
+
+
+def test_oracle_teacher_usage_is_accounted_before_candidate_disposition() -> None:
+    plan = _plan("usage", "ast_mutation", 1)
+    artifacts = CandidateArtifacts(plan=plan)
+
+    _accumulate_oracle_usage(artifacts, _oracle_pass(plan))
+
+    assert artifacts.teacher_usage.total_tokens == 4
+    assert artifacts.teacher_cost == 0.0
 
 
 def test_provenance_present_and_agrees_with_report(tmp_path: Path) -> None:

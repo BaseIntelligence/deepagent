@@ -232,11 +232,11 @@ async def test_all_alternatives_accepted_passes() -> None:
     assert runner.gold_calls == [()]
 
 
-async def test_no_alternatives_passes_vacuously() -> None:
+async def test_no_alternatives_rejects_nonvacuously() -> None:
     runner = FakeAltCorrectRunner()
     outcome = await assess_alt_correct(runner, [])
-    assert outcome.is_pass
-    assert outcome.alt_correct_accepted is True
+    assert not outcome.is_pass
+    assert outcome.alt_correct_accepted is False
     assert outcome.alternatives_total == 0
     assert runner.alt_calls == []
 

@@ -77,6 +77,7 @@ from swe_forge.forge.oracle.multifault import (
     run_multifault_completeness_gate,
     verify_multifault_evidence,
 )
+from swe_forge.forge.oracle.teacher_evidence import teacher_gate_evidence_issues
 
 if TYPE_CHECKING:
     from swe_forge.execution.docker_client import DockerClient
@@ -182,6 +183,7 @@ def verify_pass_consistency(
         problems.append("differential: differential_pass is false")
     if not report.alt_correct_accepted:
         problems.append("alt_correct: alt_correct_accepted is false")
+    problems.extend(teacher_gate_evidence_issues(report.details))
     if not (
         report.leak_audit.startswith("clean")
         or report.leak_audit.startswith("sanitized")

@@ -285,11 +285,11 @@ async def test_all_variants_killed_passes() -> None:
     assert runner.read_sources_calls == 0
 
 
-async def test_no_variants_passes_vacuously() -> None:
+async def test_no_variants_rejects_nonvacuously() -> None:
     runner = FakeDifferentialRunner()
     outcome = await assess_differential(runner, [], context_template=_template())
-    assert outcome.is_pass
-    assert outcome.differential_pass is True
+    assert not outcome.is_pass
+    assert outcome.differential_pass is False
     assert outcome.variants_total == 0
     assert outcome.variants_killed == 0
 

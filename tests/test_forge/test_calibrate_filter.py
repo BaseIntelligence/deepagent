@@ -316,6 +316,35 @@ def test_custom_thresholds_change_verdict() -> None:
 # --------------------------------------------------------------------------- #
 def _passing_oracle() -> OracleReport:
     test_files = [OracleTestFile(path="tests/test_x.py", content="def test_a(): ...")]
+
+    def call(gate: str) -> dict[str, object]:
+        return {
+            "gate": gate,
+            "call_kind": "proposal",
+            "real_teacher": True,
+            "status": "success",
+            "response_kind": "content",
+            "model": "anthropic/test-teacher",
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+            "cost": 0.0,
+            "finish_reason": "stop",
+            "requested_proposals": 1,
+            "received_proposals": 1,
+            "parsed_proposals": 1,
+            "identical_proposals": 0,
+            "invalid_proposals": 0,
+            "discarded_proposals": 0,
+            "execution_attempted": 1,
+            "execution_completed": 1,
+            "execution_errors": 0,
+            "executable_proposals": 1,
+            "error_type": "",
+        }
+
     return OracleReport(
         language="python",
         generator="ast_mutation",
@@ -336,6 +365,12 @@ def _passing_oracle() -> OracleReport:
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
+        details={
+            "teacher_gates": {
+                "differential": {"calls": [call("differential")]},
+                "alt_correct": {"calls": [call("alt_correct")]},
+            }
+        },
     )
 
 

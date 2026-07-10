@@ -278,6 +278,10 @@ def _build_provenance(
     calibration_report: CalibrationReport,
 ) -> Provenance:
     base_prov = candidate.provenance
+    raw_teacher_gates = oracle_report.details.get("teacher_gates")
+    teacher_gates = (
+        dict(raw_teacher_gates) if isinstance(raw_teacher_gates, dict) else {}
+    )
     details: dict[str, object] = {
         "generator": candidate.generator,
         "seed": base_prov.seed,
@@ -298,6 +302,7 @@ def _build_provenance(
         "flakiness_runs": oracle_report.flakiness_runs,
         "differential_pass": oracle_report.differential_pass,
         "alt_correct_accepted": oracle_report.alt_correct_accepted,
+        "teacher_gates": teacher_gates,
         "leak_audit": oracle_report.leak_audit,
         # Keep the final per-constituent proof in the shipped provenance. A
         # report consumer can therefore audit every leave-one-broken verdict

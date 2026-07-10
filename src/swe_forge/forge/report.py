@@ -72,6 +72,7 @@ from swe_forge.forge.oracle.multifault import (
     MultiFaultCompletenessEvidence,
     MultiFaultError,
 )
+from swe_forge.forge.oracle.teacher_evidence import teacher_gate_evidence_issues
 
 #: Default frontier threshold for HEADLINE B. The keep band includes
 #: ``band_high`` itself, so the independently stated headline threshold must sit
@@ -335,6 +336,7 @@ def _completeness_missing(prov: TaskProvenance, kill_threshold: float) -> list[s
                 missing.append(f"panel:{tier}")
     if prov.frontier_rate is None:
         missing.append("frontier_pass_at_k")
+    missing.extend(teacher_gate_evidence_issues(prov.details))
     missing.extend(_multifault_evidence_issues(prov))
 
     return missing
@@ -452,6 +454,7 @@ def _consistency_issues(prov: TaskProvenance, config: BandFilterConfig) -> list[
             f"irt_discrimination {discrimination:.4f} < keep threshold "
             f"{config.discrimination_threshold:.4f}"
         )
+    issues.extend(teacher_gate_evidence_issues(prov.details))
     issues.extend(_multifault_evidence_issues(prov))
     return issues
 
