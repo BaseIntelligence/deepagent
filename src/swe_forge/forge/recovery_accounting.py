@@ -28,6 +28,7 @@ from swe_forge.forge.teacher import Usage
 _SCHEMA_VERSION = 1
 _EVENT_RESERVE = "reserve"
 _EVENT_SETTLE = "settle"
+_EVENT_UNKNOWN_BILLING = "unknown_billing"
 _SETTLED_STATUSES = frozenset(("success", "error"))
 _SAFE_FINISH_REASONS = frozenset(
     ("stop", "length", "tool_calls", "function_call", "content_filter")
@@ -115,6 +116,7 @@ class _Reservation:
     reserved_cost: Decimal
     reserve_event: dict[str, object]
     settle_event: dict[str, object] | None = None
+    unknown_billing_event: dict[str, object] | None = None
 
 
 class RecoveryBudgetLedger:
@@ -251,11 +253,38 @@ class RecoveryBudgetLedger:
                     raise RecoveryAccountingError(
                         f"ledger settles physical call {physical!r} more than once"
                     )
+                if reservation.unknown_billing_event is not None:
+                    raise RecoveryAccountingError(
+                        f"ledger settles unknown-billing physical call {physical!r}"
+                    )
                 self._validate_settlement(event, reservation)
                 records[physical] = _Reservation(
                     **{
                         **reservation.__dict__,
                         "settle_event": event,
+                    }
+                )
+            elif event_type == _EVENT_UNKNOWN_BILLING:
+                reservation = records.get(physical)
+                if reservation is None:
+                    raise RecoveryAccountingError(
+                        f"ledger marks unknown billing for physical call {physical!r}"
+                    )
+                if reservation.settle_event is not None:
+                    raise RecoveryAccountingError(
+                        f"ledger marks settled physical call {physical!r} "
+                        "as unknown billing"
+                    )
+                if reservation.unknown_billing_event is not None:
+                    raise RecoveryAccountingError(
+                        f"ledger marks physical call {physical!r} as unknown "
+                        "billing more than once"
+                    )
+                self._validate_unknown_billing(event, reservation)
+                records[physical] = _Reservation(
+                    **{
+                        **reservation.__dict__,
+                        "unknown_billing_event": event,
                     }
                 )
             else:
@@ -303,6 +332,27 @@ class RecoveryBudgetLedger:
             raise RecoveryAccountingError(
                 f"settlement for {reservation.physical_call_id!r} has invalid "
                 "error_type"
+            )
+
+    def _validate_unknown_billing(
+        self, event: dict[str, object], reservation: _Reservation
+    ) -> None:
+        for field, expected in (
+            ("logical_call_id", reservation.logical_call_id),
+            ("stage", reservation.stage),
+            ("model", reservation.model),
+            ("retry", reservation.retry),
+        ):
+            if event.get(field) != expected:
+                raise RecoveryAccountingError(
+                    f"unknown billing for {reservation.physical_call_id!r} "
+                    f"mismatches {field}"
+                )
+        error_type = event.get("error_type")
+        if not isinstance(error_type, str) or not _safe_error_type(error_type):
+            raise RecoveryAccountingError(
+                f"unknown billing for {reservation.physical_call_id!r} "
+                "has an invalid error_type"
             )
 
     @property
@@ -403,6 +453,10 @@ class RecoveryBudgetLedger:
             raise RecoveryAccountingError(
                 f"cannot settle physical call {physical_call_id!r} twice"
             )
+        if reservation.unknown_billing_event is not None:
+            raise RecoveryAccountingError(
+                f"cannot settle unknown-billing physical call {physical_call_id!r}"
+            )
         event: dict[str, object] = {
             "schema_version": _SCHEMA_VERSION,
             "event": _EVENT_SETTLE,
@@ -433,6 +487,47 @@ class RecoveryBudgetLedger:
                 f"settlement for {reservation.physical_call_id!r} exceeded its "
                 "pre-reserved worst-case cost"
             )
+
+    def mark_unknown_billing(self, physical_call_id: str, *, error_type: str) -> None:
+        """Durably retain an unresolved post-send reservation without fake metering."""
+        reservation = self._records.get(physical_call_id)
+        if reservation is None:
+            raise RecoveryAccountingError(
+                f"cannot mark unknown billing for unknown physical call "
+                f"{physical_call_id!r}"
+            )
+        if reservation.settle_event is not None:
+            raise RecoveryAccountingError(
+                f"cannot mark settled physical call {physical_call_id!r} "
+                "as unknown billing"
+            )
+        if reservation.unknown_billing_event is not None:
+            raise RecoveryAccountingError(
+                f"physical call {physical_call_id!r} is already unknown billing"
+            )
+        safe_error_type = _safe_error_type(error_type)
+        if not safe_error_type:
+            raise RecoveryAccountingError("unknown billing requires a safe error type")
+        event: dict[str, object] = {
+            "schema_version": _SCHEMA_VERSION,
+            "event": _EVENT_UNKNOWN_BILLING,
+            "timestamp": _timestamp(),
+            "run_id": self.run_id,
+            "logical_call_id": reservation.logical_call_id,
+            "physical_call_id": reservation.physical_call_id,
+            "stage": reservation.stage,
+            "model": reservation.model,
+            "retry": reservation.retry,
+            "error_type": safe_error_type,
+        }
+        self._validate_unknown_billing(event, reservation)
+        self._append(event)
+        self._records[physical_call_id] = _Reservation(
+            **{
+                **reservation.__dict__,
+                "unknown_billing_event": event,
+            }
+        )
 
     def events(self) -> list[dict[str, object]]:
         """Return parsed events for audit or tests, preserving append order."""
@@ -473,6 +568,14 @@ class RecoveryBudgetLedger:
             if record.settle_event is None
         )
 
+    def unknown_billing_call_ids(self) -> tuple[str, ...]:
+        """Return unresolved calls whose provider billing cannot be proven exact."""
+        return tuple(
+            physical
+            for physical, record in self._records.items()
+            if record.unknown_billing_event is not None
+        )
+
 
 def _iter_physical_calls(evidence: Iterable[object]) -> list[dict[str, object]]:
     physical: list[dict[str, object]] = []
@@ -503,6 +606,12 @@ def reconcile_recovery_call_evidence(
     can publish a recertified recovery generation.
     """
     unsettled = ledger.unsettled_call_ids()
+    unknown_billing = ledger.unknown_billing_call_ids()
+    if unknown_billing:
+        raise RecoveryAccountingError(
+            "recovery ledger has unknown-billing physical calls: "
+            + ", ".join(unknown_billing)
+        )
     if unsettled:
         raise RecoveryAccountingError(
             "recovery ledger has unsettled physical calls: " + ", ".join(unsettled)

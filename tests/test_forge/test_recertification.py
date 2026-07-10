@@ -476,6 +476,32 @@ def test_recertification_blocks_unreconciled_ledger_calls(tmp_path: Path) -> Non
         )
 
 
+def test_recertification_blocks_unknown_billing_reservation(tmp_path: Path) -> None:
+    """An unresolved post-send reservation can never authorize publication."""
+    task = _task()
+    ledger = _ledger(tmp_path)
+    _fresh_metered_calibration(task, ledger)
+    generation = PublishedGeneration(
+        generation_id="genuine",
+        root=Path("/tmp/genuine"),
+        tasks_dir=Path("/tmp/genuine/tasks"),
+        jsonl_path=Path("/tmp/genuine/dataset.jsonl"),
+        parquet_path=Path("/tmp/genuine/dataset.parquet"),
+        entries=(PublicationEntry(index=0, task=task),),
+    )
+    ledger.reserve(
+        logical_call_id="unknown-billing",
+        stage="oracle.differential",
+        model="anthropic/test-model",
+        retry=0,
+    )
+
+    with pytest.raises(RecertificationError, match="unsettled physical calls"):
+        build_recertification_request(
+            generation, task.oracle_report, recovery_ledger=ledger
+        )
+
+
 def test_recertification_rejects_calibration_without_per_call_ledger_linkage(
     tmp_path: Path,
 ) -> None:

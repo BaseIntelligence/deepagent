@@ -20,7 +20,9 @@ names the absent environment variable and never echoes the key.
 
 from __future__ import annotations
 
+import asyncio
 import json
+from decimal import Decimal, InvalidOperation
 import os
 import uuid
 from collections.abc import Awaitable, Sequence
@@ -72,6 +74,10 @@ class MissingCredentialsError(TeacherError):
 
 class ModelRoutingError(TeacherError):
     """Raised when a model id is not provider-prefixed (``provider/<id>``)."""
+
+
+class UnknownBillingError(TeacherError):
+    """Raised when a possibly-sent request has no exact provider metering."""
 
 
 @dataclass
@@ -255,6 +261,56 @@ def _cost_from_response(resp: Any) -> float:
         return 0.0
 
 
+def _response_field(value: object, field: str) -> object:
+    """Read structured provider metadata without parsing response body content."""
+    if isinstance(value, dict):
+        return value.get(field)
+    return getattr(value, field, None)
+
+
+def _exact_response_metering(
+    resp: object,
+) -> tuple[Usage, float | str | Decimal] | None:
+    """Return only provider-supplied usage and cost, never inferred defaults."""
+    raw_usage = _response_field(resp, "usage")
+    values: dict[str, int] = {}
+    for usage_field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        raw_value = _response_field(raw_usage, usage_field)
+        if (
+            not isinstance(raw_value, int)
+            or isinstance(raw_value, bool)
+            or raw_value < 0
+        ):
+            return None
+        values[usage_field] = raw_value
+    hidden = _response_field(resp, "_hidden_params")
+    raw_cost = _response_field(hidden, "response_cost")
+    if isinstance(raw_cost, bool) or raw_cost is None:
+        return None
+    try:
+        parsed_cost = Decimal(str(raw_cost))
+    except (InvalidOperation, ValueError):
+        return None
+    if not parsed_cost.is_finite() or parsed_cost < 0:
+        return None
+    if isinstance(raw_cost, (float, str, Decimal)):
+        exact_cost: float | str | Decimal = raw_cost
+    elif isinstance(raw_cost, int):
+        exact_cost = Decimal(raw_cost)
+    else:
+        return None
+    return Usage(**values), exact_cost
+
+
+def _response_from_exception(exc: BaseException) -> object | None:
+    """Find a structured provider response without reading exception text/body."""
+    for response_field in ("llm_response", "completion_response", "response"):
+        response = getattr(exc, response_field, None)
+        if response is not None:
+            return response
+    return None
+
+
 def _normalize_tool_calls(message: Any) -> list[NormalizedToolCall]:
     raw_calls = getattr(message, "tool_calls", None) or []
     normalized: list[NormalizedToolCall] = []
@@ -433,8 +489,16 @@ class TeacherClient:
                 from swe_forge.forge.recovery_accounting import sanitize_request_id
 
                 request_id = sanitize_request_id(raw_request_id)
-                usage = _usage_from_response(response)
-                cost = _cost_from_response(response)
+                metering = _exact_response_metering(response)
+                if metering is None:
+                    self._recovery_ledger.mark_unknown_billing(
+                        physical_call_id,
+                        error_type="MissingExactProviderMetering",
+                    )
+                    raise UnknownBillingError(
+                        "recovery request has unknown provider billing"
+                    )
+                usage, cost = metering
                 if not request_id:
                     self._recovery_ledger.settle(
                         physical_call_id,
@@ -465,19 +529,48 @@ class TeacherClient:
                 self._recovery_history.append(accounting)
                 _set_recovery_accounting(response, accounting)
                 return response
+            except asyncio.CancelledError:
+                self._recovery_ledger.mark_unknown_billing(
+                    physical_call_id,
+                    error_type="CancelledError",
+                )
+                raise
             except Exception as exc:
-                # A failed provider request is itself a physical, billable
-                # attempt. It must settle before a retry can be issued.
-                from swe_forge.forge.recovery_accounting import RecoveryAccountingError
+                from swe_forge.forge.recovery_accounting import (
+                    RecoveryAccountingError,
+                    sanitize_request_id,
+                )
 
                 settled = {
                     record["physical_call_id"]
                     for record in self._recovery_ledger.settled_calls()
                 }
+                if isinstance(exc, UnknownBillingError):
+                    raise
                 try:
                     if physical_call_id not in settled:
+                        response = _response_from_exception(exc)
+                        metering = (
+                            _exact_response_metering(response)
+                            if response is not None
+                            else None
+                        )
+                        if metering is None:
+                            self._recovery_ledger.mark_unknown_billing(
+                                physical_call_id,
+                                error_type=type(exc).__name__,
+                            )
+                            raise UnknownBillingError(
+                                "recovery request has unknown provider billing"
+                            ) from None
+                        usage, cost = metering
                         self._recovery_ledger.settle(
                             physical_call_id,
+                            request_id=sanitize_request_id(
+                                _response_request_id(response)
+                            ),
+                            usage=usage,
+                            cost=cost,
                             status="error",
                             error_type=type(exc).__name__,
                         )
