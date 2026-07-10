@@ -21,20 +21,6 @@ def parse_args() -> argparse.Namespace:
         default=REPO_ROOT / "results" / "pilot_final",
     )
     parser.add_argument(
-        "--source-workspace",
-        type=Path,
-        default=REPO_ROOT
-        / "results"
-        / "pilot_keeps"
-        / "tasks"
-        / "mahmoud-boltons__bug_combination__7bb4e61cc98c",
-    )
-    parser.add_argument(
-        "--budget-progress",
-        type=Path,
-        default=REPO_ROOT / "results" / "pilot_keeps" / "harvest_progress.json",
-    )
-    parser.add_argument(
         "--work-root",
         type=Path,
         default=REPO_ROOT / "results" / "final_alternate_recovery",
@@ -47,9 +33,8 @@ def main() -> None:
     result = asyncio.run(
         run_final_alternate_recovery(
             out_dir=args.out_dir,
-            source_workspace=args.source_workspace,
-            budget_progress=args.budget_progress,
             work_root=args.work_root,
+            repository_root=REPO_ROOT,
         )
     )
     print(

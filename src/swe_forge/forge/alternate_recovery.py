@@ -11,6 +11,9 @@ import hashlib
 import json
 import os
 import shutil
+import stat
+import tempfile
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -101,9 +104,171 @@ _CANONICAL_AUDIT_ARTIFACTS = (
     "report.md",
 )
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_APPROVED_MANIFEST_RESOURCE = Path(__file__).with_name(
+    "approved_alternate_recovery_inputs.json"
+)
+# This pins the semantic manifest digest outside the retained workspace.  Editing
+# the retained bytes cannot amend the approval, and editing the manifest resource
+# without the reviewed source change below fails closed.
+APPROVED_INPUT_MANIFEST_DIGEST = (
+    "a3130d75dfd2b4fe37d9ecc785ed837cf3e4ffd0945fbc227ca49ca28a4a2e5a"
+)
+
 
 class AlternateRecoveryError(RuntimeError):
     """Raised when the sole allowed alternate-recovery path cannot continue."""
+
+
+@dataclass(frozen=True)
+class ApprovedTree:
+    """Digest commitment to a canonical, complete retained tree."""
+
+    path: str
+    file_count: int
+    tree_sha256: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "file_count": self.file_count,
+            "tree_sha256": self.tree_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ApprovedInputManifest:
+    """Separately reviewed commitment to every recovery-consumed byte."""
+
+    manifest_id: str
+    task_id: str
+    workspace_relative: str
+    budget_relative: str
+    budget_sha256: str
+    workspace_files: dict[str, str]
+    hidden_tests: ApprovedTree
+    repository: ApprovedTree
+    schema_version: int = 1
+
+    @property
+    def digest(self) -> str:
+        encoded = json.dumps(
+            self.to_dict(), sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "manifest_id": self.manifest_id,
+            "task_id": self.task_id,
+            "workspace_relative": self.workspace_relative,
+            "budget_relative": self.budget_relative,
+            "budget_sha256": self.budget_sha256,
+            "workspace_files": dict(sorted(self.workspace_files.items())),
+            "hidden_tests": self.hidden_tests.to_dict(),
+            "repository": self.repository.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: object) -> "ApprovedInputManifest":
+        if not isinstance(payload, dict):
+            raise AlternateRecoveryError("approved manifest must be an object")
+
+        def text(name: str) -> str:
+            value = payload.get(name)
+            if not isinstance(value, str) or not value:
+                raise AlternateRecoveryError(f"approved manifest lacks {name}")
+            return value
+
+        def tree(name: str) -> ApprovedTree:
+            value = payload.get(name)
+            if not isinstance(value, dict):
+                raise AlternateRecoveryError(f"approved manifest lacks {name} tree")
+            path = value.get("path")
+            count = value.get("file_count")
+            digest = value.get("tree_sha256")
+            if (
+                not isinstance(path, str)
+                or not isinstance(count, int)
+                or count < 0
+                or not isinstance(digest, str)
+                or not _is_sha256(digest)
+            ):
+                raise AlternateRecoveryError(
+                    f"approved manifest has invalid {name} tree"
+                )
+            return ApprovedTree(path=path, file_count=count, tree_sha256=digest)
+
+        workspace_files = payload.get("workspace_files")
+        if not isinstance(workspace_files, dict) or not workspace_files:
+            raise AlternateRecoveryError("approved manifest lacks workspace files")
+        files: dict[str, str] = {}
+        for path, digest in workspace_files.items():
+            if not isinstance(path, str) or not _is_sha256(digest):
+                raise AlternateRecoveryError(
+                    "approved manifest has invalid file digest"
+                )
+            _validate_relative_path(path, label="approved manifest path")
+            files[path] = digest
+        schema = payload.get("schema_version")
+        if schema != 1:
+            raise AlternateRecoveryError("approved manifest schema is unsupported")
+        budget_digest = text("budget_sha256")
+        if not _is_sha256(budget_digest):
+            raise AlternateRecoveryError("approved manifest has invalid budget digest")
+        manifest = cls(
+            manifest_id=text("manifest_id"),
+            task_id=text("task_id"),
+            workspace_relative=text("workspace_relative"),
+            budget_relative=text("budget_relative"),
+            budget_sha256=budget_digest,
+            workspace_files=files,
+            hidden_tests=tree("hidden_tests"),
+            repository=tree("repository"),
+            schema_version=schema,
+        )
+        _validate_relative_path(manifest.workspace_relative, label="workspace path")
+        _validate_relative_path(manifest.budget_relative, label="budget path")
+        for committed in (manifest.hidden_tests.path, manifest.repository.path):
+            _validate_relative_path(committed, label="approved tree path")
+        if set(manifest.workspace_files) != {
+            "workspace.yaml",
+            "patch.diff",
+            "deletion_patch.diff",
+            "provenance.json",
+        }:
+            raise AlternateRecoveryError(
+                "approved manifest must enumerate the four retained root artifacts"
+            )
+        if manifest.hidden_tests.path != "tests" or manifest.repository.path != "repo":
+            raise AlternateRecoveryError(
+                "approved manifest must enumerate hidden tests and repository roots"
+            )
+        return manifest
+
+
+@dataclass(frozen=True)
+class VerifiedRecoveryInputs:
+    """A private snapshot that is safe to consume after manifest verification."""
+
+    manifest_id: str
+    manifest_digest: str
+    snapshot_root: Path
+    budget_bytes: bytes
+    workspace_digests: dict[str, str]
+
+    def audit_evidence(self) -> dict[str, object]:
+        """Return the only recovery-input evidence safe for publication."""
+
+        return {
+            "manifest_id": self.manifest_id,
+            "manifest_digest": self.manifest_digest,
+            "verified_input_digests": dict(sorted(self.workspace_digests.items())),
+        }
+
+    def cleanup(self) -> None:
+        shutil.rmtree(self.snapshot_root, ignore_errors=True)
 
 
 def _utc_now() -> str:
@@ -135,24 +300,387 @@ class VerifiedOriginalBudget:
     remaining_usd: str
     incremental_cap_usd: str
     source_sha256: str
-    source_path: str
 
 
-def verify_original_budget(progress_path: Path | str) -> VerifiedOriginalBudget:
-    """Verify original-$1400 accounting before authorizing any new reservation.
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validate_relative_path(path: str, *, label: str) -> None:
+    candidate = Path(path)
+    if (
+        not path
+        or candidate.is_absolute()
+        or "\\" in path
+        or any(part in ("", ".", "..") for part in candidate.parts)
+        or candidate.as_posix() != path
+    ):
+        raise AlternateRecoveryError(f"{label} is not a safe canonical relative path")
+
+
+def _strict_absolute_path(value: Path | str, *, label: str) -> Path:
+    raw = Path(value)
+    if any(part in (".", "..") for part in raw.parts):
+        raise AlternateRecoveryError(f"{label} path alias is not allowed")
+    absolute = raw if raw.is_absolute() else Path.cwd() / raw
+    if not absolute.is_absolute():
+        raise AlternateRecoveryError(f"{label} path must be absolute")
+    return absolute
+
+
+def _open_directory_nofollow(path: Path, *, label: str) -> int:
+    """Open a directory only after rejecting every symlinked path component."""
+
+    if not path.is_absolute():
+        raise AlternateRecoveryError(f"{label} path must be absolute")
+    descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in path.parts[1:]:
+            if component in ("", ".", ".."):
+                raise AlternateRecoveryError(f"{label} has a traversal component")
+            try:
+                metadata = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            except OSError as exc:
+                raise AlternateRecoveryError(f"{label} directory is missing") from exc
+            if stat.S_ISLNK(metadata.st_mode):
+                raise AlternateRecoveryError(f"{label} contains a symlink")
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise AlternateRecoveryError(f"{label} is not a directory")
+            next_descriptor = os.open(
+                component,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=descriptor,
+            )
+            os.close(descriptor)
+            descriptor = next_descriptor
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _read_regular_at(
+    directory_fd: int, name: str, *, label: str
+) -> tuple[bytes, tuple[int, int]]:
+    """Read one regular file from a pinned directory descriptor, never following."""
+
+    _validate_relative_path(name, label=label)
+    try:
+        before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise AlternateRecoveryError(
+            f"approved manifest input is missing: {label}"
+        ) from exc
+    if stat.S_ISLNK(before.st_mode):
+        raise AlternateRecoveryError(f"approved manifest input is a symlink: {label}")
+    if not stat.S_ISREG(before.st_mode):
+        raise AlternateRecoveryError(
+            f"approved manifest input is not a regular file: {label}"
+        )
+    try:
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+    except OSError as exc:
+        raise AlternateRecoveryError(
+            f"approved manifest input changed: {label}"
+        ) from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise AlternateRecoveryError(
+                f"approved manifest input target swapped: {label}"
+            )
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks), (opened.st_dev, opened.st_ino)
+    finally:
+        os.close(descriptor)
+
+
+def _read_tree_at(
+    directory_fd: int,
+    *,
+    label: str,
+    ignored_top_level: frozenset[str] = frozenset(),
+) -> dict[str, bytes]:
+    """Canonical, symlink-safe walk over every consumed file in a retained tree."""
+
+    entries: dict[str, bytes] = {}
+
+    def walk(current_fd: int, prefix: str, *, is_root: bool = False) -> None:
+        try:
+            names = sorted(os.listdir(current_fd))
+        except OSError as exc:
+            raise AlternateRecoveryError(
+                f"approved manifest tree unreadable: {label}"
+            ) from exc
+        canonical_names: set[str] = set()
+        for name in names:
+            if is_root and name in ignored_top_level:
+                continue
+            normalized = unicodedata.normalize("NFC", name)
+            alias_key = normalized.casefold()
+            if name != normalized or alias_key in canonical_names:
+                raise AlternateRecoveryError(
+                    f"approved manifest path alias detected in {label}: {name!r}"
+                )
+            canonical_names.add(alias_key)
+            _validate_relative_path(name, label=f"{label} entry")
+            relative = f"{prefix}/{name}" if prefix else name
+            try:
+                metadata = os.stat(name, dir_fd=current_fd, follow_symlinks=False)
+            except OSError as exc:
+                raise AlternateRecoveryError(
+                    f"approved manifest tree entry disappeared: {relative}"
+                ) from exc
+            if stat.S_ISLNK(metadata.st_mode):
+                raise AlternateRecoveryError(
+                    f"approved manifest tree input is a symlink: {relative}"
+                )
+            if stat.S_ISDIR(metadata.st_mode):
+                child_fd = os.open(
+                    name,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=current_fd,
+                )
+                try:
+                    walk(child_fd, relative)
+                finally:
+                    os.close(child_fd)
+            elif stat.S_ISREG(metadata.st_mode):
+                content, _identity = _read_regular_at(
+                    current_fd, name, label=f"{label}/{relative}"
+                )
+                entries[relative] = content
+            else:
+                raise AlternateRecoveryError(
+                    f"approved manifest tree input is not a regular file: {relative}"
+                )
+
+    walk(directory_fd, "", is_root=True)
+    return entries
+
+
+def _canonical_tree_digest(entries: dict[str, bytes]) -> str:
+    return hashlib.sha256(
+        b"".join(
+            path.encode("utf-8")
+            + b"\0"
+            + hashlib.sha256(content).hexdigest().encode("ascii")
+            + b"\n"
+            for path, content in sorted(entries.items())
+        )
+    ).hexdigest()
+
+
+def _verified_tree_digests(
+    entries: dict[str, bytes], tree: ApprovedTree, *, label: str
+) -> str:
+    if len(entries) != tree.file_count:
+        raise AlternateRecoveryError(
+            f"approved manifest {label} tree has missing or extra inputs"
+        )
+    digest = _canonical_tree_digest(entries)
+    if digest != tree.tree_sha256:
+        raise AlternateRecoveryError(f"approved manifest {label} tree digest mismatch")
+    return digest
+
+
+def _load_approved_input_manifest() -> ApprovedInputManifest:
+    try:
+        raw = _APPROVED_MANIFEST_RESOURCE.read_bytes()
+        payload = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AlternateRecoveryError("approved input manifest is unavailable") from exc
+    manifest = ApprovedInputManifest.from_dict(payload)
+    if manifest.digest != APPROVED_INPUT_MANIFEST_DIGEST:
+        raise AlternateRecoveryError("approved input manifest digest is not pinned")
+    if manifest.task_id != ALTERNATE_RECOVERY_TASK_ID:
+        raise AlternateRecoveryError("approved input manifest task identity is invalid")
+    return manifest
+
+
+APPROVED_INPUT_MANIFEST = _load_approved_input_manifest()
+
+
+def _read_approved_manifest_material(
+    workspace: Path,
+    budget: Path,
+    repository_root: Path,
+    manifest: ApprovedInputManifest,
+) -> tuple[dict[str, bytes], bytes]:
+    """Read every approved byte through no-follow descriptors, or fail closed."""
+
+    expected_workspace = repository_root / manifest.workspace_relative
+    expected_budget = repository_root / manifest.budget_relative
+    if workspace != expected_workspace or budget != expected_budget:
+        raise AlternateRecoveryError(
+            "alternate recovery accepts only the exact approved input paths"
+        )
+    workspace_fd = _open_directory_nofollow(workspace, label="retained workspace")
+    budget_parent_fd = _open_directory_nofollow(
+        budget.parent, label="retained budget parent"
+    )
+    try:
+        root_names = set(os.listdir(workspace_fd))
+        allowed_root_names = {
+            *manifest.workspace_files,
+            manifest.hidden_tests.path,
+            manifest.repository.path,
+            "evaluate.sh",  # Retained but never recovery-consumed.
+        }
+        if root_names - allowed_root_names:
+            raise AlternateRecoveryError(
+                "approved manifest workspace has extra recovery inputs"
+            )
+        if allowed_root_names - root_names - {"evaluate.sh"}:
+            raise AlternateRecoveryError(
+                "approved manifest workspace has missing recovery inputs"
+            )
+        files: dict[str, bytes] = {}
+        for name, approved_digest in sorted(manifest.workspace_files.items()):
+            content, _identity = _read_regular_at(
+                workspace_fd, name, label=f"workspace/{name}"
+            )
+            actual_digest = hashlib.sha256(content).hexdigest()
+            if actual_digest != approved_digest:
+                raise AlternateRecoveryError(
+                    f"approved manifest digest mismatch for workspace/{name}"
+                )
+            files[name] = content
+        for tree, label, ignored in (
+            (manifest.hidden_tests, "hidden tests", frozenset()),
+            (manifest.repository, "repository", frozenset({".git"})),
+        ):
+            try:
+                metadata = os.stat(
+                    tree.path, dir_fd=workspace_fd, follow_symlinks=False
+                )
+            except OSError as exc:
+                raise AlternateRecoveryError(
+                    f"approved manifest {label} root is missing"
+                ) from exc
+            if stat.S_ISLNK(metadata.st_mode):
+                raise AlternateRecoveryError(
+                    f"approved manifest {label} root is a symlink"
+                )
+            if not stat.S_ISDIR(metadata.st_mode):
+                raise AlternateRecoveryError(
+                    f"approved manifest {label} root is not a directory"
+                )
+            tree_fd = os.open(
+                tree.path,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                dir_fd=workspace_fd,
+            )
+            try:
+                entries = _read_tree_at(tree_fd, label=label, ignored_top_level=ignored)
+            finally:
+                os.close(tree_fd)
+            _verified_tree_digests(entries, tree, label=label)
+            for relative, content in entries.items():
+                files[f"{tree.path}/{relative}"] = content
+        budget_bytes, _identity = _read_regular_at(
+            budget_parent_fd, budget.name, label="budget progress"
+        )
+        if hashlib.sha256(budget_bytes).hexdigest() != manifest.budget_sha256:
+            raise AlternateRecoveryError("approved manifest budget digest mismatch")
+        return files, budget_bytes
+    finally:
+        os.close(budget_parent_fd)
+        os.close(workspace_fd)
+
+
+def _snapshot_approved_material(
+    workspace_files: dict[str, bytes], *, manifest: ApprovedInputManifest
+) -> Path:
+    snapshot = Path(tempfile.mkdtemp(prefix="swe-forge-approved-recovery-"))
+    try:
+        for relative, content in workspace_files.items():
+            target = snapshot / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        return snapshot
+    except Exception:
+        shutil.rmtree(snapshot, ignore_errors=True)
+        raise
+
+
+def _verify_approved_recovery_inputs(
+    source_workspace: Path | str,
+    budget_progress: Path | str,
+    *,
+    repository_root: Path | str = _PROJECT_ROOT,
+    manifest: ApprovedInputManifest,
+) -> VerifiedRecoveryInputs:
+    """Pin, fully enumerate, and snapshot recovery inputs before any side effect."""
+
+    root = _strict_absolute_path(repository_root, label="repository root")
+    workspace = _strict_absolute_path(source_workspace, label="source workspace")
+    budget = _strict_absolute_path(budget_progress, label="budget progress")
+    first_files, first_budget = _read_approved_manifest_material(
+        workspace, budget, root, manifest
+    )
+    # Re-read the exact descriptor-contained path set before making a snapshot.
+    # A swap between passes is rejected, and the later pipeline uses only snapshot
+    # bytes, never the mutable retained workspace.
+    second_files, second_budget = _read_approved_manifest_material(
+        workspace, budget, root, manifest
+    )
+    if first_files != second_files or first_budget != second_budget:
+        raise AlternateRecoveryError(
+            "approved manifest inputs changed during verification"
+        )
+    snapshot = _snapshot_approved_material(first_files, manifest=manifest)
+    digests = dict(manifest.workspace_files)
+    digests[manifest.hidden_tests.path] = manifest.hidden_tests.tree_sha256
+    digests[manifest.repository.path] = manifest.repository.tree_sha256
+    digests["budget"] = manifest.budget_sha256
+    return VerifiedRecoveryInputs(
+        manifest_id=manifest.manifest_id,
+        manifest_digest=manifest.digest,
+        snapshot_root=snapshot,
+        budget_bytes=first_budget,
+        workspace_digests=digests,
+    )
+
+
+def verify_approved_recovery_inputs(
+    source_workspace: Path | str,
+    budget_progress: Path | str,
+    *,
+    repository_root: Path | str = _PROJECT_ROOT,
+) -> VerifiedRecoveryInputs:
+    """Verify only the pinned, code-reviewed alternate-recovery manifest."""
+
+    return _verify_approved_recovery_inputs(
+        source_workspace,
+        budget_progress,
+        repository_root=repository_root,
+        manifest=APPROVED_INPUT_MANIFEST,
+    )
+
+
+def _verify_original_budget_bytes(raw: bytes) -> VerifiedOriginalBudget:
+    """Verify original-$1400 accounting from already-approved immutable bytes.
 
     The alternate path accepts the terminal harvest ledger only when it reports
     the original ceiling exactly, has no active reservation or in-flight batch,
     and its accounted spend is non-negative and no greater than that ceiling.
     """
 
-    path = Path(progress_path)
     try:
-        raw = path.read_bytes()
         payload = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise AlternateRecoveryError(
-            f"cannot durably verify original mission budget from {path}"
+            "cannot durably verify original mission budget"
         ) from exc
     if not isinstance(payload, dict):
         raise AlternateRecoveryError("original budget record must be an object")
@@ -183,8 +711,23 @@ def verify_original_budget(progress_path: Path | str) -> VerifiedOriginalBudget:
         remaining_usd=_decimal_text(remaining),
         incremental_cap_usd=_decimal_text(cap),
         source_sha256=hashlib.sha256(raw).hexdigest(),
-        source_path=str(path),
     )
+
+
+def verify_original_budget(progress_path: Path | str) -> VerifiedOriginalBudget:
+    """Verify an accounting file for standalone inspection.
+
+    Recovery execution itself uses :func:`verify_approved_recovery_inputs` and
+    passes only its verified in-memory snapshot to ``_verify_original_budget_bytes``.
+    """
+
+    try:
+        raw = Path(progress_path).read_bytes()
+    except OSError as exc:
+        raise AlternateRecoveryError(
+            "cannot durably verify original mission budget"
+        ) from exc
+    return _verify_original_budget_bytes(raw)
 
 
 @dataclass(frozen=True)
@@ -303,8 +846,9 @@ class RehydratedAlternate:
     """Immutable candidate input rebuilt from the retained audit workspace."""
 
     task_id: str
-    source_workspace: Path
-    source_sha256: dict[str, str]
+    manifest_id: str
+    manifest_digest: str
+    verified_input_digests: dict[str, str]
     candidate: Candidate
     spec: GeneratedSpec
     env_image: EnvImage
@@ -327,15 +871,6 @@ def _read_workspace_yaml(path: Path) -> dict[str, object]:
     return loaded
 
 
-def _workspace_sha256(path: Path) -> str:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError as exc:
-        raise AlternateRecoveryError(
-            f"retained alternate artifact is missing: {path}"
-        ) from exc
-
-
 def _required_text(value: object, *, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise AlternateRecoveryError(f"retained alternate workspace lacks {name}")
@@ -343,11 +878,15 @@ def _required_text(value: object, *, name: str) -> str:
 
 
 def rehydrate_alternate(
-    source_workspace: Path | str,
+    approved_inputs: VerifiedRecoveryInputs,
 ) -> RehydratedAlternate:
-    """Rebuild the precise retained candidate without regenerating any patch."""
+    """Rebuild a candidate exclusively from a verified private snapshot."""
 
-    root = Path(source_workspace)
+    if not isinstance(approved_inputs, VerifiedRecoveryInputs):
+        raise AlternateRecoveryError(
+            "alternate recovery requires approved immutable recovery inputs"
+        )
+    root = approved_inputs.snapshot_root
     workspace = _read_workspace_yaml(root / "workspace.yaml")
     task_id = _required_text(workspace.get("task_id"), name="task_id")
     if task_id != ALTERNATE_RECOVERY_TASK_ID:
@@ -439,11 +978,9 @@ def rehydrate_alternate(
                 ],
                 "recovery": {
                     "source_task_id": task_id,
-                    "immutable_source_sha256": {
-                        "patch.diff": _workspace_sha256(patch_path),
-                        "deletion_patch.diff": _workspace_sha256(mutation_path),
-                        "provenance.json": _workspace_sha256(provenance_path),
-                    },
+                    "approved_manifest_id": approved_inputs.manifest_id,
+                    "approved_manifest_digest": approved_inputs.manifest_digest,
+                    "verified_input_digests": approved_inputs.workspace_digests,
                 },
             },
         ),
@@ -490,12 +1027,9 @@ def rehydrate_alternate(
     )
     return RehydratedAlternate(
         task_id=task_id,
-        source_workspace=root,
-        source_sha256={
-            "patch.diff": _workspace_sha256(patch_path),
-            "deletion_patch.diff": _workspace_sha256(mutation_path),
-            "provenance.json": _workspace_sha256(provenance_path),
-        },
+        manifest_id=approved_inputs.manifest_id,
+        manifest_digest=approved_inputs.manifest_digest,
+        verified_input_digests=approved_inputs.workspace_digests,
         candidate=candidate,
         spec=spec,
         env_image=env_image,
@@ -780,8 +1314,9 @@ def _keep_stage_writer(
             {
                 "schema_version": 1,
                 "task_id": alternate.task_id,
-                "source_workspace": str(alternate.source_workspace),
-                "source_sha256": dict(alternate.source_sha256),
+                "approved_manifest_id": alternate.manifest_id,
+                "approved_manifest_digest": alternate.manifest_digest,
+                "verified_input_digests": dict(alternate.verified_input_digests),
                 "suite_fingerprint": oracle_report.final_mutation_evidence.suite_fingerprint
                 if oracle_report.final_mutation_evidence
                 else "",
@@ -813,9 +1348,20 @@ async def run_final_alternate_recovery(
     ),
     budget_progress: Path | str = Path("results/pilot_keeps/harvest_progress.json"),
     work_root: Path | str = Path("results/final_alternate_recovery"),
+    repository_root: Path | str = _PROJECT_ROOT,
 ) -> AlternateRecoveryResult:
     """Execute exactly one no-retry recovery, keeping or tombstoning atomically."""
 
+    # This preflight must finish before certificate, ledger, Docker, LLM, or
+    # publication activity.  A manifest failure is deliberately propagated,
+    # rather than tombstoned, because even a tombstone is a publication effect.
+    approved_inputs = verify_approved_recovery_inputs(
+        source_workspace,
+        budget_progress,
+        repository_root=repository_root,
+    )
+    verified_budget = _verify_original_budget_bytes(approved_inputs.budget_bytes)
+    alternate = rehydrate_alternate(approved_inputs)
     output = Path(out_dir)
     work = Path(work_root)
     run_id = f"alternate-{uuid.uuid4().hex}"
@@ -830,7 +1376,6 @@ async def run_final_alternate_recovery(
     write_recovery_certification(output, pending)
     reason = ""
     try:
-        verified_budget = verify_original_budget(budget_progress)
         work.mkdir(parents=True, exist_ok=False)
         _write_json(work / "budget-verification.json", verified_budget.__dict__)
         ledger_path = work / "recovery-ledger.jsonl"
@@ -840,7 +1385,6 @@ async def run_final_alternate_recovery(
             cap_usd=verified_budget.incremental_cap_usd,
             worst_case_cost_usd="3.00",
         )
-        alternate = rehydrate_alternate(source_workspace)
         _write_json(
             work / "preflight.json",
             {
@@ -850,7 +1394,7 @@ async def run_final_alternate_recovery(
                 "k": 6,
                 "band_high": 0.5,
                 "discrimination_threshold": 1.0,
-                "source_sha256": alternate.source_sha256,
+                **approved_inputs.audit_evidence(),
                 "budget": verified_budget.__dict__,
             },
         )
@@ -944,25 +1488,33 @@ async def run_final_alternate_recovery(
         return AlternateRecoveryResult(
             run_id=run_id, status="tombstoned", reason=reason
         )
+    finally:
+        approved_inputs.cleanup()
 
 
 __all__ = [
     "ALTERNATE_RECOVERY_TASK_ID",
+    "APPROVED_INPUT_MANIFEST",
+    "APPROVED_INPUT_MANIFEST_DIGEST",
     "INCREMENTAL_RECOVERY_CAP_USD",
     "ORIGINAL_MISSION_BUDGET_USD",
     "UPDATE_WRAPPER_F2P_COMMAND",
     "UPDATE_WRAPPER_F2P_CONTENT",
     "UPDATE_WRAPPER_F2P_NODE",
     "UPDATE_WRAPPER_F2P_PATH",
+    "ApprovedInputManifest",
+    "ApprovedTree",
     "AlternateRecoveryError",
     "RecoveryCertification",
     "RehydratedAlternate",
     "AlternateRecoveryResult",
     "VerifiedOriginalBudget",
+    "VerifiedRecoveryInputs",
     "rehydrate_alternate",
     "run_final_alternate_recovery",
     "run_normal_oracle_gates",
     "verify_original_budget",
+    "verify_approved_recovery_inputs",
     "verify_unfiltered_public_gold",
     "write_recovery_certification",
 ]
