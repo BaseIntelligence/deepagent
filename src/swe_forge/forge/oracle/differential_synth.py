@@ -28,6 +28,7 @@ from swe_forge.forge.oracle.differential import (
 )
 from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
 from swe_forge.forge.oracle.teacher_evidence import TeacherGateCallEvidence
+from swe_forge.forge.oracle.teacher_proposals import extract_fenced_proposals
 from swe_forge.forge.oracle.teacher_regions import (
     TeacherSource,
     required_symbol,
@@ -127,7 +128,6 @@ class TeacherVariantGenerator:
                     status="not_called",
                     response_kind="source_unavailable",
                     requested_proposals=ctx.num_variants,
-                    invalid_proposals=1,
                 )
             )
             return []
@@ -154,17 +154,19 @@ class TeacherVariantGenerator:
             return []
 
         variants: list[Variant] = []
-        raw_blocks = _CODE_FENCE_RE.findall(result.text)
+        raw_proposals = extract_fenced_proposals(result.text)
         response_kind = "content"
         if not result.text.strip():
             response_kind = "empty"
-        elif not raw_blocks:
+        elif not raw_proposals:
             response_kind = "unparseable"
         identical = 0
         invalid = 0
         parsed = 0
-        for index, raw_block in enumerate(raw_blocks[: ctx.num_variants]):
-            block = raw_block.strip("\n")
+        discarded = 0
+        seen_materialized: set[str] = set()
+        for index, proposal in enumerate(raw_proposals):
+            block = proposal.content.strip("\n")
             if not _implements_target(required_symbol(teacher_source), block):
                 invalid += 1
                 continue
@@ -173,6 +175,14 @@ class TeacherVariantGenerator:
             if materialized == ctx.gold_sources[teacher_source.path]:
                 identical += 1
                 continue
+            if (
+                proposal.truncated
+                or materialized in seen_materialized
+                or len(variants) >= ctx.num_variants
+            ):
+                discarded += 1
+                continue
+            seen_materialized.add(materialized)
             variants.append(
                 Variant(
                     variant_id=f"variant_{index + 1}",
@@ -184,7 +194,9 @@ class TeacherVariantGenerator:
             )
         if parsed and parsed == identical:
             response_kind = "identical"
-        elif raw_blocks and not parsed:
+        elif parsed and parsed == discarded:
+            response_kind = "discarded"
+        elif raw_proposals and not parsed:
             response_kind = "invalid"
         self.teacher_calls.append(
             _proposal_evidence(
@@ -193,11 +205,12 @@ class TeacherVariantGenerator:
                 model=_teacher_model(self._resolve_client()),
                 response_kind=response_kind,
                 requested=ctx.num_variants,
-                received=len(raw_blocks[: ctx.num_variants]),
+                received=len(raw_proposals),
                 parsed=parsed,
                 identical=identical,
                 invalid=invalid,
-                discarded=0,
+                discarded=discarded,
+                executable=len(variants),
             )
         )
         return variants
@@ -346,6 +359,7 @@ def _proposal_evidence(
     identical: int = 0,
     invalid: int = 0,
     discarded: int = 0,
+    executable: int | None = None,
 ) -> TeacherGateCallEvidence:
     """Build a source-free metadata record from a teacher result."""
     return TeacherGateCallEvidence(
@@ -364,6 +378,11 @@ def _proposal_evidence(
         identical_proposals=identical,
         invalid_proposals=invalid,
         discarded_proposals=discarded,
+        executable_proposals=(
+            max(0, parsed - identical - discarded)
+            if executable is None
+            else max(0, executable)
+        ),
     )
 
 

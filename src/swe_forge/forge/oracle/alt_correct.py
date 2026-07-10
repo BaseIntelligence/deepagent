@@ -63,6 +63,7 @@ from swe_forge.forge.oracle.teacher_evidence import (
     evidence_calls,
     gate_evidence,
     teacher_gate_failure_reason,
+    teacher_gate_evidence_issues,
 )
 
 if TYPE_CHECKING:
@@ -721,7 +722,16 @@ async def run_alt_correct_gate(
 
     alternatives: list[AltImpl] = []
     teacher_calls = []
+    real_teacher_generator = False
     if alt_generator is not None:
+        # A public gate must not let a programmatic test seam stand in for a
+        # paid, uncached teacher call. The generic assessor remains reusable;
+        # only the shipping gate wrapper recognizes the production generator.
+        from swe_forge.forge.oracle.alt_correct_synth import (
+            TeacherAltCorrectGenerator,
+        )
+
+        real_teacher_generator = isinstance(alt_generator, TeacherAltCorrectGenerator)
         gold_sources = await runner.read_sources()
         gen_ctx = AltCorrectGenerationContext(
             candidate=candidate,
@@ -746,13 +756,28 @@ async def run_alt_correct_gate(
         completed=outcome.alternatives_total,
         executable=outcome.alternatives_total,
     )
-    if not alternatives:
-        outcome.reasons = [teacher_gate_failure_reason("alt_correct", teacher_calls)]
+    evidence = gate_evidence(teacher_calls)
+    evidence_issues = teacher_gate_evidence_issues(
+        {"teacher_gates": {"alt_correct": evidence}},
+        gates=("alt_correct",),
+    )
+    if not real_teacher_generator or evidence_issues:
+        outcome.verdict = "reject"
+        outcome.alt_correct_accepted = False
+        if not real_teacher_generator:
+            reason = "alt_correct_no_real_teacher_proposal"
+        elif not alternatives:
+            reason = teacher_gate_failure_reason("alt_correct", teacher_calls)
+        else:
+            reason = "alt_correct_teacher_evidence_invalid: " + "; ".join(
+                evidence_issues
+            )
+        outcome.reasons = [reason]
     return build_alt_correct_report(
         candidate,
         prior_report,
         outcome,
         env_image=env_image,
         base_tests=base_tests,
-        extra_details={"teacher_gates": {"alt_correct": gate_evidence(teacher_calls)}},
+        extra_details={"teacher_gates": {"alt_correct": evidence}},
     )

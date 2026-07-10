@@ -61,6 +61,7 @@ from swe_forge.forge.oracle.teacher_evidence import (
     evidence_calls,
     gate_evidence,
     teacher_gate_failure_reason,
+    teacher_gate_evidence_issues,
 )
 
 if TYPE_CHECKING:
@@ -811,7 +812,14 @@ async def run_differential_gate(
 
     variants: list[Variant] = []
     teacher_calls = []
+    real_teacher_generator = False
     if variant_generator is not None:
+        # A public gate must not let a programmatic test seam stand in for a
+        # paid, uncached teacher call. The generic assessor remains reusable;
+        # only the shipping gate wrapper recognizes the production generator.
+        from swe_forge.forge.oracle.differential_synth import TeacherVariantGenerator
+
+        real_teacher_generator = isinstance(variant_generator, TeacherVariantGenerator)
         gold_sources = await runner.read_sources()
         gen_ctx = VariantGenerationContext(
             candidate=candidate,
@@ -844,12 +852,27 @@ async def run_differential_gate(
         completed=outcome.variants_total,
         executable=outcome.variants_total,
     )
-    if not variants:
-        outcome.reasons = [teacher_gate_failure_reason("differential", teacher_calls)]
+    evidence = gate_evidence(teacher_calls)
+    evidence_issues = teacher_gate_evidence_issues(
+        {"teacher_gates": {"differential": evidence}},
+        gates=("differential",),
+    )
+    if not real_teacher_generator or evidence_issues:
+        outcome.verdict = "reject"
+        outcome.differential_pass = False
+        if not real_teacher_generator:
+            reason = "differential_no_real_teacher_proposal"
+        elif not variants:
+            reason = teacher_gate_failure_reason("differential", teacher_calls)
+        else:
+            reason = "differential_teacher_evidence_invalid: " + "; ".join(
+                evidence_issues
+            )
+        outcome.reasons = [reason]
     return build_differential_report(
         candidate,
         prior_report,
         outcome,
         env_image=env_image,
-        extra_details={"teacher_gates": {"differential": gate_evidence(teacher_calls)}},
+        extra_details={"teacher_gates": {"differential": evidence}},
     )

@@ -1828,7 +1828,7 @@ def oracle_differential(
     offline: bool = typer.Option(
         False,
         "--offline",
-        help="Never call the LLM (no variants/strengthening); gold-only sanity run.",
+        help="Never call the LLM; rejects because no real teacher proposal executes.",
     ),
     timeout: float = typer.Option(
         600.0, "--timeout", help="Per-command Docker timeout (seconds)."
@@ -1968,7 +1968,7 @@ def oracle_alt_correct(
     offline: bool = typer.Option(
         False,
         "--offline",
-        help="Never call the LLM (no alternatives); gold-only sanity run.",
+        help="Never call the LLM; rejects because no real teacher proposal executes.",
     ),
     timeout: float = typer.Option(
         600.0, "--timeout", help="Per-command Docker timeout (seconds)."

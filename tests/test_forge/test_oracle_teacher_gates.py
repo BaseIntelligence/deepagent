@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 
 import pytest
@@ -10,6 +11,7 @@ from swe_forge.forge.adapters import PythonAdapter
 from swe_forge.forge.models import (
     Candidate,
     CandidateTarget,
+    EnvImage,
     FinalMutationEvidence,
     OracleReport,
     OracleTestFile,
@@ -22,6 +24,7 @@ from swe_forge.forge.oracle.alt_correct import (
     AltImplFile,
     AltScore,
     assess_alt_correct,
+    run_alt_correct_gate,
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.differential import (
@@ -31,6 +34,7 @@ from swe_forge.forge.oracle.differential import (
     VariantGenerationContext,
     VariantScore,
     assess_differential,
+    run_differential_gate,
 )
 from swe_forge.forge.oracle.differential_synth import TeacherVariantGenerator
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
@@ -41,6 +45,7 @@ from swe_forge.forge.oracle.pipeline import (
 )
 from swe_forge.forge.oracle.teacher_evidence import (
     aggregate_teacher_gate_usage,
+    teacher_gate_evidence_issues,
     teacher_gate_failure_reason,
 )
 from swe_forge.forge.teacher import LLMResult, Usage
@@ -79,6 +84,34 @@ class _AltRunner:
 
     async def read_sources(self) -> dict[str, str]:
         return {}
+
+
+class _WrappedDifferentialRunner(_DifferentialRunner):
+    """Docker-runner replacement that lets wrapper tests stay offline."""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        self.score_calls = 0
+
+    async def score_variant(self, *_args: object, **_kwargs: object) -> VariantScore:
+        self.score_calls += 1
+        return await super().score_variant(*_args, **_kwargs)
+
+    async def read_sources(self) -> dict[str, str]:
+        return {"src/m.py": "def f():\n    return 1\n"}
+
+
+class _WrappedAltRunner(_AltRunner):
+    """Docker-runner replacement that lets wrapper tests stay offline."""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        self.score_calls = 0
+
+    async def score_alt(self, *_args: object, **_kwargs: object) -> AltScore:
+        self.score_calls += 1
+        return await super().score_alt(*_args, **_kwargs)
+
+    async def read_sources(self) -> dict[str, str]:
+        return {"src/m.py": "def f():\n    return 1\n"}
 
 
 class _Teacher:
@@ -140,6 +173,38 @@ def _alt_context() -> AltCorrectGenerationContext:
         adapter=PythonAdapter(),
         gold_sources={"src/m.py": "def f():\n    return 1\n"},
         num_alternatives=2,
+    )
+
+
+def _env_image() -> EnvImage:
+    return EnvImage(
+        repo_id="teacher-gate-test",
+        language="python",
+        image_tag="swe-forge-env-teacher-gate-test:abc123",
+        base_image="python:3.12-slim",
+        commit="0" * 40,
+        workspace_dir="/workspace/repo",
+        install_commands=["pip install -e ."],
+        baseline_test_command="python -m pytest",
+        baseline_green=True,
+        baseline_exit_code=0,
+    )
+
+
+def _prior_report() -> OracleReport:
+    return OracleReport(
+        language="python",
+        generator="ast_mutation",
+        verdict="pass",
+        fail_to_pass=["python -m pytest tests/hidden.py"],
+        pass_to_pass=["python -m pytest"],
+        test_files=[
+            OracleTestFile(path="tests/hidden.py", content="def test_x(): pass\n")
+        ],
+        flakiness_runs=3,
+        mutants_total=2,
+        mutants_killed=2,
+        provenance=Provenance(generator="ast_mutation", seed=1, language="python"),
     )
 
 
@@ -214,6 +279,239 @@ async def test_teacher_alt_records_invalid_and_successful_proposal_evidence() ->
     assert evidence is not None
     assert evidence.invalid_proposals == 1
     assert evidence.parsed_proposals == 1
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "context", "text", "expected_kind"),
+    [
+        (
+            TeacherVariantGenerator,
+            _variant_context,
+            (
+                "```python\ndef f():\n    return 2\n```\n"
+                "```python\ndef f():\n    return 2\n```\n"
+                "```python\ndef f():\n    return 3\n```\n"
+            ),
+            "differential",
+        ),
+        (
+            TeacherAltCorrectGenerator,
+            _alt_context,
+            (
+                "```python\ndef f():\n    return 1 + 0\n```\n"
+                "```python\ndef f():\n    return 1 + 0\n```\n"
+                "```python\ndef f():\n    return 0 + 1\n```\n"
+            ),
+            "alt_correct",
+        ),
+    ],
+)
+async def test_teacher_generators_account_for_duplicate_and_overflow_proposals(
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    context: object,
+    text: str,
+    expected_kind: str,
+) -> None:
+    generator = generator_cls(client=_Teacher(text))  # type: ignore[arg-type, call-arg]
+    proposals = await generator(
+        replace(context(), num_variants=1)
+        if expected_kind == "differential"
+        else replace(context(), num_alternatives=1)
+    )  # type: ignore[misc]
+
+    assert len(proposals) == 1
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.received_proposals == 3
+    assert evidence.invalid_proposals == 0
+    assert evidence.parsed_proposals == 3
+    assert evidence.identical_proposals == 0
+    assert evidence.discarded_proposals == 2
+    assert evidence.executable_proposals == 1
+    assert evidence.received_proposals == (
+        evidence.invalid_proposals + evidence.parsed_proposals
+    )
+    assert evidence.parsed_proposals == (
+        evidence.identical_proposals
+        + evidence.discarded_proposals
+        + evidence.executable_proposals
+    )
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "context", "expected_gate"),
+    [
+        (TeacherVariantGenerator, _variant_context, "differential"),
+        (TeacherAltCorrectGenerator, _alt_context, "alt_correct"),
+    ],
+)
+async def test_teacher_generators_record_truncated_valid_proposals_as_discarded(
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    context: object,
+    expected_gate: str,
+) -> None:
+    generator = generator_cls(  # type: ignore[arg-type, call-arg]
+        client=_Teacher("```python\ndef f():\n    return 1 + 0\n")
+    )
+
+    assert await generator(context()) == []
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.received_proposals == 1
+    assert evidence.invalid_proposals == 0
+    assert evidence.parsed_proposals == 1
+    assert evidence.identical_proposals == 0
+    assert evidence.discarded_proposals == 1
+    assert evidence.executable_proposals == 0
+    assert teacher_gate_failure_reason(expected_gate, [evidence]) == (
+        f"{expected_gate}_teacher_discarded_proposals"
+    )
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "context"),
+    [
+        (TeacherVariantGenerator, _variant_context),
+        (TeacherAltCorrectGenerator, _alt_context),
+    ],
+)
+async def test_teacher_generators_reconcile_source_unavailable_without_inventing_invalid_proposals(
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    context: object,
+) -> None:
+    generator = generator_cls(  # type: ignore[arg-type, call-arg]
+        client=_Teacher("```python\ndef f():\n    return 2\n```")
+    )
+
+    assert await generator(replace(context(), gold_sources={})) == []  # type: ignore[misc]
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.real_teacher is False
+    assert evidence.received_proposals == 0
+    assert evidence.invalid_proposals == 0
+    assert evidence.parsed_proposals == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("received_proposals", 2, "received"),
+        ("parsed_proposals", 2, "parsed"),
+        ("execution_completed", 0, "execution"),
+        ("execution_errors", 1, "execution"),
+    ],
+)
+def test_teacher_gate_evidence_requires_reconciled_proposal_and_execution_counts(
+    field: str, value: object, expected: str
+) -> None:
+    evidence = _positive_gate_evidence("differential")
+    evidence["calls"][0][field] = value  # type: ignore[index]
+    issues = teacher_gate_evidence_issues(
+        {"teacher_gates": {"differential": evidence}},
+        gates=("differential",),
+    )
+
+    assert len(issues) == 1
+    assert expected in issues[0]
+
+
+async def test_standalone_differential_rejects_passing_injected_proposals_without_teacher_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import swe_forge.forge.oracle.differential as differential_module
+
+    class _InjectedGenerator:
+        async def __call__(self, _ctx: VariantGenerationContext) -> list[Variant]:
+            return [_variant()]
+
+    monkeypatch.setattr(
+        differential_module, "DockerDifferentialRunner", _WrappedDifferentialRunner
+    )
+    report = await run_differential_gate(
+        _candidate(),
+        _env_image(),
+        _prior_report(),
+        variant_generator=_InjectedGenerator(),
+        adapter=PythonAdapter(),
+    )
+
+    assert report.verdict == "reject"
+    assert report.differential_pass is False
+    assert report.reasons == ["differential_no_real_teacher_proposal"]
+
+
+async def test_standalone_alt_correct_rejects_passing_injected_proposals_without_teacher_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import swe_forge.forge.oracle.alt_correct as alt_correct_module
+
+    class _InjectedGenerator:
+        async def __call__(self, _ctx: AltCorrectGenerationContext) -> list[AltImpl]:
+            return [_alt()]
+
+    monkeypatch.setattr(alt_correct_module, "DockerAltCorrectRunner", _WrappedAltRunner)
+    report = await run_alt_correct_gate(
+        _candidate(),
+        _env_image(),
+        _prior_report(),
+        alt_generator=_InjectedGenerator(),
+        adapter=PythonAdapter(),
+    )
+
+    assert report.verdict == "reject"
+    assert report.alt_correct_accepted is False
+    assert report.reasons == ["alt_correct_no_real_teacher_proposal"]
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "runner_cls", "gate"),
+    [
+        (TeacherVariantGenerator, "differential", "differential"),
+        (TeacherAltCorrectGenerator, "alt_correct", "alt_correct"),
+    ],
+)
+async def test_standalone_gates_accept_positive_real_teacher_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    runner_cls: str,
+    gate: str,
+) -> None:
+    if runner_cls == "differential":
+        import swe_forge.forge.oracle.differential as differential_module
+
+        monkeypatch.setattr(
+            differential_module, "DockerDifferentialRunner", _WrappedDifferentialRunner
+        )
+        result = await run_differential_gate(
+            _candidate(),
+            _env_image(),
+            _prior_report(),
+            variant_generator=generator_cls(  # type: ignore[arg-type, call-arg]
+                client=_Teacher("```python\ndef f():\n    return 2\n```")
+            ),
+            adapter=PythonAdapter(),
+        )
+    else:
+        import swe_forge.forge.oracle.alt_correct as alt_correct_module
+
+        monkeypatch.setattr(
+            alt_correct_module, "DockerAltCorrectRunner", _WrappedAltRunner
+        )
+        result = await run_alt_correct_gate(
+            _candidate(),
+            _env_image(),
+            _prior_report(),
+            alt_generator=generator_cls(  # type: ignore[arg-type, call-arg]
+                client=_Teacher("```python\ndef f():\n    return 1 + 0\n```")
+            ),
+            adapter=PythonAdapter(),
+        )
+
+    assert result.is_pass
+    calls = result.details["teacher_gates"][gate]["calls"]  # type: ignore[index]
+    assert calls[0]["parsed_proposals"] == 1  # type: ignore[index]
+    assert calls[0]["executable_proposals"] == 1  # type: ignore[index]
+    assert calls[0]["execution_completed"] == 1  # type: ignore[index]
 
 
 def _pass_report(*, teacher_gates: object) -> OracleReport:
