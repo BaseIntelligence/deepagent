@@ -1,0 +1,37 @@
+{
+  "run_id": "pilot-final-round2-9b55c9252d184ecfb8344406876468b7",
+  "status": "failure_evidence_complete",
+  "publication_preserved": {
+    "prior_current_target": "generations/4f852089056348f892623df3f548d643",
+    "current_target": "generations/4f852089056348f892623df3f548d643",
+    "same_target": true,
+    "generation_id": "4f852089056348f892623df3f548d643"
+  },
+  "ledger": {
+    "cap_usd": "25.00",
+    "exact_cost_usd": "0.04410",
+    "within_cap": true,
+    "events": 4,
+    "settled_physical_calls": 2,
+    "unsettled_physical_call_ids": [],
+    "all_requests_pre_reserved_and_settled": true,
+    "stages": [
+      "oracle.differential",
+      "oracle.alt_correct"
+    ]
+  },
+  "calibration": {
+    "attempts": 1,
+    "executed": false,
+    "reason": "oracle rejected at the live alternative-correct gate before calibration",
+    "retry_performed": false
+  },
+  "prior_generation_integrity": {
+    "task_ids": [
+      "mahmoud-boltons__bug_combination__242d17b94d94"
+    ],
+    "workspace_jsonl_parquet_reconciled": true,
+    "leak_and_git_history_audit_passed": true,
+    "leak_findings": []
+  }
+}

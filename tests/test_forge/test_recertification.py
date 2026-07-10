@@ -23,7 +23,9 @@ from swe_forge.forge.models import (
     OracleTestFile,
     Provenance,
 )
+from swe_forge.forge.oracle.differential import NullVariantSynthesizer
 from swe_forge.forge.oracle.multifault import (
+    RECOVERY_DUPLICATE_VALUE_TEST_COMMAND,
     ConstituentVerdict,
     MultiFaultCompletenessEvidence,
 )
@@ -532,8 +534,24 @@ def test_recertification_reruns_teacher_gates_before_final_suite(
     _fresh_metered_calibration(task, ledger)
     calls: list[str] = []
     variant_generator = object()
-    differential_synthesizer = object()
     alt_generator = object()
+
+    async def _establish(candidate, env_image, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append("establish")
+        assert candidate is task.candidate
+        assert env_image is task.env_image
+        frozen = kwargs["provided_tests"]
+        assert any(
+            test.test_id == RECOVERY_DUPLICATE_VALUE_TEST_COMMAND for test in frozen
+        )
+        return task.oracle_report
+
+    async def _flakiness(candidate, env_image, report, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append("flakiness")
+        assert candidate is task.candidate
+        assert env_image is task.env_image
+        assert report is task.oracle_report
+        return report
 
     async def _differential(candidate, env_image, report, **kwargs):  # type: ignore[no-untyped-def]
         calls.append("differential")
@@ -541,7 +559,7 @@ def test_recertification_reruns_teacher_gates_before_final_suite(
         assert env_image is task.env_image
         assert report is not task.oracle_report
         assert kwargs["variant_generator"] is variant_generator
-        assert kwargs["synthesizer"] is differential_synthesizer
+        assert isinstance(kwargs["synthesizer"], NullVariantSynthesizer)
         return report
 
     async def _alt_correct(candidate, env_image, report, **kwargs):  # type: ignore[no-untyped-def]
@@ -570,6 +588,8 @@ def test_recertification_reruns_teacher_gates_before_final_suite(
     monkeypatch.setattr(
         recertification, "run_differential_gate", _differential, raising=False
     )
+    monkeypatch.setattr(recertification, "run_establish_gate", _establish)
+    monkeypatch.setattr(recertification, "run_flakiness_gate", _flakiness)
     monkeypatch.setattr(
         recertification, "run_alt_correct_gate", _alt_correct, raising=False
     )
@@ -593,13 +613,14 @@ def test_recertification_reruns_teacher_gates_before_final_suite(
             task,
             recovery_ledger=_ledger(tmp_path),
             variant_generator=variant_generator,  # type: ignore[arg-type]
-            differential_synthesizer=differential_synthesizer,  # type: ignore[arg-type]
             alt_generator=alt_generator,  # type: ignore[arg-type]
         )
     )
 
     assert result is not task.oracle_report
     assert calls == [
+        "establish",
+        "flakiness",
         "multifault",
         "differential",
         "alt_correct",

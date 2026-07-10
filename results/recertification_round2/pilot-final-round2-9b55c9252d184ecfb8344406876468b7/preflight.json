@@ -1,0 +1,35 @@
+{
+  "run_id": "pilot-final-round2-9b55c9252d184ecfb8344406876468b7",
+  "started_at": "2026-07-10T19:42:25.502939+00:00",
+  "incremental_cap_usd": "25.00",
+  "worst_case_request_reservation_usd": "3.00",
+  "prior_current_target": "generations/4f852089056348f892623df3f548d643",
+  "prior_generation_id": "4f852089056348f892623df3f548d643",
+  "source_dir": "results/multifault_recovery_certified",
+  "panel": [
+    {
+      "model": "openai/gpt-4o-mini",
+      "tier": "weak"
+    },
+    {
+      "model": "anthropic/claude-sonnet-4-6",
+      "tier": "mid"
+    },
+    {
+      "model": "anthropic/claude-opus-4-8",
+      "tier": "frontier"
+    },
+    {
+      "model": "openai/gpt-5.5",
+      "tier": "frontier"
+    }
+  ],
+  "k": 6,
+  "band_high": 0.5,
+  "discrimination_threshold": 1.0,
+  "calibration_attempts": 1,
+  "cache": {
+    "no_cache": true,
+    "no_store": true
+  }
+}

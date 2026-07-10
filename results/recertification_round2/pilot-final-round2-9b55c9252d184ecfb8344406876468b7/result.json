@@ -1,0 +1,11 @@
+{
+  "status": "not_published",
+  "run_id": "pilot-final-round2-9b55c9252d184ecfb8344406876468b7",
+  "prior_current_target": "generations/4f852089056348f892623df3f548d643",
+  "current_target_after_failure": "generations/4f852089056348f892623df3f548d643",
+  "prior_generation_preserved": true,
+  "error_type": "RecertificationError",
+  "error": "recertified oracle did not pass: alt_correct_overfit: 1 genuinely-correct alternative(s) [\"alt_2 (failed: ['python -m pytest test_describe_bug.py', 'python -m pytest test_swe_forge_mut_1.py', 'python -m pytest test_swe_forge_recovery_one_to_one.py::test_one_to_one_duplicate_values_reconcile_last_mapping_and_inverse_cardinality'])\"] were FAILED by the F2P+P2P suite; the suite is over-fit to the gold implementation (a false-negative) and must be relaxed or the candidate rejected",
+  "exact_cost_usd": "0.04410",
+  "unsettled_calls": []
+}

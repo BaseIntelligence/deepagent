@@ -24,20 +24,27 @@ from swe_forge.forge.oracle.alt_correct import (
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.differential import (
+    NullVariantSynthesizer,
     VariantGenerator,
-    VariantStrengthSynthesizer,
     run_differential_gate,
 )
 from swe_forge.forge.oracle.differential_synth import (
-    DifferentialKillSynthesizer,
     TeacherVariantGenerator,
 )
+from swe_forge.forge.oracle.establish import (
+    HiddenTest,
+    HiddenTestFile,
+    run_establish_gate,
+)
+from swe_forge.forge.oracle.flakiness import run_flakiness_gate
 from swe_forge.forge.oracle.leak import run_leak_gate
 from swe_forge.forge.oracle.mutation import (
     final_suite_fingerprint,
     run_final_mutation_gate,
 )
 from swe_forge.forge.oracle.multifault import (
+    RECOVERY_DUPLICATE_VALUE_TEST_COMMAND,
+    RECOVERY_DUPLICATE_VALUE_TEST_PATH,
     run_multifault_completeness_gate,
     strengthen_recovery_duplicate_value_invariant,
     verify_multifault_evidence,
@@ -126,6 +133,42 @@ def _final_evidence(report: OracleReport):
     if evidence is None:
         raise RecertificationError("final mutation evidence is missing")
     return evidence
+
+
+def _frozen_recovery_tests(report: OracleReport) -> tuple[HiddenTest, ...]:
+    """Rebuild every final hidden test without allowing suite expansion.
+
+    The recovery source has already been strengthened with the named OneToOne
+    duplicate-value test. Round-two recertification must prove that exact suite
+    again, rather than asking a teacher to synthesize an untracked replacement
+    before its fingerprint is remeasured. Every retained test file is therefore
+    an intended F2P check and is run through the normal establish/flakiness APIs.
+    """
+    tests: list[HiddenTest] = []
+    for test_file in report.test_files:
+        if not test_file.path or not test_file.content:
+            raise RecertificationError(
+                "certified recovery has an empty final hidden test file"
+            )
+        tests.append(
+            HiddenTest(
+                test_id=(
+                    RECOVERY_DUPLICATE_VALUE_TEST_COMMAND
+                    if test_file.path == RECOVERY_DUPLICATE_VALUE_TEST_PATH
+                    else f"python -m pytest {test_file.path}"
+                ),
+                files=(
+                    HiddenTestFile(
+                        path=test_file.path,
+                        content=test_file.content,
+                    ),
+                ),
+                origin="provided",
+            )
+        )
+    if not tests:
+        raise RecertificationError("certified recovery has no frozen hidden tests")
+    return tuple(tests)
 
 
 def _validate_recovery_identity(task: ForgeTask) -> None:
@@ -233,7 +276,6 @@ async def recertify_final_oracle(
     command_timeout: float = 600.0,
     mutation_timeout: float = 1200.0,
     variant_generator: VariantGenerator | None = None,
-    differential_synthesizer: VariantStrengthSynthesizer | None = None,
     alt_generator: AltCorrectGenerator | None = None,
     adapter: LanguageAdapter | None = None,
     docker_client: DockerClient | None = None,
@@ -249,14 +291,42 @@ async def recertify_final_oracle(
     """
     validate_certified_recovery_source(task)
     threshold = _final_evidence(task.oracle_report).threshold
+    # Freeze and prove the complete strengthened suite before any live teacher
+    # call. The establish gate reruns F2P/P2P on gold and broken; flakiness then
+    # repeats that exact suite in fresh containers at least three times.
+    strengthened = strengthen_recovery_duplicate_value_invariant(task.oracle_report)
+    established = await run_establish_gate(
+        task.candidate,
+        task.env_image,
+        provided_tests=_frozen_recovery_tests(strengthened),
+        synthesizer=None,
+        adapter=adapter,
+        docker_client=docker_client,
+        command_timeout=command_timeout,
+    )
+    if not established.is_pass:
+        return established
+    flakiness = await run_flakiness_gate(
+        task.candidate,
+        task.env_image,
+        established,
+        adapter=adapter,
+        docker_client=docker_client,
+        command_timeout=command_timeout,
+    )
+    if not flakiness.is_pass:
+        return flakiness
+    # Preserve the explicit named-test metadata on the running report without
+    # changing the tests that establish/flakiness already executed.
+    flakiness = strengthen_recovery_duplicate_value_invariant(flakiness)
+
     # No live teacher request may occur before the recovered task proves the
     # exact upstream duplicate-value behavior. This corrects the old
     # whole-file/unique-value attribution and records named per-state exits.
-    strengthened = strengthen_recovery_duplicate_value_invariant(task.oracle_report)
     preflight = await run_multifault_completeness_gate(
         task.candidate,
         task.env_image,
-        strengthened,
+        flakiness,
         adapter=adapter,
         docker_client=docker_client,
         command_timeout=command_timeout,
@@ -280,8 +350,10 @@ async def recertify_final_oracle(
         preflight,
         variant_generator=variant_generator
         or TeacherVariantGenerator(client=differential_client),
-        synthesizer=differential_synthesizer
-        or DifferentialKillSynthesizer(client=differential_client),
+        # The suite was frozen before live oracle execution. A survivor is
+        # evidence to reject, not an opportunity to change the suite and retain
+        # stale calibration assumptions.
+        synthesizer=NullVariantSynthesizer(),
         adapter=adapter,
         docker_client=docker_client,
         command_timeout=command_timeout,
@@ -426,7 +498,6 @@ async def recertify_recovery_export(
     mutation_timeout: float = 1200.0,
     recalibrator: Recalibrator | None = None,
     variant_generator: VariantGenerator | None = None,
-    differential_synthesizer: VariantStrengthSynthesizer | None = None,
     alt_generator: AltCorrectGenerator | None = None,
     adapter: LanguageAdapter | None = None,
     docker_client: DockerClient | None = None,
@@ -439,7 +510,6 @@ async def recertify_recovery_export(
         command_timeout=command_timeout,
         mutation_timeout=mutation_timeout,
         variant_generator=variant_generator,
-        differential_synthesizer=differential_synthesizer,
         alt_generator=alt_generator,
         adapter=adapter,
         docker_client=docker_client,
