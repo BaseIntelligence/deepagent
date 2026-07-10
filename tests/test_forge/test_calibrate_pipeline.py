@@ -23,6 +23,7 @@ validator.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -171,7 +172,32 @@ def _oracle_report(
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
-        details={"teacher_gates": _teacher_gate_evidence()},
+        details={
+            "teacher_gates": _teacher_gate_evidence(),
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        protected_alt_correct_audit={
+            "version": 1,
+            "original_public_suite_sha256": "a" * 64,
+            "gold": {"public": {"passed": True, "exit_code": 0}},
+            "alternatives": {
+                "alt_1": {
+                    "proposal_sha256": hashlib.sha256(
+                        b"calc.py\0def subtract(): ...\n\0"
+                    ).hexdigest(),
+                    "patches": [
+                        {"path": "calc.py", "content": "def subtract(): ...\n"}
+                    ],
+                    "public": {"passed": True, "exit_code": 0},
+                    "hidden": [{"test_id": F2P, "exit_code": 0}],
+                }
+            },
+        },
     )
 
 

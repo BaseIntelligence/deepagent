@@ -383,7 +383,30 @@ def _pass_report(
             "teacher_gates": {
                 "differential": {"calls": [call("differential")]},
                 "alt_correct": {"calls": [call("alt_correct")]},
-            }
+            },
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        protected_alt_correct_audit={
+            "version": 1,
+            "original_public_suite_sha256": "a" * 64,
+            "gold": {"public": {"passed": True, "exit_code": 0}},
+            "alternatives": {
+                "alt_1": {
+                    "proposal_sha256": hashlib.sha256(
+                        b"src/alpha.py\0def alpha(): ...\n\0"
+                    ).hexdigest(),
+                    "patches": [
+                        {"path": "src/alpha.py", "content": "def alpha(): ...\n"}
+                    ],
+                    "public": {"passed": True, "exit_code": 0},
+                    "hidden": [{"test_id": F2P, "exit_code": 0}],
+                }
+            },
         },
     )
 

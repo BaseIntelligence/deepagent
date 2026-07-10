@@ -20,6 +20,7 @@ manual integration check and the user-testing validator.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -61,6 +62,7 @@ from swe_forge.forge.models import (
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.publication import (
+    PublicationError,
     load_published_generation,
     protected_alt_correct_audit_path,
 )
@@ -177,7 +179,9 @@ def _alt_correct_audit() -> dict[str, object]:
         },
         "alternatives": {
             "alt_1": {
-                "proposal_sha256": "b" * 64,
+                "proposal_sha256": hashlib.sha256(
+                    b"src/m.py\0def total(items, tax_rate):\n    return sum(items)\n\0"
+                ).hexdigest(),
                 "patches": [
                     {
                         "path": "src/m.py",
@@ -758,6 +762,30 @@ def test_direct_export_is_discoverable_without_its_internal_store(
     assert not (tasks_root / ".forge-task-publications").exists()
 
 
+def test_direct_export_retains_private_alt_correct_audit_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+
+    result = export_forge_task(task, tasks_root, overwrite=True)
+
+    assert result.shipped
+    store = export_mod._direct_store_root(tasks_root, task.task_id)
+    audits = sorted((store / ".protected-audit").glob("*.json"))
+    assert len(audits) == 1
+    assert audits[0].stat().st_mode & 0o777 == 0o600
+    assert audits[0].parent.stat().st_mode & 0o777 == 0o700
+    raw_proposal = task.oracle_report.protected_alt_correct_audit["alternatives"][  # type: ignore[index]
+        "alt_1"
+    ]["patches"][0]["content"]
+    assert all(
+        raw_proposal not in path.read_text(encoding="utf-8", errors="ignore")
+        for path in result.path.rglob("*")  # type: ignore[union-attr]
+        if path.is_file()
+    )
+
+
 def test_failed_midwrite_leaves_no_partial_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1130,6 +1158,56 @@ def test_alt_correct_private_audit_persists_without_leaking_to_exports(
     assert raw_proposal.rstrip() not in json.dumps(
         generation.entries[0].task.to_dict(), sort_keys=True
     )
+
+
+def test_published_generation_privileged_loader_rehydrates_alt_correct_audit(
+    tmp_path: Path,
+) -> None:
+    result = export_batch([_request()], tmp_path)
+
+    generation = load_published_generation(tmp_path)
+
+    assert generation is not None
+    task = generation.entries[0].task
+    assert task.task_id == result.shipped[0].task_id
+    assert task.oracle_report.protected_alt_correct_audit == _alt_correct_audit()
+    # Rehydration is in-memory only. The manifest remains a public-safe
+    # serialization without the protected evidence.
+    manifest = (generation.root / "manifest.json").read_text(encoding="utf-8")
+    raw_proposal = _alt_correct_audit()["alternatives"]["alt_1"]["patches"][0][
+        "content"
+    ]
+    assert raw_proposal not in manifest
+    assert "protected_alt_correct_audit" not in manifest
+
+
+@pytest.mark.parametrize(
+    "corruption", ["missing", "malformed", "mismatched", "patch_mismatch"]
+)
+def test_hardened_publication_refuses_missing_or_invalid_private_alt_audit(
+    tmp_path: Path, corruption: str
+) -> None:
+    result = export_batch([_request()], tmp_path)
+    generation = load_published_generation(tmp_path)
+    assert generation is not None
+    audit_path = protected_alt_correct_audit_path(
+        generation.root, result.shipped[0].task_id
+    )
+    if corruption == "missing":
+        audit_path.unlink()
+    elif corruption == "malformed":
+        audit_path.write_text("{broken", encoding="utf-8")
+    elif corruption == "mismatched":
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        audit["original_public_suite_sha256"] = "c" * 64
+        audit_path.write_text(json.dumps(audit), encoding="utf-8")
+    else:
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        audit["alternatives"]["alt_1"]["patches"][0]["content"] = "tampered"
+        audit_path.write_text(json.dumps(audit), encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="protected alt-correct audit"):
+        load_published_generation(tmp_path)
 
 
 # --------------------------------------------------------------------------- #

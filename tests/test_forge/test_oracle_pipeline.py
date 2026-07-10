@@ -21,6 +21,8 @@ exercised by this feature's manual verification and the user-testing validator.
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 import swe_forge.forge.oracle.pipeline as pipeline_module
@@ -98,7 +100,9 @@ def _alt_correct_audit() -> dict[str, object]:
         },
         "alternatives": {
             "alt_1": {
-                "proposal_sha256": "b" * 64,
+                "proposal_sha256": hashlib.sha256(
+                    b"src/m.py\0def total(xs): return sum(xs)\n\0"
+                ).hexdigest(),
                 "patches": [
                     {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
                 ],
@@ -300,6 +304,85 @@ def test_verify_pass_consistency_requires_protected_public_validity_audit() -> N
         "protected public-validity audit" in problem
         for problem in verify_pass_consistency(report)
     )
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(report, calibration_kept=True)
+
+
+def test_legacy_alt_correct_report_is_readable_but_never_directly_exportable() -> None:
+    report = _pass_report()
+    report.details.pop("alt_correct")
+    report.protected_alt_correct_audit = None
+
+    # Historical reports remain parseable as immutable recertification inputs,
+    # but their missing hardened evidence can never authorize an export.
+    legacy = OracleReport.from_dict(report.to_dict())
+
+    assert legacy.alt_correct_accepted is True
+    assert any(
+        "source-free public validity summary is missing" in problem
+        for problem in verify_pass_consistency(legacy)
+    )
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(legacy, calibration_kept=True)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (
+            lambda report: report.details["alt_correct"].update(  # type: ignore[index]
+                {"public_suite_sha256": "c" * 64}
+            ),
+            "digest does not match",
+        ),
+        (
+            lambda report: report.protected_alt_correct_audit.update(  # type: ignore[union-attr]
+                {"version": 0}
+            ),
+            "version is unsupported",
+        ),
+        (
+            lambda report: report.protected_alt_correct_audit["gold"]["public"].update(  # type: ignore[index,union-attr]
+                {"exit_code": 1}
+            ),
+            "gold public result is malformed",
+        ),
+        (
+            lambda report: report.protected_alt_correct_audit["alternatives"]["alt_1"][  # type: ignore[index,union-attr]
+                "public"
+            ].update({"exit_code": 1}),
+            "alternative public result is malformed",
+        ),
+        (
+            lambda report: report.details["alt_correct"].update(  # type: ignore[index]
+                {"invalid_teacher_proposals": ["alt_1"]}
+            ),
+            "invalid alternative identities do not match audit",
+        ),
+        (
+            lambda report: report.details["alt_correct"].update(  # type: ignore[index]
+                {"source": "raw alternative source"}
+            ),
+            "unsafe schema",
+        ),
+        (
+            lambda report: report.protected_alt_correct_audit["alternatives"][  # type: ignore[index,union-attr]
+                "alt_1"
+            ]["patches"][0].update({"content": "tampered"}),
+            "proposal digest does not match",
+        ),
+    ],
+)
+def test_alt_correct_export_requires_matching_hardened_public_audit(
+    mutate: object, expected: str
+) -> None:
+    report = _pass_report()
+    assert callable(mutate)
+    mutate(report)
+
+    problems = verify_pass_consistency(report)
+
+    assert any(expected in problem for problem in problems)
     with pytest.raises(ExportRefusedError):
         ensure_oracle_exportable(report, calibration_kept=True)
 

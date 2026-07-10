@@ -304,6 +304,17 @@ def _safe_public_audit(
     }
 
 
+def _safe_public_summary(details: dict[str, object]) -> dict[str, object]:
+    """Extract the only alt-correct details allowed onto public surfaces."""
+    keys = (
+        "public_suite_sha256",
+        "gold_public_suite_passed",
+        "public_valid_alternatives",
+        "invalid_teacher_proposals",
+    )
+    return {key: details.get(key) for key in keys}
+
+
 async def assess_alt_correct(
     runner: AltCorrectRunner,
     alternatives: Sequence[AltImpl],
@@ -630,7 +641,7 @@ def build_alt_correct_report(
     over-fit test(s) are removed from ``fail_to_pass``/``test_files``.
     """
     details: dict[str, object] = dict(prior_report.details)
-    details["alt_correct"] = outcome.details
+    details["alt_correct"] = _safe_public_summary(outcome.details)
     # A relaxation removes hidden tests. Do not let counts from a prior suite
     # survive it; final pipeline remeasurement must bind the retained suite.
     if prior_report.final_mutation_evidence is not None:

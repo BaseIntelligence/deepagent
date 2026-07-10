@@ -116,6 +116,7 @@ _GIT_ENV = {
 _DIRECT_STORE_DIR = ".forge-task-publications"
 _DIRECT_GENERATIONS_DIR = "generations"
 _DIRECT_CURRENT_LINK = "current"
+_DIRECT_PROTECTED_AUDIT_DIR = ".protected-audit"
 
 
 class ExportError(RuntimeError):
@@ -1178,6 +1179,48 @@ def _fsync_direct_store_ancestors(tasks_root: Path, store: Path) -> None:
         publication._fsync_path(path)
 
 
+def _direct_protected_alt_correct_audit_path(store: Path, generation_id: str) -> Path:
+    """Return a direct export's non-agent-facing raw alt-correct evidence path."""
+    return store / _DIRECT_PROTECTED_AUDIT_DIR / f"{generation_id}.json"
+
+
+def _write_direct_protected_alt_correct_audit(
+    store: Path, generation_id: str, task: ForgeTask
+) -> Path | None:
+    """Persist protected evidence outside the direct task workspace facade."""
+    audit = task.oracle_report.protected_alt_correct_audit
+    hardened = (
+        task.oracle_report.alt_correct_accepted
+        and "alt_correct" in task.oracle_report.details
+    )
+    if not hardened:
+        return None
+    if not isinstance(audit, dict):
+        raise ExportError(
+            f"protected alt-correct audit is missing for {task.task_id!r}"
+        )
+
+    directory = store / _DIRECT_PROTECTED_AUDIT_DIR
+    if directory.exists() and (not directory.is_dir() or directory.is_symlink()):
+        raise ExportError(f"direct protected audit store is invalid: {directory}")
+    directory.mkdir(exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    path = _direct_protected_alt_correct_audit_path(store, generation_id)
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(audit, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.chmod(path, 0o600)
+    publication._fsync_path(path)
+    publication._fsync_path(directory)
+    publication._fsync_path(store)
+    return path
+
+
 def export_forge_task(
     task: ForgeTask,
     tasks_root: Path | str,
@@ -1241,6 +1284,7 @@ def export_forge_task(
 
     stage: Path | None = None
     pointer_tmp: Path | None = None
+    direct_audit_path: Path | None = None
     store_created = False
     generation_committed = False
 
@@ -1298,8 +1342,11 @@ def export_forge_task(
                 _remove_new_empty_direct_store(store)
             return staged
 
-        publication._fsync_tree(stage)
         generation_id = uuid.uuid4().hex
+        direct_audit_path = _write_direct_protected_alt_correct_audit(
+            store, generation_id, task
+        )
+        publication._fsync_tree(stage)
         final_generation = generations / generation_id
         os.replace(stage, final_generation)
         stage = None
@@ -1328,6 +1375,8 @@ def export_forge_task(
     except Exception as exc:  # noqa: BLE001 - preserve selected output on every failure
         if stage is not None:
             shutil.rmtree(stage, ignore_errors=True)
+        if direct_audit_path is not None and not generation_committed:
+            direct_audit_path.unlink(missing_ok=True)
         if pointer_tmp is not None:
             pointer_tmp.unlink(missing_ok=True)
         if store_created and not generation_committed:

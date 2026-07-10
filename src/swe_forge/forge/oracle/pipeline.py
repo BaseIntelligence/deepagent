@@ -31,6 +31,7 @@ through every gate and never branches on language itself.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING
 
@@ -99,6 +100,15 @@ GATE_ORDER: tuple[str, ...] = (
 #: fields are not mutually consistent (a defensive guard - should never fire in a
 #: correct gate, but the pipeline refuses to emit an inconsistent ``pass``).
 REASON_PIPELINE_INCONSISTENT = "pipeline_inconsistent_pass"
+_ALT_CORRECT_AUDIT_VERSION = 1
+_ALT_CORRECT_PUBLIC_SUMMARY_KEYS = frozenset(
+    {
+        "public_suite_sha256",
+        "gold_public_suite_passed",
+        "public_valid_alternatives",
+        "invalid_teacher_proposals",
+    }
+)
 
 #: One bound gate: consumes the prior report (``None`` for the first gate) and
 #: returns the extended report. The orchestration threads these uniformly.
@@ -113,44 +123,112 @@ class ExportRefusedError(RuntimeError):
     """Raised by :func:`ensure_oracle_exportable` for a non-shippable candidate."""
 
 
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
+
+
+def _is_exit_code(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _patches_digest(patches: Sequence[dict[str, object]]) -> str:
+    """Recompute the canonical digest recorded for a materialized proposal."""
+    digest = hashlib.sha256()
+    for patch in sorted(patches, key=lambda item: str(item["path"])):
+        digest.update(str(patch["path"]).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(patch["content"]).encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
     """Validate the non-agent-facing evidence for alt-correct public validity."""
-    # Artifacts emitted before public-validity hardening lack the entire
-    # alt-correct record. They can remain immutable inputs to fresh
-    # recertification, which executes the hardened gate and records the audit.
-    # Any report produced by the hardened gate has this record and therefore
-    # cannot bypass the checks below.
-    if "alt_correct" not in report.details:
+    # Historical artifacts remain readable as immutable recertification inputs,
+    # but this validator is an export boundary: a passing report that claims
+    # alternative correctness can never use the old missing-evidence shape to
+    # authorize public publication.
+    if not report.alt_correct_accepted:
         return []
+
+    public_details = report.details.get("alt_correct")
+    if not isinstance(public_details, dict):
+        return ["alt_correct: source-free public validity summary is missing"]
+    if set(public_details) != _ALT_CORRECT_PUBLIC_SUMMARY_KEYS:
+        return ["alt_correct: public validity summary has an unsafe schema"]
 
     audit = report.protected_alt_correct_audit
     if not isinstance(audit, dict):
         return ["alt_correct: protected public-validity audit is missing"]
+    if audit.get("version") != _ALT_CORRECT_AUDIT_VERSION:
+        return ["alt_correct: protected public-validity audit version is unsupported"]
+    audit_digest = audit.get("original_public_suite_sha256")
+    if not _is_sha256(audit_digest):
+        return ["alt_correct: protected public suite digest is malformed"]
+    summary_digest = public_details.get("public_suite_sha256")
+    if not _is_sha256(summary_digest):
+        return ["alt_correct: public suite digest is missing or malformed"]
+    if summary_digest != audit_digest:
+        return ["alt_correct: public suite digest does not match protected audit"]
     gold = audit.get("gold")
     if not isinstance(gold, dict):
         return ["alt_correct: protected gold public result is missing"]
     gold_public = gold.get("public")
-    if not isinstance(gold_public, dict) or gold_public.get("passed") is not True:
+    if not isinstance(gold_public, dict):
+        return ["alt_correct: protected gold public result is malformed"]
+    gold_passed = gold_public.get("passed")
+    gold_exit = gold_public.get("exit_code")
+    if not isinstance(gold_passed, bool) or not _is_exit_code(gold_exit):
+        return ["alt_correct: protected gold public result is malformed"]
+    if gold_passed and gold_exit != 0:
+        return ["alt_correct: protected gold public result is malformed"]
+    if gold_passed is not True:
         return ["alt_correct: gold did not pass the original public suite"]
     alternatives = audit.get("alternatives")
     if not isinstance(alternatives, dict) or not alternatives:
         return ["alt_correct: protected alternative audit is missing"]
 
     public_green = 0
+    invalid_alternatives: list[str] = []
     for alt_id, record in alternatives.items():
-        if not isinstance(alt_id, str) or not isinstance(record, dict):
+        if not isinstance(alt_id, str) or not alt_id or not isinstance(record, dict):
             return ["alt_correct: protected alternative audit is malformed"]
         proposal_digest = record.get("proposal_sha256")
         patches = record.get("patches")
         public = record.get("public")
         if (
-            not isinstance(proposal_digest, str)
-            or len(proposal_digest) != 64
+            not _is_sha256(proposal_digest)
             or not isinstance(patches, list)
             or not patches
             or not isinstance(public, dict)
         ):
             return ["alt_correct: protected alternative audit is incomplete"]
+        if any(
+            not isinstance(patch, dict)
+            or not isinstance(patch.get("path"), str)
+            or not patch["path"]
+            or not isinstance(patch.get("content"), str)
+            for patch in patches
+        ):
+            return ["alt_correct: protected alternative audit is malformed"]
+        typed_patches = [patch for patch in patches if isinstance(patch, dict)]
+        if proposal_digest != _patches_digest(typed_patches):
+            return [
+                "alt_correct: protected alternative proposal digest does not "
+                "match materialized patches"
+            ]
+        public_passed = public.get("passed")
+        public_exit = public.get("exit_code")
+        if not isinstance(public_passed, bool) or not _is_exit_code(public_exit):
+            return ["alt_correct: alternative public result is malformed"]
+        if public_passed and public_exit != 0:
+            return ["alt_correct: alternative public result is malformed"]
+        if not public_passed and public_exit == 0:
+            return ["alt_correct: alternative public result is malformed"]
         if public.get("passed") is True:
             public_green += 1
             hidden = record.get("hidden")
@@ -159,21 +237,26 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
                     "alt_correct: public-green alternative has no hidden per-node "
                     "execution evidence"
                 ]
+        else:
+            invalid_alternatives.append(alt_id)
     if public_green < 1:
         return [
             "alt_correct: no executable real-teacher alternative passed the "
             "original public suite"
         ]
 
-    public_details = report.details.get("alt_correct")
-    if not isinstance(public_details, dict):
-        return ["alt_correct: public validity summary is missing"]
-    if not isinstance(public_details.get("public_suite_sha256"), str):
-        return ["alt_correct: public suite digest is missing"]
     if public_details.get("gold_public_suite_passed") is not True:
         return ["alt_correct: public gold summary is not green"]
     if public_details.get("public_valid_alternatives") != public_green:
         return ["alt_correct: public-valid alternative count does not match audit"]
+    invalid_summary = public_details.get("invalid_teacher_proposals")
+    if (
+        not isinstance(invalid_summary, list)
+        or any(not isinstance(item, str) for item in invalid_summary)
+        or sorted(invalid_summary) != sorted(invalid_alternatives)
+        or len(set(invalid_summary)) != len(invalid_summary)
+    ):
+        return ["alt_correct: invalid alternative identities do not match audit"]
     return []
 
 

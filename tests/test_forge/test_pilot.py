@@ -27,6 +27,7 @@ feature's manual integration run and the user-testing validator.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 import signal
 import shutil
@@ -240,7 +241,9 @@ def _alt_correct_audit() -> dict[str, object]:
         },
         "alternatives": {
             "alt_1": {
-                "proposal_sha256": "b" * 64,
+                "proposal_sha256": hashlib.sha256(
+                    b"src/m.py\0def total(xs): return sum(xs)\n\0"
+                ).hexdigest(),
                 "patches": [
                     {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
                 ],

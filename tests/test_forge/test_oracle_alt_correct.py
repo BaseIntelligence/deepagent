@@ -543,7 +543,7 @@ async def test_build_report_pass_sets_flag_and_carries_fields() -> None:
     assert report.mutants_killed == 10
     assert report.fail_to_pass == ["python -m pytest tests/test_x.py"]
     assert [tf.path for tf in report.test_files] == ["tests/test_x.py"]
-    assert report.details["alt_correct"]["alternatives_total"] == 2
+    assert report.details["alt_correct"]["public_valid_alternatives"] == 2
     # serializable + reproducible
     again = OracleReport.from_dict(report.to_dict())
     assert again.alt_correct_accepted is True
@@ -567,6 +567,12 @@ async def test_public_alt_audit_round_trips_only_through_protected_serialization
     public = report.to_dict()
     assert "0 + 1" not in repr(public)
     assert "patches" not in repr(public)
+    assert set(public["details"]["alt_correct"]) == {
+        "public_suite_sha256",
+        "gold_public_suite_passed",
+        "public_valid_alternatives",
+        "invalid_teacher_proposals",
+    }
     assert public["details"]["alt_correct"]["public_valid_alternatives"] == 1
     assert "public_suite_sha256" in public["details"]["alt_correct"]
 

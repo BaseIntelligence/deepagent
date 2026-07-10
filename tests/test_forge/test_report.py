@@ -190,7 +190,9 @@ def _alt_correct_audit() -> dict[str, object]:
         "gold": {"public": {"passed": True, "exit_code": 0}},
         "alternatives": {
             "alt_1": {
-                "proposal_sha256": "b" * 64,
+                "proposal_sha256": hashlib.sha256(
+                    b"src/m.py\0def total(xs): return sum(xs)\n\0"
+                ).hexdigest(),
                 "patches": [
                     {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
                 ],

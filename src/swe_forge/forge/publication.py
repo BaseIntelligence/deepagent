@@ -13,16 +13,18 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from swe_forge.export.jsonl import import_jsonl
 from swe_forge.export.parquet import import_parquet
-from swe_forge.forge.models import ForgeTask
+from swe_forge.forge.models import ForgeTask, OracleReport
+from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
 
 if TYPE_CHECKING:
     from swe_forge.forge.export import TaskExportResult
@@ -206,7 +208,9 @@ def _read_manifest(root: Path) -> PublishedGeneration:
             raise PublicationError(
                 f"publication manifest {manifest_path} has duplicate index"
             )
-        task = ForgeTask.from_dict(raw["task"])
+        task = _rehydrate_protected_alt_correct_audit(
+            root, ForgeTask.from_dict(raw["task"])
+        )
         if task.task_id in seen_ids:
             raise PublicationError(
                 f"publication manifest {manifest_path} has duplicate task id"
@@ -316,6 +320,73 @@ def protected_alt_correct_audit_path(root: Path | str, task_id: str) -> Path:
     )
 
 
+def _requires_protected_alt_correct_audit(task: ForgeTask) -> bool:
+    """Whether this report was emitted by hardened alt-correct validation."""
+    return (
+        task.oracle_report.alt_correct_accepted
+        and "alt_correct" in task.oracle_report.details
+    )
+
+
+def _rehydrate_protected_alt_correct_audit(root: Path, task: ForgeTask) -> ForgeTask:
+    """Load and validate a private audit for a hardened public task.
+
+    The public manifest deliberately excludes raw alternative implementations.
+    This privileged publication-store loader restores that evidence only in
+    memory, then reruns the normal export gate so a missing, malformed, or
+    mismatched sidecar cannot flow into a successor generation.
+    """
+    if not _requires_protected_alt_correct_audit(task):
+        # Pre-hardening reports are preserved as read-only recertification
+        # inputs. They remain non-exportable because ensure_oracle_exportable()
+        # rejects their missing hardened evidence at every write boundary.
+        return task
+
+    path = protected_alt_correct_audit_path(root, task.task_id)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise PublicationError(
+            f"protected alt-correct audit is missing for {task.task_id!r}"
+        ) from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise PublicationError(
+            f"protected alt-correct audit is not a regular private file for "
+            f"{task.task_id!r}"
+        )
+    if metadata.st_mode & 0o077:
+        raise PublicationError(
+            f"protected alt-correct audit has unsafe permissions for {task.task_id!r}"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PublicationError(
+            f"protected alt-correct audit is unreadable for {task.task_id!r}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise PublicationError(
+            f"protected alt-correct audit is malformed for {task.task_id!r}"
+        )
+    try:
+        report = OracleReport.from_protected_dict(
+            {
+                **task.oracle_report.to_dict(),
+                "protected_alt_correct_audit": payload,
+            }
+        )
+        ensure_oracle_exportable(
+            report,
+            candidate=task.candidate,
+            calibration_kept=task.calibration_report.is_keep,
+        )
+    except (ExportRefusedError, ValueError, TypeError) as exc:
+        raise PublicationError(
+            f"protected alt-correct audit is invalid for {task.task_id!r}: {exc}"
+        ) from exc
+    return replace(task, oracle_report=report)
+
+
 def _write_protected_alt_correct_audit(
     stage: Path,
     entry: PublicationEntry,
@@ -338,17 +409,10 @@ def _write_protected_alt_correct_audit(
         os.chmod(target, 0o600)
         return
 
-    # An unchanged task may be copied into a successor generation.  Preserve its
-    # prior private audit if it has one, without exposing it through the manifest
-    # or stable tasks/dataset facade.
-    if previous is None:
-        return
-    source = protected_alt_correct_audit_path(previous.root, entry.task.task_id)
-    if source.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        shutil.copy2(source, target)
-        os.chmod(target.parent, 0o700)
-        os.chmod(target, 0o600)
+    if _requires_protected_alt_correct_audit(entry.task):
+        raise PublicationError(
+            f"protected alt-correct audit is missing for {entry.task.task_id!r}"
+        )
 
 
 def publish_generation(
@@ -379,6 +443,17 @@ def publish_generation(
     indexes = [entry.index for entry in unique_entries]
     if len(indexes) != len(set(indexes)):
         raise PublicationError("generation request contains duplicate entry indexes")
+    for entry in unique_entries:
+        try:
+            ensure_oracle_exportable(
+                entry.task.oracle_report,
+                candidate=entry.task.candidate,
+                calibration_kept=entry.task.calibration_report.is_keep,
+            )
+        except ExportRefusedError as exc:
+            raise PublicationError(
+                f"task {entry.task.task_id!r} is not exportable: {exc}"
+            ) from exc
 
     _ensure_public_facade(out_path, extra_artifacts=extra_facade_artifacts)
     previous = load_published_generation(out_path)
