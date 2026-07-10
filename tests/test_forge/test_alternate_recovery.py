@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 import pytest
@@ -393,3 +394,183 @@ def test_certification_payload_never_marks_stale_task_as_passed() -> None:
     assert tombstone["state"] == "tombstone"
     assert tombstone["passed"] is False
     assert tombstone["task_ids"] == []
+
+
+def test_crashed_global_claim_reconciles_without_restarting_live_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh work roots cannot turn a crash after claim into a second attempt."""
+    workspace, budget, manifest = _write_recovery_fixture(tmp_path)
+    output = tmp_path / "pilot_final"
+    authority_root = tmp_path / "machine-global-authority"
+    rehydrate_calls = 0
+
+    class SimulatedCrash(BaseException):
+        pass
+
+    def crash_after_claim(_verified: object) -> object:
+        nonlocal rehydrate_calls
+        rehydrate_calls += 1
+        raise SimulatedCrash()
+
+    monkeypatch.setattr(alternate_recovery, "APPROVED_INPUT_MANIFEST", manifest)
+    monkeypatch.setattr(alternate_recovery, "_CANONICAL_RECOVERY_OUTPUT", output)
+    monkeypatch.setattr(
+        alternate_recovery, "default_authority_root", lambda: authority_root
+    )
+    monkeypatch.setattr(alternate_recovery, "rehydrate_alternate", crash_after_claim)
+
+    with pytest.raises(SimulatedCrash):
+        asyncio.run(
+            alternate_recovery.run_final_alternate_recovery(
+                out_dir=output,
+                source_workspace=workspace,
+                budget_progress=budget,
+                work_root=tmp_path / "first-work",
+                repository_root=tmp_path,
+            )
+        )
+
+    authority = alternate_recovery.RecoveryAttemptAuthority(
+        authority_root, ALTERNATE_RECOVERY_TASK_ID
+    )
+    claim = authority.record()
+    assert claim is not None
+    assert claim.state == "claimed"
+    assert rehydrate_calls == 1
+
+    def reconcile_without_live_work(
+        authority: alternate_recovery.RecoveryAttemptAuthority,
+        claim: alternate_recovery.RecoveryAuthorityRecord,
+        **_kwargs: object,
+    ) -> alternate_recovery.AlternateRecoveryResult:
+        authority.consume(
+            claim,
+            terminal_state="tombstone",
+            certification_run_id=claim.run_id,
+            ledger_run_id=claim.run_id,
+            selected_generation_id="reconciled-terminal",
+        )
+        return alternate_recovery.AlternateRecoveryResult(
+            run_id=claim.run_id,
+            status="tombstoned",
+            reason="crash reconciliation",
+        )
+
+    monkeypatch.setattr(
+        alternate_recovery,
+        "_reconcile_claim_to_tombstone",
+        reconcile_without_live_work,
+    )
+    result = asyncio.run(
+        alternate_recovery.run_final_alternate_recovery(
+            out_dir=output,
+            source_workspace=workspace,
+            budget_progress=budget,
+            work_root=tmp_path / "fresh-work-root",
+            repository_root=tmp_path,
+        )
+    )
+    assert result.status == "tombstoned"
+    assert rehydrate_calls == 1
+
+    with pytest.raises(AlternateRecoveryError, match="already consumed"):
+        asyncio.run(
+            alternate_recovery.run_final_alternate_recovery(
+                out_dir=output,
+                source_workspace=workspace,
+                budget_progress=budget,
+                work_root=tmp_path / "another-work-root",
+                repository_root=tmp_path,
+            )
+        )
+    assert rehydrate_calls == 1
+
+
+def test_alternate_recovery_rejects_output_alias_before_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An output-root alias cannot create or bypass recovery authority."""
+    workspace, budget, manifest = _write_recovery_fixture(tmp_path)
+    canonical_output = tmp_path / "pilot_final"
+    authority_root = tmp_path / "machine-global-authority"
+    monkeypatch.setattr(alternate_recovery, "APPROVED_INPUT_MANIFEST", manifest)
+    monkeypatch.setattr(
+        alternate_recovery, "_CANONICAL_RECOVERY_OUTPUT", canonical_output
+    )
+    monkeypatch.setattr(
+        alternate_recovery, "default_authority_root", lambda: authority_root
+    )
+
+    with pytest.raises(AlternateRecoveryError, match="canonical pilot_final output"):
+        asyncio.run(
+            alternate_recovery.run_final_alternate_recovery(
+                out_dir=tmp_path / "alternate-output",
+                source_workspace=workspace,
+                budget_progress=budget,
+                work_root=tmp_path / "fresh-work-root",
+                repository_root=tmp_path,
+            )
+        )
+
+    assert not authority_root.exists()
+
+
+def test_selected_terminal_generation_consumes_crash_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A crash after pointer selection reconciles the selected terminal, not a retry."""
+    authority = alternate_recovery.RecoveryAttemptAuthority(
+        tmp_path / "machine-global-authority", ALTERNATE_RECOVERY_TASK_ID
+    )
+    claim = authority.claim(
+        run_id="alternate-crashed-after-publish",
+        expected_current_generation_id="previous-generation",
+        ledger_path=tmp_path / "work" / "recovery-ledger.jsonl",
+    )
+    terminal = tmp_path / "terminal-generation"
+    terminal.mkdir()
+    (terminal / "certification.json").write_text(
+        json.dumps(
+            RecoveryCertification.tombstone(
+                run_id=claim.run_id,
+                reason="already selected",
+                previous_generation_id=claim.expected_current_generation_id,
+            ).to_dict()
+        ),
+        encoding="utf-8",
+    )
+    (terminal / "recovery-ledger.jsonl").write_text(
+        json.dumps({"run_id": claim.run_id}) + "\n",
+        encoding="utf-8",
+    )
+    selected = SimpleNamespace(root=terminal, generation_id="selected-terminal")
+    monkeypatch.setattr(
+        alternate_recovery, "load_published_generation", lambda _output: selected
+    )
+
+    result = alternate_recovery._reconcile_selected_terminal(
+        authority, claim, output=tmp_path / "pilot_final"
+    )
+
+    assert result is not None
+    assert result.status == "tombstoned"
+    record = authority.record()
+    assert record is not None
+    assert record.state == "consumed"
+    assert record.selected_generation_id == "selected-terminal"
+
+
+def test_empty_terminal_ledger_reconciles_to_its_durable_claim(
+    tmp_path: Path,
+) -> None:
+    """A crash before the first live call still has a valid empty ledger."""
+    ledger = tmp_path / "recovery-ledger.jsonl"
+    ledger.touch()
+
+    assert (
+        alternate_recovery._terminal_ledger_run_id(
+            ledger, empty_run_id="alternate-before-call"
+        )
+        == "alternate-before-call"
+    )

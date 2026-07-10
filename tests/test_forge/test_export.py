@@ -1328,3 +1328,42 @@ def test_failed_generation_keeps_the_prior_complete_generation(
     assert after.generation_id == before.generation_id
     assert {task.id for task in import_jsonl(tmp_path / "dataset.jsonl")} == before_ids
     assert not list((tmp_path / ".forge-publications").glob(".staging-*"))
+
+
+def test_expected_current_generation_cas_preserves_an_intervening_publication(
+    tmp_path: Path,
+) -> None:
+    """A terminal writer cannot replace a generation selected after its preflight."""
+    first = export_batch([_request()], tmp_path, overwrite=True)
+    expected = load_published_generation(tmp_path)
+    assert expected is not None
+
+    intervening = export_batch(
+        [
+            _request(
+                candidate=_candidate(seed=8),
+                repo_url="https://github.com/acme/intervening.git",
+            )
+        ],
+        tmp_path,
+        overwrite=True,
+    )
+
+    with pytest.raises(
+        export_mod.ExportError,
+        match="expected current generation .* does not match",
+    ):
+        export_batch(
+            [],
+            tmp_path,
+            overwrite=True,
+            expected_current_generation_id=expected.generation_id,
+        )
+
+    selected = load_published_generation(tmp_path)
+    assert selected is not None
+    assert selected.generation_id != expected.generation_id
+    assert {task.id for task in import_jsonl(intervening.jsonl_path)} == {
+        entry.task.task_id for entry in selected.entries
+    }
+    assert first.kept

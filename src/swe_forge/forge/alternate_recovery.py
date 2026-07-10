@@ -65,6 +65,12 @@ from swe_forge.forge.recovery_accounting import (
     RecoveryBudgetLedger,
     reconcile_recovery_reports,
 )
+from swe_forge.forge.recovery_authority import (
+    RecoveryAttemptAuthority,
+    RecoveryAuthorityError,
+    RecoveryAuthorityRecord,
+    default_authority_root,
+)
 from swe_forge.forge.report import GoldSummary, build_benchmark_report, write_report
 from swe_forge.forge.teacher import TeacherClient
 
@@ -105,6 +111,9 @@ _CANONICAL_AUDIT_ARTIFACTS = (
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_CANONICAL_RECOVERY_OUTPUT = _PROJECT_ROOT / "results" / "pilot_final"
+_LEGACY_RECOVERY_WORK_ROOT = _PROJECT_ROOT / "results" / "final_alternate_recovery"
+_LEGACY_TOMBSTONE_GENERATION_ID = "eb215983bd91465cbc07dce80cf5e015"
 _APPROVED_MANIFEST_RESOURCE = Path(__file__).with_name(
     "approved_alternate_recovery_inputs.json"
 )
@@ -757,24 +766,30 @@ class RecoveryCertification:
         )
 
     @classmethod
-    def tombstone(cls, *, run_id: str, reason: str) -> "RecoveryCertification":
+    def tombstone(
+        cls, *, run_id: str, reason: str, previous_generation_id: str = ""
+    ) -> "RecoveryCertification":
         return cls(
             run_id=run_id,
             state="tombstone",
             passed=False,
             task_ids=(),
             created_at=_utc_now(),
+            previous_generation_id=previous_generation_id,
             reason=reason,
         )
 
     @classmethod
-    def keep(cls, *, run_id: str, task_id: str) -> "RecoveryCertification":
+    def keep(
+        cls, *, run_id: str, task_id: str, previous_generation_id: str = ""
+    ) -> "RecoveryCertification":
         return cls(
             run_id=run_id,
             state="keep",
             passed=True,
             task_ids=(task_id,),
             created_at=_utc_now(),
+            previous_generation_id=previous_generation_id,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -839,6 +854,218 @@ def write_recovery_certification(
     finally:
         temp.unlink(missing_ok=True)
     return path
+
+
+def _require_canonical_recovery_output(out_dir: Path | str) -> Path:
+    """Refuse output aliases so the global authority has one publication target."""
+    output = _strict_absolute_path(out_dir, label="recovery output")
+    if output != _CANONICAL_RECOVERY_OUTPUT:
+        raise AlternateRecoveryError(
+            "alternate recovery accepts only the canonical pilot_final output path"
+        )
+    return output
+
+
+def _terminal_ledger_run_id(path: Path, *, empty_run_id: str = "") -> str:
+    """Read only the run identity from a terminal ledger without trusting content."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise AlternateRecoveryError("terminal recovery ledger is unavailable") from exc
+    if not lines:
+        if empty_run_id:
+            return empty_run_id
+        raise AlternateRecoveryError("terminal recovery ledger is empty")
+    run_ids: set[str] = set()
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise AlternateRecoveryError(
+                "terminal recovery ledger is malformed"
+            ) from exc
+        run_id = event.get("run_id") if isinstance(event, dict) else None
+        if not isinstance(run_id, str) or not run_id:
+            raise AlternateRecoveryError("terminal recovery ledger lacks a run id")
+        run_ids.add(run_id)
+    if len(run_ids) != 1:
+        raise AlternateRecoveryError("terminal recovery ledger has mixed run ids")
+    return next(iter(run_ids))
+
+
+def _migrate_existing_terminal_tombstone(
+    authority: RecoveryAttemptAuthority, output: Path
+) -> bool:
+    """Record the one pre-authorized terminal tombstone before any live activity."""
+    selected = load_published_generation(output)
+    if selected is None or selected.generation_id != _LEGACY_TOMBSTONE_GENERATION_ID:
+        return False
+    certification_path = selected.root / "certification.json"
+    try:
+        certification = json.loads(certification_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AlternateRecoveryError(
+            "legacy terminal certification is unavailable"
+        ) from exc
+    if (
+        not isinstance(certification, dict)
+        or certification.get("state") != "tombstone"
+        or certification.get("passed") is not False
+        or certification.get("task_ids") != []
+        or not isinstance(certification.get("run_id"), str)
+        or not certification["run_id"]
+    ):
+        raise AlternateRecoveryError("legacy terminal certification is invalid")
+    ledger = selected.root / "recovery-ledger.jsonl"
+    if not ledger.is_file():
+        ledger = _LEGACY_RECOVERY_WORK_ROOT / "recovery-ledger.jsonl"
+    ledger_run_id = _terminal_ledger_run_id(ledger)
+    try:
+        authority.migrate_terminal_tombstone(
+            run_id=certification["run_id"],
+            ledger_run_id=ledger_run_id,
+            certification_run_id=certification["run_id"],
+            selected_generation_id=selected.generation_id,
+            ledger_path=ledger.resolve(strict=True),
+        )
+    except RecoveryAuthorityError as exc:
+        raise AlternateRecoveryError(str(exc)) from exc
+    return True
+
+
+def _consume_terminal_authority(
+    authority: RecoveryAttemptAuthority,
+    claim: RecoveryAuthorityRecord,
+    *,
+    terminal_state: Literal["keep", "tombstone"],
+    output: Path,
+) -> None:
+    """Require selected certification and ledger evidence before consuming a claim."""
+    selected = load_published_generation(output)
+    if selected is None:
+        raise AlternateRecoveryError("terminal recovery publication is not selected")
+    certification_path = selected.root / "certification.json"
+    ledger_path = selected.root / "recovery-ledger.jsonl"
+    try:
+        certification = json.loads(certification_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AlternateRecoveryError(
+            "terminal recovery certification is unavailable"
+        ) from exc
+    if (
+        not isinstance(certification, dict)
+        or certification.get("run_id") != claim.run_id
+        or certification.get("state") != terminal_state
+        or certification.get("previous_generation_id")
+        != claim.expected_current_generation_id
+    ):
+        raise AlternateRecoveryError(
+            "terminal certification does not reconcile to the authority claim"
+        )
+    try:
+        authority.consume(
+            claim,
+            terminal_state=terminal_state,
+            certification_run_id=certification["run_id"],
+            ledger_run_id=_terminal_ledger_run_id(
+                ledger_path, empty_run_id=claim.run_id
+            ),
+            selected_generation_id=selected.generation_id,
+        )
+    except RecoveryAuthorityError as exc:
+        raise AlternateRecoveryError(str(exc)) from exc
+
+
+def _reconcile_selected_terminal(
+    authority: RecoveryAttemptAuthority,
+    claim: RecoveryAuthorityRecord,
+    *,
+    output: Path,
+) -> AlternateRecoveryResult | None:
+    """Consume a claim when a matching terminal publication already selected."""
+    selected = load_published_generation(output)
+    if selected is None:
+        return None
+    try:
+        certification = json.loads(
+            (selected.root / "certification.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(certification, dict):
+        return None
+    terminal_state = certification.get("state")
+    if (
+        terminal_state not in {"keep", "tombstone"}
+        or certification.get("run_id") != claim.run_id
+        or certification.get("previous_generation_id")
+        != claim.expected_current_generation_id
+    ):
+        return None
+    _consume_terminal_authority(
+        authority,
+        claim,
+        terminal_state=terminal_state,
+        output=output,
+    )
+    return AlternateRecoveryResult(
+        run_id=claim.run_id,
+        status="kept" if terminal_state == "keep" else "tombstoned",
+        reason=(
+            ""
+            if terminal_state == "keep"
+            else str(certification.get("reason", "terminal reconciliation"))
+        ),
+        task_id=ALTERNATE_RECOVERY_TASK_ID if terminal_state == "keep" else "",
+    )
+
+
+def _reconcile_claim_to_tombstone(
+    authority: RecoveryAttemptAuthority,
+    claim: RecoveryAuthorityRecord,
+    *,
+    output: Path,
+    cap_usd: str,
+    reason: str,
+) -> AlternateRecoveryResult:
+    """Terminally reconcile a crashed claim without Docker or teacher activity."""
+    ledger_path = Path(claim.ledger_path)
+    if not ledger_path.exists():
+        RecoveryBudgetLedger(
+            ledger_path,
+            run_id=claim.run_id,
+            cap_usd=cap_usd,
+            worst_case_cost_usd="3.00",
+        )
+    tombstone = RecoveryCertification.tombstone(
+        run_id=claim.run_id,
+        reason=reason,
+        previous_generation_id=claim.expected_current_generation_id,
+    )
+    _promote_regular_audit_artifacts_to_prior_generation(output)
+    export_batch(
+        [],
+        output,
+        overwrite=True,
+        generation_metadata_writer=_tombstone_stage_writer(
+            tombstone, reason, ledger_path=ledger_path
+        ),
+        extra_facade_artifacts=_CANONICAL_AUDIT_ARTIFACTS,
+        expected_current_generation_id=claim.expected_current_generation_id,
+    )
+    _consume_terminal_authority(
+        authority,
+        claim,
+        terminal_state="tombstone",
+        output=output,
+    )
+    _write_json(
+        ledger_path.parent / "result.json",
+        {"run_id": claim.run_id, "status": "tombstoned", "reason": reason},
+    )
+    return AlternateRecoveryResult(
+        run_id=claim.run_id, status="tombstoned", reason=reason
+    )
 
 
 @dataclass(frozen=True)
@@ -1219,7 +1446,9 @@ async def run_normal_oracle_gates(
     )
 
 
-def _tombstone_stage_writer(certification: RecoveryCertification, reason: str):
+def _tombstone_stage_writer(
+    certification: RecoveryCertification, reason: str, *, ledger_path: Path
+):
     def write(stage: Path, _entries: Sequence[object]) -> None:
         _write_json(stage / "certification.json", certification.to_dict())
         _write_json(
@@ -1254,6 +1483,7 @@ def _tombstone_stage_writer(certification: RecoveryCertification, reason: str):
                 "invalidation_reason": reason,
             },
         )
+        (stage / "recovery-ledger.jsonl").write_bytes(ledger_path.read_bytes())
 
     return write
 
@@ -1342,12 +1572,12 @@ class AlternateRecoveryResult:
 
 async def run_final_alternate_recovery(
     *,
-    out_dir: Path | str = Path("results/pilot_final"),
+    out_dir: Path | str = _CANONICAL_RECOVERY_OUTPUT,
     source_workspace: Path | str = Path(
         "results/pilot_keeps/tasks/" + ALTERNATE_RECOVERY_TASK_ID
     ),
     budget_progress: Path | str = Path("results/pilot_keeps/harvest_progress.json"),
-    work_root: Path | str = Path("results/final_alternate_recovery"),
+    work_root: Path | str = _LEGACY_RECOVERY_WORK_ROOT,
     repository_root: Path | str = _PROJECT_ROOT,
 ) -> AlternateRecoveryResult:
     """Execute exactly one no-retry recovery, keeping or tombstoning atomically."""
@@ -1361,30 +1591,71 @@ async def run_final_alternate_recovery(
         repository_root=repository_root,
     )
     verified_budget = _verify_original_budget_bytes(approved_inputs.budget_bytes)
-    alternate = rehydrate_alternate(approved_inputs)
-    output = Path(out_dir)
-    work = Path(work_root)
-    run_id = f"alternate-{uuid.uuid4().hex}"
-    previous = load_published_generation(output)
-    pending = RecoveryCertification.pending(
-        run_id=run_id,
-        previous_generation_id=previous.generation_id if previous else "",
-        task_id=ALTERNATE_RECOVERY_TASK_ID,
-    )
-    # This root-level marker is deliberately set before any Docker/LLM request:
-    # a stale selected generation cannot be accepted while recertification runs.
-    write_recovery_certification(output, pending)
-    reason = ""
     try:
+        output = _require_canonical_recovery_output(out_dir)
+        authority = RecoveryAttemptAuthority(
+            default_authority_root(), ALTERNATE_RECOVERY_TASK_ID
+        )
+        if _migrate_existing_terminal_tombstone(authority, output):
+            raise AlternateRecoveryError(
+                "final alternate recovery is already consumed by the terminal tombstone"
+            )
+        existing_claim = authority.record()
+        if existing_claim is not None:
+            if existing_claim.state == "claimed":
+                selected_terminal = _reconcile_selected_terminal(
+                    authority,
+                    existing_claim,
+                    output=output,
+                )
+                if selected_terminal is not None:
+                    return selected_terminal
+                return _reconcile_claim_to_tombstone(
+                    authority,
+                    existing_claim,
+                    output=output,
+                    cap_usd=verified_budget.incremental_cap_usd,
+                    reason=(
+                        "AlternateRecoveryError: durable authority claim was "
+                        "interrupted before terminal reconciliation"
+                    ),
+                )
+            raise AlternateRecoveryError(
+                "final alternate recovery is already consumed by a durable authority"
+            )
+
+        work = _strict_absolute_path(work_root, label="recovery work root")
         work.mkdir(parents=True, exist_ok=False)
-        _write_json(work / "budget-verification.json", verified_budget.__dict__)
-        ledger_path = work / "recovery-ledger.jsonl"
+        run_id = f"alternate-{uuid.uuid4().hex}"
+        ledger_path = (work / "recovery-ledger.jsonl").resolve()
+        previous = load_published_generation(output)
+        try:
+            claim = authority.claim(
+                run_id=run_id,
+                expected_current_generation_id=(
+                    previous.generation_id if previous else ""
+                ),
+                ledger_path=ledger_path,
+            )
+        except RecoveryAuthorityError as exc:
+            raise AlternateRecoveryError(str(exc)) from exc
+
+        # The claim was fsynced before this certification, ledger, Docker, or
+        # live teacher work. A crash at any later point leaves authority consumed.
         ledger = RecoveryBudgetLedger(
             ledger_path,
             run_id=run_id,
             cap_usd=verified_budget.incremental_cap_usd,
             worst_case_cost_usd="3.00",
         )
+        pending = RecoveryCertification.pending(
+            run_id=run_id,
+            previous_generation_id=claim.expected_current_generation_id,
+            task_id=ALTERNATE_RECOVERY_TASK_ID,
+        )
+        write_recovery_certification(output, pending)
+        alternate = rehydrate_alternate(approved_inputs)
+        _write_json(work / "budget-verification.json", verified_budget.__dict__)
         _write_json(
             work / "preflight.json",
             {
@@ -1426,7 +1697,11 @@ async def run_final_alternate_recovery(
                 "fresh calibration dropped: " + "; ".join(calibration.reasons)
             )
         reconcile_recovery_reports(ledger, oracle, calibration)
-        keep = RecoveryCertification.keep(run_id=run_id, task_id=alternate.task_id)
+        keep = RecoveryCertification.keep(
+            run_id=run_id,
+            task_id=alternate.task_id,
+            previous_generation_id=claim.expected_current_generation_id,
+        )
         _promote_regular_audit_artifacts_to_prior_generation(output)
         export = export_batch(
             [
@@ -1454,9 +1729,16 @@ async def run_final_alternate_recovery(
                 calibration_report=calibration,
             ),
             extra_facade_artifacts=_CANONICAL_AUDIT_ARTIFACTS,
+            expected_current_generation_id=claim.expected_current_generation_id,
         )
         if len(export.kept) != 1 or len(export.refused) != 0:
             raise AlternateRecoveryError("alternate keep export did not reconcile")
+        _consume_terminal_authority(
+            authority,
+            claim,
+            terminal_state="keep",
+            output=output,
+        )
         _write_json(
             work / "result.json",
             {"run_id": run_id, "status": "kept", "task_id": alternate.task_id},
@@ -1466,28 +1748,23 @@ async def run_final_alternate_recovery(
         )
     except Exception as exc:
         reason = f"{type(exc).__name__}: {exc}"
-        tombstone = RecoveryCertification.tombstone(run_id=run_id, reason=reason)
+        # Do not publish another terminal generation for validation, alias, or
+        # already-consumed failures. Only a durable claim may be reconciled.
+        claimed_record = locals().get("claim")
+        if not isinstance(claimed_record, RecoveryAuthorityRecord):
+            raise
         try:
-            _promote_regular_audit_artifacts_to_prior_generation(output)
-            export_batch(
-                [],
-                output,
-                overwrite=True,
-                generation_metadata_writer=_tombstone_stage_writer(tombstone, reason),
-                extra_facade_artifacts=_CANONICAL_AUDIT_ARTIFACTS,
-            )
-            work.mkdir(parents=True, exist_ok=True)
-            _write_json(
-                work / "result.json",
-                {"run_id": run_id, "status": "tombstoned", "reason": reason},
+            return _reconcile_claim_to_tombstone(
+                authority,
+                claimed_record,
+                output=output,
+                cap_usd=verified_budget.incremental_cap_usd,
+                reason=reason,
             )
         except Exception as tombstone_error:
             raise AlternateRecoveryError(
                 f"alternate recovery failed and tombstone publication failed: {tombstone_error}"
             ) from tombstone_error
-        return AlternateRecoveryResult(
-            run_id=run_id, status="tombstoned", reason=reason
-        )
     finally:
         approved_inputs.cleanup()
 

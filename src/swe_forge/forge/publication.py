@@ -17,9 +17,12 @@ import stat
 import tempfile
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import fcntl
 
 from swe_forge.export.jsonl import import_jsonl
 from swe_forge.export.parquet import import_parquet
@@ -93,6 +96,22 @@ def _current_path(out_dir: Path) -> Path:
 
 def _generation_dir(out_dir: Path, generation_id: str) -> Path:
     return _store_root(out_dir) / _GENERATIONS_DIR / generation_id
+
+
+@contextmanager
+def _publication_lock(out_dir: Path):
+    """Serialize pointer checks and replacement across all local publishers."""
+    store = _store_root(out_dir)
+    store.mkdir(parents=True, exist_ok=True)
+    lock_path = store / ".publication.lock"
+    descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def _canonical_task_payload(task: ForgeTask) -> str:
@@ -415,7 +434,7 @@ def _write_protected_alt_correct_audit(
         )
 
 
-def publish_generation(
+def _publish_generation_locked(
     out_dir: Path | str,
     entries: Sequence[PublicationEntry],
     *,
@@ -554,6 +573,51 @@ def publish_generation(
     except BaseException:
         shutil.rmtree(stage, ignore_errors=True)
         raise
+
+
+def publish_generation(
+    out_dir: Path | str,
+    entries: Sequence[PublicationEntry],
+    *,
+    workspace_writer: WorkspaceWriter,
+    dataset_writer: DatasetWriter,
+    overwrite: bool,
+    replace_existing: bool = False,
+    metadata_writer: GenerationMetadataWriter | None = None,
+    extra_facade_artifacts: Sequence[str] = (),
+    expected_current_generation_id: str | None = None,
+) -> tuple[PublishedGeneration, list[PublicationOutcome]]:
+    """Build and select a generation, optionally compare-and-swapping ``current``.
+
+    The selected predecessor is checked while the publication lock is held and
+    remains locked through final pointer replacement.  Therefore an intervening
+    publisher cannot be silently overwritten by a terminal recovery writer.
+    """
+    out_path = Path(out_dir)
+    with _publication_lock(out_path):
+        _ensure_public_facade(out_path, extra_artifacts=extra_facade_artifacts)
+        current = load_published_generation(out_path)
+        actual = current.generation_id if current is not None else ""
+        if (
+            expected_current_generation_id is not None
+            and actual != expected_current_generation_id
+        ):
+            expected = expected_current_generation_id or "<none>"
+            selected = actual or "<none>"
+            raise PublicationError(
+                "expected current generation "
+                f"{expected!r} does not match selected generation {selected!r}"
+            )
+        return _publish_generation_locked(
+            out_path,
+            entries,
+            workspace_writer=workspace_writer,
+            dataset_writer=dataset_writer,
+            overwrite=overwrite,
+            replace_existing=replace_existing,
+            metadata_writer=metadata_writer,
+            extra_facade_artifacts=extra_facade_artifacts,
+        )
 
 
 __all__ = [

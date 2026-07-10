@@ -1467,6 +1467,7 @@ def export_batch(
     adapter: LanguageAdapter | None = None,
     generation_metadata_writer: publication.GenerationMetadataWriter | None = None,
     extra_facade_artifacts: Sequence[str] = (),
+    expected_current_generation_id: str | None = None,
 ) -> BatchExportResult:
     """Export a batch: ship only the qualified subset; one refusal never aborts.
 
@@ -1478,6 +1479,10 @@ def export_batch(
     writes valid empty artifacts. ``replace_existing`` is only for a caller that
     has re-certified a same-id task and needs a complete successor generation;
     ordinary exports retain their conflicting-id refusal.
+
+    ``expected_current_generation_id`` is a publication compare-and-swap
+    precondition. It is used by terminal recovery publication so an intervening
+    selected generation is never overwritten.
     """
     out_path = Path(out_dir)
     tasks_dir = out_path / "tasks"
@@ -1550,6 +1555,7 @@ def export_batch(
             replace_existing=replace_existing,
             metadata_writer=generation_metadata_writer,
             extra_facade_artifacts=extra_facade_artifacts,
+            expected_current_generation_id=expected_current_generation_id,
         )
     except PublicationError as exc:
         raise ExportError(str(exc)) from exc
