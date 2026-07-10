@@ -26,6 +26,7 @@ import warnings
 
 import pytest
 
+import swe_forge.forge.calibrate.runner as runner_module
 from swe_forge.forge.calibrate.runner import (
     DEFAULT_BUDGET,
     CalibrationRun,
@@ -406,6 +407,45 @@ async def test_per_model_usage_aggregates_k_records() -> None:
     expected = sum((10 + i) * 2 for i in range(3))
     assert rec.usage.total_tokens == expected
     assert rec.cost == pytest.approx(0.001 * 3)
+
+
+async def test_default_rollout_factory_isolates_client_per_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent recovery rollouts must not share mutable accounting state."""
+    clients: list[object] = []
+    solvers: list[object] = []
+
+    def _client(self: PanelModel, **_kwargs: object) -> object:
+        client = object()
+        clients.append(client)
+        return client
+
+    async def _run_solver_rollout(*args: object, **kwargs: object) -> RolloutOutcome:
+        solvers.append(kwargs["solver"])
+        return _outcome(str(kwargs["model"]), solved=False)
+
+    monkeypatch.setattr(PanelModel, "client", _client)
+    monkeypatch.setattr(runner_module, "run_solver_rollout", _run_solver_rollout)
+
+    rollout = runner_module._build_rollout_fn(
+        _candidate(),
+        _env_image(),
+        _spec(),
+        _oracle_report(),
+        adapter=None,
+        docker_client=None,
+        max_turns=2,
+        max_tokens=32,
+        command_timeout=10.0,
+        recovery_ledger=object(),  # type: ignore[arg-type]
+    )
+    model = _panel()[0]
+    await asyncio.gather(rollout(model, 0), rollout(model, 1))
+
+    assert len(clients) == 2
+    assert len({id(client) for client in clients}) == 2
+    assert len({id(solver) for solver in solvers}) == 2
 
 
 # --------------------------------------------------------------------------- #

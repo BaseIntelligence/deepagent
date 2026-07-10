@@ -648,6 +648,7 @@ def test_recertification_transactionally_supersedes_stale_same_id(
     captured: dict[str, object] = {}
 
     async def _recertify(*args, **kwargs):  # type: ignore[no-untyped-def]
+        assert args[0].env_image.original_public_test_command == "python -m pytest -q"
         return task.oracle_report
 
     async def _recalibrate(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -672,6 +673,7 @@ def test_recertification_transactionally_supersedes_stale_same_id(
             tmp_path,
             recovery_ledger=ledger,
             recalibrator=_recalibrate,
+            public_suite_command="python -m pytest -q",
         )
     )
 
@@ -682,3 +684,4 @@ def test_recertification_transactionally_supersedes_stale_same_id(
     requests = captured["requests"]
     assert isinstance(requests, list)
     assert requests[0].task_id == _TASK_ID
+    assert requests[0].env_image.original_public_test_command == "python -m pytest -q"

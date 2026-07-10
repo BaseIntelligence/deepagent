@@ -443,21 +443,25 @@ def _build_rollout_fn(
     command_timeout: float,
     recovery_ledger: RecoveryBudgetLedger | None,
 ) -> RolloutFn:
-    solvers: dict[str, AgenticSolver] = {}
-
     def _solver_for(model: PanelModel) -> AgenticSolver:
-        if model.model_string not in solvers:
-            solvers[model.model_string] = AgenticSolver(
-                client=model.client(
-                    max_tokens=max_tokens,
-                    timeout=command_timeout,
-                    recovery_ledger=recovery_ledger,
-                    recovery_stage="calibration.rollout" if recovery_ledger else "",
-                ),
-                max_turns=max_turns,
+        """Return an isolated solver for one concurrent rollout.
+
+        ``TeacherClient`` records mutable per-call recovery history. Sharing one
+        client across a model's concurrent rollouts interleaves that history and
+        makes each rollout's usage/cost evidence include sibling requests. A
+        fresh client keeps the uncached calls and ledger linkage independently
+        attributable to their one solver rollout.
+        """
+        return AgenticSolver(
+            client=model.client(
                 max_tokens=max_tokens,
-            )
-        return solvers[model.model_string]
+                timeout=command_timeout,
+                recovery_ledger=recovery_ledger,
+                recovery_stage="calibration.rollout" if recovery_ledger else "",
+            ),
+            max_turns=max_turns,
+            max_tokens=max_tokens,
+        )
 
     async def _rollout(model: PanelModel, index: int) -> RolloutOutcome:
         from swe_forge.execution.docker_client import DockerClient

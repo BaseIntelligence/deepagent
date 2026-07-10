@@ -12,7 +12,7 @@ accidentally publishing stale difficulty evidence.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -185,6 +185,42 @@ def _validate_recovery_identity(task: ForgeTask) -> None:
     if not task.calibration_report.is_keep:
         raise RecertificationError("certified recovery requires a calibration keep")
     _final_fingerprint(task.oracle_report)
+
+
+def _with_verified_public_suite_command(
+    task: ForgeTask, public_suite_command: str
+) -> ForgeTask:
+    """Attach an externally verified public command to a legacy source in memory.
+
+    The certified recovery predates ``EnvImage.original_public_test_command``.
+    It must never silently fall back to the filtered P2P command, because an
+    alternative-correct proposal must first pass the unfiltered upstream suite.
+    A recertification caller may supply the independently Docker-verified
+    command for this immutable legacy input. The source publication is not
+    rewritten: only the fresh recertified successor can carry the new metadata.
+    """
+    supplied = public_suite_command.strip()
+    recorded = task.env_image.original_public_test_command.strip()
+    if recorded:
+        if supplied and supplied != recorded:
+            raise RecertificationError(
+                "recertification public suite command conflicts with the "
+                "certified EnvImage record"
+            )
+        return task
+    if not supplied:
+        raise RecertificationError(
+            "certified recovery EnvImage has no original unfiltered public test "
+            "command; recertification requires an independently verified "
+            "public_suite_command"
+        )
+    return replace(
+        task,
+        env_image=replace(
+            task.env_image,
+            original_public_test_command=supplied,
+        ),
+    )
 
 
 def validate_certified_recovery_source(task: ForgeTask) -> None:
@@ -429,6 +465,7 @@ def build_recertification_request(
     oracle_report: OracleReport,
     calibration_report: CalibrationReport | None = None,
     recovery_ledger: RecoveryBudgetLedger | None = None,
+    source_task: ForgeTask | None = None,
 ) -> ExportRequest:
     """Construct the only permissible transactional export request.
 
@@ -440,7 +477,22 @@ def build_recertification_request(
     """
     if len(generation.entries) != 1:
         raise RecertificationError("cannot re-export a non-singleton recovery set")
-    source = generation.entries[0].task
+    published_source = generation.entries[0].task
+    source = source_task or published_source
+    if source.task_id != published_source.task_id:
+        raise RecertificationError(
+            "recertification source override does not match the certified task id"
+        )
+    if (
+        source.candidate.to_dict() != published_source.candidate.to_dict()
+        or source.spec.to_dict() != published_source.spec.to_dict()
+        or source.repo_url != published_source.repo_url
+        or source.base_commit != published_source.base_commit
+        or source.repo != published_source.repo
+    ):
+        raise RecertificationError(
+            "recertification source override changes immutable certified task content"
+        )
     validate_certified_recovery_source(source)
     if oracle_report.verdict != "pass":
         raise RecertificationError(
@@ -494,6 +546,7 @@ async def recertify_recovery_export(
     recovery_ledger: RecoveryBudgetLedger,
     source_dir: Path | str = CERTIFIED_RECOVERY_SOURCE,
     overwrite: bool = True,
+    public_suite_command: str = "",
     command_timeout: float = 600.0,
     mutation_timeout: float = 1200.0,
     recalibrator: Recalibrator | None = None,
@@ -502,8 +555,15 @@ async def recertify_recovery_export(
     adapter: LanguageAdapter | None = None,
     docker_client: DockerClient | None = None,
 ) -> RecertificationResult:
-    """Re-certify the recovery and publish exactly its genuine singleton."""
+    """Re-certify the recovery and publish exactly its genuine singleton.
+
+    ``public_suite_command`` exists solely for the pre-schema recovery source:
+    it must name an independently verified unfiltered upstream test command and
+    is retained only on the candidate successor, never written back to the
+    immutable source generation.
+    """
     generation, source_task = load_certified_recovery(source_dir)
+    source_task = _with_verified_public_suite_command(source_task, public_suite_command)
     oracle_report = await recertify_final_oracle(
         source_task,
         recovery_ledger=recovery_ledger,
@@ -530,6 +590,7 @@ async def recertify_recovery_export(
         oracle_report,
         calibration_report=calibration,
         recovery_ledger=recovery_ledger,
+        source_task=source_task,
     )
     result = export_batch(
         [request],
