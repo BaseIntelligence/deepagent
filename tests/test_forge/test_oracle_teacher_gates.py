@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from swe_forge.forge import teacher as teacher_module
 from swe_forge.forge.adapters import PythonAdapter
 from swe_forge.forge.models import (
     Candidate,
@@ -28,6 +31,7 @@ from swe_forge.forge.oracle.alt_correct import (
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.differential import (
+    DifferentialSynthesisContext,
     REASON_DIFFERENTIAL_NO_EXECUTABLE,
     Variant,
     VariantFile,
@@ -36,7 +40,10 @@ from swe_forge.forge.oracle.differential import (
     assess_differential,
     run_differential_gate,
 )
-from swe_forge.forge.oracle.differential_synth import TeacherVariantGenerator
+from swe_forge.forge.oracle.differential_synth import (
+    DifferentialKillSynthesizer,
+    TeacherVariantGenerator,
+)
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.pipeline import (
     ExportRefusedError,
@@ -48,7 +55,7 @@ from swe_forge.forge.oracle.teacher_evidence import (
     teacher_gate_evidence_issues,
     teacher_gate_failure_reason,
 )
-from swe_forge.forge.teacher import LLMResult, Usage
+from swe_forge.forge.teacher import LLMResult, TeacherClient, Usage
 
 
 class _DifferentialRunner:
@@ -130,6 +137,55 @@ class _Teacher:
             cost=0.0125,
             finish_reason="stop",
         )
+
+
+class _TeacherClientSubclass(TeacherClient):
+    """A usable parser double that must not attest a real transport call."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(
+            base_url="https://teacher.test",
+            api_key="sk-subclass-test",
+            model="anthropic/test-model",
+        )
+        self._text = text
+
+    async def complete_text(self, *_args: object, **_kwargs: object) -> LLMResult:
+        return LLMResult(
+            text=self._text,
+            usage=Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10),
+            cost=0.0125,
+            finish_reason="stop",
+        )
+
+
+def _concrete_teacher_client(
+    *,
+    base_url: str = "https://teacher.test",
+    api_key: str = "sk-concrete-test",
+) -> TeacherClient:
+    return TeacherClient(
+        base_url=base_url,
+        api_key=api_key,
+        model="anthropic/test-model",
+    )
+
+
+def _teacher_response(text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=text, tool_calls=[]),
+                finish_reason="stop",
+            )
+        ],
+        usage=SimpleNamespace(
+            prompt_tokens=7,
+            completion_tokens=3,
+            total_tokens=10,
+        ),
+        _hidden_params={"response_cost": 0.0125},
+    )
 
 
 def _candidate() -> Candidate:
@@ -280,6 +336,88 @@ async def test_teacher_alt_records_invalid_and_successful_proposal_evidence() ->
     assert evidence is not None
     assert evidence.invalid_proposals == 1
     assert evidence.parsed_proposals == 1
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "context", "text"),
+    [
+        (
+            TeacherVariantGenerator,
+            _variant_context,
+            "```python\ndef f():\n    return 2\n```",
+        ),
+        (
+            TeacherAltCorrectGenerator,
+            _alt_context,
+            "```python\ndef f():\n    return 1 + 0\n```",
+        ),
+    ],
+)
+async def test_injected_teacher_doubles_remain_usable_but_non_authoritative(
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    context: object,
+    text: str,
+) -> None:
+    generator = generator_cls(client=_Teacher(text))  # type: ignore[arg-type, call-arg]
+
+    assert await generator(context())  # type: ignore[misc]
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.real_teacher is False
+    assert evidence.usage.total_tokens == 10
+    assert evidence.cost == 0.0125
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "context", "text"),
+    [
+        (
+            TeacherVariantGenerator,
+            _variant_context,
+            "```python\ndef f():\n    return 2\n```",
+        ),
+        (
+            TeacherAltCorrectGenerator,
+            _alt_context,
+            "```python\ndef f():\n    return 1 + 0\n```",
+        ),
+    ],
+)
+async def test_teacher_client_subclasses_are_non_authoritative(
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    context: object,
+    text: str,
+) -> None:
+    generator = generator_cls(  # type: ignore[arg-type, call-arg]
+        client=_TeacherClientSubclass(text)
+    )
+
+    assert await generator(context())  # type: ignore[misc]
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.real_teacher is False
+
+
+async def test_injected_differential_strengthener_is_non_authoritative() -> None:
+    synthesizer = DifferentialKillSynthesizer(
+        client=_Teacher(
+            "```python\ndef test_f():\n    from m import f\n    assert f() == 1\n```"
+        )  # type: ignore[arg-type]
+    )
+
+    proposals = await synthesizer(
+        DifferentialSynthesisContext(
+            candidate=_candidate(),
+            adapter=PythonAdapter(),
+            gold_sources={"src/m.py": "def f():\n    return 1\n"},
+            survivors=(_variant(),),
+            round_index=1,
+        )
+    )
+
+    assert proposals
+    assert synthesizer.last_call is not None
+    assert synthesizer.last_call.real_teacher is False
 
 
 @pytest.mark.parametrize(
@@ -477,6 +615,78 @@ async def test_standalone_gates_accept_positive_real_teacher_evidence(
     runner_cls: str,
     gate: str,
 ) -> None:
+    text = (
+        "```python\ndef f():\n    return 2\n```"
+        if runner_cls == "differential"
+        else "```python\ndef f():\n    return 1 + 0\n```"
+    )
+    completion = AsyncMock(return_value=_teacher_response(text))
+    with patch.object(teacher_module.litellm, "acompletion", completion):
+        if runner_cls == "differential":
+            import swe_forge.forge.oracle.differential as differential_module
+
+            monkeypatch.setattr(
+                differential_module,
+                "DockerDifferentialRunner",
+                _WrappedDifferentialRunner,
+            )
+            result = await run_differential_gate(
+                _candidate(),
+                _env_image(),
+                _prior_report(),
+                variant_generator=generator_cls(  # type: ignore[arg-type, call-arg]
+                    client=_concrete_teacher_client()
+                ),
+                adapter=PythonAdapter(),
+            )
+        else:
+            import swe_forge.forge.oracle.alt_correct as alt_correct_module
+
+            monkeypatch.setattr(
+                alt_correct_module,
+                "DockerAltCorrectRunner",
+                _WrappedAltRunner,
+            )
+            result = await run_alt_correct_gate(
+                _candidate(),
+                _env_image(),
+                _prior_report(),
+                alt_generator=generator_cls(  # type: ignore[arg-type, call-arg]
+                    client=_concrete_teacher_client()
+                ),
+                adapter=PythonAdapter(),
+            )
+
+    assert result.is_pass
+    assert completion.await_count == 1
+    calls = result.details["teacher_gates"][gate]["calls"]  # type: ignore[index]
+    assert calls[0]["parsed_proposals"] == 1  # type: ignore[index]
+    assert calls[0]["executable_proposals"] == 1  # type: ignore[index]
+    assert calls[0]["execution_completed"] == 1  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "runner_cls", "gate", "client_kind"),
+    [
+        (TeacherVariantGenerator, "differential", "differential", "fake"),
+        (TeacherAltCorrectGenerator, "alt_correct", "alt_correct", "fake"),
+        (TeacherVariantGenerator, "differential", "differential", "subclass"),
+        (TeacherAltCorrectGenerator, "alt_correct", "alt_correct", "subclass"),
+    ],
+)
+async def test_standalone_gates_reject_nonconcrete_teacher_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    runner_cls: str,
+    gate: str,
+    client_kind: str,
+) -> None:
+    text = (
+        "```python\ndef f():\n    return 2\n```"
+        if runner_cls == "differential"
+        else "```python\ndef f():\n    return 1 + 0\n```"
+    )
+    client = _Teacher(text) if client_kind == "fake" else _TeacherClientSubclass(text)
     if runner_cls == "differential":
         import swe_forge.forge.oracle.differential as differential_module
 
@@ -488,7 +698,7 @@ async def test_standalone_gates_accept_positive_real_teacher_evidence(
             _env_image(),
             _prior_report(),
             variant_generator=generator_cls(  # type: ignore[arg-type, call-arg]
-                client=_Teacher("```python\ndef f():\n    return 2\n```")
+                client=client  # type: ignore[arg-type]
             ),
             adapter=PythonAdapter(),
         )
@@ -503,16 +713,44 @@ async def test_standalone_gates_accept_positive_real_teacher_evidence(
             _env_image(),
             _prior_report(),
             alt_generator=generator_cls(  # type: ignore[arg-type, call-arg]
-                client=_Teacher("```python\ndef f():\n    return 1 + 0\n```")
+                client=client  # type: ignore[arg-type]
             ),
             adapter=PythonAdapter(),
         )
 
-    assert result.is_pass
-    calls = result.details["teacher_gates"][gate]["calls"]  # type: ignore[index]
-    assert calls[0]["parsed_proposals"] == 1  # type: ignore[index]
-    assert calls[0]["executable_proposals"] == 1  # type: ignore[index]
-    assert calls[0]["execution_completed"] == 1  # type: ignore[index]
+    assert result.verdict == "reject"
+    assert result.reasons == [
+        f"{gate}_teacher_evidence_invalid: "
+        f"{gate}: no real-teacher proposal call was recorded"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("generator_cls", "context", "gate"),
+    [
+        (TeacherVariantGenerator, _variant_context, "differential"),
+        (TeacherAltCorrectGenerator, _alt_context, "alt_correct"),
+    ],
+)
+async def test_concrete_teacher_errors_are_attributable_and_secret_free(
+    generator_cls: type[TeacherVariantGenerator] | type[TeacherAltCorrectGenerator],
+    context: object,
+    gate: str,
+) -> None:
+    generator = generator_cls(  # type: ignore[arg-type, call-arg]
+        client=_concrete_teacher_client(api_key="sk-never-serialize", base_url="")
+    )
+
+    assert await generator(context()) == []  # type: ignore[misc]
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.real_teacher is True
+    assert evidence.status == "error"
+    assert evidence.error_type == "MissingCredentialsError"
+    assert teacher_gate_failure_reason(gate, [evidence]) == (
+        f"{gate}_teacher_call_failed:MissingCredentialsError"
+    )
+    assert "sk-never-serialize" not in json.dumps(evidence.to_dict())
 
 
 def _pass_report(*, teacher_gates: object) -> OracleReport:

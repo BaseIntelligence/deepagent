@@ -924,16 +924,19 @@ async def run_alt_correct_gate(
 
     alternatives: list[AltImpl] = []
     teacher_calls = []
-    real_teacher_generator = False
+    authoritative_teacher_generator = False
     if alt_generator is not None:
         # A public gate must not let a programmatic test seam stand in for a
-        # paid, uncached teacher call. The generic assessor remains reusable;
-        # only the shipping gate wrapper recognizes the production generator.
+        # paid, uncached concrete-teacher call. The generic assessor remains
+        # reusable; only the exact production generator can issue
+        # authoritative transport-attested evidence.
         from swe_forge.forge.oracle.alt_correct_synth import (
             TeacherAltCorrectGenerator,
         )
 
-        real_teacher_generator = isinstance(alt_generator, TeacherAltCorrectGenerator)
+        authoritative_teacher_generator = (
+            type(alt_generator) is TeacherAltCorrectGenerator
+        )
         gold_sources = await runner.read_sources()
         gen_ctx = AltCorrectGenerationContext(
             candidate=candidate,
@@ -964,10 +967,10 @@ async def run_alt_correct_gate(
         {"teacher_gates": {"alt_correct": evidence}},
         gates=("alt_correct",),
     )
-    if not real_teacher_generator or evidence_issues:
+    if not authoritative_teacher_generator or evidence_issues:
         outcome.verdict = "reject"
         outcome.alt_correct_accepted = False
-        if not real_teacher_generator:
+        if not authoritative_teacher_generator:
             reason = "alt_correct_no_real_teacher_proposal"
         elif not alternatives:
             reason = teacher_gate_failure_reason("alt_correct", teacher_calls)

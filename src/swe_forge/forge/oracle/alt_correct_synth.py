@@ -32,7 +32,12 @@ from swe_forge.forge.oracle.teacher_regions import (
     required_symbol,
     select_teacher_source,
 )
-from swe_forge.forge.teacher import LLMResult, TeacherClient, Usage
+from swe_forge.forge.teacher import (
+    LLMResult,
+    TeacherClient,
+    Usage,
+    is_concrete_teacher_client,
+)
 
 logger = getLogger(__name__)
 
@@ -104,8 +109,10 @@ class TeacherAltCorrectGenerator:
                 )
             )
             return []
+        client = self._resolve_client()
+        real_teacher = is_concrete_teacher_client(client)
         try:
-            result = await self._resolve_client().complete_text(
+            result = await client.complete_text(
                 self._user_message(ctx, teacher_source),
                 system=_ALT_CORRECT_SYSTEM_PROMPT,
                 max_tokens=self._max_tokens,
@@ -115,13 +122,13 @@ class TeacherAltCorrectGenerator:
                 TeacherGateCallEvidence(
                     gate="alt_correct",
                     call_kind="proposal",
-                    real_teacher=True,
+                    real_teacher=real_teacher,
                     status="error",
                     response_kind="error",
-                    model=_teacher_model(self._resolve_client()),
+                    model=_teacher_model(client),
                     requested_proposals=ctx.num_alternatives,
                     error_type=type(exc).__name__,
-                    recovery_accounting=_teacher_recovery(self._resolve_client()),
+                    recovery_accounting=_teacher_recovery(client),
                 )
             )
             logger.warning("alt-correct generation aborted (%s)", type(exc).__name__)
@@ -175,7 +182,8 @@ class TeacherAltCorrectGenerator:
         self.teacher_calls.append(
             _proposal_evidence(
                 result,
-                model=_teacher_model(self._resolve_client()),
+                model=_teacher_model(client),
+                real_teacher=real_teacher,
                 response_kind=response_kind,
                 requested=ctx.num_alternatives,
                 received=len(raw_proposals),
@@ -223,6 +231,7 @@ def _proposal_evidence(
     result: LLMResult,
     *,
     model: str,
+    real_teacher: bool,
     response_kind: str,
     requested: int,
     received: int,
@@ -236,7 +245,7 @@ def _proposal_evidence(
     return TeacherGateCallEvidence(
         gate="alt_correct",
         call_kind="proposal",
-        real_teacher=True,
+        real_teacher=real_teacher,
         status="success",
         response_kind=response_kind,
         model=model,

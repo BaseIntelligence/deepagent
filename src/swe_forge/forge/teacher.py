@@ -671,6 +671,17 @@ class TeacherClient:
         )
 
 
+def is_concrete_teacher_client(client: object) -> bool:
+    """Return whether an invocation uses the unmodified Forge transport type.
+
+    Oracle shipping evidence is authoritative only for a call made through the
+    concrete transport. Injected parsers and test doubles, including subclasses
+    that can replace the transport method, remain supported but are deliberately
+    non-authoritative.
+    """
+    return type(client) is TeacherClient
+
+
 def _response_request_id(resp: Any) -> str:
     """Extract the provider's request id without retaining any response body."""
     for value in (

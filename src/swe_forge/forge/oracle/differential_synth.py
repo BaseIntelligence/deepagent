@@ -34,7 +34,12 @@ from swe_forge.forge.oracle.teacher_regions import (
     required_symbol,
     select_teacher_source,
 )
-from swe_forge.forge.teacher import LLMResult, TeacherClient, Usage
+from swe_forge.forge.teacher import (
+    LLMResult,
+    TeacherClient,
+    Usage,
+    is_concrete_teacher_client,
+)
 
 logger = getLogger(__name__)
 
@@ -131,8 +136,10 @@ class TeacherVariantGenerator:
                 )
             )
             return []
+        client = self._resolve_client()
+        real_teacher = is_concrete_teacher_client(client)
         try:
-            result = await self._resolve_client().complete_text(
+            result = await client.complete_text(
                 self._user_message(ctx, teacher_source),
                 system=_VARIANT_SYSTEM_PROMPT,
                 max_tokens=self._max_tokens,
@@ -142,13 +149,13 @@ class TeacherVariantGenerator:
                 TeacherGateCallEvidence(
                     gate="differential",
                     call_kind="proposal",
-                    real_teacher=True,
+                    real_teacher=real_teacher,
                     status="error",
                     response_kind="error",
-                    model=_teacher_model(self._resolve_client()),
+                    model=_teacher_model(client),
                     requested_proposals=ctx.num_variants,
                     error_type=type(exc).__name__,
-                    recovery_accounting=_teacher_recovery(self._resolve_client()),
+                    recovery_accounting=_teacher_recovery(client),
                 )
             )
             logger.warning("variant generation aborted (%s)", type(exc).__name__)
@@ -203,7 +210,8 @@ class TeacherVariantGenerator:
             _proposal_evidence(
                 "differential",
                 result,
-                model=_teacher_model(self._resolve_client()),
+                model=_teacher_model(client),
+                real_teacher=real_teacher,
                 response_kind=response_kind,
                 requested=ctx.num_variants,
                 received=len(raw_proposals),
@@ -264,8 +272,10 @@ class DifferentialKillSynthesizer:
         if path in ctx.existing_test_paths:
             path = _kill_test_path(ctx.language, ctx.round_index * 100 + 1)
 
+        client = self._resolve_client()
+        real_teacher = is_concrete_teacher_client(client)
         try:
-            result = await self._resolve_client().complete_text(
+            result = await client.complete_text(
                 self._user_message(ctx, path),
                 system=_KILL_SYSTEM_PROMPT,
                 max_tokens=self._max_tokens,
@@ -275,13 +285,13 @@ class DifferentialKillSynthesizer:
                 TeacherGateCallEvidence(
                     gate="differential",
                     call_kind="strengthen",
-                    real_teacher=True,
+                    real_teacher=real_teacher,
                     status="error",
                     response_kind="error",
-                    model=_teacher_model(self._resolve_client()),
+                    model=_teacher_model(client),
                     requested_proposals=1,
                     error_type=type(exc).__name__,
-                    recovery_accounting=_teacher_recovery(self._resolve_client()),
+                    recovery_accounting=_teacher_recovery(client),
                 )
             )
             logger.warning(
@@ -294,7 +304,8 @@ class DifferentialKillSynthesizer:
             _proposal_evidence(
                 "differential",
                 result,
-                model=_teacher_model(self._resolve_client()),
+                model=_teacher_model(client),
+                real_teacher=real_teacher,
                 response_kind=(
                     "empty"
                     if not result.text.strip()
@@ -353,6 +364,7 @@ def _proposal_evidence(
     result: LLMResult,
     *,
     model: str,
+    real_teacher: bool,
     response_kind: str,
     requested: int,
     received: int,
@@ -367,7 +379,7 @@ def _proposal_evidence(
     return TeacherGateCallEvidence(
         gate=gate,
         call_kind=call_kind,
-        real_teacher=True,
+        real_teacher=real_teacher,
         status="success",
         response_kind=response_kind,
         model=model,

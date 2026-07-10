@@ -166,7 +166,7 @@ def teacher_gate_failure_reason(
     proposal = next(
         (call for call in reversed(calls) if call.call_kind == "proposal"), None
     )
-    if proposal is None or not proposal.real_teacher:
+    if proposal is None:
         return f"{gate}_no_real_teacher_proposal"
     if proposal.status == "error":
         return f"{gate}_teacher_call_failed:{proposal.error_type or 'unknown'}"
