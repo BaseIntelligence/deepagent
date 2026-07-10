@@ -465,7 +465,7 @@ class CandidateDisposition:
     """Where one candidate exited the funnel (one row of the run ledger)."""
 
     plan: CandidatePlan
-    stage: str  # env_failed | synth_failed | oracle_reject | calib_drop | cap_rejected | kept
+    stage: str  # env_failed | synth_failed | oracle_reject | calib_drop | source_rejected | cap_rejected | kept
     oracle_verdict: str = ""
     band_verdict: str = ""
     task_id: str = ""
@@ -1736,6 +1736,29 @@ async def run_pilot(
                 )
                 continue
 
+            checkpoint_result = checkpoint.result_for(index)
+            if checkpoint_result is not None and checkpoint_result.status not in (
+                "shipped",
+                "skipped",
+            ):
+                counts.export_refused += 1
+                dispositions.append(
+                    CandidateDisposition(
+                        plan,
+                        "source_rejected"
+                        if checkpoint_result.status == "source_rejected"
+                        else "export_refused",
+                        oracle_verdict=oracle.verdict,
+                        band_verdict=calibration.band_verdict,
+                        reason=checkpoint_result.reason,
+                        cap_grant=cap_grant.to_dict()
+                        if cap_grant is not None
+                        else None,
+                        calibration=_calibration_summary(calibration),
+                    )
+                )
+                continue
+
             # Oracle pass AND band keep is retained only if it crossed the
             # checkpoint admission boundary. A SIGTERM may let an in-flight
             # candidate finish calculation, but it cannot add a new keep after
@@ -1748,27 +1771,6 @@ async def run_pilot(
                         oracle_verdict=oracle.verdict,
                         band_verdict=calibration.band_verdict,
                         reason="checkpoint admission closed before keep acceptance",
-                        calibration=_calibration_summary(calibration),
-                    )
-                )
-                continue
-
-            checkpoint_result = checkpoint.result_for(index)
-            if checkpoint_result is not None and checkpoint_result.status not in (
-                "shipped",
-                "skipped",
-            ):
-                counts.export_refused += 1
-                dispositions.append(
-                    CandidateDisposition(
-                        plan,
-                        "export_refused",
-                        oracle_verdict=oracle.verdict,
-                        band_verdict=calibration.band_verdict,
-                        reason=checkpoint_result.reason,
-                        cap_grant=cap_grant.to_dict()
-                        if cap_grant is not None
-                        else None,
                         calibration=_calibration_summary(calibration),
                     )
                 )

@@ -39,7 +39,11 @@ import pytest
 
 from swe_forge.export.jsonl import import_jsonl
 from swe_forge.export.parquet import import_parquet
-from swe_forge.forge.export import ExportRequest, assemble_forge_task
+from swe_forge.forge.export import (
+    ExportRequest,
+    TaskExportResult,
+    assemble_forge_task,
+)
 from swe_forge.forge.gold_eval import EvalRun, GoldEvalReport, TaskGoldResult
 from swe_forge.forge.models import (
     CalibrationReport,
@@ -1186,6 +1190,238 @@ def test_instance_cap_admission_serializes_concurrent_keeps(tmp_path: Path) -> N
     ]
 
 
+def test_omitted_source_resolves_registered_spec_before_concurrent_admission(
+    tmp_path: Path,
+) -> None:
+    """Omitted sources use the registered cap, before either request queues."""
+    source = _repo("acme/capped", instance_cap=1)
+    plans = [
+        CandidatePlan(repo=source, generator="ast_mutation", seed=0),
+        CandidatePlan(repo=source, generator="function_removal", seed=1),
+    ]
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True, source_specs=(source,))
+
+    async def _drive() -> tuple[TaskExportResult, TaskExportResult]:
+        processor = FakeProcessor()
+        requests: list[ExportRequest] = []
+        for index, plan in enumerate(plans):
+            artifacts = await processor.process(plan, tmp_path / f"work-{index}")
+            request = _keep_export_request(artifacts)
+            assert request is not None
+            requests.append(request)
+        first, second = await asyncio.gather(
+            checkpoint.record_keep(0, requests[0]),
+            checkpoint.record_keep(1, requests[1]),
+        )
+        return first, second
+
+    results = asyncio.run(_drive())
+    assert {result.status for result in results} == {"shipped", "cap_rejected"}
+    assert checkpoint.accepted_indexes == (0,)
+    assert checkpoint.pending_indexes == ()
+    assert checkpoint.capacity_grant(0) is not None
+    assert checkpoint.capacity_grant(0).accepted is True
+    assert checkpoint.capacity_grant(1) is not None
+    assert checkpoint.capacity_grant(1).accepted is False
+    assert source.used == 1
+    assert len(_task_dirs(tmp_path)) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
+
+
+def test_checkpoint_refuses_omitted_unknown_source_before_queue_mutation(
+    tmp_path: Path,
+) -> None:
+    """An omitted source may only resolve through the constructor registry."""
+    registered = _repo("acme/registered", instance_cap=1)
+    unknown_plan = CandidatePlan(
+        repo=_repo("acme/unknown", instance_cap=1),
+        generator="ast_mutation",
+        seed=0,
+    )
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True, source_specs=(registered,))
+
+    async def _drive():
+        artifacts = await FakeProcessor().process(unknown_plan, tmp_path / "work")
+        request = _keep_export_request(artifacts)
+        assert request is not None
+        return await checkpoint.record_keep(0, request)
+
+    result = asyncio.run(_drive())
+    assert result.status == "source_rejected"
+    assert "no registered RepoSpec" in result.reason
+    assert checkpoint.accepted_indexes == ()
+    assert checkpoint.pending_indexes == ()
+    assert checkpoint.capacity_grant(0) is None
+    assert registered.used == 0
+    assert _task_dirs(tmp_path) == []
+    assert import_jsonl(tmp_path / "dataset.jsonl") == []
+    assert import_parquet(tmp_path / "dataset.parquet") == []
+
+
+def test_checkpoint_refuses_missing_or_mismatched_explicit_source_before_queue(
+    tmp_path: Path,
+) -> None:
+    """Missing identities and wrong explicit sources fail before a grant exists."""
+    source = _repo("acme/source", instance_cap=1)
+    other = _repo("acme/other", instance_cap=1)
+    plan = CandidatePlan(repo=source, generator="ast_mutation", seed=0)
+
+    async def _request() -> ExportRequest:
+        artifacts = await FakeProcessor().process(plan, tmp_path / "work")
+        request = _keep_export_request(artifacts)
+        assert request is not None
+        return request
+
+    missing_request = asyncio.run(_request())
+    missing_request.env_image.repo_id = ""
+    missing = PilotCheckpoint(tmp_path / "missing", source_specs=(source,))
+    missing_result = asyncio.run(missing.record_keep(0, missing_request, source=source))
+    assert missing_result.status == "source_rejected"
+    assert "missing EnvImage.repo_id" in missing_result.reason
+    assert missing.accepted_indexes == ()
+    assert missing.pending_indexes == ()
+    assert missing.capacity_grant(0) is None
+
+    mismatch_request = asyncio.run(_request())
+    mismatch = PilotCheckpoint(tmp_path / "mismatch", source_specs=(source,))
+    mismatch_result = asyncio.run(
+        mismatch.record_keep(0, mismatch_request, source=other)
+    )
+    assert mismatch_result.status == "source_rejected"
+    assert "does not match EnvImage.repo_id" in mismatch_result.reason
+    assert mismatch.accepted_indexes == ()
+    assert mismatch.pending_indexes == ()
+    assert mismatch.capacity_grant(0) is None
+    assert source.used == other.used == 0
+    assert _task_dirs(tmp_path / "missing") == _task_dirs(tmp_path / "mismatch") == []
+
+
+def test_pilot_records_source_rejection_without_artifacts(tmp_path: Path) -> None:
+    """A direct caller's source mismatch remains visible in the pilot ledger."""
+    plan = _plan("acme/source", "ast_mutation", 0)
+
+    class MismatchedEnvProcessor(FakeProcessor):
+        async def process(
+            self, candidate_plan: CandidatePlan, workdir: Path
+        ) -> CandidateArtifacts:
+            artifacts = await super().process(candidate_plan, workdir)
+            assert artifacts.env_image is not None
+            artifacts.env_image.repo_id = "acme/unregistered"
+            return artifacts
+
+    outcome = _run(
+        PilotConfig(
+            plans=[plan],
+            out_dir=tmp_path,
+            run_gold_eval=False,
+            write_report=False,
+        ),
+        MismatchedEnvProcessor(),
+    )
+
+    assert outcome.counts.calibration_keep == 1
+    assert outcome.counts.cap_admitted == outcome.counts.exported == 0
+    assert outcome.counts.export_refused == 1
+    assert [(item.stage, item.reason) for item in outcome.dispositions] == [
+        (
+            "source_rejected",
+            "explicit RepoSpec.repo_id 'acme/source' does not match "
+            "EnvImage.repo_id 'acme/unregistered'",
+        )
+    ]
+    assert _task_dirs(tmp_path) == []
+    assert import_jsonl(tmp_path / "dataset.jsonl") == []
+    assert import_parquet(tmp_path / "dataset.parquet") == []
+
+
+def test_checkpoint_accepts_matching_explicit_unregistered_source(
+    tmp_path: Path,
+) -> None:
+    """An explicit source is valid, but never authorizes future omission."""
+    source = _repo("acme/direct", instance_cap=2)
+    plan = CandidatePlan(repo=source, generator="ast_mutation", seed=0)
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+
+    async def _drive() -> tuple[TaskExportResult, TaskExportResult]:
+        artifacts = await FakeProcessor().process(plan, tmp_path / "work")
+        request = _keep_export_request(artifacts)
+        assert request is not None
+        shipped = await checkpoint.record_keep(0, request, source=source)
+
+        omitted_plan = CandidatePlan(
+            repo=source,
+            generator="function_removal",
+            seed=1,
+        )
+        omitted_artifacts = await FakeProcessor().process(
+            omitted_plan, tmp_path / "omitted"
+        )
+        omitted_request = _keep_export_request(omitted_artifacts)
+        assert omitted_request is not None
+        omitted = await checkpoint.record_keep(1, omitted_request)
+        return shipped, omitted
+
+    result, omitted = asyncio.run(_drive())
+    assert result.status == "shipped"
+    assert omitted.status == "source_rejected"
+    assert "no registered RepoSpec" in omitted.reason
+    assert source.used == 1
+    assert checkpoint.capacity_grant(0) is not None
+    assert checkpoint.capacity_grant(0).repo_id == source.repo_id
+    assert checkpoint.capacity_grant(1) is None
+    assert checkpoint.accepted_indexes == (0,)
+    assert checkpoint.pending_indexes == ()
+    assert len(_task_dirs(tmp_path)) == 1
+
+
+def test_omitted_source_refusal_releases_its_single_grant_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused write returns an omitted-source grant without leaving artifacts."""
+    source = _repo("acme/capped", instance_cap=1)
+    first = CandidatePlan(repo=source, generator="ast_mutation", seed=0)
+    replacement = CandidatePlan(repo=source, generator="function_removal", seed=1)
+    checkpoint = PilotCheckpoint(tmp_path, overwrite=True, source_specs=(source,))
+    original = checkpoint._record_keep_sync
+
+    def _refuse(index: int, request: ExportRequest) -> TaskExportResult:
+        return TaskExportResult(
+            task_id=request._fallback_id(),
+            status="refused",
+            reason="induced source-safe refusal",
+        )
+
+    monkeypatch.setattr(checkpoint, "_record_keep_sync", _refuse)
+
+    async def _refuse_first() -> TaskExportResult:
+        first_artifacts = await FakeProcessor().process(first, tmp_path / "first")
+        first_request = _keep_export_request(first_artifacts)
+        assert first_request is not None
+        return await checkpoint.record_keep(0, first_request)
+
+    refused = asyncio.run(_refuse_first())
+    assert refused.status == "refused"
+    assert source.used == 0
+    assert checkpoint._released_capacity == {0}
+    assert _task_dirs(tmp_path) == []
+
+    monkeypatch.setattr(checkpoint, "_record_keep_sync", original)
+
+    async def _ship_replacement() -> TaskExportResult:
+        replacement_artifacts = await FakeProcessor().process(
+            replacement, tmp_path / "replacement"
+        )
+        replacement_request = _keep_export_request(replacement_artifacts)
+        assert replacement_request is not None
+        return await checkpoint.record_keep(1, replacement_request)
+
+    shipped = asyncio.run(_ship_replacement())
+    assert shipped.status == "shipped"
+    assert source.used == 1
+    assert len(_task_dirs(tmp_path)) == 1
+
+
 def test_non_qualified_candidates_do_not_consume_source_capacity(
     tmp_path: Path,
 ) -> None:
@@ -1266,9 +1502,7 @@ def test_checkpoint_restart_restores_source_capacity_before_new_publication(
         first = await processor.process(first_plan, tmp_path / "first")
         first_request = _keep_export_request(first)
         assert first_request is not None
-        assert (
-            await checkpoint.record_keep(0, first_request, source=first_source)
-        ).status == "shipped"
+        assert (await checkpoint.record_keep(0, first_request)).status == "shipped"
 
         restarted = PilotCheckpoint(
             tmp_path, overwrite=True, source_specs=(restarted_source,)
@@ -1278,9 +1512,7 @@ def test_checkpoint_restart_restores_source_capacity_before_new_publication(
         second = await processor.process(second_plan, tmp_path / "second")
         second_request = _keep_export_request(second)
         assert second_request is not None
-        refused = await restarted.record_keep(
-            1, second_request, source=restarted_source
-        )
+        refused = await restarted.record_keep(1, second_request)
         assert refused.status == "cap_rejected"
         assert "per-repo cap reached" in refused.reason
 
@@ -1308,9 +1540,7 @@ def test_checkpoint_replay_does_not_acquire_a_second_source_slot(
         initial_request = _keep_export_request(initial_artifacts)
         assert initial_request is not None
         assert (
-            await first_checkpoint.record_keep(
-                0, initial_request, source=initial_source
-            )
+            await first_checkpoint.record_keep(0, initial_request)
         ).status == "shipped"
 
         restarted = PilotCheckpoint(
@@ -1319,7 +1549,7 @@ def test_checkpoint_replay_does_not_acquire_a_second_source_slot(
         replay_artifacts = await processor.process(replay_plan, tmp_path / "replay")
         replay_request = _keep_export_request(replay_artifacts)
         assert replay_request is not None
-        result = await restarted.record_keep(0, replay_request, source=replay_source)
+        result = await restarted.record_keep(0, replay_request)
         assert result.status == "skipped"
         assert replay_source.used == 1
         assert replay_source.remaining == 0
@@ -1327,6 +1557,72 @@ def test_checkpoint_replay_does_not_acquire_a_second_source_slot(
     asyncio.run(_drive())
     assert len(_task_dirs(tmp_path)) == 1
     assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+
+
+def test_checkpoint_replay_fails_closed_for_invalid_source_identity(
+    tmp_path: Path,
+) -> None:
+    """Replay idempotency applies only after source resolution succeeds."""
+    source = _repo("acme/capped", instance_cap=1)
+    plan = CandidatePlan(repo=source, generator="ast_mutation", seed=0)
+    other = _repo("acme/other", instance_cap=1)
+
+    async def _request(name: str) -> ExportRequest:
+        artifacts = await FakeProcessor().process(plan, tmp_path / name)
+        request = _keep_export_request(artifacts)
+        assert request is not None
+        return request
+
+    async def _drive() -> None:
+        initial = PilotCheckpoint(tmp_path, overwrite=True, source_specs=(source,))
+        initial_request = await _request("initial")
+        assert (await initial.record_keep(0, initial_request)).status == "shipped"
+        assert source.used == 1
+
+        missing = PilotCheckpoint(
+            tmp_path,
+            overwrite=True,
+            source_specs=(source,),
+        )
+        missing_request = await _request("missing")
+        missing_request.env_image.repo_id = ""
+        missing_result = await missing.record_keep(0, missing_request)
+        assert missing_result.status == "source_rejected"
+        assert missing.accepted_indexes == ()
+        assert missing.pending_indexes == ()
+
+        unknown = PilotCheckpoint(
+            tmp_path,
+            overwrite=True,
+            source_specs=(source,),
+        )
+        unknown_request = await _request("unknown")
+        unknown_request.env_image.repo_id = "acme/unknown"
+        unknown_result = await unknown.record_keep(0, unknown_request)
+        assert unknown_result.status == "source_rejected"
+        assert unknown.accepted_indexes == ()
+        assert unknown.pending_indexes == ()
+
+        mismatched = PilotCheckpoint(
+            tmp_path,
+            overwrite=True,
+            source_specs=(source,),
+        )
+        mismatched_request = await _request("mismatched")
+        mismatched_result = await mismatched.record_keep(
+            0,
+            mismatched_request,
+            source=other,
+        )
+        assert mismatched_result.status == "source_rejected"
+        assert mismatched.accepted_indexes == ()
+        assert mismatched.pending_indexes == ()
+
+    asyncio.run(_drive())
+    assert source.used == 1
+    assert len(_task_dirs(tmp_path)) == 1
+    assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
+    assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
 
 
 def test_pilot_restart_reuses_committed_funnel_without_new_cap_acquisition(
@@ -1684,7 +1980,11 @@ def test_checkpoint_ships_each_keep_incrementally(tmp_path: Path) -> None:
     provenance per keep (not deferred to a final all-at-once pass).
     """
     plans = _mixed_plans()  # all keeps under the default FakeProcessor
-    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+    checkpoint = PilotCheckpoint(
+        tmp_path,
+        overwrite=True,
+        source_specs=tuple(plan.repo for plan in plans),
+    )
 
     # A stop before the first keep still leaves valid empty artifacts.
     assert (tmp_path / "dataset.jsonl").read_text() == ""
@@ -1801,7 +2101,11 @@ def test_mid_write_kill_leaves_valid_dataset(tmp_path: Path, monkeypatch) -> Non
     leaves BOTH previously-shipped datasets untouched, valid, and consistent.
     """
     plans = _mixed_plans()
-    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+    checkpoint = PilotCheckpoint(
+        tmp_path,
+        overwrite=True,
+        source_specs=(plans[0].repo, plans[3].repo),
+    )
 
     async def _drive() -> None:
         processor = FakeProcessor()
@@ -1896,7 +2200,11 @@ def test_checkpoint_restart_recovers_complete_generation_and_ignores_staging(
     async def _drive() -> None:
         processor = FakeProcessor()
         first = await processor.process(plans[0], tmp_path / "w0")
-        checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+        checkpoint = PilotCheckpoint(
+            tmp_path,
+            overwrite=True,
+            source_specs=(plans[0].repo, plans[3].repo),
+        )
         first_result = await checkpoint.record_keep(
             0,
             _keep_export_request(first),  # type: ignore[arg-type]
@@ -1908,7 +2216,11 @@ def test_checkpoint_restart_recovers_complete_generation_and_ignores_staging(
         abandoned.mkdir(parents=True)
         (abandoned / "dataset.jsonl").write_text('{"id":"not-committed"}\n')
 
-        restarted = PilotCheckpoint(tmp_path, overwrite=True)
+        restarted = PilotCheckpoint(
+            tmp_path,
+            overwrite=True,
+            source_specs=(plans[0].repo, plans[3].repo),
+        )
         assert restarted.kept_count == 1
         assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
         assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
@@ -1997,7 +2309,7 @@ def test_cancelled_refused_checkpoint_write_releases_source_capacity(
         artifacts = await FakeProcessor().process(plan, tmp_path / "work")
         request = _keep_export_request(artifacts)
         assert request is not None
-        assert checkpoint.admit_keep(0, request, source=source) is None
+        assert checkpoint.admit_keep(0, request) is None
         assert source.used == 1
 
         drain = asyncio.create_task(checkpoint.drain(indexes=(0,)))
@@ -2033,7 +2345,11 @@ def test_checkpoint_closes_admission_and_drains_accepted_keeps_in_plan_order(
     from swe_forge.forge import checkpoint as checkpoint_mod
 
     plans = _mixed_plans()
-    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
+    checkpoint = PilotCheckpoint(
+        tmp_path,
+        overwrite=True,
+        source_specs=tuple(plan.repo for plan in plans),
+    )
     processor = FakeProcessor()
     sources = [tmp_path / "sources" / str(index) for index in range(3)]
     for source in sources:
@@ -2113,8 +2429,12 @@ def test_shutdown_drain_continues_after_a_failed_accepted_keep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failed copy never strands a later accepted keep before cleanup."""
-    checkpoint = PilotCheckpoint(tmp_path, overwrite=True)
     plans = _mixed_plans()
+    checkpoint = PilotCheckpoint(
+        tmp_path,
+        overwrite=True,
+        source_specs=(plans[0].repo, plans[1].repo),
+    )
 
     async def _requests() -> list[ExportRequest]:
         processor = FakeProcessor()

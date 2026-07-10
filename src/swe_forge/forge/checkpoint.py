@@ -115,6 +115,10 @@ class PilotCheckpoint:
         # workers. Keep the first spec for each repo as the canonical
         # SourceRegistry-backed counter and synchronize any same-id aliases so
         # manually constructed plans cannot race independent ``used`` values.
+        # Only constructor-provided sources authorize omitted source lookups.
+        # Explicit direct callers can join capacity accounting without changing
+        # the set of authoritative source mappings.
+        self._registered_source_specs: dict[str, RepoSpec] = {}
         self._capacity_specs: dict[str, RepoSpec] = {}
         self._capacity_aliases: dict[str, list[RepoSpec]] = {}
         self._capacity_grants: dict[int, InstanceGrant] = {}
@@ -136,7 +140,8 @@ class PilotCheckpoint:
                     reason="recovered from committed publication",
                 )
         for spec in source_specs:
-            self._register_source(spec)
+            canonical = self._register_source(spec)
+            self._registered_source_specs[canonical.repo_id] = canonical
 
     @property
     def out_dir(self) -> Path:
@@ -246,6 +251,55 @@ class PilotCheckpoint:
         for alias in self._capacity_aliases[repo_id]:
             alias.used = canonical.used
 
+    def _resolve_admission_source(
+        self,
+        request: ExportRequest,
+        source: RepoSpec | None,
+    ) -> tuple[RepoSpec | None, TaskExportResult | None]:
+        """Resolve a request to a source before it can enter checkpoint state.
+
+        Omitted sources are allowed only when the request's EnvImage identity
+        has an authoritative constructor-registered source. Direct callers may
+        supply a source, but it must name that exact EnvImage repo before it is
+        registered and charged.
+        """
+        repo_id = str(request.env_image.repo_id).strip()
+        task_id = request.task_id or request._fallback_id()
+        if not repo_id:
+            return None, TaskExportResult(
+                task_id=task_id,
+                status="source_rejected",
+                reason="missing EnvImage.repo_id for checkpoint source resolution",
+            )
+
+        if source is None:
+            canonical = self._registered_source_specs.get(repo_id)
+            if canonical is None:
+                return None, TaskExportResult(
+                    task_id=task_id,
+                    status="source_rejected",
+                    reason=(f"no registered RepoSpec for EnvImage.repo_id {repo_id!r}"),
+                )
+            return canonical, None
+
+        if source.repo_id != repo_id:
+            return None, TaskExportResult(
+                task_id=task_id,
+                status="source_rejected",
+                reason=(
+                    f"explicit RepoSpec.repo_id {source.repo_id!r} does not "
+                    f"match EnvImage.repo_id {repo_id!r}"
+                ),
+            )
+        try:
+            return self._register_source(source), None
+        except RuntimeError as exc:
+            return None, TaskExportResult(
+                task_id=task_id,
+                status="source_rejected",
+                reason=f"explicit RepoSpec rejected: {exc}",
+            )
+
     def _release_capacity(self, index: int) -> None:
         """Return a one-shot grant when its Stage-5 export did not ship."""
         if index in self._released_capacity:
@@ -278,6 +332,10 @@ class PilotCheckpoint:
         if index in self._accepted:
             return None
         if index in self._kept:
+            _, source_refusal = self._resolve_admission_source(request, source)
+            if source_refusal is not None:
+                self._results[index] = source_refusal
+                return source_refusal
             # A recovered plan index must pass through the normal payload
             # comparison in _record_keep_sync, but it already owns a committed
             # source slot. Queue it without taking a second RepoSpec grant.
@@ -293,19 +351,22 @@ class PilotCheckpoint:
                 status="refused",
                 reason="checkpoint admission is closed",
             )
-        if source is not None:
-            spec = self._register_source(source)
-            grant = spec.acquire()
-            self._capacity_grants[index] = grant
-            self._sync_source_usage(spec.repo_id)
-            if not grant.accepted:
-                result = TaskExportResult(
-                    task_id=request.task_id or request._fallback_id(),
-                    status="cap_rejected",
-                    reason=grant.reason,
-                )
-                self._results[index] = result
-                return result
+        spec, source_refusal = self._resolve_admission_source(request, source)
+        if source_refusal is not None:
+            self._results[index] = source_refusal
+            return source_refusal
+        assert spec is not None
+        grant = spec.acquire()
+        self._capacity_grants[index] = grant
+        self._sync_source_usage(spec.repo_id)
+        if not grant.accepted:
+            result = TaskExportResult(
+                task_id=request.task_id or request._fallback_id(),
+                status="cap_rejected",
+                reason=grant.reason,
+            )
+            self._results[index] = result
+            return result
         self._accepted[index] = request
         self._pending[index] = request
         return None
