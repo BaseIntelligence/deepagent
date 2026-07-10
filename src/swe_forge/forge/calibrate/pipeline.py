@@ -71,6 +71,7 @@ from swe_forge.forge.panel import (
     DEFAULT_VALIDATE_TIMEOUT,
     PanelModel,
 )
+from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
 from swe_forge.forge.teacher import Usage
 
 
@@ -111,6 +112,11 @@ def build_usage_accounting(run: CalibrationRun) -> dict[str, object]:
             "valid": v.valid,
             "usage": (v.usage if v.usage is not None else Usage()).to_dict(),
             "cost": v.cost,
+            "recovery_accounting": (
+                dict(v.recovery_accounting)
+                if v.recovery_accounting is not None
+                else None
+            ),
         }
         for v in run.validations
     ]
@@ -132,6 +138,9 @@ def build_usage_accounting(run: CalibrationRun) -> dict[str, object]:
                     "solved": outcome.solved,
                     "usage": outcome.usage.to_dict(),
                     "cost": outcome.cost,
+                    "recovery_accounting": [
+                        dict(item) for item in outcome.recovery_accounting
+                    ],
                 }
             )
             rollout_usage = rollout_usage + outcome.usage
@@ -156,6 +165,18 @@ def build_usage_accounting(run: CalibrationRun) -> dict[str, object]:
             "cost": run.cost,
         },
     }
+
+
+def build_recovery_accounting(run: CalibrationRun) -> list[dict[str, object]]:
+    """Collect physical-call evidence without losing its oracle-calibration link."""
+    entries: list[dict[str, object]] = []
+    for validation in run.validations:
+        if validation.recovery_accounting is not None:
+            entries.append(dict(validation.recovery_accounting))
+    for record in run.models:
+        for outcome in record.rollouts:
+            entries.extend(dict(item) for item in outcome.recovery_accounting)
+    return entries
 
 
 def _default_provenance(candidate: Candidate) -> Provenance:
@@ -189,6 +210,7 @@ def assemble_calibration_report(
     """
     details: dict[str, object] = {
         "usage_accounting": build_usage_accounting(run),
+        "recovery_accounting": build_recovery_accounting(run),
         "calibration": {
             "band": run.band,
             "difficulty_hint": run.difficulty_hint,
@@ -255,6 +277,7 @@ async def run_calibration(
     docker_client: object | None = None,
     validator: ValidatorFn | None = None,
     rollout_fn: RolloutFn | None = None,
+    recovery_ledger: RecoveryBudgetLedger | None = None,
 ) -> CalibrationOutcome:
     """Run the full panel calibration end to end -> a finalized CalibrationReport.
 
@@ -309,6 +332,7 @@ async def run_calibration(
         docker_client=docker_client,
         validator=validator,
         rollout_fn=rollout_fn,
+        recovery_ledger=recovery_ledger,
     )
     report = assemble_calibration_report(
         run,
@@ -327,5 +351,6 @@ __all__ = [
     "CalibrationOutcome",
     "assemble_calibration_report",
     "build_usage_accounting",
+    "build_recovery_accounting",
     "run_calibration",
 ]

@@ -62,6 +62,7 @@ class TeacherGateCallEvidence:
     execution_errors: int = 0
     executable_proposals: int = 0
     error_type: str = ""
+    recovery_accounting: dict[str, object] | None = None
 
     def with_execution(
         self,
@@ -105,6 +106,11 @@ class TeacherGateCallEvidence:
             "execution_errors": self.execution_errors,
             "executable_proposals": self.executable_proposals,
             "error_type": self.error_type,
+            "recovery_accounting": (
+                dict(self.recovery_accounting)
+                if self.recovery_accounting is not None
+                else None
+            ),
         }
 
 
@@ -190,10 +196,34 @@ def _safe_record(record: dict[str, object]) -> bool:
     usage = record.get("usage")
     if not isinstance(usage, dict):
         return False
-    return all(
+    if not all(
         _nonnegative_int(usage.get(field))
         for field in ("prompt_tokens", "completion_tokens", "total_tokens")
-    )
+    ):
+        return False
+    return _safe_recovery_accounting(record.get("recovery_accounting"))
+
+
+def _safe_recovery_accounting(value: object) -> bool:
+    """Allow absent accounting, otherwise reject secret/raw-content structures."""
+    if value is None:
+        return True
+    if not isinstance(value, dict) or _FORBIDDEN_KEYS & set(value):
+        return False
+    calls = value.get("physical_calls")
+    logical = value.get("logical_call_id")
+    if not isinstance(logical, str) or not logical or not isinstance(calls, list):
+        return False
+    for call in calls:
+        if not isinstance(call, dict) or _FORBIDDEN_KEYS & set(call):
+            return False
+        usage = call.get("usage")
+        if not isinstance(usage, dict) or not all(
+            _nonnegative_int(usage.get(field))
+            for field in ("prompt_tokens", "completion_tokens", "total_tokens")
+        ):
+            return False
+    return True
 
 
 _COUNT_FIELDS = (

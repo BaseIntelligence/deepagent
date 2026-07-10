@@ -44,9 +44,99 @@ REASON_PARTIAL_APPLY = "multifault_partial_repair_apply_failed"
 REASON_PARTIAL_P2P = "multifault_partial_repair_p2p_not_green"
 REASON_PARTIAL_ACCEPTED = "multifault_partial_repair_accepted"
 
+# The recovery task's earlier OneToOne proof only checked unique values. This
+# upstream-grounded duplicate-value invariant is intentionally a *node id*, not
+# a whole-file attribution, so the constituent evidence can prove the exact
+# test that distinguishes the leave-OneToOne-broken state.
+RECOVERY_DUPLICATE_VALUE_TEST_PATH = "test_swe_forge_recovery_one_to_one.py"
+RECOVERY_DUPLICATE_VALUE_TEST_NODE = (
+    "test_swe_forge_recovery_one_to_one.py::"
+    "test_one_to_one_duplicate_values_reconcile_last_mapping_and_inverse_cardinality"
+)
+RECOVERY_DUPLICATE_VALUE_TEST_COMMAND = (
+    "python -m pytest " + RECOVERY_DUPLICATE_VALUE_TEST_NODE
+)
+RECOVERY_DUPLICATE_VALUE_TEST_CONTENT = """\
+from boltons.dictutils import OneToOne
+
+
+def test_one_to_one_duplicate_values_reconcile_last_mapping_and_inverse_cardinality():
+    one_to_one = OneToOne({"alpha": 1, "beta": 1})
+    assert dict(one_to_one) == {"beta": 1}
+    assert dict(one_to_one.inv) == {1: "beta"}
+    assert len(one_to_one) == len(one_to_one.inv) == 1
+    assert one_to_one.inv[1] == "beta"
+    assert one_to_one["beta"] == 1
+"""
+
 
 class MultiFaultError(RuntimeError):
     """Raised when constituent metadata cannot support a sound proof."""
+
+
+def strengthen_recovery_duplicate_value_invariant(
+    report: OracleReport,
+) -> OracleReport:
+    """Add the exact OneToOne duplicate-value invariant to recovery's suite.
+
+    The new assertion is derived from upstream's OneToOne duplicate-value
+    initialization behavior.  It must run when Stats is repaired and OneToOne
+    stays mutated, while full gold must pass it.  We preserve existing hidden
+    tests and make the node command explicitly visible in both F2P evidence and
+    the eventual per-constituent execution record.
+    """
+    test_files = list(report.test_files)
+    existing = {test.path for test in test_files}
+    if RECOVERY_DUPLICATE_VALUE_TEST_PATH not in existing:
+        test_files.append(
+            OracleTestFile(
+                path=RECOVERY_DUPLICATE_VALUE_TEST_PATH,
+                content=RECOVERY_DUPLICATE_VALUE_TEST_CONTENT,
+                origin="provided",
+            )
+        )
+    elif (
+        next(
+            test
+            for test in test_files
+            if test.path == RECOVERY_DUPLICATE_VALUE_TEST_PATH
+        ).content
+        != RECOVERY_DUPLICATE_VALUE_TEST_CONTENT
+    ):
+        raise MultiFaultError(
+            "recovery duplicate-value test path already has different content"
+        )
+    fail_to_pass = list(report.fail_to_pass)
+    if RECOVERY_DUPLICATE_VALUE_TEST_COMMAND not in fail_to_pass:
+        fail_to_pass.append(RECOVERY_DUPLICATE_VALUE_TEST_COMMAND)
+    details = dict(report.details)
+    details["recovery_duplicate_value_invariant"] = {
+        "test_node": RECOVERY_DUPLICATE_VALUE_TEST_NODE,
+        "test_command": RECOVERY_DUPLICATE_VALUE_TEST_COMMAND,
+        "behavior": (
+            "OneToOne({'alpha': 1, 'beta': 1}) keeps the last mapping and "
+            "reconciles forward/inverse cardinality."
+        ),
+    }
+    return OracleReport(
+        language=report.language,
+        generator=report.generator,
+        verdict=report.verdict,
+        reasons=list(report.reasons),
+        fail_to_pass=fail_to_pass,
+        pass_to_pass=list(report.pass_to_pass),
+        test_files=test_files,
+        flakiness_runs=report.flakiness_runs,
+        mutants_total=report.mutants_total,
+        mutants_killed=report.mutants_killed,
+        final_mutation_evidence=report.final_mutation_evidence,
+        multifault_evidence=report.multifault_evidence,
+        differential_pass=report.differential_pass,
+        alt_correct_accepted=report.alt_correct_accepted,
+        leak_audit=report.leak_audit,
+        provenance=report.provenance,
+        details=details,
+    )
 
 
 @dataclass(frozen=True)
@@ -84,7 +174,48 @@ class PartialRepairScore:
     other_inverse_patches_applied: bool
     p2p_passed: bool
     failed_f2p_test_ids: tuple[str, ...] = ()
+    test_exits: tuple["TestStateExit", ...] = ()
     error: str = ""
+
+
+@dataclass(frozen=True)
+class FullGoldScore:
+    """Terminal exits for the exact full-gold state of the final suite."""
+
+    p2p_exit_code: int
+    test_exits: tuple["TestStateExit", ...]
+
+
+@dataclass(frozen=True)
+class TestStateExit:
+    """One exact hidden-test command and exit for a named proof state."""
+
+    __test__ = False
+
+    test_id: str
+    exit_code: int
+
+    def __post_init__(self) -> None:
+        if not self.test_id.strip():
+            raise MultiFaultError("test-state exit requires a non-empty test id")
+
+    @property
+    def passed(self) -> bool:
+        return self.exit_code == 0
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "test_id": self.test_id,
+            "exit_code": self.exit_code,
+            "passed": self.passed,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "TestStateExit":
+        exit_code = data.get("exit_code")
+        if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+            raise MultiFaultError("test-state exit_code must be an int")
+        return cls(test_id=str(data.get("test_id", "")), exit_code=exit_code)
 
 
 @dataclass(frozen=True)
@@ -99,6 +230,7 @@ class ConstituentVerdict:
     p2p_passed: bool
     failed_f2p_test_ids: tuple[str, ...]
     verdict: str
+    test_exits: tuple[TestStateExit, ...] = ()
     reason: str = ""
 
     def __post_init__(self) -> None:
@@ -129,6 +261,7 @@ class ConstituentVerdict:
             "p2p_passed": self.p2p_passed,
             "failed_f2p_test_ids": list(self.failed_f2p_test_ids),
             "verdict": self.verdict,
+            "test_exits": [exit.to_dict() for exit in self.test_exits],
             "reason": self.reason,
         }
 
@@ -136,6 +269,7 @@ class ConstituentVerdict:
     def from_dict(cls, data: dict[str, object]) -> ConstituentVerdict:
         repaired = data.get("repaired_indices", [])
         failed = data.get("failed_f2p_test_ids", [])
+        test_exits = data.get("test_exits", [])
         return cls(
             index=int(str(data["index"])),
             file=str(data["file"]),
@@ -151,6 +285,13 @@ class ConstituentVerdict:
             if isinstance(failed, list)
             else (),
             verdict=str(data["verdict"]),
+            test_exits=tuple(
+                TestStateExit.from_dict(item)
+                for item in test_exits
+                if isinstance(item, dict)
+            )
+            if isinstance(test_exits, list)
+            else (),
             reason=str(data.get("reason", "")),
         )
 
@@ -162,6 +303,8 @@ class MultiFaultCompletenessEvidence:
     suite_fingerprint: str
     p2p_command: str
     constituents: tuple[ConstituentVerdict, ...]
+    full_gold_test_exits: tuple[TestStateExit, ...] = ()
+    full_gold_p2p_exit_code: int | None = None
 
     def __post_init__(self) -> None:
         if len(self.suite_fingerprint) != 64:
@@ -183,13 +326,19 @@ class MultiFaultCompletenessEvidence:
             "suite_fingerprint": self.suite_fingerprint,
             "p2p_command": self.p2p_command,
             "constituents": [record.to_dict() for record in self.constituents],
+            "full_gold_test_exits": [
+                exit.to_dict() for exit in self.full_gold_test_exits
+            ],
+            "full_gold_p2p_exit_code": self.full_gold_p2p_exit_code,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> MultiFaultCompletenessEvidence:
         records = data.get("constituents", [])
+        full_gold_test_exits = data.get("full_gold_test_exits", [])
         if not isinstance(records, list):
             raise MultiFaultError("multifault evidence constituents must be a list")
+        raw_full_gold_p2p_exit = data.get("full_gold_p2p_exit_code")
         return cls(
             suite_fingerprint=str(data["suite_fingerprint"]),
             p2p_command=str(data["p2p_command"]),
@@ -197,6 +346,19 @@ class MultiFaultCompletenessEvidence:
                 ConstituentVerdict.from_dict(record)
                 for record in records
                 if isinstance(record, dict)
+            ),
+            full_gold_test_exits=tuple(
+                TestStateExit.from_dict(item)
+                for item in full_gold_test_exits
+                if isinstance(item, dict)
+            )
+            if isinstance(full_gold_test_exits, list)
+            else (),
+            full_gold_p2p_exit_code=(
+                raw_full_gold_p2p_exit
+                if isinstance(raw_full_gold_p2p_exit, int)
+                and not isinstance(raw_full_gold_p2p_exit, bool)
+                else None
             ),
         )
 
@@ -352,6 +514,7 @@ def _verdict(
         p2p_passed=score.p2p_passed,
         failed_f2p_test_ids=tuple(score.failed_f2p_test_ids),
         verdict="pass" if not reason else "reject",
+        test_exits=score.test_exits,
         reason=reason,
     )
 
@@ -396,6 +559,9 @@ async def assess_multifault_completeness(
             evidence=None,
         )
 
+    full_gold_exits, full_gold_p2p_exit = await _full_gold_evidence(
+        runner, tests, p2p_command
+    )
     verdicts: list[ConstituentVerdict] = []
     for leave_broken in constituents:
         repairs = tuple(
@@ -410,6 +576,8 @@ async def assess_multifault_completeness(
         suite_fingerprint=final_suite_fingerprint(test_files),
         p2p_command=p2p_command,
         constituents=tuple(verdicts),
+        full_gold_test_exits=full_gold_exits,
+        full_gold_p2p_exit_code=full_gold_p2p_exit,
     )
     reasons = [record.reason for record in verdicts if record.reason]
     return MultiFaultOutcome(
@@ -424,8 +592,32 @@ async def assess_multifault_completeness(
             "suite_fingerprint": evidence.suite_fingerprint,
             "p2p_command": p2p_command,
             "constituents": [record.to_dict() for record in evidence.constituents],
+            "full_gold_test_exits": [
+                exit.to_dict() for exit in evidence.full_gold_test_exits
+            ],
+            "full_gold_p2p_exit_code": evidence.full_gold_p2p_exit_code,
         },
     )
+
+
+async def _full_gold_evidence(
+    runner: PartialRepairRunner, tests: Sequence[HiddenTest], p2p_command: str
+) -> tuple[tuple[TestStateExit, ...], int | None]:
+    """Record exact full-gold exits when the runner can execute that state.
+
+    The optional protocol keeps old test seams valid, while the Docker runner
+    always emits actual terminal exits. Legacy evidence remains readable only as
+    immutable input and cannot satisfy recovery's stricter named-test invariant.
+    """
+    score_gold = getattr(runner, "score_gold", None)
+    if score_gold is None:
+        return (), None
+    score = await score_gold(tests, p2p_command=p2p_command)
+    if not isinstance(score, FullGoldScore):
+        raise MultiFaultError("full-gold runner returned malformed test exits")
+    if not all(isinstance(exit, TestStateExit) for exit in score.test_exits):
+        raise MultiFaultError("full-gold runner returned malformed test exits")
+    return score.test_exits, score.p2p_exit_code
 
 
 class DockerPartialRepairRunner:
@@ -565,16 +757,41 @@ class DockerPartialRepairRunner:
 
             p2p = await recipe.run_p2p()
             failed: list[str] = []
+            exits: list[TestStateExit] = []
             for test in tests:
                 await recipe.write_test(test)
                 run = await recipe.run_test(test)
                 await recipe.remove_test(test)
+                exits.append(
+                    TestStateExit(test_id=test.test_id, exit_code=run.exit_code)
+                )
                 if not run.passed:
                     failed.append(test.test_id)
             return PartialRepairScore(
                 other_inverse_patches_applied=True,
                 p2p_passed=p2p.passed,
                 failed_f2p_test_ids=tuple(failed),
+                test_exits=tuple(exits),
+            )
+
+    async def score_gold(
+        self, tests: Sequence[HiddenTest], *, p2p_command: str
+    ) -> FullGoldScore:
+        """Execute the exact final suite on gold, preserving terminal exits."""
+        async with self._recipe(p2p_command) as recipe:
+            await recipe.set_state(TreeState.GOLD)
+            p2p = await recipe.run_p2p()
+            exits: list[TestStateExit] = []
+            for test in tests:
+                await recipe.write_test(test)
+                run = await recipe.run_test(test)
+                await recipe.remove_test(test)
+                exits.append(
+                    TestStateExit(test_id=test.test_id, exit_code=run.exit_code)
+                )
+            return FullGoldScore(
+                p2p_exit_code=p2p.exit_code,
+                test_exits=tuple(exits),
             )
 
 
@@ -733,6 +950,46 @@ def verify_multifault_evidence(
     return problems
 
 
+def verify_recovery_duplicate_value_proof(report: OracleReport) -> list[str]:
+    """Validate recovery's named OneToOne invariant across all required states."""
+    details = report.details.get("recovery_duplicate_value_invariant")
+    if not isinstance(details, dict):
+        return ["recovery: duplicate-value initialization invariant is missing"]
+    if details.get("test_node") != RECOVERY_DUPLICATE_VALUE_TEST_NODE:
+        return ["recovery: duplicate-value proof does not name the exact test node"]
+    evidence = report.multifault_evidence
+    if evidence is None:
+        return ["recovery: duplicate-value proof has no constituent evidence"]
+    if evidence.full_gold_p2p_exit_code != 0:
+        return ["recovery: full gold P2P did not exit zero"]
+    gold_exits = {
+        exit.test_id: exit.exit_code for exit in evidence.full_gold_test_exits
+    }
+    if gold_exits.get(RECOVERY_DUPLICATE_VALUE_TEST_COMMAND) != 0:
+        return ["recovery: duplicate-value test did not pass on the full gold state"]
+    one_to_one = next(
+        (
+            record
+            for record in evidence.constituents
+            if record.file == "boltons/dictutils.py"
+        ),
+        None,
+    )
+    if one_to_one is None:
+        return ["recovery: OneToOne constituent evidence is missing"]
+    one_to_one_exits = {exit.test_id: exit.exit_code for exit in one_to_one.test_exits}
+    if one_to_one_exits.get(RECOVERY_DUPLICATE_VALUE_TEST_COMMAND) != 1:
+        return [
+            "recovery: duplicate-value test did not exit one with only OneToOne broken"
+        ]
+    if RECOVERY_DUPLICATE_VALUE_TEST_COMMAND not in one_to_one.failed_f2p_test_ids:
+        return [
+            "recovery: OneToOne leave-one-broken evidence omits the duplicate-value "
+            "test node"
+        ]
+    return []
+
+
 __all__ = [
     "MULTIFAULT_GENERATORS",
     "REASON_METADATA",
@@ -742,15 +999,23 @@ __all__ = [
     "ConstituentInversePatch",
     "ConstituentVerdict",
     "DockerPartialRepairRunner",
+    "FullGoldScore",
     "MultiFaultCompletenessEvidence",
     "MultiFaultError",
     "MultiFaultOutcome",
     "PartialRepairRunner",
     "PartialRepairScore",
+    "RECOVERY_DUPLICATE_VALUE_TEST_COMMAND",
+    "RECOVERY_DUPLICATE_VALUE_TEST_CONTENT",
+    "RECOVERY_DUPLICATE_VALUE_TEST_NODE",
+    "RECOVERY_DUPLICATE_VALUE_TEST_PATH",
+    "TestStateExit",
     "assess_multifault_completeness",
     "build_multifault_report",
     "constituent_metadata_fingerprint",
     "normalize_constituent_inverse_patches",
     "run_multifault_completeness_gate",
+    "strengthen_recovery_duplicate_value_invariant",
     "verify_multifault_evidence",
+    "verify_recovery_duplicate_value_proof",
 ]

@@ -65,6 +65,7 @@ from swe_forge.forge.panel import (
     PanelModel,
     validate_model,
 )
+from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
 from swe_forge.forge.teacher import Usage
 
 # The benign litellm async-logging warning message (matched as a regex prefix).
@@ -288,6 +289,7 @@ async def run_panel_calibration(
     docker_client: object | None = None,
     validator: ValidatorFn | None = None,
     rollout_fn: RolloutFn | None = None,
+    recovery_ledger: RecoveryBudgetLedger | None = None,
 ) -> CalibrationRun:
     """Run ``k`` independent rollouts x each panel model and record pass@k.
 
@@ -314,6 +316,7 @@ async def run_panel_calibration(
         max_tokens=validate_max_tokens,
         num_retries=validate_num_retries,
         timeout=validate_timeout,
+        recovery_ledger=recovery_ledger,
     )
     resolved_rollout = rollout_fn or _build_rollout_fn(
         candidate,
@@ -325,6 +328,7 @@ async def run_panel_calibration(
         max_turns=max_turns,
         max_tokens=max_tokens,
         command_timeout=command_timeout,
+        recovery_ledger=recovery_ledger,
     )
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -404,7 +408,12 @@ async def run_panel_calibration(
 
 
 def _build_validator(
-    *, prompt: str, max_tokens: int, num_retries: int, timeout: float
+    *,
+    prompt: str,
+    max_tokens: int,
+    num_retries: int,
+    timeout: float,
+    recovery_ledger: RecoveryBudgetLedger | None,
 ) -> ValidatorFn:
     async def _validate(model: PanelModel) -> ModelValidation:
         return await validate_model(
@@ -415,6 +424,7 @@ def _build_validator(
             max_tokens=max_tokens,
             num_retries=num_retries,
             timeout=timeout,
+            recovery_ledger=recovery_ledger,
         )
 
     return _validate
@@ -431,13 +441,19 @@ def _build_rollout_fn(
     max_turns: int,
     max_tokens: int,
     command_timeout: float,
+    recovery_ledger: RecoveryBudgetLedger | None,
 ) -> RolloutFn:
     solvers: dict[str, AgenticSolver] = {}
 
     def _solver_for(model: PanelModel) -> AgenticSolver:
         if model.model_string not in solvers:
             solvers[model.model_string] = AgenticSolver(
-                client=model.client(max_tokens=max_tokens, timeout=command_timeout),
+                client=model.client(
+                    max_tokens=max_tokens,
+                    timeout=command_timeout,
+                    recovery_ledger=recovery_ledger,
+                    recovery_stage="calibration.rollout" if recovery_ledger else "",
+                ),
                 max_turns=max_turns,
                 max_tokens=max_tokens,
             )

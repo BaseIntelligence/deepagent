@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Callable, Union
+from typing import TYPE_CHECKING, Any, Callable, Union
 
 # LiteLLM auto-loads a local .env on import while in its default "DEV" mode. That
 # would repopulate credentials from .env even after an explicit `env -u`, which
@@ -35,6 +36,9 @@ os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
 import litellm  # noqa: E402  (must follow the LITELLM_MODE guard above)
 
 from swe_forge.forge.config import ForgeSettings  # noqa: E402
+
+if TYPE_CHECKING:
+    from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
 
 # Drop provider-incompatible params instead of erroring (e.g. an unsupported
 # sampling field on one of the two protocols). Required by the LLM contract.
@@ -131,6 +135,7 @@ class LLMResult:
     cost: float
     finish_reason: str | None = None
     tool_calls: list[NormalizedToolCall] = field(default_factory=list)
+    recovery_accounting: dict[str, object] | None = None
     raw: Any = field(default=None, repr=False)
 
     def to_dict(self, *, include_tools: bool = False) -> dict[str, Any]:
@@ -142,6 +147,8 @@ class LLMResult:
         }
         if include_tools:
             data["tool_calls"] = [tc.to_dict() for tc in self.tool_calls]
+        if self.recovery_accounting is not None:
+            data["recovery_accounting"] = dict(self.recovery_accounting)
         return data
 
 
@@ -155,6 +162,7 @@ class AgenticResult:
     cost: float
     tool_calls: list[NormalizedToolCall] = field(default_factory=list)
     messages: list[Message] = field(default_factory=list)
+    recovery_accounting: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -163,6 +171,9 @@ class AgenticResult:
             "usage": self.usage.to_dict(),
             "cost": self.cost,
             "tool_calls": [tc.to_dict() for tc in self.tool_calls],
+            "recovery_accounting": [
+                dict(record) for record in self.recovery_accounting
+            ],
         }
 
 
@@ -282,6 +293,9 @@ class TeacherClient:
         timeout: float = DEFAULT_TIMEOUT,
         base_url_var: str = TEACHER_BASE_URL_VAR,
         api_key_var: str = TEACHER_API_KEY_VAR,
+        recovery_ledger: RecoveryBudgetLedger | None = None,
+        recovery_stage: str = "",
+        recovery_logical_call_id: str = "",
     ) -> None:
         self.base_url = (base_url or "").strip()
         self.api_key = api_key or ""
@@ -291,6 +305,17 @@ class TeacherClient:
         self.timeout = timeout
         self._base_url_var = base_url_var
         self._api_key_var = api_key_var
+        self._recovery_ledger = recovery_ledger
+        self._recovery_stage = recovery_stage.strip()
+        self._recovery_logical_call_id = recovery_logical_call_id.strip()
+        self.last_recovery_accounting: dict[str, object] | None = None
+        self.last_agentic_recovery_accounting: list[dict[str, object]] = []
+        self._recovery_history: list[dict[str, object]] = []
+        self._recovery_invocations = 0
+        if self._recovery_ledger is not None and not self._recovery_stage:
+            raise TeacherError(
+                "recovery_stage is required when a recovery budget ledger is active"
+            )
 
     @classmethod
     def from_settings(
@@ -303,6 +328,9 @@ class TeacherClient:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         num_retries: int = DEFAULT_NUM_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
+        recovery_ledger: RecoveryBudgetLedger | None = None,
+        recovery_stage: str = "",
+        recovery_logical_call_id: str = "",
     ) -> "TeacherClient":
         settings = settings or ForgeSettings()
         return cls(
@@ -312,6 +340,9 @@ class TeacherClient:
             max_tokens=max_tokens,
             num_retries=num_retries,
             timeout=timeout,
+            recovery_ledger=recovery_ledger,
+            recovery_stage=recovery_stage,
+            recovery_logical_call_id=recovery_logical_call_id,
         )
 
     @property
@@ -371,7 +402,103 @@ class TeacherClient:
                 kwargs["tool_choice"] = tool_choice
         if response_format is not None:
             kwargs["response_format"] = response_format
-        return await litellm.acompletion(**kwargs)
+        if self._recovery_ledger is None:
+            return await litellm.acompletion(**kwargs)
+
+        # LiteLLM's internal retry loop cannot expose each physical provider
+        # attempt. Own recovery retries here so every attempt is pre-reserved
+        # and fsync-settled before a further attempt can occur.
+        kwargs["num_retries"] = 0
+        if self._recovery_logical_call_id:
+            suffix = self._recovery_invocations
+            logical_call_id = (
+                self._recovery_logical_call_id
+                if suffix == 0
+                else f"{self._recovery_logical_call_id}:{suffix}"
+            )
+        else:
+            logical_call_id = uuid.uuid4().hex
+        self._recovery_invocations += 1
+        self.last_recovery_accounting = None
+        for retry in range(self.num_retries + 1):
+            physical_call_id = self._recovery_ledger.reserve(
+                logical_call_id=logical_call_id,
+                stage=self._recovery_stage,
+                model=routing.model,
+                retry=retry,
+            )
+            try:
+                response = await litellm.acompletion(**kwargs)
+                raw_request_id = _response_request_id(response)
+                from swe_forge.forge.recovery_accounting import sanitize_request_id
+
+                request_id = sanitize_request_id(raw_request_id)
+                usage = _usage_from_response(response)
+                cost = _cost_from_response(response)
+                if not request_id:
+                    self._recovery_ledger.settle(
+                        physical_call_id,
+                        usage=usage,
+                        cost=cost,
+                        status="error",
+                        error_type=(
+                            "MissingRequestId"
+                            if not raw_request_id
+                            else "UnsafeRequestId"
+                        ),
+                    )
+                    raise TeacherError(
+                        "recovery LLM response omitted a safe provider request id"
+                    )
+                self._recovery_ledger.settle(
+                    physical_call_id,
+                    request_id=request_id,
+                    usage=usage,
+                    cost=cost,
+                    status="success",
+                    finish_reason=getattr(response.choices[0], "finish_reason", None),
+                )
+                accounting = _recovery_call_record(
+                    self._recovery_ledger, physical_call_id, logical_call_id
+                )
+                self.last_recovery_accounting = accounting
+                self._recovery_history.append(accounting)
+                _set_recovery_accounting(response, accounting)
+                return response
+            except Exception as exc:
+                # A failed provider request is itself a physical, billable
+                # attempt. It must settle before a retry can be issued.
+                from swe_forge.forge.recovery_accounting import RecoveryAccountingError
+
+                settled = {
+                    record["physical_call_id"]
+                    for record in self._recovery_ledger.settled_calls()
+                }
+                try:
+                    if physical_call_id not in settled:
+                        self._recovery_ledger.settle(
+                            physical_call_id,
+                            status="error",
+                            error_type=type(exc).__name__,
+                        )
+                except Exception:
+                    # Do not hide a failed settlement behind a retry. The
+                    # original error is no longer safely attributable.
+                    raise
+
+                if isinstance(exc, RecoveryAccountingError):
+                    self.last_recovery_accounting = _recovery_call_record(
+                        self._recovery_ledger, physical_call_id, logical_call_id
+                    )
+                    self._recovery_history.append(self.last_recovery_accounting)
+                    raise
+                if retry >= self.num_retries:
+                    self.last_recovery_accounting = _recovery_call_record(
+                        self._recovery_ledger, physical_call_id, logical_call_id
+                    )
+                    self._recovery_history.append(self.last_recovery_accounting)
+                    raise
+        raise AssertionError("unreachable recovery retry loop")
 
     @staticmethod
     def _result(resp: Any) -> LLMResult:
@@ -383,6 +510,7 @@ class TeacherClient:
             cost=_cost_from_response(resp),
             finish_reason=getattr(choice, "finish_reason", None),
             tool_calls=_normalize_tool_calls(message),
+            recovery_accounting=_get_recovery_accounting(resp),
             raw=resp,
         )
 
@@ -470,54 +598,67 @@ class TeacherClient:
         turns = 0
         final_text = ""
         last_tool_calls: list[NormalizedToolCall] = []
+        recovery_accounting: list[dict[str, object]] = []
+        history_start = len(self._recovery_history)
 
-        for _ in range(max_turns):
-            resp = await self._acompletion(
-                conversation,
-                tools=tools,
-                tool_choice=tool_choice,
-                max_tokens=max_tokens,
-            )
-            turns += 1
-            total_usage = total_usage + _usage_from_response(resp)
-            total_cost += _cost_from_response(resp)
-            message = resp.choices[0].message
-            tool_calls = _normalize_tool_calls(message)
-            final_text = getattr(message, "content", None) or ""
+        try:
+            for _ in range(max_turns):
+                resp = await self._acompletion(
+                    conversation,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    max_tokens=max_tokens,
+                )
+                turns += 1
+                call_accounting = getattr(resp, "_forge_recovery_accounting", None)
+                if isinstance(call_accounting, dict):
+                    recovery_accounting.append(dict(call_accounting))
+                total_usage = total_usage + _usage_from_response(resp)
+                total_cost += _cost_from_response(resp)
+                message = resp.choices[0].message
+                tool_calls = _normalize_tool_calls(message)
+                final_text = getattr(message, "content", None) or ""
 
-            if not tool_calls:
-                break
+                if not tool_calls:
+                    break
 
-            last_tool_calls = tool_calls
-            conversation.append(
-                {
-                    "role": "assistant",
-                    "content": getattr(message, "content", None) or "",
-                    "tool_calls": [
-                        {
-                            "id": call.id,
-                            "type": "function",
-                            "function": {
-                                "name": call.name,
-                                "arguments": call.raw_arguments
-                                or json.dumps(call.arguments),
-                            },
-                        }
-                        for call in tool_calls
-                    ],
-                }
-            )
-            for call in tool_calls:
-                outcome = tool_executor(call)
-                if isinstance(outcome, Awaitable):
-                    outcome = await outcome
+                last_tool_calls = tool_calls
                 conversation.append(
                     {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": str(outcome),
+                        "role": "assistant",
+                        "content": getattr(message, "content", None) or "",
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": call.raw_arguments
+                                    or json.dumps(call.arguments),
+                                },
+                            }
+                            for call in tool_calls
+                        ],
                     }
                 )
+                for call in tool_calls:
+                    outcome = tool_executor(call)
+                    if isinstance(outcome, Awaitable):
+                        outcome = await outcome
+                    conversation.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": str(outcome),
+                        }
+                    )
+        except Exception:
+            self.last_agentic_recovery_accounting = [
+                dict(record) for record in self._recovery_history[history_start:]
+            ]
+            raise
+
+        self.last_agentic_recovery_accounting = list(recovery_accounting)
 
         return AgenticResult(
             text=final_text,
@@ -526,4 +667,77 @@ class TeacherClient:
             cost=total_cost,
             tool_calls=last_tool_calls,
             messages=conversation,
+            recovery_accounting=recovery_accounting,
         )
+
+
+def _response_request_id(resp: Any) -> str:
+    """Extract the provider's request id without retaining any response body."""
+    for value in (
+        getattr(resp, "id", None),
+        (getattr(resp, "_hidden_params", None) or {}).get("request_id"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _recovery_call_record(
+    ledger: RecoveryBudgetLedger, physical_call_id: str, logical_call_id: str
+) -> dict[str, object]:
+    """Return one terminal ledger call in the compact evidence shape."""
+    calls = [
+        call
+        for call in ledger.settled_calls()
+        if call["logical_call_id"] == logical_call_id
+    ]
+    if any(call["physical_call_id"] == physical_call_id for call in calls):
+        return {
+            "logical_call_id": logical_call_id,
+            "physical_calls": [
+                {
+                    "physical_call_id": call["physical_call_id"],
+                    "run_id": call["run_id"],
+                    "stage": call["stage"],
+                    "model": call["model"],
+                    "request_id": call["request_id"],
+                    "retry": call["retry"],
+                    "usage": call["usage"],
+                    "cost": call["cost"],
+                    "status": call["status"],
+                    "finish_reason": call["finish_reason"],
+                    "error_type": call["error_type"],
+                }
+                for call in calls
+            ],
+        }
+    raise TeacherError(
+        f"recovery ledger lost settled physical request {physical_call_id!r}"
+    )
+
+
+def _set_recovery_accounting(resp: Any, accounting: dict[str, object]) -> None:
+    """Attach safe accounting to a provider response without exposing contents."""
+    try:
+        setattr(resp, "_forge_recovery_accounting", accounting)
+        return
+    except (AttributeError, TypeError):
+        pass
+    hidden = getattr(resp, "_hidden_params", None)
+    if isinstance(hidden, dict):
+        hidden["_forge_recovery_accounting"] = accounting
+        return
+    raise TeacherError("cannot retain required recovery accounting on LLM response")
+
+
+def _get_recovery_accounting(resp: Any) -> dict[str, object] | None:
+    """Read the safe accounting attachment from either supported response shape."""
+    direct = getattr(resp, "_forge_recovery_accounting", None)
+    if isinstance(direct, dict):
+        return direct
+    hidden = getattr(resp, "_hidden_params", None)
+    if isinstance(hidden, dict):
+        value = hidden.get("_forge_recovery_accounting")
+        if isinstance(value, dict):
+            return value
+    return None

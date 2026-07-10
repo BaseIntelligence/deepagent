@@ -121,6 +121,7 @@ class TeacherAltCorrectGenerator:
                     model=_teacher_model(self._resolve_client()),
                     requested_proposals=ctx.num_alternatives,
                     error_type=type(exc).__name__,
+                    recovery_accounting=_teacher_recovery(self._resolve_client()),
                 )
             )
             logger.warning("alt-correct generation aborted (%s)", type(exc).__name__)
@@ -253,6 +254,7 @@ def _proposal_evidence(
             if executable is None
             else max(0, executable)
         ),
+        recovery_accounting=_result_recovery(result),
     )
 
 
@@ -260,6 +262,18 @@ def _teacher_model(client: object) -> str:
     """Read a model id without making lightweight parser fakes implement it."""
     model = getattr(client, "model", "")
     return model.strip() if isinstance(model, str) else ""
+
+
+def _teacher_recovery(client: object) -> dict[str, object] | None:
+    """Read only the secret-free ledger record retained by the teacher client."""
+    accounting = getattr(client, "last_recovery_accounting", None)
+    return dict(accounting) if isinstance(accounting, dict) else None
+
+
+def _result_recovery(result: object) -> dict[str, object] | None:
+    """Read optional accounting while remaining compatible with test doubles."""
+    accounting = getattr(result, "recovery_accounting", None)
+    return dict(accounting) if isinstance(accounting, dict) else None
 
 
 __all__ = ["TeacherAltCorrectGenerator"]

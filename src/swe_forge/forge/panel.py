@@ -41,6 +41,7 @@ from swe_forge.forge.teacher import (
     Usage,
     resolve_routing,
 )
+from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
 from swe_forge.forge.teacher import (
     Message as Message,
 )
@@ -136,6 +137,8 @@ class PanelModel:
         max_tokens: int = DEFAULT_MAX_TOKENS,
         num_retries: int = DEFAULT_NUM_RETRIES,
         timeout: float = DEFAULT_TIMEOUT,
+        recovery_ledger: RecoveryBudgetLedger | None = None,
+        recovery_stage: str = "",
     ) -> TeacherClient:
         """Build a LiteLLM client bound to this model's endpoint."""
         return TeacherClient(
@@ -147,6 +150,8 @@ class PanelModel:
             timeout=timeout,
             base_url_var=TEACHER_BASE_URL_VAR,
             api_key_var=TEACHER_API_KEY_VAR,
+            recovery_ledger=recovery_ledger,
+            recovery_stage=recovery_stage,
         )
 
     @property
@@ -184,6 +189,7 @@ class ModelValidation:
     error: str | None = None
     usage: Usage | None = None
     cost: float = 0.0
+    recovery_accounting: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -194,6 +200,8 @@ class ModelValidation:
         if self.usage is not None:
             data["usage"] = self.usage.to_dict()
             data["cost"] = self.cost
+        if self.recovery_accounting is not None:
+            data["recovery_accounting"] = dict(self.recovery_accounting)
         return data
 
 
@@ -282,6 +290,7 @@ async def validate_model(
     max_tokens: int = DEFAULT_VALIDATE_MAX_TOKENS,
     num_retries: int = DEFAULT_VALIDATE_NUM_RETRIES,
     timeout: float = DEFAULT_VALIDATE_TIMEOUT,
+    recovery_ledger: RecoveryBudgetLedger | None = None,
 ) -> ModelValidation:
     """Probe a model id with a single live call; never runs bulk rollouts.
 
@@ -302,6 +311,8 @@ async def validate_model(
         max_tokens=max_tokens,
         num_retries=num_retries,
         timeout=timeout,
+        recovery_ledger=recovery_ledger,
+        recovery_stage="calibration.validation" if recovery_ledger else "",
     )
     try:
         result = await client.complete_text(prompt)
@@ -314,9 +325,14 @@ async def validate_model(
             model=model_string,
             valid=False,
             error=_redact(f"{type(exc).__name__}: {exc}", secret),
+            recovery_accounting=client.last_recovery_accounting,
         )
     return ModelValidation(
-        model=model_string, valid=True, usage=result.usage, cost=result.cost
+        model=model_string,
+        valid=True,
+        usage=result.usage,
+        cost=result.cost,
+        recovery_accounting=result.recovery_accounting,
     )
 
 
@@ -330,6 +346,7 @@ async def validate_models(
     max_tokens: int = DEFAULT_VALIDATE_MAX_TOKENS,
     num_retries: int = DEFAULT_VALIDATE_NUM_RETRIES,
     timeout: float = DEFAULT_VALIDATE_TIMEOUT,
+    recovery_ledger: RecoveryBudgetLedger | None = None,
 ) -> list[ModelValidation]:
     """Validate several model ids concurrently with one probe each (no bulk)."""
     semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -344,6 +361,7 @@ async def validate_models(
                 max_tokens=max_tokens,
                 num_retries=num_retries,
                 timeout=timeout,
+                recovery_ledger=recovery_ledger,
             )
 
     return list(await asyncio.gather(*(one(m) for m in model_strings)))

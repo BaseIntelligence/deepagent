@@ -13,10 +13,16 @@ from swe_forge.forge.models import (
     Provenance,
 )
 from swe_forge.forge.oracle.multifault import (
+    FullGoldScore,
     MultiFaultCompletenessEvidence,
     PartialRepairScore,
+    RECOVERY_DUPLICATE_VALUE_TEST_COMMAND,
+    RECOVERY_DUPLICATE_VALUE_TEST_NODE,
+    TestStateExit,
     assess_multifault_completeness,
     normalize_constituent_inverse_patches,
+    strengthen_recovery_duplicate_value_invariant,
+    verify_recovery_duplicate_value_proof,
 )
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.pipeline import verify_pass_consistency
@@ -111,6 +117,43 @@ class FakePartialRepairRunner:
         )
 
 
+class RecoveryProofRunner(FakePartialRepairRunner):
+    """Records the recovery proof's exact gold and leave-one-broken exits."""
+
+    async def score(self, leave_broken, repairs, tests, *, p2p_command):  # type: ignore[no-untyped-def]
+        score = await super().score(
+            leave_broken, repairs, tests, p2p_command=p2p_command
+        )
+        exits = tuple(
+            TestStateExit(
+                test_id=test.test_id,
+                exit_code=(
+                    1
+                    if leave_broken.file == "boltons/dictutils.py"
+                    and test.test_id == RECOVERY_DUPLICATE_VALUE_TEST_COMMAND
+                    else 0
+                ),
+            )
+            for test in tests
+        )
+        return PartialRepairScore(
+            other_inverse_patches_applied=score.other_inverse_patches_applied,
+            p2p_passed=score.p2p_passed,
+            failed_f2p_test_ids=tuple(exit.test_id for exit in exits if not exit.passed)
+            or score.failed_f2p_test_ids,
+            test_exits=exits,
+        )
+
+    async def score_gold(self, tests, *, p2p_command):  # type: ignore[no-untyped-def]
+        assert p2p_command == P2P
+        return FullGoldScore(
+            p2p_exit_code=0,
+            test_exits=tuple(
+                TestStateExit(test_id=test.test_id, exit_code=0) for test in tests
+            ),
+        )
+
+
 async def test_each_leave_one_broken_variant_repairs_all_other_faults() -> None:
     candidate = _candidate()
     runner = FakePartialRepairRunner()
@@ -127,6 +170,71 @@ async def test_each_leave_one_broken_variant_repairs_all_other_faults() -> None:
     assert [record.index for record in outcome.evidence.constituents] == [0, 1]
     assert all(record.verdict == "pass" for record in outcome.evidence.constituents)
     assert runner.calls == [(0, (1,)), (1, (0,))]
+
+
+async def test_recovery_duplicate_value_node_fails_only_with_one_to_one_broken() -> (
+    None
+):
+    """The exact duplicate-value node replaces ineffective whole-file attribution."""
+    candidate = _candidate(
+        metadata=[
+            {
+                "index": 0,
+                "file": "boltons/dictutils.py",
+                "mutation_patch": "mutation OneToOne",
+                "inverse_patch": "inverse OneToOne",
+            },
+            {
+                "index": 1,
+                "file": "boltons/statsutils.py",
+                "mutation_patch": "mutation Stats",
+                "inverse_patch": "inverse Stats",
+            },
+        ]
+    )
+    candidate.target = CandidateTarget(
+        files=("boltons/dictutils.py", "boltons/statsutils.py"),
+        symbols=("OneToOne.__init__", "Stats.describe"),
+    )
+    report = strengthen_recovery_duplicate_value_invariant(
+        OracleReport(
+            language="python",
+            generator="bug_combination",
+            verdict="pass",
+            fail_to_pass=[F2P],
+            pass_to_pass=[P2P],
+            test_files=_tests(),
+            flakiness_runs=3,
+            mutants_total=10,
+            mutants_killed=10,
+        )
+    )
+
+    outcome = await assess_multifault_completeness(
+        candidate,
+        report.test_files,
+        p2p_command=P2P,
+        runner=RecoveryProofRunner(),
+        fail_to_pass=report.fail_to_pass,
+    )
+
+    assert outcome.verdict == "pass"
+    assert outcome.evidence is not None
+    one_to_one = outcome.evidence.constituents[0]
+    assert RECOVERY_DUPLICATE_VALUE_TEST_COMMAND in one_to_one.failed_f2p_test_ids
+    assert {exit.test_id: exit.exit_code for exit in one_to_one.test_exits}[
+        RECOVERY_DUPLICATE_VALUE_TEST_COMMAND
+    ] == 1
+    assert {
+        exit.test_id: exit.exit_code for exit in outcome.evidence.full_gold_test_exits
+    }[RECOVERY_DUPLICATE_VALUE_TEST_COMMAND] == 0
+    assert outcome.evidence.full_gold_p2p_exit_code == 0
+    report.multifault_evidence = outcome.evidence
+    assert (
+        report.details["recovery_duplicate_value_invariant"]["test_node"]  # type: ignore[index]
+        == RECOVERY_DUPLICATE_VALUE_TEST_NODE
+    )
+    assert verify_recovery_duplicate_value_proof(report) == []
 
 
 async def test_partial_repair_accepted_by_final_hidden_suite_rejects() -> None:

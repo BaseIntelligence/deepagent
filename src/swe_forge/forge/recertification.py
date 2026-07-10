@@ -1,11 +1,12 @@
 """Fail-closed recertification of the single certified multi-fault recovery.
 
 This module deliberately accepts one immutable recovery publication only. It
-first re-runs the normal, live teacher differential and alternative-correct
-gates, then re-runs final mutation, constituent-completeness, and leak gates.
-Calibration reuse is permitted only when the final hidden-suite fingerprint is
-byte-for-byte unchanged. Otherwise a caller must perform fresh panel
-calibration rather than accidentally publishing stale difficulty evidence.
+first proves the named duplicate-value constituent invariant without an LLM
+call, then re-runs the normal live teacher differential and alternative-correct
+gates, final mutation, constituent completeness, and leak gates. Calibration
+reuse is permitted only when the final hidden-suite fingerprint is byte-for-byte
+unchanged. Otherwise a caller must perform fresh panel calibration rather than
+accidentally publishing stale difficulty evidence.
 """
 
 from __future__ import annotations
@@ -38,7 +39,9 @@ from swe_forge.forge.oracle.mutation import (
 )
 from swe_forge.forge.oracle.multifault import (
     run_multifault_completeness_gate,
+    strengthen_recovery_duplicate_value_invariant,
     verify_multifault_evidence,
+    verify_recovery_duplicate_value_proof,
 )
 from swe_forge.forge.oracle.pipeline import (
     ensure_oracle_exportable,
@@ -48,6 +51,12 @@ from swe_forge.forge.publication import (
     PublishedGeneration,
     load_published_generation,
 )
+from swe_forge.forge.recovery_accounting import (
+    RecoveryBudgetLedger,
+    require_calibration_recovery_evidence,
+    reconcile_recovery_reports,
+)
+from swe_forge.forge.teacher import TeacherClient
 
 if TYPE_CHECKING:
     from swe_forge.execution.docker_client import DockerClient
@@ -64,6 +73,23 @@ class RecertificationError(RuntimeError):
     """Raised when the certified recovery cannot be safely republished."""
 
 
+def historical_recovery_spend_evidence() -> dict[str, object]:
+    """Describe pre-ledger recovery spend without granting it budget authority.
+
+    The certified recovery input predates durable per-request accounting. Its
+    observed historical amount is therefore a lower bound only, not an exact
+    total, cap proof, or publication authorization. New recertification can
+    only use :class:`RecoveryBudgetLedger` exact, reconciled settlements.
+    """
+    return {
+        "historical_observed_lower_bound_usd": "21.43272865",
+        "is_exact": False,
+        "can_prove_cap": False,
+        "can_authorize_publication": False,
+        "reason": "pre-ledger recovery calls were not durably metered",
+    }
+
+
 @dataclass(frozen=True)
 class RecertificationResult:
     """The recertified report plus its one transactional export result."""
@@ -72,9 +98,13 @@ class RecertificationResult:
     task_id: str
     oracle_report: OracleReport
     export: BatchExportResult
+    accounting: dict[str, object]
+    historical_spend: dict[str, object]
 
 
-Recalibrator = Callable[[ForgeTask, OracleReport], Awaitable[CalibrationReport]]
+Recalibrator = Callable[
+    [ForgeTask, OracleReport, RecoveryBudgetLedger], Awaitable[CalibrationReport]
+]
 
 
 def _final_fingerprint(report: OracleReport) -> str:
@@ -199,6 +229,7 @@ def require_unchanged_suite_for_calibration(
 async def recertify_final_oracle(
     task: ForgeTask,
     *,
+    recovery_ledger: RecoveryBudgetLedger,
     command_timeout: float = 600.0,
     mutation_timeout: float = 1200.0,
     variant_generator: VariantGenerator | None = None,
@@ -218,24 +249,55 @@ async def recertify_final_oracle(
     """
     validate_certified_recovery_source(task)
     threshold = _final_evidence(task.oracle_report).threshold
+    # No live teacher request may occur before the recovered task proves the
+    # exact upstream duplicate-value behavior. This corrects the old
+    # whole-file/unique-value attribution and records named per-state exits.
+    strengthened = strengthen_recovery_duplicate_value_invariant(task.oracle_report)
+    preflight = await run_multifault_completeness_gate(
+        task.candidate,
+        task.env_image,
+        strengthened,
+        adapter=adapter,
+        docker_client=docker_client,
+        command_timeout=command_timeout,
+    )
+    proof_problems = verify_recovery_duplicate_value_proof(preflight)
+    if not preflight.is_pass or proof_problems:
+        if preflight.is_pass:
+            raise RecertificationError(
+                "recovery duplicate-value proof is inconsistent: "
+                + "; ".join(proof_problems)
+            )
+        return preflight
+
+    differential_client = TeacherClient.from_settings(
+        recovery_ledger=recovery_ledger,
+        recovery_stage="oracle.differential",
+    )
     differential = await run_differential_gate(
         task.candidate,
         task.env_image,
-        task.oracle_report,
-        variant_generator=variant_generator or TeacherVariantGenerator(),
-        synthesizer=differential_synthesizer or DifferentialKillSynthesizer(),
+        preflight,
+        variant_generator=variant_generator
+        or TeacherVariantGenerator(client=differential_client),
+        synthesizer=differential_synthesizer
+        or DifferentialKillSynthesizer(client=differential_client),
         adapter=adapter,
         docker_client=docker_client,
         command_timeout=command_timeout,
     )
     if not differential.is_pass:
         return differential
+    alt_client = TeacherClient.from_settings(
+        recovery_ledger=recovery_ledger,
+        recovery_stage="oracle.alt_correct",
+    )
     alt_correct = await run_alt_correct_gate(
         task.candidate,
         task.env_image,
         differential,
         spec=task.spec,
-        alt_generator=alt_generator or TeacherAltCorrectGenerator(),
+        alt_generator=alt_generator or TeacherAltCorrectGenerator(client=alt_client),
         adapter=adapter,
         docker_client=docker_client,
         command_timeout=command_timeout,
@@ -263,6 +325,12 @@ async def recertify_final_oracle(
     )
     if not multifault.is_pass:
         return multifault
+    proof_problems = verify_recovery_duplicate_value_proof(multifault)
+    if proof_problems:
+        raise RecertificationError(
+            "recovery duplicate-value proof is inconsistent: "
+            + "; ".join(proof_problems)
+        )
     recertified = await run_leak_gate(
         task.candidate,
         task.env_image,
@@ -288,6 +356,7 @@ def build_recertification_request(
     generation: PublishedGeneration,
     oracle_report: OracleReport,
     calibration_report: CalibrationReport | None = None,
+    recovery_ledger: RecoveryBudgetLedger | None = None,
 ) -> ExportRequest:
     """Construct the only permissible transactional export request.
 
@@ -323,6 +392,17 @@ def build_recertification_request(
         raise RecertificationError(
             f"recertified task is not exportable: {exc}"
         ) from exc
+    if recovery_ledger is None:
+        raise RecertificationError(
+            "recovery publication requires a durable budget ledger"
+        )
+    try:
+        require_calibration_recovery_evidence(calibration)
+        reconcile_recovery_reports(recovery_ledger, oracle_report, calibration)
+    except Exception as exc:
+        raise RecertificationError(
+            f"recovery LLM accounting cannot authorize publication: {exc}"
+        ) from exc
     return ExportRequest(
         candidate=source.candidate,
         spec=source.spec,
@@ -339,6 +419,7 @@ def build_recertification_request(
 async def recertify_recovery_export(
     out_dir: Path | str,
     *,
+    recovery_ledger: RecoveryBudgetLedger,
     source_dir: Path | str = CERTIFIED_RECOVERY_SOURCE,
     overwrite: bool = True,
     command_timeout: float = 600.0,
@@ -354,6 +435,7 @@ async def recertify_recovery_export(
     generation, source_task = load_certified_recovery(source_dir)
     oracle_report = await recertify_final_oracle(
         source_task,
+        recovery_ledger=recovery_ledger,
         command_timeout=command_timeout,
         mutation_timeout=mutation_timeout,
         variant_generator=variant_generator,
@@ -366,22 +448,18 @@ async def recertify_recovery_export(
         raise RecertificationError(
             "recertified oracle did not pass: " + "; ".join(oracle_report.reasons)
         )
-    try:
-        require_unchanged_suite_for_calibration(
-            source_task.oracle_report, oracle_report
+    if recalibrator is None:
+        raise RecertificationError(
+            "recovery publication requires fresh metered calibration; historical "
+            "calibration cannot authorize publication"
         )
-    except RecertificationError:
-        if recalibrator is None:
-            raise RecertificationError(
-                "final hidden suite changed during recertification and no "
-                "recalibrator was supplied"
-            ) from None
-        calibration = await recalibrator(source_task, oracle_report)
-    else:
-        calibration = source_task.calibration_report
+    calibration = await recalibrator(source_task, oracle_report, recovery_ledger)
 
     request = build_recertification_request(
-        generation, oracle_report, calibration_report=calibration
+        generation,
+        oracle_report,
+        calibration_report=calibration,
+        recovery_ledger=recovery_ledger,
     )
     result = export_batch(
         [request],
@@ -398,6 +476,10 @@ async def recertify_recovery_export(
         task_id=source_task.task_id,
         oracle_report=oracle_report,
         export=result,
+        accounting=reconcile_recovery_reports(
+            recovery_ledger, oracle_report, calibration
+        ),
+        historical_spend=historical_recovery_spend_evidence(),
     )
 
 
@@ -408,6 +490,7 @@ __all__ = [
     "RecertificationResult",
     "build_recertification_request",
     "load_certified_recovery",
+    "historical_recovery_spend_evidence",
     "recertify_final_oracle",
     "recertify_recovery_export",
     "require_unchanged_suite_for_calibration",

@@ -279,6 +279,7 @@ class SolverRollout:
     usage: Usage
     cost: float
     error: str | None = None
+    recovery_accounting: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -288,6 +289,9 @@ class SolverRollout:
             "usage": self.usage.to_dict(),
             "cost": self.cost,
             "error": self.error,
+            "recovery_accounting": [
+                dict(record) for record in self.recovery_accounting
+            ],
         }
 
 
@@ -348,6 +352,7 @@ class AgenticSolver:
         turns = 0
         usage = Usage()
         cost = 0.0
+        recovery_accounting: list[dict[str, object]] = []
         try:
             result = await client.agentic_turn(
                 messages,
@@ -359,8 +364,14 @@ class AgenticSolver:
             turns = result.turns
             usage = result.usage
             cost = result.cost
+            recovery_accounting = result.recovery_accounting
         except Exception as exc:  # network/endpoint failure: clean non-solve
             error = f"{type(exc).__name__}: {exc}"
+            attempted = getattr(client, "last_agentic_recovery_accounting", None)
+            if isinstance(attempted, list):
+                recovery_accounting = [
+                    dict(item) for item in attempted if isinstance(item, dict)
+                ]
             logger.warning("solver rollout aborted: %s", error)
 
         return SolverRollout(
@@ -370,6 +381,7 @@ class AgenticSolver:
             usage=usage,
             cost=cost,
             error=error,
+            recovery_accounting=recovery_accounting,
         )
 
     async def _dispatch(
@@ -684,6 +696,7 @@ class RolloutOutcome:
     usage: Usage
     cost: float
     error: str | None = None
+    recovery_accounting: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -696,6 +709,9 @@ class RolloutOutcome:
             "usage": self.usage.to_dict(),
             "cost": self.cost,
             "error": self.error,
+            "recovery_accounting": [
+                dict(record) for record in self.recovery_accounting
+            ],
         }
 
 
@@ -819,6 +835,7 @@ async def run_solver_rollout(
             usage=Usage(),
             cost=0.0,
             error=f"{type(exc).__name__}: {exc}",
+            recovery_accounting=[],
         )
 
     # Submit-gate: only a finished, non-empty patch is scored.
@@ -848,6 +865,7 @@ async def run_solver_rollout(
         usage=rollout.usage,
         cost=rollout.cost,
         error=rollout.error,
+        recovery_accounting=rollout.recovery_accounting,
     )
 
 

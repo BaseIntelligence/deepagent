@@ -1,0 +1,726 @@
+"""Durable, fail-closed LLM cost accounting for recovery recertification.
+
+Recovery work is unusual because a publication must be able to prove every
+physical request that contributed to its oracle or calibration evidence.  This
+module provides a small append-only JSONL ledger.  A request is reserved and
+fsynced *before* it is issued, then durably settled with the provider-reported
+usage and cost whether it succeeds or fails.
+
+The ledger intentionally contains operational metadata only.  It never stores
+prompts, responses, endpoint URLs, headers, credentials, or exception text.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from typing import Iterable, Literal, Protocol
+
+from swe_forge.forge.models import CalibrationReport
+from swe_forge.forge.teacher import Usage
+
+_SCHEMA_VERSION = 1
+_EVENT_RESERVE = "reserve"
+_EVENT_SETTLE = "settle"
+_SETTLED_STATUSES = frozenset(("success", "error"))
+_SAFE_FINISH_REASONS = frozenset(
+    ("stop", "length", "tool_calls", "function_call", "content_filter")
+)
+_SAFE_ERROR_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
+_SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+
+class RecoveryAccountingError(RuntimeError):
+    """Raised when recovery cost evidence is incomplete or inconsistent."""
+
+
+class _ReportLike(Protocol):
+    details: dict[str, object]
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _money(value: object, *, field: str) -> Decimal:
+    if isinstance(value, bool):
+        raise RecoveryAccountingError(f"{field} must be a non-negative decimal")
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise RecoveryAccountingError(
+            f"{field} must be a non-negative decimal"
+        ) from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise RecoveryAccountingError(f"{field} must be a non-negative decimal")
+    return parsed
+
+
+def _money_text(value: object, *, field: str) -> str:
+    """Render a decimal without losing the provider-reported precision."""
+    return format(_money(value, field=field), "f")
+
+
+def _usage_dict(usage: Usage | dict[str, object] | None) -> dict[str, int]:
+    if isinstance(usage, Usage):
+        payload: dict[str, object] = dict(usage.to_dict())
+    elif isinstance(usage, dict):
+        payload = usage
+    elif usage is None:
+        payload = {}
+    else:
+        raise RecoveryAccountingError("usage must be a Usage object or mapping")
+    result: dict[str, int] = {}
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = payload.get(field, 0)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise RecoveryAccountingError(f"usage.{field} must be a non-negative int")
+        result[field] = value
+    return result
+
+
+def _safe_finish_reason(value: object) -> str | None:
+    """Persist only known terminal labels, never arbitrary provider content."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized if normalized in _SAFE_FINISH_REASONS else "other"
+
+
+def _safe_error_type(value: object) -> str:
+    """Persist a bounded exception class name, not provider exception text."""
+    return value if isinstance(value, str) and _SAFE_ERROR_TYPE.fullmatch(value) else ""
+
+
+def sanitize_request_id(value: object) -> str:
+    """Return a bounded opaque provider request ID, or no ID if it is unsafe."""
+    return value if isinstance(value, str) and _SAFE_REQUEST_ID.fullmatch(value) else ""
+
+
+@dataclass(frozen=True)
+class _Reservation:
+    """One active or settled physical request reconstructed from the ledger."""
+
+    physical_call_id: str
+    logical_call_id: str
+    stage: str
+    model: str
+    retry: int
+    reserved_cost: Decimal
+    reserve_event: dict[str, object]
+    settle_event: dict[str, object] | None = None
+
+
+class RecoveryBudgetLedger:
+    """Append-only, fsynced request reservations for one recovery run.
+
+    ``cap_usd`` is enforced before each physical request using settled exact
+    spend plus all active worst-case reservations.  Settlement replaces the
+    request's reservation with the exact provider cost, and a provider charge
+    exceeding its reserved bound is itself a hard accounting failure.
+    """
+
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        run_id: str,
+        cap_usd: float | str | Decimal,
+        worst_case_cost_usd: float | str | Decimal,
+    ) -> None:
+        self.path = Path(path)
+        self.run_id = str(run_id).strip()
+        self.cap_usd = _money(cap_usd, field="cap_usd")
+        self.worst_case_cost_usd = _money(
+            worst_case_cost_usd, field="worst_case_cost_usd"
+        )
+        if not self.run_id:
+            raise RecoveryAccountingError("run_id must be non-empty")
+        if self.cap_usd <= 0:
+            raise RecoveryAccountingError("cap_usd must be greater than zero")
+        if self.worst_case_cost_usd <= 0:
+            raise RecoveryAccountingError(
+                "worst_case_cost_usd must be greater than zero"
+            )
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.path.exists():
+            self.path.touch()
+            self._fsync_file()
+            self._fsync_parent()
+        self._records = self._load_records()
+
+    def _fsync_file(self) -> None:
+        descriptor = os.open(self.path, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _fsync_parent(self) -> None:
+        descriptor = os.open(self.path.parent, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+
+    def _append(self, event: dict[str, object]) -> None:
+        encoded = json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n"
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        self._fsync_parent()
+
+    def _load_records(self) -> dict[str, _Reservation]:
+        records: dict[str, _Reservation] = {}
+        for line_no, raw_line in enumerate(
+            self.path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise RecoveryAccountingError(
+                    f"ledger has malformed JSON at line {line_no}"
+                ) from exc
+            if not isinstance(event, dict):
+                raise RecoveryAccountingError(
+                    f"ledger event at line {line_no} must be an object"
+                )
+            if event.get("schema_version") != _SCHEMA_VERSION:
+                raise RecoveryAccountingError(
+                    f"ledger event at line {line_no} has unsupported schema"
+                )
+            if event.get("run_id") != self.run_id:
+                raise RecoveryAccountingError(
+                    f"ledger event at line {line_no} belongs to a different run"
+                )
+            event_type = event.get("event")
+            physical = event.get("physical_call_id")
+            if not isinstance(physical, str) or not physical:
+                raise RecoveryAccountingError(
+                    f"ledger event at line {line_no} has no physical_call_id"
+                )
+            if event_type == _EVENT_RESERVE:
+                if physical in records:
+                    raise RecoveryAccountingError(
+                        f"ledger has duplicate physical call {physical!r}"
+                    )
+                logical = event.get("logical_call_id")
+                stage = event.get("stage")
+                model = event.get("model")
+                retry = event.get("retry")
+                if (
+                    not isinstance(logical, str)
+                    or not logical
+                    or not isinstance(stage, str)
+                    or not stage
+                    or not isinstance(model, str)
+                    or not model
+                    or not isinstance(retry, int)
+                    or isinstance(retry, bool)
+                    or retry < 0
+                ):
+                    raise RecoveryAccountingError(
+                        f"ledger reserve at line {line_no} is malformed"
+                    )
+                records[physical] = _Reservation(
+                    physical_call_id=physical,
+                    logical_call_id=logical,
+                    stage=stage,
+                    model=model,
+                    retry=retry,
+                    reserved_cost=_money(
+                        event.get("reserved_cost_usd"),
+                        field="reserved_cost_usd",
+                    ),
+                    reserve_event=event,
+                )
+            elif event_type == _EVENT_SETTLE:
+                reservation = records.get(physical)
+                if reservation is None:
+                    raise RecoveryAccountingError(
+                        f"ledger settles unknown physical call {physical!r}"
+                    )
+                if reservation.settle_event is not None:
+                    raise RecoveryAccountingError(
+                        f"ledger settles physical call {physical!r} more than once"
+                    )
+                self._validate_settlement(event, reservation)
+                records[physical] = _Reservation(
+                    **{
+                        **reservation.__dict__,
+                        "settle_event": event,
+                    }
+                )
+            else:
+                raise RecoveryAccountingError(
+                    f"ledger event at line {line_no} has unknown event type"
+                )
+        return records
+
+    def _validate_settlement(
+        self, event: dict[str, object], reservation: _Reservation
+    ) -> None:
+        for field, expected in (
+            ("logical_call_id", reservation.logical_call_id),
+            ("stage", reservation.stage),
+            ("model", reservation.model),
+            ("retry", reservation.retry),
+        ):
+            if event.get(field) != expected:
+                raise RecoveryAccountingError(
+                    f"settlement for {reservation.physical_call_id!r} mismatches {field}"
+                )
+        status = event.get("status")
+        if status not in _SETTLED_STATUSES:
+            raise RecoveryAccountingError(
+                f"settlement for {reservation.physical_call_id!r} has invalid status"
+            )
+        _money(event.get("cost_usd"), field="cost_usd")
+        raw_usage = event.get("usage")
+        _usage_dict(raw_usage if isinstance(raw_usage, dict) else None)
+        if status == "success" and not isinstance(event.get("request_id"), str):
+            raise RecoveryAccountingError(
+                f"successful settlement for {reservation.physical_call_id!r} "
+                "has no request_id"
+            )
+        if event.get("finish_reason") not in (
+            None,
+            *_SAFE_FINISH_REASONS,
+            "other",
+        ):
+            raise RecoveryAccountingError(
+                f"settlement for {reservation.physical_call_id!r} has invalid "
+                "finish_reason"
+            )
+        if not isinstance(event.get("error_type", ""), str):
+            raise RecoveryAccountingError(
+                f"settlement for {reservation.physical_call_id!r} has invalid "
+                "error_type"
+            )
+
+    @property
+    def total_exact_cost(self) -> Decimal:
+        return sum(
+            (
+                _money(record.settle_event.get("cost_usd"), field="cost_usd")
+                for record in self._records.values()
+                if record.settle_event is not None
+            ),
+            Decimal(),
+        )
+
+    @property
+    def total_active_reservations(self) -> Decimal:
+        return sum(
+            (
+                record.reserved_cost
+                for record in self._records.values()
+                if record.settle_event is None
+            ),
+            Decimal(),
+        )
+
+    def reserve(
+        self,
+        *,
+        logical_call_id: str,
+        stage: str,
+        model: str,
+        retry: int,
+        worst_case_cost_usd: float | str | Decimal | None = None,
+    ) -> str:
+        """Durably reserve a physical request before calling a provider."""
+        logical = str(logical_call_id).strip()
+        stage_name = str(stage).strip()
+        model_name = str(model).strip()
+        if not logical or not stage_name or not model_name:
+            raise RecoveryAccountingError(
+                "logical_call_id, stage, and model must be non-empty"
+            )
+        if retry < 0:
+            raise RecoveryAccountingError("retry must be >= 0")
+        reserved = (
+            self.worst_case_cost_usd
+            if worst_case_cost_usd is None
+            else _money(worst_case_cost_usd, field="worst_case_cost_usd")
+        )
+        projected = self.total_exact_cost + self.total_active_reservations + reserved
+        if projected > self.cap_usd:
+            raise RecoveryAccountingError(
+                "recovery budget cap exhausted before physical LLM request "
+                f"(projected={format(projected, 'f')}, cap={format(self.cap_usd, 'f')})"
+            )
+        physical = uuid.uuid4().hex
+        event: dict[str, object] = {
+            "schema_version": _SCHEMA_VERSION,
+            "event": _EVENT_RESERVE,
+            "timestamp": _timestamp(),
+            "run_id": self.run_id,
+            "logical_call_id": logical,
+            "physical_call_id": physical,
+            "stage": stage_name,
+            "model": model_name,
+            "retry": retry,
+            "reserved_cost_usd": format(reserved, "f"),
+        }
+        self._append(event)
+        self._records[physical] = _Reservation(
+            physical_call_id=physical,
+            logical_call_id=logical,
+            stage=stage_name,
+            model=model_name,
+            retry=retry,
+            reserved_cost=reserved,
+            reserve_event=event,
+        )
+        return physical
+
+    def settle(
+        self,
+        physical_call_id: str,
+        *,
+        request_id: str = "",
+        usage: Usage | dict[str, object] | None = None,
+        cost: float | str | Decimal = 0,
+        status: Literal["success", "error"],
+        finish_reason: str | None = None,
+        error_type: str = "",
+    ) -> None:
+        """Append and fsync the terminal result for a previously reserved call."""
+        reservation = self._records.get(physical_call_id)
+        if reservation is None:
+            raise RecoveryAccountingError(
+                f"cannot settle unknown physical call {physical_call_id!r}"
+            )
+        if reservation.settle_event is not None:
+            raise RecoveryAccountingError(
+                f"cannot settle physical call {physical_call_id!r} twice"
+            )
+        event: dict[str, object] = {
+            "schema_version": _SCHEMA_VERSION,
+            "event": _EVENT_SETTLE,
+            "timestamp": _timestamp(),
+            "run_id": self.run_id,
+            "logical_call_id": reservation.logical_call_id,
+            "physical_call_id": reservation.physical_call_id,
+            "stage": reservation.stage,
+            "model": reservation.model,
+            "retry": reservation.retry,
+            "request_id": sanitize_request_id(request_id),
+            "usage": _usage_dict(usage),
+            "cost_usd": _money_text(cost, field="cost_usd"),
+            "status": status,
+            "finish_reason": _safe_finish_reason(finish_reason),
+            "error_type": _safe_error_type(error_type),
+        }
+        self._validate_settlement(event, reservation)
+        self._append(event)
+        self._records[physical_call_id] = _Reservation(
+            **{
+                **reservation.__dict__,
+                "settle_event": event,
+            }
+        )
+        if _money(event["cost_usd"], field="cost_usd") > reservation.reserved_cost:
+            raise RecoveryAccountingError(
+                f"settlement for {reservation.physical_call_id!r} exceeded its "
+                "pre-reserved worst-case cost"
+            )
+
+    def events(self) -> list[dict[str, object]]:
+        """Return parsed events for audit or tests, preserving append order."""
+        return [
+            json.loads(line)
+            for line in self.path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def settled_calls(self) -> list[dict[str, object]]:
+        """Return secret-free terminal call records in reservation order."""
+        calls: list[dict[str, object]] = []
+        for event in self.events():
+            if event.get("event") != _EVENT_SETTLE:
+                continue
+            calls.append(
+                {
+                    "run_id": event["run_id"],
+                    "logical_call_id": event["logical_call_id"],
+                    "physical_call_id": event["physical_call_id"],
+                    "stage": event["stage"],
+                    "model": event["model"],
+                    "retry": event["retry"],
+                    "request_id": event["request_id"],
+                    "usage": event["usage"],
+                    "cost": event["cost_usd"],
+                    "status": event["status"],
+                    "finish_reason": event["finish_reason"],
+                    "error_type": event["error_type"],
+                }
+            )
+        return calls
+
+    def unsettled_call_ids(self) -> tuple[str, ...]:
+        return tuple(
+            physical
+            for physical, record in self._records.items()
+            if record.settle_event is None
+        )
+
+
+def _iter_physical_calls(evidence: Iterable[object]) -> list[dict[str, object]]:
+    physical: list[dict[str, object]] = []
+    for index, item in enumerate(evidence):
+        if not isinstance(item, dict):
+            raise RecoveryAccountingError(f"recovery evidence {index} is malformed")
+        logical = item.get("logical_call_id")
+        calls = item.get("physical_calls")
+        if not isinstance(logical, str) or not logical or not isinstance(calls, list):
+            raise RecoveryAccountingError(
+                f"recovery evidence {index} has no logical call or physical calls"
+            )
+        for call in calls:
+            if not isinstance(call, dict):
+                raise RecoveryAccountingError(
+                    f"recovery evidence {index} has a malformed physical call"
+                )
+            physical.append({**call, "logical_call_id": logical})
+    return physical
+
+
+def reconcile_recovery_call_evidence(
+    ledger: RecoveryBudgetLedger, evidence: Iterable[object]
+) -> dict[str, object]:
+    """Require one-to-one agreement between settled ledger and stage evidence.
+
+    Missing, duplicate, unresolved, or mismatched calls raise before a caller
+    can publish a recertified recovery generation.
+    """
+    unsettled = ledger.unsettled_call_ids()
+    if unsettled:
+        raise RecoveryAccountingError(
+            "recovery ledger has unsettled physical calls: " + ", ".join(unsettled)
+        )
+    if ledger.total_exact_cost > ledger.cap_usd:
+        raise RecoveryAccountingError(
+            "recovery ledger settled cost exceeds its configured budget cap "
+            f"(cost={format(ledger.total_exact_cost, 'f')}, "
+            f"cap={format(ledger.cap_usd, 'f')})"
+        )
+    evidence_calls = _iter_physical_calls(evidence)
+    evidence_by_id: dict[str, dict[str, object]] = {}
+    for call in evidence_calls:
+        physical = call.get("physical_call_id")
+        if not isinstance(physical, str) or not physical:
+            raise RecoveryAccountingError("recovery evidence physical call is missing")
+        if physical in evidence_by_id:
+            raise RecoveryAccountingError(
+                f"recovery evidence has duplicate physical call {physical!r}"
+            )
+        evidence_by_id[physical] = call
+
+    ledger_calls = {
+        str(call["physical_call_id"]): call for call in ledger.settled_calls()
+    }
+    missing = sorted(set(ledger_calls) - set(evidence_by_id))
+    unexpected = sorted(set(evidence_by_id) - set(ledger_calls))
+    if missing or unexpected:
+        parts = []
+        if missing:
+            parts.append("missing evidence for " + ", ".join(missing))
+        if unexpected:
+            parts.append("unexpected evidence for " + ", ".join(unexpected))
+        raise RecoveryAccountingError(
+            "recovery call evidence is missing: " + "; ".join(parts)
+        )
+
+    for physical, settled in ledger_calls.items():
+        observed = evidence_by_id[physical]
+        for field in (
+            "run_id",
+            "logical_call_id",
+            "stage",
+            "model",
+            "retry",
+            "request_id",
+            "status",
+            "finish_reason",
+            "error_type",
+        ):
+            if observed.get(field) != settled.get(field):
+                raise RecoveryAccountingError(
+                    f"recovery call {physical!r} has mismatched {field}"
+                )
+        raw_observed_usage = observed.get("usage")
+        observed_usage = _usage_dict(
+            raw_observed_usage if isinstance(raw_observed_usage, dict) else None
+        )
+        if observed_usage != settled["usage"]:
+            raise RecoveryAccountingError(
+                f"recovery call {physical!r} has mismatched usage"
+            )
+        if _money(observed.get("cost"), field="cost") != _money(
+            settled["cost"], field="cost"
+        ):
+            raise RecoveryAccountingError(
+                f"recovery call {physical!r} has mismatched cost"
+            )
+    return {
+        "run_id": ledger.run_id,
+        "physical_calls": len(ledger_calls),
+        "exact_cost_usd": format(ledger.total_exact_cost, "f"),
+        "status": "reconciled",
+    }
+
+
+def accounting_evidence_from_reports(
+    oracle_report: _ReportLike, calibration_report: _ReportLike | None = None
+) -> list[dict[str, object]]:
+    """Collect canonical recovery call evidence from oracle and calibration data."""
+    evidence: list[dict[str, object]] = []
+
+    teacher_gates = oracle_report.details.get("teacher_gates")
+    if isinstance(teacher_gates, dict):
+        for payload in teacher_gates.values():
+            if not isinstance(payload, dict):
+                continue
+            calls = payload.get("calls")
+            if not isinstance(calls, list):
+                continue
+            for call in calls:
+                if not isinstance(call, dict):
+                    continue
+                accounting = call.get("recovery_accounting")
+                if isinstance(accounting, dict):
+                    evidence.append(accounting)
+
+    direct_oracle = oracle_report.details.get("recovery_accounting")
+    if isinstance(direct_oracle, list):
+        evidence.extend(item for item in direct_oracle if isinstance(item, dict))
+
+    if calibration_report is not None:
+        direct_calibration = calibration_report.details.get("recovery_accounting")
+        if isinstance(direct_calibration, list):
+            evidence.extend(
+                item for item in direct_calibration if isinstance(item, dict)
+            )
+    return evidence
+
+
+def require_calibration_recovery_evidence(
+    calibration_report: CalibrationReport,
+) -> None:
+    """Require every fresh calibration logical call to cite physical ledger calls.
+
+    A validation probe is one logical call and a solver rollout is one logical
+    call that may contain several physical turns. Every row must retain its
+    secret-free physical records, and their exact usage/cost sum must match the
+    existing calibration accounting row. This prevents a recalibrator from
+    returning an empty ledger-linkage list after issuing unmetered requests.
+    """
+    accounting = calibration_report.details.get("usage_accounting")
+    if not isinstance(accounting, dict):
+        raise RecoveryAccountingError("fresh calibration has no usage accounting")
+    if not calibration_report.models:
+        raise RecoveryAccountingError("fresh calibration has no validated models")
+    expected_rollout_calls = sum(model.k for model in calibration_report.models)
+    per_call_records: list[object] = []
+    for section_name in ("validation", "rollout"):
+        section = accounting.get(section_name)
+        if not isinstance(section, dict):
+            raise RecoveryAccountingError(
+                f"fresh calibration has no {section_name} accounting"
+            )
+        calls = section.get("calls")
+        rows = section.get("per_call")
+        if (
+            not isinstance(calls, int)
+            or isinstance(calls, bool)
+            or calls < 0
+            or not isinstance(rows, list)
+            or len(rows) != calls
+            or (section_name == "validation" and calls < len(calibration_report.models))
+            or (section_name == "rollout" and calls != expected_rollout_calls)
+        ):
+            raise RecoveryAccountingError(
+                f"fresh calibration {section_name} call count is inconsistent"
+            )
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise RecoveryAccountingError(
+                    f"fresh calibration {section_name} row {index} is malformed"
+                )
+            raw_records = row.get("recovery_accounting")
+            records = (
+                [raw_records]
+                if isinstance(raw_records, dict)
+                else raw_records
+                if isinstance(raw_records, list)
+                else []
+            )
+            if not records:
+                raise RecoveryAccountingError(
+                    f"fresh calibration {section_name} row {index} has no "
+                    "physical ledger evidence"
+                )
+            per_call_records.extend(records)
+            physical = _iter_physical_calls(records)
+            physical_usage = Usage()
+            physical_cost = Decimal()
+            for call in physical:
+                raw_usage = call.get("usage")
+                physical_usage = physical_usage + Usage(
+                    **_usage_dict(raw_usage if isinstance(raw_usage, dict) else None)
+                )
+                physical_cost += _money(call.get("cost"), field="cost")
+            row_usage = row.get("usage")
+            if (
+                _usage_dict(row_usage if isinstance(row_usage, dict) else None)
+                != physical_usage.to_dict()
+            ):
+                raise RecoveryAccountingError(
+                    f"fresh calibration {section_name} row {index} has mismatched usage"
+                )
+            if _money(row.get("cost"), field="cost") != physical_cost:
+                raise RecoveryAccountingError(
+                    f"fresh calibration {section_name} row {index} has mismatched cost"
+                )
+    direct = calibration_report.details.get("recovery_accounting")
+    if not isinstance(direct, list):
+        raise RecoveryAccountingError("fresh calibration has no recovery accounting")
+    if direct != per_call_records:
+        raise RecoveryAccountingError(
+            "fresh calibration recovery accounting does not match its per-call "
+            "physical ledger evidence"
+        )
+
+
+def reconcile_recovery_reports(
+    ledger: RecoveryBudgetLedger,
+    oracle_report: _ReportLike,
+    calibration_report: CalibrationReport | None = None,
+) -> dict[str, object]:
+    """Reconcile a recovery ledger to canonical oracle/calibration evidence."""
+    if calibration_report is not None:
+        require_calibration_recovery_evidence(calibration_report)
+    return reconcile_recovery_call_evidence(
+        ledger,
+        accounting_evidence_from_reports(oracle_report, calibration_report),
+    )
+
+
+__all__ = [
+    "RecoveryAccountingError",
+    "RecoveryBudgetLedger",
+    "accounting_evidence_from_reports",
+    "reconcile_recovery_call_evidence",
+    "reconcile_recovery_reports",
+    "require_calibration_recovery_evidence",
+    "sanitize_request_id",
+]
