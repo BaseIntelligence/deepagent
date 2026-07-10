@@ -1416,6 +1416,8 @@ def export_batch(
     jsonl_name: str = "dataset.jsonl",
     parquet_name: str = "dataset.parquet",
     adapter: LanguageAdapter | None = None,
+    generation_metadata_writer: publication.GenerationMetadataWriter | None = None,
+    extra_facade_artifacts: Sequence[str] = (),
 ) -> BatchExportResult:
     """Export a batch: ship only the qualified subset; one refusal never aborts.
 
@@ -1497,6 +1499,8 @@ def export_batch(
             dataset_writer=export_dataset,
             overwrite=overwrite,
             replace_existing=replace_existing,
+            metadata_writer=generation_metadata_writer,
+            extra_facade_artifacts=extra_facade_artifacts,
         )
     except PublicationError as exc:
         raise ExportError(str(exc)) from exc

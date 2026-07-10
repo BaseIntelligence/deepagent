@@ -78,6 +78,7 @@ class PublishedGeneration:
 
 WorkspaceWriter = Callable[[ForgeTask, Path], "TaskExportResult"]
 DatasetWriter = Callable[[Sequence[ForgeTask], Path, Path], int]
+GenerationMetadataWriter = Callable[[Path, Sequence[PublicationEntry]], None]
 
 
 def _store_root(out_dir: Path) -> Path:
@@ -153,7 +154,7 @@ def _symlink(target: str, path: Path) -> None:
     os.symlink(target, path)
 
 
-def _ensure_public_facade(out_dir: Path) -> None:
+def _ensure_public_facade(out_dir: Path, extra_artifacts: Sequence[str] = ()) -> None:
     """Create stable legacy paths that all resolve through the one current pointer."""
     out_dir.mkdir(parents=True, exist_ok=True)
     store = _store_root(out_dir)
@@ -164,6 +165,15 @@ def _ensure_public_facade(out_dir: Path) -> None:
         f"{_STORE_DIR}/{_CURRENT_LINK}/dataset.parquet",
         out_dir / "dataset.parquet",
     )
+    for name in extra_artifacts:
+        if (
+            not name
+            or "/" in name
+            or "\\" in name
+            or name in {"tasks", "dataset.jsonl", "dataset.parquet"}
+        ):
+            raise PublicationError(f"invalid public publication artifact {name!r}")
+        _symlink(f"{_STORE_DIR}/{_CURRENT_LINK}/{name}", out_dir / name)
     _fsync_path(store / _GENERATIONS_DIR)
     _fsync_path(store)
     _fsync_path(out_dir)
@@ -349,6 +359,8 @@ def publish_generation(
     dataset_writer: DatasetWriter,
     overwrite: bool,
     replace_existing: bool = False,
+    metadata_writer: GenerationMetadataWriter | None = None,
+    extra_facade_artifacts: Sequence[str] = (),
 ) -> tuple[PublishedGeneration, list[PublicationOutcome]]:
     """Build, validate, and atomically select a complete generation.
 
@@ -368,7 +380,7 @@ def publish_generation(
     if len(indexes) != len(set(indexes)):
         raise PublicationError("generation request contains duplicate entry indexes")
 
-    _ensure_public_facade(out_path)
+    _ensure_public_facade(out_path, extra_artifacts=extra_facade_artifacts)
     previous = load_published_generation(out_path)
     prior_by_id = (
         {entry.task.task_id: entry for entry in previous.entries} if previous else {}
@@ -437,6 +449,8 @@ def publish_generation(
         )
         for entry in accepted:
             _write_protected_alt_correct_audit(stage, entry, previous)
+        if metadata_writer is not None:
+            metadata_writer(stage, accepted)
         generation_id = uuid.uuid4().hex
         _write_manifest(stage, generation_id, accepted)
         _validate_staged_generation(stage, accepted_ids)

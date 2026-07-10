@@ -281,6 +281,7 @@ async def run_panel_calibration(
     validate_prompt: str = "ping",
     validate_max_tokens: int = DEFAULT_VALIDATE_MAX_TOKENS,
     validate_num_retries: int = DEFAULT_VALIDATE_NUM_RETRIES,
+    rollout_num_retries: int = 3,
     validate_timeout: float = DEFAULT_VALIDATE_TIMEOUT,
     max_turns: int = DEFAULT_MAX_TURNS,
     max_tokens: int = DEFAULT_MAX_TOKENS,
@@ -327,6 +328,7 @@ async def run_panel_calibration(
         docker_client=docker_client,
         max_turns=max_turns,
         max_tokens=max_tokens,
+        num_retries=rollout_num_retries,
         command_timeout=command_timeout,
         recovery_ledger=recovery_ledger,
     )
@@ -440,6 +442,7 @@ def _build_rollout_fn(
     docker_client: object | None,
     max_turns: int,
     max_tokens: int,
+    num_retries: int = 3,
     command_timeout: float,
     recovery_ledger: RecoveryBudgetLedger | None,
 ) -> RolloutFn:
@@ -455,6 +458,7 @@ def _build_rollout_fn(
         return AgenticSolver(
             client=model.client(
                 max_tokens=max_tokens,
+                num_retries=num_retries,
                 timeout=command_timeout,
                 recovery_ledger=recovery_ledger,
                 recovery_stage="calibration.rollout" if recovery_ledger else "",
