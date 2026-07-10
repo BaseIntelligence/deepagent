@@ -183,6 +183,30 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
+def _alt_correct_audit() -> dict[str, object]:
+    return {
+        "version": 1,
+        "original_public_suite_sha256": "a" * 64,
+        "gold": {"public": {"passed": True, "exit_code": 0}},
+        "alternatives": {
+            "alt_1": {
+                "proposal_sha256": "b" * 64,
+                "patches": [
+                    {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
+                ],
+                "public": {"passed": True, "exit_code": 0},
+                "filtered_p2p": {"passed": True, "exit_code": 0},
+                "hidden": [
+                    {
+                        "test_id": "python -m pytest tests/hidden/test_total.py",
+                        "exit_code": 0,
+                    }
+                ],
+            }
+        },
+    }
+
+
 def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-def]
     from swe_forge.forge.models import OracleReport, OracleTestFile
 
@@ -243,7 +267,16 @@ def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-d
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
-        details={"teacher_gates": _teacher_gate_evidence()},
+        details={
+            "teacher_gates": _teacher_gate_evidence(),
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        protected_alt_correct_audit=_alt_correct_audit(),
         provenance=Provenance(
             generator=generator, seed=7, language=language, created_at=_TS
         ),

@@ -37,6 +37,7 @@ the Python re-test ``.pyc`` determinism invariant baked into the recipe.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
@@ -79,6 +80,8 @@ DEFAULT_NUM_ALTERNATIVES = 2
 REASON_ALT_CORRECT_OVERFIT = "alt_correct_overfit"
 REASON_ALT_CORRECT_GOLD_NOT_GREEN = "alt_correct_gold_not_green"
 REASON_ALT_CORRECT_NO_EXECUTABLE = "alt_correct_no_executable_teacher_proposals"
+REASON_ALT_CORRECT_INVALID_TEACHER_PROPOSAL = "invalid_teacher_proposal"
+REASON_ALT_CORRECT_PUBLIC_SUITE_UNAVAILABLE = "alt_correct_public_suite_unavailable"
 
 
 class AltCorrectError(RuntimeError):
@@ -123,26 +126,38 @@ class AltImpl:
 
 @dataclass(frozen=True)
 class AltScore:
-    """The outcome of running the F2P+P2P suite against one tree (gold/alt)."""
+    """The outcome of public, hidden-F2P, and filtered-P2P checks on one tree."""
 
     f2p_passed: bool
     p2p_passed: bool
+    public_suite_passed: bool = False
+    public_suite_exit_code: int | None = None
+    p2p_exit_code: int | None = None
+    hidden_test_exits: tuple[tuple[str, int], ...] = ()
     failing_test_ids: tuple[str, ...] = ()
 
     @property
-    def accepted(self) -> bool:
-        """``True`` iff every F2P test passed AND the P2P/regression suite is green.
+    def public_valid(self) -> bool:
+        """Whether a tree passed the original unfiltered upstream/public suite."""
+        return self.public_suite_passed
 
-        For an alternative this means *accepted* (good - the correct alternative
-        is not falsely rejected); for gold it means *accepted* (the required
+    @property
+    def accepted(self) -> bool:
+        """True iff public validation, every F2P, and filtered P2P are green.
+
+        For an alternative this means accepted (good, the correct alternative is
+        not falsely rejected); for gold it means accepted (the required
         by-construction guarantee).
         """
-        return self.f2p_passed and self.p2p_passed
+        return self.public_valid and self.f2p_passed and self.p2p_passed
 
     def summary(self) -> dict[str, object]:
         return {
+            "public_suite_passed": self.public_suite_passed,
+            "public_suite_exit_code": self.public_suite_exit_code,
             "f2p_passed": self.f2p_passed,
             "p2p_passed": self.p2p_passed,
+            "p2p_exit_code": self.p2p_exit_code,
             "accepted": self.accepted,
             "failing_test_ids": list(self.failing_test_ids),
         }
@@ -214,6 +229,10 @@ class AltCorrectOutcome:
     relaxed: bool = False
     relaxed_test_ids: list[str] = field(default_factory=list)
     details: dict[str, object] = field(default_factory=dict)
+    # Raw materialized proposals, their digests, and per-node exit evidence are
+    # never agent-facing.  This is intentionally excluded from normal report
+    # serialization and written only by the protected publication audit store.
+    protected_audit: dict[str, object] = field(default_factory=dict, repr=False)
 
     @property
     def is_pass(self) -> bool:
@@ -233,12 +252,65 @@ def _overfit_reason(rejected: Sequence[tuple[AltImpl, AltScore]]) -> str:
     )
 
 
+def _proposal_digest(alt: AltImpl) -> str:
+    """Return a stable digest of an alternative's materialized source patches."""
+    digest = hashlib.sha256()
+    for file in sorted(alt.files, key=lambda item: item.path):
+        digest.update(file.path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file.content.encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _protected_alt_record(alt: AltImpl, score: AltScore) -> dict[str, object]:
+    """Build audit-only source and execution evidence for one materialized alt."""
+    return {
+        "proposal_sha256": _proposal_digest(alt),
+        "patches": [{"path": file.path, "content": file.content} for file in alt.files],
+        "public": {
+            "passed": score.public_suite_passed,
+            "exit_code": score.public_suite_exit_code,
+        },
+        "filtered_p2p": {
+            "passed": score.p2p_passed,
+            "exit_code": score.p2p_exit_code,
+        },
+        "hidden": [
+            {"test_id": test_id, "exit_code": exit_code}
+            for test_id, exit_code in score.hidden_test_exits
+        ],
+    }
+
+
+def _safe_public_audit(
+    *,
+    public_command: str,
+    gold: AltScore,
+    scores: dict[str, AltScore],
+) -> dict[str, object]:
+    """Return a source-free summary fit for the normal OracleReport details."""
+    return {
+        "public_suite_sha256": hashlib.sha256(
+            public_command.encode("utf-8")
+        ).hexdigest(),
+        "gold_public_suite_passed": gold.public_suite_passed,
+        "public_valid_alternatives": sum(
+            score.public_valid for score in scores.values()
+        ),
+        "invalid_teacher_proposals": sorted(
+            alt_id for alt_id, score in scores.items() if not score.public_valid
+        ),
+    }
+
+
 async def assess_alt_correct(
     runner: AltCorrectRunner,
     alternatives: Sequence[AltImpl],
     *,
     fail_to_pass: Sequence[str] = (),
     relax: bool = False,
+    original_public_command: str = "",
 ) -> AltCorrectOutcome:
     """Run the alt-correct gate: every correct alternative must be accepted.
 
@@ -250,6 +322,27 @@ async def assess_alt_correct(
     and makes every alternative pass (a recorded relax action), else rejects.
     """
     gold_base = await runner.score_gold()
+    protected_audit: dict[str, object] = {
+        "version": 1,
+        "original_public_suite_sha256": hashlib.sha256(
+            original_public_command.encode("utf-8")
+        ).hexdigest(),
+        "gold": {
+            "public": {
+                "passed": gold_base.public_suite_passed,
+                "exit_code": gold_base.public_suite_exit_code,
+            },
+            "filtered_p2p": {
+                "passed": gold_base.p2p_passed,
+                "exit_code": gold_base.p2p_exit_code,
+            },
+            "hidden": [
+                {"test_id": test_id, "exit_code": exit_code}
+                for test_id, exit_code in gold_base.hidden_test_exits
+            ],
+        },
+        "alternatives": {},
+    }
     details: dict[str, object] = {
         "stage": "alt_correct",
         "alternatives_total": len(alternatives),
@@ -270,6 +363,7 @@ async def assess_alt_correct(
             alternatives_total=len(alternatives),
             alternatives_accepted=0,
             details=details,
+            protected_audit=protected_audit,
         )
 
     if not alternatives:
@@ -283,21 +377,58 @@ async def assess_alt_correct(
             alternatives_total=0,
             alternatives_accepted=0,
             details=details,
+            protected_audit=protected_audit,
         )
 
     per_alt: dict[str, AltScore] = {}
     rejected: list[tuple[AltImpl, AltScore]] = []
+    public_invalid: list[str] = []
+    public_valid_alternatives: list[AltImpl] = []
     for alt in alternatives:
         score = await runner.score_alt(alt)
         per_alt[alt.impl_id] = score
+        audit_alternatives = protected_audit["alternatives"]
+        assert isinstance(audit_alternatives, dict)
+        audit_alternatives[alt.impl_id] = _protected_alt_record(alt, score)
+        if not score.public_valid:
+            public_invalid.append(alt.impl_id)
+            continue
+        public_valid_alternatives.append(alt)
         if not score.accepted:
             rejected.append((alt, score))
-    accepted_count = len(alternatives) - len(rejected)
+    accepted_count = len(public_valid_alternatives) - len(rejected)
     details["initial"] = {
-        "accepted": [aid for aid, s in per_alt.items() if s.accepted],
-        "rejected": [a.impl_id for a, _ in rejected],
-        "per_alt": {aid: s.summary() for aid, s in per_alt.items()},
+        "accepted": [
+            aid
+            for aid, score in per_alt.items()
+            if score.public_valid and score.accepted
+        ],
+        "rejected": [alt.impl_id for alt, _ in rejected],
+        "public_invalid": sorted(public_invalid),
     }
+    details.update(
+        _safe_public_audit(
+            public_command=original_public_command,
+            gold=gold_base,
+            scores=per_alt,
+        )
+    )
+
+    if not public_valid_alternatives:
+        return AltCorrectOutcome(
+            verdict="reject",
+            reasons=[
+                f"{REASON_ALT_CORRECT_INVALID_TEACHER_PROPOSAL}: "
+                f"alternative(s) {sorted(public_invalid)} failed the original "
+                "unfiltered upstream/public suite"
+            ],
+            alt_correct_accepted=False,
+            alternatives_total=len(alternatives),
+            alternatives_accepted=0,
+            rejected=sorted(public_invalid),
+            details=details,
+            protected_audit=protected_audit,
+        )
 
     if not rejected:
         return AltCorrectOutcome(
@@ -308,6 +439,7 @@ async def assess_alt_correct(
             alternatives_accepted=accepted_count,
             rejected=[],
             details=details,
+            protected_audit=protected_audit,
         )
 
     if not relax:
@@ -319,10 +451,17 @@ async def assess_alt_correct(
             alternatives_accepted=accepted_count,
             rejected=[a.impl_id for a, _ in rejected],
             details=details,
+            protected_audit=protected_audit,
         )
 
     return await _attempt_relax(
-        runner, alternatives, rejected, accepted_count, fail_to_pass, details
+        runner,
+        public_valid_alternatives,
+        rejected,
+        accepted_count,
+        fail_to_pass,
+        details,
+        protected_audit,
     )
 
 
@@ -333,6 +472,7 @@ async def _attempt_relax(
     accepted_count: int,
     fail_to_pass: Sequence[str],
     details: dict[str, object],
+    protected_audit: dict[str, object],
 ) -> AltCorrectOutcome:
     """Try to drop the over-fit hidden test(s) so correct alternatives pass.
 
@@ -364,6 +504,7 @@ async def _attempt_relax(
             alternatives_accepted=accepted_count,
             rejected=rejected_ids,
             details=details,
+            protected_audit=protected_audit,
         )
 
     overfit_ids = sorted({tid for _, s in rejected for tid in s.failing_test_ids})
@@ -388,12 +529,18 @@ async def _attempt_relax(
             alternatives_accepted=accepted_count,
             rejected=rejected_ids,
             details=details,
+            protected_audit=protected_audit,
         )
 
     gold_relaxed = await runner.score_gold(exclude=overfit_ids)
     still_failing: list[str] = []
     for alt, _ in rejected:
         relaxed_score = await runner.score_alt(alt, exclude=overfit_ids)
+        audit_alternatives = protected_audit["alternatives"]
+        assert isinstance(audit_alternatives, dict)
+        audit_alternatives[alt.impl_id]["relaxed"] = _protected_alt_record(
+            alt, relaxed_score
+        )
         if not relaxed_score.accepted:
             still_failing.append(alt.impl_id)
 
@@ -414,6 +561,7 @@ async def _attempt_relax(
             relaxed=True,
             relaxed_test_ids=overfit_ids,
             details=details,
+            protected_audit=protected_audit,
         )
 
     details["relax"] = {
@@ -436,6 +584,7 @@ async def _attempt_relax(
         alternatives_accepted=accepted_count,
         rejected=rejected_ids,
         details=details,
+        protected_audit=protected_audit,
     )
 
 
@@ -549,6 +698,9 @@ def build_alt_correct_report(
         leak_audit=prior_report.leak_audit,
         provenance=provenance,
         details=details,
+        protected_alt_correct_audit=(
+            dict(outcome.protected_audit) if outcome.protected_audit else None
+        ),
     )
 
 
@@ -573,6 +725,7 @@ class DockerAltCorrectRunner:
         *,
         base_tests: Sequence[HiddenTest] = (),
         p2p_command: str = "",
+        original_public_command: str = "",
         command_timeout: float = 600.0,
         docker_client: "DockerClient | None" = None,
     ) -> None:
@@ -581,6 +734,7 @@ class DockerAltCorrectRunner:
         self._adapter = adapter
         self._base_tests = list(base_tests)
         self._p2p_command = p2p_command or env_image.baseline_test_command
+        self._original_public_command = original_public_command
         self._timeout = command_timeout
         self._docker_client = docker_client
 
@@ -631,18 +785,41 @@ class DockerAltCorrectRunner:
             for file in alt_files:
                 await recipe.sandbox.write_file(file.path, file.content)
 
-            # P2P/regression runs with NO hidden test present (a hidden test must
-            # not make the repo's own suite look red).
+            # The original upstream/public suite is a hard precondition.  It
+            # deliberately runs before filtered P2P or any hidden test, so a
+            # public-red teacher proposal can never be misclassified as hidden
+            # overfit or motivate hidden-suite relaxation.
+            await recipe.purge_pycache()
+            public = await recipe.sandbox.run_command(
+                self._original_public_command,
+                timeout=self._timeout,
+                env={"PYTHONDONTWRITEBYTECODE": "1"}
+                if self.language == "python"
+                else None,
+            )
+            if public.exit_code != 0:
+                return AltScore(
+                    f2p_passed=False,
+                    p2p_passed=False,
+                    public_suite_passed=False,
+                    public_suite_exit_code=public.exit_code,
+                )
+
+            # Filtered P2P/regression runs with NO hidden test present (a hidden
+            # test must not make the repo's own suite look red), but only after
+            # the original public command has proven this tree valid.
             p2p = await recipe.run_p2p()
 
             failing: list[str] = []
             f2p_passed = True
+            hidden_exits: list[tuple[str, int]] = []
             for test in self._base_tests:
                 if test.test_id in skip:
                     continue
                 await recipe.write_test(test)
                 run = await recipe.run_test(test)
                 await recipe.remove_test(test)
+                hidden_exits.append((test.test_id, run.exit_code))
                 if not run.passed:
                     failing.append(test.test_id)
                     f2p_passed = False
@@ -652,6 +829,10 @@ class DockerAltCorrectRunner:
             return AltScore(
                 f2p_passed=f2p_passed,
                 p2p_passed=p2p.passed,
+                public_suite_passed=True,
+                public_suite_exit_code=public.exit_code,
+                p2p_exit_code=p2p.exit_code,
+                hidden_test_exits=tuple(hidden_exits),
                 failing_test_ids=tuple(failing),
             )
 
@@ -705,6 +886,26 @@ async def run_alt_correct_gate(
     base_tests = reconstruct_suite_tests(
         adapter, prior_report.fail_to_pass, prior_report.test_files
     )
+    original_public_command = env_image.original_public_test_command.strip()
+    if not original_public_command:
+        outcome = AltCorrectOutcome(
+            verdict="reject",
+            reasons=[
+                f"{REASON_ALT_CORRECT_PUBLIC_SUITE_UNAVAILABLE}: EnvImage does not "
+                "retain the original unfiltered upstream/public test command"
+            ],
+            alt_correct_accepted=False,
+            alternatives_total=0,
+            alternatives_accepted=0,
+            details={"stage": "alt_correct"},
+        )
+        return build_alt_correct_report(
+            candidate,
+            prior_report,
+            outcome,
+            env_image=env_image,
+            extra_details={"teacher_gates": {"alt_correct": gate_evidence([])}},
+        )
     p2p_command = (
         prior_report.pass_to_pass[0]
         if prior_report.pass_to_pass
@@ -716,6 +917,7 @@ async def run_alt_correct_gate(
         adapter,
         base_tests=base_tests,
         p2p_command=p2p_command,
+        original_public_command=original_public_command,
         command_timeout=command_timeout,
         docker_client=docker_client,
     )
@@ -748,6 +950,7 @@ async def run_alt_correct_gate(
         alternatives,
         fail_to_pass=prior_report.fail_to_pass,
         relax=relax,
+        original_public_command=original_public_command,
     )
     append_execution(
         teacher_calls,

@@ -369,6 +369,7 @@ class TestBuilderHappyPath:
         assert env.image_tag == "swe-forge-env-demo_py:0123456789ab"
         assert env.commit == _COMMIT
         assert env.baseline_test_command == "python -m pytest"
+        assert env.original_public_test_command == "python -m pytest"
         assert env.install_commands == ["pip install -e .", "pip install pytest"]
         assert env.baseline_green is True
         assert env.baseline_exit_code == 0
@@ -382,6 +383,28 @@ class TestBuilderHappyPath:
         assert fake.committed == ["swe-forge-env-demo_py:0123456789ab"]
         assert len(fake.ephemeral_names) == 1
         assert result.success is True
+
+    def test_p2p_exclusions_do_not_replace_original_public_command(
+        self, py_repo: Path
+    ) -> None:
+        fake = FakeDocker(exec_results=[_OK, _OK, _OK])
+        builder = EnvBuilder(
+            docker=fake, registry=build_default_registry(), run_id="testrun"
+        )
+
+        result = builder._build_in_docker(
+            repo_path=py_repo,
+            repo_id="demo/py",
+            language="python",
+            commit=_COMMIT,
+            url="",
+            p2p_exclusions=("test_version_selftest",),
+        )
+
+        assert result.success is True
+        assert result.env_image is not None
+        assert result.env_image.original_public_test_command == "python -m pytest"
+        assert "not (test_version_selftest)" in result.env_image.baseline_test_command
 
     def test_unique_scoped_container_names_and_teardown(self, py_repo: Path) -> None:
         fake = FakeDocker(exec_results=[_OK, _OK, _OK])

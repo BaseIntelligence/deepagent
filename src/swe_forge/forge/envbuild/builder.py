@@ -521,9 +521,10 @@ class EnvBuilder:
             if install_override
             else adapter.baseline_install_commands(repo_path)
         )
-        baseline_cmd = baseline_command_override or adapter.baseline_test_command(
-            repo_path
+        original_public_cmd = (
+            baseline_command_override or adapter.baseline_test_command(repo_path)
         )
+        baseline_cmd = original_public_cmd
         if p2p_exclusions:
             baseline_cmd = adapter.apply_p2p_exclusions(baseline_cmd, p2p_exclusions)
         workdir = self._workspace_dir
@@ -678,6 +679,7 @@ class EnvBuilder:
             baseline_test_command=baseline_cmd,
             baseline_green=True,
             baseline_exit_code=reproduce.exit_code,
+            original_public_test_command=original_public_cmd,
             baseline_summary=_last_line(reproduce.combined),
             prep_commands=list(_PREP_COMMANDS),
             built_at=_now_iso(),

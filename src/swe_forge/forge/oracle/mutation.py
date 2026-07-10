@@ -680,6 +680,7 @@ def build_final_mutation_report(
         leak_audit=prior_report.leak_audit,
         provenance=provenance,
         details=details,
+        protected_alt_correct_audit=prior_report.protected_alt_correct_audit,
     )
 
 

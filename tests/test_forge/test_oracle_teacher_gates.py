@@ -76,11 +76,11 @@ class _AltRunner:
 
     async def score_gold(self, exclude=()) -> AltScore:  # type: ignore[no-untyped-def]
         assert not exclude
-        return AltScore(f2p_passed=True, p2p_passed=True)
+        return AltScore(f2p_passed=True, p2p_passed=True, public_suite_passed=True)
 
     async def score_alt(self, _alt, exclude=()) -> AltScore:  # type: ignore[no-untyped-def]
         assert not exclude
-        return AltScore(f2p_passed=True, p2p_passed=True)
+        return AltScore(f2p_passed=True, p2p_passed=True, public_suite_passed=True)
 
     async def read_sources(self) -> dict[str, str]:
         return {}
@@ -186,6 +186,7 @@ def _env_image() -> EnvImage:
         workspace_dir="/workspace/repo",
         install_commands=["pip install -e ."],
         baseline_test_command="python -m pytest",
+        original_public_test_command="python -m pytest",
         baseline_green=True,
         baseline_exit_code=0,
     )
@@ -536,7 +537,34 @@ def _pass_report(*, teacher_gates: object) -> OracleReport:
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
-        details={"teacher_gates": teacher_gates},
+        details={
+            "teacher_gates": teacher_gates,
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        protected_alt_correct_audit={
+            "version": 1,
+            "original_public_suite_sha256": "a" * 64,
+            "gold": {"public": {"passed": True, "exit_code": 0}},
+            "alternatives": {
+                "alt_1": {
+                    "proposal_sha256": "b" * 64,
+                    "patches": [{"path": "src/m.py", "content": "def f(): return 1\n"}],
+                    "public": {"passed": True, "exit_code": 0},
+                    "filtered_p2p": {"passed": True, "exit_code": 0},
+                    "hidden": [
+                        {
+                            "test_id": "python -m pytest tests/hidden.py",
+                            "exit_code": 0,
+                        }
+                    ],
+                }
+            },
+        },
     )
 
 

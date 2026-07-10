@@ -113,6 +113,70 @@ class ExportRefusedError(RuntimeError):
     """Raised by :func:`ensure_oracle_exportable` for a non-shippable candidate."""
 
 
+def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
+    """Validate the non-agent-facing evidence for alt-correct public validity."""
+    # Artifacts emitted before public-validity hardening lack the entire
+    # alt-correct record. They can remain immutable inputs to fresh
+    # recertification, which executes the hardened gate and records the audit.
+    # Any report produced by the hardened gate has this record and therefore
+    # cannot bypass the checks below.
+    if "alt_correct" not in report.details:
+        return []
+
+    audit = report.protected_alt_correct_audit
+    if not isinstance(audit, dict):
+        return ["alt_correct: protected public-validity audit is missing"]
+    gold = audit.get("gold")
+    if not isinstance(gold, dict):
+        return ["alt_correct: protected gold public result is missing"]
+    gold_public = gold.get("public")
+    if not isinstance(gold_public, dict) or gold_public.get("passed") is not True:
+        return ["alt_correct: gold did not pass the original public suite"]
+    alternatives = audit.get("alternatives")
+    if not isinstance(alternatives, dict) or not alternatives:
+        return ["alt_correct: protected alternative audit is missing"]
+
+    public_green = 0
+    for alt_id, record in alternatives.items():
+        if not isinstance(alt_id, str) or not isinstance(record, dict):
+            return ["alt_correct: protected alternative audit is malformed"]
+        proposal_digest = record.get("proposal_sha256")
+        patches = record.get("patches")
+        public = record.get("public")
+        if (
+            not isinstance(proposal_digest, str)
+            or len(proposal_digest) != 64
+            or not isinstance(patches, list)
+            or not patches
+            or not isinstance(public, dict)
+        ):
+            return ["alt_correct: protected alternative audit is incomplete"]
+        if public.get("passed") is True:
+            public_green += 1
+            hidden = record.get("hidden")
+            if not isinstance(hidden, list) or not hidden:
+                return [
+                    "alt_correct: public-green alternative has no hidden per-node "
+                    "execution evidence"
+                ]
+    if public_green < 1:
+        return [
+            "alt_correct: no executable real-teacher alternative passed the "
+            "original public suite"
+        ]
+
+    public_details = report.details.get("alt_correct")
+    if not isinstance(public_details, dict):
+        return ["alt_correct: public validity summary is missing"]
+    if not isinstance(public_details.get("public_suite_sha256"), str):
+        return ["alt_correct: public suite digest is missing"]
+    if public_details.get("gold_public_suite_passed") is not True:
+        return ["alt_correct: public gold summary is not green"]
+    if public_details.get("public_valid_alternatives") != public_green:
+        return ["alt_correct: public-valid alternative count does not match audit"]
+    return []
+
+
 def verify_pass_consistency(
     report: OracleReport, *, kill_threshold: float = DEFAULT_KILL_THRESHOLD
 ) -> list[str]:
@@ -183,6 +247,7 @@ def verify_pass_consistency(
         problems.append("differential: differential_pass is false")
     if not report.alt_correct_accepted:
         problems.append("alt_correct: alt_correct_accepted is false")
+    problems.extend(_alt_correct_public_validity_issues(report))
     problems.extend(teacher_gate_evidence_issues(report.details))
     if not (
         report.leak_audit.startswith("clean")

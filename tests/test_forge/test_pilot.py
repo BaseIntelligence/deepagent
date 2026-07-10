@@ -224,6 +224,39 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
+def _alt_correct_audit() -> dict[str, object]:
+    return {
+        "version": 1,
+        "original_public_suite_sha256": "a" * 64,
+        "gold": {
+            "public": {"passed": True, "exit_code": 0},
+            "filtered_p2p": {"passed": True, "exit_code": 0},
+            "hidden": [
+                {
+                    "test_id": "python -m pytest tests/hidden/test_total.py",
+                    "exit_code": 0,
+                }
+            ],
+        },
+        "alternatives": {
+            "alt_1": {
+                "proposal_sha256": "b" * 64,
+                "patches": [
+                    {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
+                ],
+                "public": {"passed": True, "exit_code": 0},
+                "filtered_p2p": {"passed": True, "exit_code": 0},
+                "hidden": [
+                    {
+                        "test_id": "python -m pytest tests/hidden/test_total.py",
+                        "exit_code": 0,
+                    }
+                ],
+            }
+        },
+    }
+
+
 def _oracle_pass(plan: CandidatePlan) -> OracleReport:
     test_files = [
         OracleTestFile(
@@ -255,7 +288,16 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
-        details={"teacher_gates": _teacher_gate_evidence()},
+        details={
+            "teacher_gates": _teacher_gate_evidence(),
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        protected_alt_correct_audit=_alt_correct_audit(),
         provenance=_provenance(plan),
     )
 
@@ -662,6 +704,7 @@ def test_with_p2p_exclusions_narrows_baseline_and_records_provenance() -> None:
     assert derived.image_tag == env.image_tag
     assert derived.baseline_test_command.startswith(env.baseline_test_command)
     assert "not (slugify or test_slugify)" in derived.baseline_test_command
+    assert derived.original_public_test_command == env.original_public_test_command
     assert derived.baseline_green is True
     # The derivation is recorded on the derived image provenance for audit.
     assert derived.provenance["per_candidate_p2p_exclusions"]["exclusions"] == [

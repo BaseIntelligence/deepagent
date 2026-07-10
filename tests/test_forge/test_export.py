@@ -60,6 +60,10 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
+from swe_forge.forge.publication import (
+    load_published_generation,
+    protected_alt_correct_audit_path,
+)
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -157,6 +161,42 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
+def _alt_correct_audit() -> dict[str, object]:
+    return {
+        "version": 1,
+        "original_public_suite_sha256": "a" * 64,
+        "gold": {
+            "public": {"passed": True, "exit_code": 0},
+            "filtered_p2p": {"passed": True, "exit_code": 0},
+            "hidden": [
+                {
+                    "test_id": "python -m pytest tests/hidden/test_total.py",
+                    "exit_code": 0,
+                }
+            ],
+        },
+        "alternatives": {
+            "alt_1": {
+                "proposal_sha256": "b" * 64,
+                "patches": [
+                    {
+                        "path": "src/m.py",
+                        "content": "def total(items, tax_rate):\n    return sum(items)\n",
+                    }
+                ],
+                "public": {"passed": True, "exit_code": 0},
+                "filtered_p2p": {"passed": True, "exit_code": 0},
+                "hidden": [
+                    {
+                        "test_id": "python -m pytest tests/hidden/test_total.py",
+                        "exit_code": 0,
+                    }
+                ],
+            }
+        },
+    }
+
+
 def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
     test_files = [
         OracleTestFile(
@@ -196,7 +236,16 @@ def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
             tool="fake-tool",
         ),
         provenance=_provenance(),
-        details={"teacher_gates": _teacher_gate_evidence()},
+        details={
+            "teacher_gates": _teacher_gate_evidence(),
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        protected_alt_correct_audit=_alt_correct_audit(),
     )
 
 
@@ -1051,6 +1100,36 @@ def test_forgetask_round_trips_through_dict() -> None:
     assert restored.fail_to_pass == task.fail_to_pass
     assert restored.oracle_report.verdict == "pass"
     assert restored.calibration_report.band_verdict == "keep"
+
+
+def test_alt_correct_private_audit_persists_without_leaking_to_exports(
+    tmp_path: Path,
+) -> None:
+    result = export_batch([_request()], tmp_path)
+    generation = load_published_generation(tmp_path)
+    assert generation is not None
+    audit_path = protected_alt_correct_audit_path(
+        generation.root, result.shipped[0].task_id
+    )
+    assert audit_path.is_file()
+    assert audit_path.stat().st_mode & 0o777 == 0o600
+    private_audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    raw_proposal = private_audit["alternatives"]["alt_1"]["patches"][0]["content"]
+    assert raw_proposal == "def total(items, tax_rate):\n    return sum(items)\n"
+
+    public_files = [
+        path
+        for path in generation.root.rglob("*")
+        if path.is_file() and ".protected-audit" not in path.parts
+    ]
+    assert public_files
+    assert all(
+        raw_proposal.rstrip() not in path.read_text(encoding="utf-8", errors="ignore")
+        for path in public_files
+    )
+    assert raw_proposal.rstrip() not in json.dumps(
+        generation.entries[0].task.to_dict(), sort_keys=True
+    )
 
 
 # --------------------------------------------------------------------------- #

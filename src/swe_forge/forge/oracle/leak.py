@@ -537,6 +537,7 @@ def build_leak_report(
         leak_audit=outcome.leak_audit,
         provenance=provenance,
         details=details,
+        protected_alt_correct_audit=prior_report.protected_alt_correct_audit,
     )
 
 

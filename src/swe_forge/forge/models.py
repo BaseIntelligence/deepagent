@@ -372,6 +372,12 @@ class EnvImage:
     baseline_test_command: str
     baseline_green: bool
     baseline_exit_code: int
+    # The original, unfiltered upstream/public regression command proven by the
+    # env build.  Candidate-specific P2P derivation may narrow
+    # ``baseline_test_command`` later, but it must never replace this command.
+    # Alt-correct validates gold and every teacher proposal against this command
+    # before it is allowed to inspect hidden F2P or filtered P2P results.
+    original_public_test_command: str = ""
     baseline_summary: str = ""
     prep_commands: list[str] = field(default_factory=list)
     built_at: str = ""
@@ -387,6 +393,7 @@ class EnvImage:
             "workspace_dir": self.workspace_dir,
             "install_commands": list(self.install_commands),
             "baseline_test_command": self.baseline_test_command,
+            "original_public_test_command": self.original_public_test_command,
             "baseline_green": self.baseline_green,
             "baseline_exit_code": self.baseline_exit_code,
             "baseline_summary": self.baseline_summary,
@@ -417,6 +424,9 @@ class EnvImage:
             baseline_exit_code=int(exit_code)
             if isinstance(exit_code, (int, str))
             else -1,
+            original_public_test_command=str(
+                data.get("original_public_test_command", "")
+            ),
             baseline_summary=str(data.get("baseline_summary", "")),
             prep_commands=[str(c) for c in prep] if isinstance(prep, list) else [],
             built_at=str(data.get("built_at", "")),
@@ -805,6 +815,13 @@ class OracleReport:
     leak_audit: str = ""
     provenance: Provenance | None = None
     details: dict[str, object] = field(default_factory=dict)
+    # Raw teacher alternatives are audit-only evidence.  They deliberately do
+    # not participate in ``to_dict`` because that payload is used by the public
+    # task, dataset, report, and generation-manifest surfaces.  A protected
+    # writer may use ``to_protected_dict`` to persist them outside those surfaces.
+    protected_alt_correct_audit: dict[str, object] | None = field(
+        default=None, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.language not in SUPPORTED_LANGUAGES:
@@ -864,6 +881,21 @@ class OracleReport:
             "details": dict(self.details),
         }
 
+    def to_protected_dict(self) -> dict[str, object]:
+        """Serialize this report with private alt-correct proposal evidence.
+
+        This method is exclusively for the protected audit store.  The default
+        :meth:`to_dict` remains the only serialization permitted for agent-facing
+        task workspaces, datasets, benchmark reports, and manifests.
+        """
+        data = self.to_dict()
+        data["protected_alt_correct_audit"] = (
+            dict(self.protected_alt_correct_audit)
+            if self.protected_alt_correct_audit is not None
+            else None
+        )
+        return data
+
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> OracleReport:
         test_files = data.get("test_files", [])
@@ -919,6 +951,18 @@ class OracleReport:
             else None,
             details=dict(details) if isinstance(details, dict) else {},
         )
+
+    @classmethod
+    def from_protected_dict(cls, data: dict[str, object]) -> OracleReport:
+        """Restore a report from a protected audit payload, if structurally safe."""
+        report = cls.from_dict(data)
+        audit = data.get("protected_alt_correct_audit")
+        if audit is not None and not isinstance(audit, dict):
+            raise ModelError("protected_alt_correct_audit must be an object or null")
+        report.protected_alt_correct_audit = (
+            dict(audit) if isinstance(audit, dict) else None
+        )
+        return report
 
 
 def _coerce_float(value: object, default: float = 0.0) -> float:

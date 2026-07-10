@@ -16,6 +16,10 @@ verification and the user-testing validator in real Docker.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+from dataclasses import dataclass
+
 import pytest
 
 from swe_forge.forge.adapters import PythonAdapter
@@ -30,10 +34,12 @@ from swe_forge.forge.models import (
     Provenance,
 )
 from swe_forge.forge.oracle.alt_correct import (
+    REASON_ALT_CORRECT_INVALID_TEACHER_PROPOSAL,
     REASON_ALT_CORRECT_GOLD_NOT_GREEN,
     REASON_ALT_CORRECT_OVERFIT,
     AltCorrectError,
     AltCorrectGenerationContext,
+    DockerAltCorrectRunner,
     AltImpl,
     AltImplFile,
     AltScore,
@@ -43,7 +49,7 @@ from swe_forge.forge.oracle.alt_correct import (
     run_alt_correct_gate,
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
-from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
+from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile, TestRun
 
 
 # --------------------------------------------------------------------------- #
@@ -65,6 +71,7 @@ class FakeAltCorrectRunner:
         *,
         alt_failures: dict[str, set[str]] | None = None,
         alt_p2p_failures: set[str] | None = None,
+        alt_public_failures: set[str] | None = None,
         stubborn_alts: set[str] | None = None,
         gold_base_fails: bool = False,
         sources: dict[str, str] | None = None,
@@ -72,6 +79,7 @@ class FakeAltCorrectRunner:
         self.language = "python"
         self._alt_failures = alt_failures or {}
         self._alt_p2p_failures = set(alt_p2p_failures or set())
+        self._alt_public_failures = set(alt_public_failures or set())
         self._stubborn_alts = set(stubborn_alts or set())
         self._gold_base_fails = gold_base_fails
         self._sources = sources or {}
@@ -83,9 +91,12 @@ class FakeAltCorrectRunner:
         self.gold_calls.append(tuple(sorted(exclude)))
         if self._gold_base_fails:
             return AltScore(
-                f2p_passed=False, p2p_passed=True, failing_test_ids=("base",)
+                f2p_passed=False,
+                p2p_passed=True,
+                public_suite_passed=True,
+                failing_test_ids=("base",),
             )
-        return AltScore(f2p_passed=True, p2p_passed=True)
+        return AltScore(f2p_passed=True, p2p_passed=True, public_suite_passed=True)
 
     async def score_alt(self, alt, exclude=()) -> AltScore:  # type: ignore[no-untyped-def]
         skip = set(exclude)
@@ -95,6 +106,7 @@ class FakeAltCorrectRunner:
             return AltScore(
                 f2p_passed=False,
                 p2p_passed=not p2p_failed,
+                public_suite_passed=alt.impl_id not in self._alt_public_failures,
                 failing_test_ids=("stubborn",),
             )
         active = self._alt_failures.get(alt.impl_id, set()) - skip
@@ -104,12 +116,74 @@ class FakeAltCorrectRunner:
         return AltScore(
             f2p_passed=not active,
             p2p_passed=not p2p_failed,
+            public_suite_passed=alt.impl_id not in self._alt_public_failures,
             failing_test_ids=failing,
         )
 
     async def read_sources(self) -> dict[str, str]:
         self.read_sources_calls += 1
         return dict(self._sources)
+
+
+@dataclass
+class _CommandResult:
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+class _RecordingRecipe:
+    """A Docker recipe seam that exposes the concrete command ordering."""
+
+    def __init__(self, *, public_exit: int = 0) -> None:
+        self.public_exit = public_exit
+        self.p2p_command = "pytest -q -k filtered"
+        self.calls: list[str] = []
+        self.sandbox = self
+
+    async def set_state(self, _state: object) -> None:
+        pass
+
+    async def purge_pycache(self) -> None:
+        pass
+
+    async def run_command(self, command: str, **_kwargs: object) -> _CommandResult:
+        self.calls.append(command)
+        return _CommandResult(self.public_exit)
+
+    async def write_file(self, _path: str, _content: str) -> None:
+        pass
+
+    async def run_p2p(self) -> TestRun:
+        self.calls.append(self.p2p_command)
+        return TestRun(command=self.p2p_command, exit_code=0, passed=True)
+
+    async def write_test(self, _test: HiddenTest) -> None:
+        pass
+
+    async def remove_test(self, _test: HiddenTest) -> None:
+        pass
+
+    async def run_test(self, test: HiddenTest) -> TestRun:
+        self.calls.append(test.test_id)
+        return TestRun(command=test.test_id, exit_code=0, passed=True)
+
+
+class _RecordingDockerAltRunner(DockerAltCorrectRunner):
+    def __init__(self, recipe: _RecordingRecipe) -> None:
+        super().__init__(
+            _candidate(),
+            _env_image(),
+            PythonAdapter(),
+            base_tests=[_test("tests/hidden.py")],
+            p2p_command=recipe.p2p_command,
+            original_public_command="python -m pytest -q",
+        )
+        self._recording_recipe = recipe
+
+    @contextlib.asynccontextmanager
+    async def _recipe(self):  # type: ignore[override]
+        yield self._recording_recipe
 
 
 class FakeLLMResult:
@@ -171,6 +245,7 @@ def _env_image() -> EnvImage:
         workspace_dir="/workspace/repo",
         install_commands=["pip install -e ."],
         baseline_test_command="python -m pytest",
+        original_public_test_command="python -m pytest",
         baseline_green=True,
         baseline_exit_code=0,
     )
@@ -211,9 +286,14 @@ def test_alt_impl_requires_id() -> None:
 
 
 def test_alt_score_accepted() -> None:
-    assert AltScore(f2p_passed=True, p2p_passed=True).accepted
-    assert not AltScore(f2p_passed=False, p2p_passed=True).accepted
-    assert not AltScore(f2p_passed=True, p2p_passed=False).accepted
+    assert AltScore(f2p_passed=True, p2p_passed=True, public_suite_passed=True).accepted
+    assert not AltScore(
+        f2p_passed=False, p2p_passed=True, public_suite_passed=True
+    ).accepted
+    assert not AltScore(
+        f2p_passed=True, p2p_passed=False, public_suite_passed=True
+    ).accepted
+    assert not AltScore(f2p_passed=True, p2p_passed=True).accepted
 
 
 # --------------------------------------------------------------------------- #
@@ -251,6 +331,34 @@ async def test_gold_not_green_rejects() -> None:
     assert runner.alt_calls == []
 
 
+async def test_docker_runner_runs_original_public_suite_before_filtered_and_hidden() -> (
+    None
+):
+    recipe = _RecordingRecipe()
+    runner = _RecordingDockerAltRunner(recipe)
+
+    score = await runner.score_alt(_alt("alt_1"))
+
+    assert score.accepted is True
+    assert recipe.calls == [
+        "python -m pytest -q",
+        "pytest -q -k filtered",
+        "python -m pytest tests/hidden.py",
+    ]
+    assert score.hidden_test_exits == (("python -m pytest tests/hidden.py", 0),)
+
+
+async def test_docker_runner_public_red_never_runs_filtered_or_hidden() -> None:
+    recipe = _RecordingRecipe(public_exit=1)
+    runner = _RecordingDockerAltRunner(recipe)
+
+    score = await runner.score_alt(_alt("alt_1"))
+
+    assert score.public_valid is False
+    assert recipe.calls == ["python -m pytest -q"]
+    assert score.hidden_test_exits == ()
+
+
 # --------------------------------------------------------------------------- #
 # VAL-ORACLE-013: an over-fit suite that FAILS a correct alternative -> reject
 # --------------------------------------------------------------------------- #
@@ -267,6 +375,89 @@ async def test_overfit_alternative_rejects_by_default() -> None:
     assert outcome.reasons[0].startswith(REASON_ALT_CORRECT_OVERFIT)
     assert "alt_2" in outcome.reasons[0]
     assert outcome.relaxed is False
+
+
+@pytest.mark.parametrize("hidden_passed", [False, True])
+async def test_public_red_alternative_is_invalid_teacher_proposal_not_overfit(
+    hidden_passed: bool,
+) -> None:
+    """A public-red proposal never enters hidden-overfit or relaxation logic."""
+    runner = FakeAltCorrectRunner(alt_public_failures={"alt_public_red"})
+    if not hidden_passed:
+        runner._alt_failures["alt_public_red"] = {"python -m pytest tests/hidden.py"}
+
+    outcome = await assess_alt_correct(
+        runner,
+        [_alt("alt_public_red")],
+        fail_to_pass=["python -m pytest tests/hidden.py"],
+        relax=True,
+    )
+
+    assert outcome.verdict == "reject"
+    assert outcome.alt_correct_accepted is False
+    assert outcome.alternatives_accepted == 0
+    assert outcome.rejected == ["alt_public_red"]
+    assert outcome.reasons == [
+        f"{REASON_ALT_CORRECT_INVALID_TEACHER_PROPOSAL}: "
+        "alternative(s) ['alt_public_red'] failed the original unfiltered "
+        "upstream/public suite"
+    ]
+    assert "relax" not in outcome.details
+    audit = outcome.protected_audit
+    assert audit["alternatives"]["alt_public_red"]["public"]["passed"] is False
+    assert audit["alternatives"]["alt_public_red"]["hidden"] == []
+
+
+async def test_public_green_hidden_red_remains_an_overfit_rejection() -> None:
+    runner = FakeAltCorrectRunner(
+        alt_failures={"alt_public_green": {"python -m pytest tests/overfit.py"}}
+    )
+
+    outcome = await assess_alt_correct(
+        runner,
+        [_alt("alt_public_green")],
+        fail_to_pass=["python -m pytest tests/hidden.py"],
+    )
+
+    assert outcome.verdict == "reject"
+    assert outcome.reasons[0].startswith(REASON_ALT_CORRECT_OVERFIT)
+    assert (
+        outcome.protected_audit["alternatives"]["alt_public_green"]["public"]["passed"]
+        is True
+    )
+
+
+async def test_public_green_hidden_green_passes_with_private_patch_audit() -> None:
+    alternative = _alt("alt_public_green", "def f():\n    return 0 + 1\n")
+    outcome = await assess_alt_correct(
+        FakeAltCorrectRunner(), [alternative], fail_to_pass=["hidden"]
+    )
+
+    assert outcome.verdict == "pass"
+    protected = outcome.protected_audit["alternatives"]["alt_public_green"]
+    assert (
+        protected["proposal_sha256"]
+        == hashlib.sha256(b"src/m.py\0def f():\n    return 0 + 1\n\0").hexdigest()
+    )
+    assert protected["patches"] == [
+        {"path": "src/m.py", "content": "def f():\n    return 0 + 1\n"}
+    ]
+    assert protected["public"]["passed"] is True
+
+
+async def test_zero_public_valid_alternatives_rejects_even_when_hidden_would_pass() -> (
+    None
+):
+    runner = FakeAltCorrectRunner(
+        alt_public_failures={"alt_1", "alt_2"},
+    )
+
+    outcome = await assess_alt_correct(runner, [_alt("alt_1"), _alt("alt_2")])
+
+    assert outcome.verdict == "reject"
+    assert outcome.alternatives_accepted == 0
+    assert outcome.details["public_valid_alternatives"] == 0
+    assert outcome.reasons[0].startswith(REASON_ALT_CORRECT_INVALID_TEACHER_PROPOSAL)
 
 
 # --------------------------------------------------------------------------- #
@@ -357,6 +548,33 @@ async def test_build_report_pass_sets_flag_and_carries_fields() -> None:
     again = OracleReport.from_dict(report.to_dict())
     assert again.alt_correct_accepted is True
     assert again.verdict == "pass"
+
+
+async def test_public_alt_audit_round_trips_only_through_protected_serialization() -> (
+    None
+):
+    alternative = _alt("alt_1", "def f():\n    return 0 + 1\n")
+    outcome = await assess_alt_correct(FakeAltCorrectRunner(), [alternative])
+    report = build_alt_correct_report(
+        _candidate(),
+        _differential_report(
+            [OracleTestFile(path="tests/test_x.py", content="X", origin="synthesized")]
+        ),
+        outcome,
+        env_image=_env_image(),
+    )
+
+    public = report.to_dict()
+    assert "0 + 1" not in repr(public)
+    assert "patches" not in repr(public)
+    assert public["details"]["alt_correct"]["public_valid_alternatives"] == 1
+    assert "public_suite_sha256" in public["details"]["alt_correct"]
+
+    protected = report.to_protected_dict()
+    audit = protected["protected_alt_correct_audit"]
+    assert audit["alternatives"]["alt_1"]["patches"][0]["content"].endswith("0 + 1\n")
+    restored = OracleReport.from_protected_dict(protected)
+    assert restored.protected_alt_correct_audit == report.protected_alt_correct_audit
 
 
 async def test_build_report_reject_carries_reason() -> None:
@@ -458,6 +676,24 @@ async def test_run_gate_requires_passing_prior_report() -> None:
         await run_alt_correct_gate(
             _candidate(), _env_image(), reject_prior, adapter=PythonAdapter()
         )
+
+
+async def test_run_gate_fails_closed_without_original_public_command() -> None:
+    report = await run_alt_correct_gate(
+        _candidate(),
+        EnvImage(
+            **{
+                **_env_image().to_dict(),
+                "original_public_test_command": "",
+            }
+        ),
+        _differential_report([]),
+        adapter=PythonAdapter(),
+    )
+
+    assert report.verdict == "reject"
+    assert report.alt_correct_accepted is False
+    assert report.reasons[0].startswith("alt_correct_public_suite_unavailable")
 
 
 # --------------------------------------------------------------------------- #

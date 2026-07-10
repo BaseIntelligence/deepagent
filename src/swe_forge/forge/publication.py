@@ -33,6 +33,8 @@ _GENERATIONS_DIR = "generations"
 _CURRENT_LINK = "current"
 _MANIFEST_NAME = "manifest.json"
 _SCHEMA_VERSION = 1
+_PROTECTED_AUDIT_DIR = ".protected-audit"
+_ALT_CORRECT_AUDIT_DIR = "alt-correct"
 
 
 class PublicationError(RuntimeError):
@@ -297,6 +299,48 @@ def _copy_workspace(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination)
 
 
+def protected_alt_correct_audit_path(root: Path | str, task_id: str) -> Path:
+    """Return the non-public location for one task's raw alt-correct audit."""
+    return (
+        Path(root) / _PROTECTED_AUDIT_DIR / _ALT_CORRECT_AUDIT_DIR / f"{task_id}.json"
+    )
+
+
+def _write_protected_alt_correct_audit(
+    stage: Path,
+    entry: PublicationEntry,
+    previous: PublishedGeneration | None,
+) -> None:
+    """Persist raw alternative patches only beneath the private generation store."""
+    target = protected_alt_correct_audit_path(stage, entry.task.task_id)
+    audit = entry.task.oracle_report.protected_alt_correct_audit
+    if isinstance(audit, dict):
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(target.parent, 0o700)
+        descriptor = os.open(
+            target,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(audit, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.chmod(target, 0o600)
+        return
+
+    # An unchanged task may be copied into a successor generation.  Preserve its
+    # prior private audit if it has one, without exposing it through the manifest
+    # or stable tasks/dataset facade.
+    if previous is None:
+        return
+    source = protected_alt_correct_audit_path(previous.root, entry.task.task_id)
+    if source.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        shutil.copy2(source, target)
+        os.chmod(target.parent, 0o700)
+        os.chmod(target, 0o600)
+
+
 def publish_generation(
     out_dir: Path | str,
     entries: Sequence[PublicationEntry],
@@ -391,6 +435,8 @@ def publish_generation(
             stage / "dataset.jsonl",
             stage / "dataset.parquet",
         )
+        for entry in accepted:
+            _write_protected_alt_correct_audit(stage, entry, previous)
         generation_id = uuid.uuid4().hex
         _write_manifest(stage, generation_id, accepted)
         _validate_staged_generation(stage, accepted_ids)
@@ -429,4 +475,5 @@ __all__ = [
     "canonical_task_payload",
     "load_published_generation",
     "publish_generation",
+    "protected_alt_correct_audit_path",
 ]

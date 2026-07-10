@@ -87,6 +87,29 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
+def _alt_correct_audit() -> dict[str, object]:
+    return {
+        "version": 1,
+        "original_public_suite_sha256": "a" * 64,
+        "gold": {
+            "public": {"passed": True, "exit_code": 0},
+            "filtered_p2p": {"passed": True, "exit_code": 0},
+            "hidden": [{"test_id": _F2P[0], "exit_code": 0}],
+        },
+        "alternatives": {
+            "alt_1": {
+                "proposal_sha256": "b" * 64,
+                "patches": [
+                    {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
+                ],
+                "public": {"passed": True, "exit_code": 0},
+                "filtered_p2p": {"passed": True, "exit_code": 0},
+                "hidden": [{"test_id": _F2P[0], "exit_code": 0}],
+            }
+        },
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Fixtures
 # --------------------------------------------------------------------------- #
@@ -156,7 +179,16 @@ def _pass_report(**overrides: object) -> OracleReport:
             tool="fake-tool",
         ),
         "provenance": _provenance(),
-        "details": {"teacher_gates": _teacher_gate_evidence()},
+        "details": {
+            "teacher_gates": _teacher_gate_evidence(),
+            "alt_correct": {
+                "public_suite_sha256": "a" * 64,
+                "gold_public_suite_passed": True,
+                "public_valid_alternatives": 1,
+                "invalid_teacher_proposals": [],
+            },
+        },
+        "protected_alt_correct_audit": _alt_correct_audit(),
     }
     fields.update(overrides)
     return OracleReport(**fields)  # type: ignore[arg-type]
@@ -258,6 +290,18 @@ async def test_inconsistent_pass_is_demoted_to_reject(bad: dict[str, object]) ->
 
 def test_verify_pass_consistency_clean() -> None:
     assert verify_pass_consistency(_pass_report()) == []
+
+
+def test_verify_pass_consistency_requires_protected_public_validity_audit() -> None:
+    report = _pass_report()
+    report.protected_alt_correct_audit = None
+
+    assert any(
+        "protected public-validity audit" in problem
+        for problem in verify_pass_consistency(report)
+    )
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(report, calibration_kept=True)
 
 
 def test_custom_final_mutation_threshold_is_exportable() -> None:

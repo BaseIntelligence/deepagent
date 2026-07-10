@@ -136,6 +136,7 @@ def strengthen_recovery_duplicate_value_invariant(
         leak_audit=report.leak_audit,
         provenance=report.provenance,
         details=details,
+        protected_alt_correct_audit=report.protected_alt_correct_audit,
     )
 
 
@@ -821,6 +822,7 @@ def build_multifault_report(
         multifault_evidence=outcome.evidence,
         provenance=prior_report.provenance,
         details=details,
+        protected_alt_correct_audit=prior_report.protected_alt_correct_audit,
     )
 
 

@@ -1579,9 +1579,20 @@ def _load_oracle_report(report_file: str) -> OracleReport:
         _fail(f"oracle report file not found: {report_file}")
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+        protected_path = _protected_oracle_report_path(path)
+        if protected_path.is_file():
+            protected = json.loads(protected_path.read_text(encoding="utf-8"))
+            if not isinstance(protected, dict):
+                raise ModelError("protected oracle audit is not an object")
+            return OracleReport.from_protected_dict({**data, **protected})
         return OracleReport.from_dict(data)
     except (json.JSONDecodeError, KeyError, ModelError) as exc:
         _fail(f"invalid oracle report JSON: {exc}")
+
+
+def _protected_oracle_report_path(report_path: Path) -> Path:
+    """Return the mode-0600 non-agent-facing sidecar for raw proposal evidence."""
+    return report_path.with_name(f"{report_path.stem}.protected.json")
 
 
 def _write_oracle_report(out: str, report: OracleReport) -> None:
@@ -1594,6 +1605,24 @@ def _write_oracle_report(out: str, report: OracleReport) -> None:
         out_path.mkdir(parents=True, exist_ok=True)
         report_path = out_path / "oracle_report.json"
     report_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+    protected_path = _protected_oracle_report_path(report_path)
+    if report.protected_alt_correct_audit is None:
+        protected_path.unlink(missing_ok=True)
+        return
+    descriptor = os.open(
+        protected_path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(
+            {"protected_alt_correct_audit": report.protected_alt_correct_audit},
+            handle,
+            indent=2,
+            sort_keys=True,
+        )
+        handle.write("\n")
+    os.chmod(protected_path, 0o600)
 
 
 @app.command(name="oracle-flakiness")
