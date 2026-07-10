@@ -912,7 +912,6 @@ async def run_final_alternate_recovery(
         )
         if len(export.kept) != 1 or len(export.refused) != 0:
             raise AlternateRecoveryError("alternate keep export did not reconcile")
-        write_recovery_certification(output, keep)
         _write_json(
             work / "result.json",
             {"run_id": run_id, "status": "kept", "task_id": alternate.task_id},
@@ -932,7 +931,6 @@ async def run_final_alternate_recovery(
                 generation_metadata_writer=_tombstone_stage_writer(tombstone, reason),
                 extra_facade_artifacts=_CANONICAL_AUDIT_ARTIFACTS,
             )
-            write_recovery_certification(output, tombstone)
             work.mkdir(parents=True, exist_ok=True)
             _write_json(
                 work / "result.json",
