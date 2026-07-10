@@ -1063,6 +1063,7 @@ def export_batch(
     out_dir: Path | str,
     *,
     overwrite: bool = False,
+    replace_existing: bool = False,
     jsonl_name: str = "dataset.jsonl",
     parquet_name: str = "dataset.parquet",
     adapter: LanguageAdapter | None = None,
@@ -1074,7 +1075,9 @@ def export_batch(
     without aborting its qualified siblings. Qualified tasks are written and the
     jsonl/parquet datasets are regenerated from the FULL kept set (one record per
     kept task, no append-duplication). An all-unqualified (or empty) batch still
-    writes valid empty artifacts.
+    writes valid empty artifacts. ``replace_existing`` is only for a caller that
+    has re-certified a same-id task and needs a complete successor generation;
+    ordinary exports retain their conflicting-id refusal.
     """
     out_path = Path(out_dir)
     tasks_dir = out_path / "tasks"
@@ -1145,6 +1148,7 @@ def export_batch(
             workspace_writer=_write_workspace,
             dataset_writer=export_dataset,
             overwrite=overwrite,
+            replace_existing=replace_existing,
         )
     except PublicationError as exc:
         raise ExportError(str(exc)) from exc

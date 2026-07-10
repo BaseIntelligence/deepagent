@@ -28,6 +28,11 @@ from swe_forge.forge.oracle.differential import (
 )
 from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile
 from swe_forge.forge.oracle.teacher_evidence import TeacherGateCallEvidence
+from swe_forge.forge.oracle.teacher_regions import (
+    TeacherSource,
+    required_symbol,
+    select_teacher_source,
+)
 from swe_forge.forge.teacher import LLMResult, TeacherClient, Usage
 
 logger = getLogger(__name__)
@@ -49,7 +54,7 @@ Rules:
   (off-by-one, wrong operator/comparison, dropped edge case, swapped branch, wrong
   default, etc.). Do NOT just reformat or rename - the result must compute a wrong
   answer somewhere.
-- Each variant must be a COMPLETE drop-in replacement for the whole file shown.
+- Each variant must be a COMPLETE replacement for the target source region shown.
 - Output ONE fenced code block per variant, nothing else (no prose between blocks).
 """
 
@@ -69,7 +74,7 @@ Rules:
 
 
 def _extract_blocks(text: str) -> list[str]:
-    return [m.strip() for m in _CODE_FENCE_RE.findall(text) if m.strip()]
+    return [m.strip("\n") for m in _CODE_FENCE_RE.findall(text) if m.strip()]
 
 
 def _extract_code(text: str) -> str:
@@ -79,27 +84,9 @@ def _extract_code(text: str) -> str:
     return text.strip()
 
 
-def _primary_target(ctx_files: tuple[str, ...], gold_sources: dict[str, str]) -> str:
-    """Pick the source file the variants overwrite (a real, readable target)."""
-    for path in ctx_files:
-        if path in gold_sources and gold_sources[path].strip():
-            return path
-    if ctx_files:
-        return ctx_files[0]
-    if gold_sources:
-        return next(iter(gold_sources))
-    return ""
-
-
-def _implements_target(ctx: VariantGenerationContext, content: str) -> bool:
+def _implements_target(symbol: str, content: str) -> bool:
     """Reject fenced prose or a replacement that omits the published target."""
-    required = {
-        part
-        for symbol in ctx.candidate.target.symbols
-        for part in symbol.split(".")
-        if part and part != "__init__"
-    }
-    return bool(content.strip()) and all(name in content for name in required)
+    return bool(content.strip()) and (not symbol or symbol in content)
 
 
 def _kill_test_path(language: str, round_index: int) -> str:
@@ -130,8 +117,8 @@ class TeacherVariantGenerator:
 
     async def __call__(self, ctx: VariantGenerationContext) -> list[Variant]:
         self.teacher_calls = []
-        target = _primary_target(ctx.candidate.target.files, ctx.gold_sources)
-        if not target:
+        teacher_source = select_teacher_source(ctx.candidate, ctx.gold_sources)
+        if teacher_source is None:
             self.teacher_calls.append(
                 TeacherGateCallEvidence(
                     gate="differential",
@@ -144,24 +131,9 @@ class TeacherVariantGenerator:
                 )
             )
             return []
-        gold = ctx.gold_sources.get(target, "")
-        if not gold.strip():
-            self.teacher_calls.append(
-                TeacherGateCallEvidence(
-                    gate="differential",
-                    call_kind="proposal",
-                    real_teacher=False,
-                    status="not_called",
-                    response_kind="source_unavailable",
-                    requested_proposals=ctx.num_variants,
-                    invalid_proposals=1,
-                )
-            )
-            return []
-
         try:
             result = await self._resolve_client().complete_text(
-                self._user_message(ctx, target, gold),
+                self._user_message(ctx, teacher_source),
                 system=_VARIANT_SYSTEM_PROMPT,
                 max_tokens=self._max_tokens,
             )
@@ -192,21 +164,21 @@ class TeacherVariantGenerator:
         invalid = 0
         parsed = 0
         for index, raw_block in enumerate(raw_blocks[: ctx.num_variants]):
-            block = raw_block.strip()
-            if not block:
-                invalid += 1
-                continue
-            if not _implements_target(ctx, block):
+            block = raw_block.strip("\n")
+            if not _implements_target(required_symbol(teacher_source), block):
                 invalid += 1
                 continue
             parsed += 1
-            if block == gold.strip():
+            materialized = teacher_source.materialize(block)
+            if materialized == ctx.gold_sources[teacher_source.path]:
                 identical += 1
                 continue
             variants.append(
                 Variant(
                     variant_id=f"variant_{index + 1}",
-                    files=(VariantFile(path=target, content=block + "\n"),),
+                    files=(
+                        VariantFile(path=teacher_source.path, content=materialized),
+                    ),
                     description=f"teacher plausible-wrong variant #{index + 1}",
                 )
             )
@@ -236,18 +208,20 @@ class TeacherVariantGenerator:
         return self.teacher_calls[-1] if self.teacher_calls else None
 
     def _user_message(
-        self, ctx: VariantGenerationContext, target: str, gold: str
+        self, ctx: VariantGenerationContext, teacher_source: TeacherSource
     ) -> str:
-        symbols = ", ".join(ctx.candidate.target.symbols) or "(unspecified)"
+        symbol = teacher_source.symbol or "(unspecified)"
         return (
             f"Language: {ctx.language}\n"
-            f"Target file: {target}\n"
-            f"Target symbol(s): {symbols}\n"
-            f"Produce {ctx.num_variants} plausible-but-wrong variants of this file.\n\n"
-            "Gold (correct) source:\n"
-            f"```\n{gold}\n```\n\n"
+            f"Target file: {teacher_source.path}\n"
+            f"Target symbol: {symbol}\n"
+            f"Produce {ctx.num_variants} plausible-but-wrong replacements for "
+            "this source region.\n\n"
+            "Gold (correct) target source region:\n"
+            f"```\n{teacher_source.source}\n```\n\n"
             f"Return {ctx.num_variants} fenced code blocks, one complete wrong "
-            "version of the file per block."
+            "replacement for the shown source region per block. Preserve its "
+            "indentation and public interface."
         )
 
 

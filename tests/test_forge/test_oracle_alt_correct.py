@@ -503,6 +503,51 @@ async def test_teacher_alt_generator_skips_block_equal_to_gold() -> None:
     assert "def f() -> int" in teacher.last_prompt
 
 
+async def test_teacher_alt_generator_replaces_only_target_region() -> None:
+    gold = (
+        "# leading context\n"
+        "class Example:\n"
+        "    def f(self):\n"
+        "        return 1\n"
+        "\n"
+        "# trailing context\n"
+    )
+    candidate = Candidate(
+        language="python",
+        generator="ast_mutation",
+        target=CandidateTarget(files=("src/m.py",), symbols=("Example.f",)),
+        mutation_patch="forward",
+        oracle_patch="inverse",
+        difficulty_hint="medium",
+        provenance=Provenance(
+            generator="ast_mutation",
+            seed=7,
+            language="python",
+            details={
+                "constituents": [{"file": "src/m.py", "start_line": 3, "end_line": 4}]
+            },
+        ),
+    )
+    teacher = FakeTeacher(
+        "```python\n    def f(self):\n        value = 1\n        return value\n```"
+    )
+    generator = TeacherAltCorrectGenerator(client=teacher)  # type: ignore[arg-type]
+
+    alternatives = await generator(
+        AltCorrectGenerationContext(
+            candidate=candidate,
+            adapter=PythonAdapter(),
+            gold_sources={"src/m.py": gold},
+            interface_block="def f(self) -> int",
+        )
+    )
+
+    assert len(alternatives) == 1
+    assert alternatives[0].files[0].content == gold.replace(
+        "return 1", "value = 1\n        return value"
+    )
+
+
 async def test_teacher_alt_generator_no_sources_returns_empty() -> None:
     gen = TeacherAltCorrectGenerator(client=FakeTeacher("```\nx\n```"))  # type: ignore[arg-type]
     ctx = AltCorrectGenerationContext(

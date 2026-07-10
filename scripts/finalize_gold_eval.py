@@ -17,7 +17,7 @@ from pathlib import Path
 from swe_forge.forge.gold_eval import run_gold_eval
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT_DIR = Path("results/pilot_keeps")
+DEFAULT_OUT_DIR = Path("results/pilot_final")
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -26,7 +26,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--out-dir",
         type=Path,
         default=DEFAULT_OUT_DIR,
-        help="Export directory containing tasks/ (default: results/pilot_keeps).",
+        help="Export directory containing tasks/ (default: results/pilot_final).",
     )
     return parser.parse_args(argv)
 
@@ -39,7 +39,9 @@ def resolve_out_dir(out_dir: Path) -> Path:
 def display_tasks_dir(tasks_dir: Path) -> str:
     """Keep canonical reports portable by storing a repository-relative path."""
     try:
-        return str(tasks_dir.resolve().relative_to(REPO_ROOT))
+        # Do not resolve the public publication symlink: the stable task facade,
+        # rather than a private immutable generation id, belongs in the report.
+        return str(tasks_dir.absolute().relative_to(REPO_ROOT))
     except ValueError:
         return str(tasks_dir)
 

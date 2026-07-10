@@ -121,23 +121,23 @@ def _load_finalize_gold_eval_script():
     return module
 
 
-def test_finalize_gold_eval_defaults_to_canonical_pilot_keeps() -> None:
+def test_finalize_gold_eval_defaults_to_canonical_pilot_final() -> None:
     script = _load_finalize_gold_eval_script()
 
-    assert script.parse_args([]).out_dir == Path("results/pilot_keeps")
+    assert script.parse_args([]).out_dir == Path("results/pilot_final")
 
 
 def test_finalize_gold_eval_anchors_default_to_repository_root() -> None:
     script = _load_finalize_gold_eval_script()
 
     assert script.resolve_out_dir(script.parse_args([]).out_dir) == (
-        Path(__file__).parents[2] / "results" / "pilot_keeps"
+        Path(__file__).parents[2] / "results" / "pilot_final"
     )
     assert (
         script.display_tasks_dir(
-            Path(__file__).parents[2] / "results" / "pilot_keeps" / "tasks"
+            Path(__file__).parents[2] / "results" / "pilot_final" / "tasks"
         )
-        == "results/pilot_keeps/tasks"
+        == "results/pilot_final/tasks"
     )
 
 
@@ -508,12 +508,14 @@ def test_evaluate_sh_scores_gold_twice_in_docker(tmp_path: Path) -> None:
         Candidate,
         CandidateTarget,
         EnvImage,
+        FinalMutationEvidence,
         GeneratedSpec,
         ModelSolveRecord,
         OracleReport,
         OracleTestFile,
         Provenance,
     )
+    from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 
     ts = "2026-01-01T00:00:00+00:00"
 
@@ -616,6 +618,40 @@ def test_evaluate_sh_scores_gold_twice_in_docker(tmp_path: Path) -> None:
             generator="ast_mutation", seed=1, language="python", created_at=ts
         ),
     )
+    test_files = [
+        OracleTestFile(
+            path="tests/hidden/test_tax.py",
+            content=(
+                "from mathlib.calc import total_with_tax\n\n\n"
+                "def test_tax():\n    assert total_with_tax([100], 10) == 110\n"
+            ),
+        )
+    ]
+    teacher_call = {
+        "call_kind": "proposal",
+        "real_teacher": True,
+        "status": "success",
+        "response_kind": "content",
+        "model": "anthropic/test-model",
+        "usage": {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        },
+        "cost": 0.01,
+        "finish_reason": "stop",
+        "requested_proposals": 1,
+        "received_proposals": 1,
+        "parsed_proposals": 1,
+        "identical_proposals": 0,
+        "invalid_proposals": 0,
+        "discarded_proposals": 0,
+        "execution_attempted": 1,
+        "execution_completed": 1,
+        "execution_errors": 0,
+        "executable_proposals": 1,
+        "error_type": "",
+    }
     oracle = OracleReport(
         language="python",
         generator="ast_mutation",
@@ -623,24 +659,29 @@ def test_evaluate_sh_scores_gold_twice_in_docker(tmp_path: Path) -> None:
         reasons=[],
         fail_to_pass=["python -m pytest tests/hidden/test_tax.py -q"],
         pass_to_pass=["python -m pytest tests/test_add.py -q"],
-        test_files=[
-            OracleTestFile(
-                path="tests/hidden/test_tax.py",
-                content=(
-                    "from mathlib.calc import total_with_tax\n\n\n"
-                    "def test_tax():\n    assert total_with_tax([100], 10) == 110\n"
-                ),
-            )
-        ],
+        test_files=test_files,
         flakiness_runs=3,
         mutants_total=4,
         mutants_killed=4,
+        final_mutation_evidence=FinalMutationEvidence(
+            suite_fingerprint=final_suite_fingerprint(test_files),
+            mutants_total=4,
+            mutants_killed=4,
+            threshold=0.8,
+            tool="fake",
+        ),
         differential_pass=True,
         alt_correct_accepted=True,
         leak_audit="clean",
         provenance=Provenance(
             generator="ast_mutation", seed=1, language="python", created_at=ts
         ),
+        details={
+            "teacher_gates": {
+                "differential": {"calls": [{**teacher_call, "gate": "differential"}]},
+                "alt_correct": {"calls": [{**teacher_call, "gate": "alt_correct"}]},
+            }
+        },
     )
     models = [
         ModelSolveRecord(model="weak/m", tier="weak", k=4, solves=0, pass_at_k=0.0),

@@ -304,12 +304,16 @@ def publish_generation(
     workspace_writer: WorkspaceWriter,
     dataset_writer: DatasetWriter,
     overwrite: bool,
+    replace_existing: bool = False,
 ) -> tuple[PublishedGeneration, list[PublicationOutcome]]:
     """Build, validate, and atomically select a complete generation.
 
     ``workspace_writer`` writes only beneath the private stage.  A workspace
     refusal is omitted like the historical batch exporter, while an exception
     during dataset validation or pointer commit leaves ``current`` unchanged.
+    ``replace_existing`` is reserved for a recertification that has newly
+    verified the same deterministic task id. It stages a complete successor
+    generation without deleting the old one before the pointer switch.
     """
     out_path = Path(out_dir)
     unique_entries = list(entries)
@@ -339,24 +343,28 @@ def publish_generation(
                 if _canonical_task_payload(prior.task) != _canonical_task_payload(
                     entry.task
                 ):
-                    raise PublicationError(
-                        f"conflicting duplicate task_id {entry.task.task_id!r} "
-                        "against the published generation"
+                    if not replace_existing:
+                        raise PublicationError(
+                            f"conflicting duplicate task_id {entry.task.task_id!r} "
+                            "against the published generation"
+                        )
+                else:
+                    _copy_workspace(
+                        previous.tasks_dir / prior.task.task_id,  # type: ignore[union-attr]
+                        stage_tasks / entry.task.task_id,
                     )
-                _copy_workspace(
-                    previous.tasks_dir / prior.task.task_id,  # type: ignore[union-attr]
-                    stage_tasks / entry.task.task_id,
-                )
-                accepted.append(PublicationEntry(index=entry.index, task=entry.task))
-                outcomes.append(
-                    PublicationOutcome(
-                        index=entry.index,
-                        task_id=entry.task.task_id,
-                        status="skipped",
-                        reason="task workspace already published",
+                    accepted.append(
+                        PublicationEntry(index=entry.index, task=entry.task)
                     )
-                )
-                continue
+                    outcomes.append(
+                        PublicationOutcome(
+                            index=entry.index,
+                            task_id=entry.task.task_id,
+                            status="skipped",
+                            reason="task workspace already published",
+                        )
+                    )
+                    continue
 
             result = workspace_writer(entry.task, stage_tasks)
             status = str(getattr(result, "status", "failed"))

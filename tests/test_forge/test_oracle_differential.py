@@ -753,6 +753,46 @@ async def test_teacher_variant_generator_skips_block_equal_to_gold() -> None:
     assert "return 9" in variants[0].files[0].content
 
 
+async def test_teacher_variant_generator_replaces_only_target_region() -> None:
+    gold = (
+        "# leading context\n"
+        "class Example:\n"
+        "    def f(self):\n"
+        "        return 1\n"
+        "\n"
+        "# trailing context\n"
+    )
+    candidate = Candidate(
+        language="python",
+        generator="ast_mutation",
+        target=CandidateTarget(files=("src/m.py",), symbols=("Example.f",)),
+        mutation_patch="forward",
+        oracle_patch="inverse",
+        difficulty_hint="medium",
+        provenance=Provenance(
+            generator="ast_mutation",
+            seed=7,
+            language="python",
+            details={
+                "constituents": [{"file": "src/m.py", "start_line": 3, "end_line": 4}]
+            },
+        ),
+    )
+    teacher = FakeTeacher("```python\n    def f(self):\n        return 2\n```")
+    generator = TeacherVariantGenerator(client=teacher)  # type: ignore[arg-type]
+
+    variants = await generator(
+        VariantGenerationContext(
+            candidate=candidate,
+            adapter=PythonAdapter(),
+            gold_sources={"src/m.py": gold},
+        )
+    )
+
+    assert len(variants) == 1
+    assert variants[0].files[0].content == gold.replace("return 1", "return 2")
+
+
 async def test_teacher_variant_generator_no_sources_returns_empty() -> None:
     gen = TeacherVariantGenerator(client=FakeTeacher("```\nx\n```"))  # type: ignore[arg-type]
     ctx = VariantGenerationContext(
