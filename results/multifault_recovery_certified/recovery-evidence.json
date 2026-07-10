@@ -1,0 +1,102 @@
+{
+  "feature": "m6-pilot-multifault-suite-recovery",
+  "status": "kept",
+  "source_task_id": "mahmoud-boltons__bug_combination__a00c108c7c90",
+  "exported_task_id": "mahmoud-boltons__bug_combination__242d17b94d94",
+  "attempt_order": [
+    "a00c108c7c90"
+  ],
+  "stopped_after_first_keep": true,
+  "unattempted_candidates": [
+    "7bb4e61cc98c",
+    "673742034467",
+    "36590c523bdc"
+  ],
+  "strengthening": {
+    "previously_untested_constituent": "OneToOne.__init__ (boltons/dictutils.py)",
+    "gold_independent_behavior_check": "Initializing OneToOne from a mapping plus keyword arguments preserves both the forward mapping and the inverse mapping.",
+    "behavior_basis": "upstream tests/test_dictutils.py::test_one_to_one",
+    "hidden_test_path": "test_describe_bug.py"
+  },
+  "oracle": {
+    "flakiness_runs": 3,
+    "final_mutation": {
+      "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e",
+      "mutants_total": 65,
+      "mutants_killed": 52,
+      "threshold": 0.8,
+      "tool": "cosmic-ray"
+    },
+    "multifault_completeness": {
+      "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e",
+      "p2p_command": "python -m pytest -k 'not (test_one_to_one)'",
+      "constituents": [
+        {
+          "index": 0,
+          "file": "boltons/dictutils.py",
+          "inverse_patch_sha256": "ae0e856e8787dcffe2abaf89aa1f674d4b7fc7fd1f41302002bed213d1b831cf",
+          "repaired_indices": [
+            1
+          ],
+          "other_inverse_patches_applied": true,
+          "p2p_passed": true,
+          "failed_f2p_test_ids": [
+            "python -m pytest test_swe_forge_mut_1.py"
+          ],
+          "verdict": "pass",
+          "reason": ""
+        },
+        {
+          "index": 1,
+          "file": "boltons/statsutils.py",
+          "inverse_patch_sha256": "5cba72ff00996e602871eff7fd673f00dbeb2d212025d21d0e2eff289e4e7027",
+          "repaired_indices": [
+            0
+          ],
+          "other_inverse_patches_applied": true,
+          "p2p_passed": true,
+          "failed_f2p_test_ids": [
+            "python -m pytest test_describe_bug.py",
+            "python -m pytest test_swe_forge_mut_1.py"
+          ],
+          "verdict": "pass",
+          "reason": ""
+        }
+      ]
+    },
+    "leak_audit": "clean",
+    "real_teacher_proof": {
+      "wrong_variant_selected": "len(self) != len(self.inv)",
+      "equivalent_alternative_selected": "not len(self) != len(self.inv)",
+      "variant_cost_usd": 0.0009650000000000001,
+      "alternative_cost_usd": 0.000745
+    }
+  },
+  "strict_calibration": {
+    "k": 6,
+    "band_high": 0.5,
+    "band_verdict": "keep",
+    "frontier_pass_at_k": 0.16666666666666666,
+    "irt_discrimination": 4.703802194101592,
+    "calls": 28,
+    "cost_usd": 13.0709288
+  },
+  "yield": {
+    "attempted": 1,
+    "oracle_pass": 1,
+    "band_keep": 1,
+    "exported": 1,
+    "gold_rate": 1.0
+  },
+  "spend": {
+    "cap_usd": 60.0,
+    "observable_cost_usd": 21.43272865,
+    "observable_components_usd": {
+      "preliminary_strict_calibration": 8.359909850000001,
+      "final_strict_calibration": 13.0709288,
+      "nonvacuous_teacher_proof": 0.0017100000000000001,
+      "llm_health_check": 0.00018
+    },
+    "accounting_limitation": "The existing oracle synthesizer/variant/alternative artifact schema does not persist response usage or cost. Earlier non-final teacher calls are therefore explicitly unmetered here rather than guessed; the observable total is a lower bound, not a falsely precise total."
+  }
+}

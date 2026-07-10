@@ -1,0 +1,1294 @@
+{
+  "entries": [
+    {
+      "index": 0,
+      "task": {
+        "base_commit": "979fa9b613fa8c0a455ae16ea6f2ec91c11ecafe",
+        "calibration_report": {
+          "band_verdict": "keep",
+          "details": {
+            "band_filter": {
+              "band_high": 0.5,
+              "discrimination": 4.703802194101592,
+              "discrimination_threshold": 1.0,
+              "frontier_pass_at_k": 0.16666666666666666,
+              "reason": "keep: frontier pass@k 0.1667 is in the low-but-nonzero band (0, 0.5000], discrimination 4.7038 >= 1.0000, and solves are nonzero",
+              "rule": "in-band-high-discrimination",
+              "verdict": "keep"
+            },
+            "calibration": {
+              "band": "hard",
+              "cost": 13.0709288,
+              "difficulty_hint": "high",
+              "rollout_calls": 24,
+              "total_calls": 28,
+              "usage": {
+                "completion_tokens": 69875,
+                "prompt_tokens": 3056427,
+                "total_tokens": 3126302
+              },
+              "validation_calls": 4,
+              "validations": [
+                {
+                  "cost": 6e-06,
+                  "error": null,
+                  "model": "openai/gpt-4o-mini",
+                  "usage": {
+                    "completion_tokens": 8,
+                    "prompt_tokens": 8,
+                    "total_tokens": 16
+                  },
+                  "valid": true
+                },
+                {
+                  "cost": 0.000144,
+                  "error": null,
+                  "model": "anthropic/claude-sonnet-4-6",
+                  "usage": {
+                    "completion_tokens": 8,
+                    "prompt_tokens": 8,
+                    "total_tokens": 16
+                  },
+                  "valid": true
+                },
+                {
+                  "cost": 0.00024,
+                  "error": null,
+                  "model": "anthropic/claude-opus-4-8",
+                  "usage": {
+                    "completion_tokens": 8,
+                    "prompt_tokens": 8,
+                    "total_tokens": 16
+                  },
+                  "valid": true
+                },
+                {
+                  "cost": 0.00018500000000000002,
+                  "error": null,
+                  "model": "openai/gpt-5.5",
+                  "usage": {
+                    "completion_tokens": 5,
+                    "prompt_tokens": 7,
+                    "total_tokens": 12
+                  },
+                  "valid": true
+                }
+              ]
+            },
+            "irt_fit": {
+              "converged": true,
+              "degenerate": false,
+              "difficulty": 1.3427448117050205,
+              "discrimination": 4.703802194101592,
+              "iterations": 12,
+              "n_models": 4,
+              "n_trials": 24,
+              "total_solves": 2
+            },
+            "tier_abilities": {
+              "frontier": 1.0,
+              "mid": 0.0,
+              "weak": -1.0
+            },
+            "usage_accounting": {
+              "aggregate": {
+                "cost": 13.0709288,
+                "total_calls": 28,
+                "usage": {
+                  "completion_tokens": 69875,
+                  "prompt_tokens": 3056427,
+                  "total_tokens": 3126302
+                }
+              },
+              "rollout": {
+                "calls": 24,
+                "cost": 13.070353800000003,
+                "per_call": [
+                  {
+                    "cost": 0.0030820499999999994,
+                    "index": 0,
+                    "model": "openai/gpt-4o-mini",
+                    "solved": false,
+                    "tier": "weak",
+                    "usage": {
+                      "completion_tokens": 758,
+                      "prompt_tokens": 19307,
+                      "total_tokens": 20065
+                    }
+                  },
+                  {
+                    "cost": 0.02581305,
+                    "index": 1,
+                    "model": "openai/gpt-4o-mini",
+                    "solved": false,
+                    "tier": "weak",
+                    "usage": {
+                      "completion_tokens": 7357,
+                      "prompt_tokens": 216707,
+                      "total_tokens": 224064
+                    }
+                  },
+                  {
+                    "cost": 0.023286750000000002,
+                    "index": 2,
+                    "model": "openai/gpt-4o-mini",
+                    "solved": false,
+                    "tier": "weak",
+                    "usage": {
+                      "completion_tokens": 5172,
+                      "prompt_tokens": 175261,
+                      "total_tokens": 180433
+                    }
+                  },
+                  {
+                    "cost": 0.0052715999999999996,
+                    "index": 3,
+                    "model": "openai/gpt-4o-mini",
+                    "solved": false,
+                    "tier": "weak",
+                    "usage": {
+                      "completion_tokens": 601,
+                      "prompt_tokens": 40868,
+                      "total_tokens": 41469
+                    }
+                  },
+                  {
+                    "cost": 0.0226152,
+                    "index": 4,
+                    "model": "openai/gpt-4o-mini",
+                    "solved": false,
+                    "tier": "weak",
+                    "usage": {
+                      "completion_tokens": 3296,
+                      "prompt_tokens": 190384,
+                      "total_tokens": 193680
+                    }
+                  },
+                  {
+                    "cost": 0.004723799999999999,
+                    "index": 5,
+                    "model": "openai/gpt-4o-mini",
+                    "solved": false,
+                    "tier": "weak",
+                    "usage": {
+                      "completion_tokens": 1043,
+                      "prompt_tokens": 33144,
+                      "total_tokens": 34187
+                    }
+                  },
+                  {
+                    "cost": 0.57181365,
+                    "index": 0,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "solved": false,
+                    "tier": "mid",
+                    "usage": {
+                      "completion_tokens": 2564,
+                      "prompt_tokens": 219368,
+                      "total_tokens": 221932
+                    }
+                  },
+                  {
+                    "cost": 0.3166452,
+                    "index": 1,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "solved": false,
+                    "tier": "mid",
+                    "usage": {
+                      "completion_tokens": 1797,
+                      "prompt_tokens": 98034,
+                      "total_tokens": 99831
+                    }
+                  },
+                  {
+                    "cost": 0.1377903,
+                    "index": 2,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "solved": false,
+                    "tier": "mid",
+                    "usage": {
+                      "completion_tokens": 1486,
+                      "prompt_tokens": 40340,
+                      "total_tokens": 41826
+                    }
+                  },
+                  {
+                    "cost": 0.0806472,
+                    "index": 3,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "solved": false,
+                    "tier": "mid",
+                    "usage": {
+                      "completion_tokens": 1261,
+                      "prompt_tokens": 26429,
+                      "total_tokens": 27690
+                    }
+                  },
+                  {
+                    "cost": 0.004692,
+                    "index": 4,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "solved": false,
+                    "tier": "mid",
+                    "usage": {
+                      "completion_tokens": 161,
+                      "prompt_tokens": 759,
+                      "total_tokens": 920
+                    }
+                  },
+                  {
+                    "cost": 0.0028770000000000002,
+                    "index": 5,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "solved": false,
+                    "tier": "mid",
+                    "usage": {
+                      "completion_tokens": 40,
+                      "prompt_tokens": 759,
+                      "total_tokens": 799
+                    }
+                  },
+                  {
+                    "cost": 1.00097,
+                    "index": 0,
+                    "model": "anthropic/claude-opus-4-8",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 2119,
+                      "prompt_tokens": 189599,
+                      "total_tokens": 191718
+                    }
+                  },
+                  {
+                    "cost": 0.49528999999999995,
+                    "index": 1,
+                    "model": "anthropic/claude-opus-4-8",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 1983,
+                      "prompt_tokens": 89143,
+                      "total_tokens": 91126
+                    }
+                  },
+                  {
+                    "cost": 0.6873650000000001,
+                    "index": 2,
+                    "model": "anthropic/claude-opus-4-8",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 2309,
+                      "prompt_tokens": 125928,
+                      "total_tokens": 128237
+                    }
+                  },
+                  {
+                    "cost": 0.55721,
+                    "index": 3,
+                    "model": "anthropic/claude-opus-4-8",
+                    "solved": true,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 2594,
+                      "prompt_tokens": 98472,
+                      "total_tokens": 101066
+                    }
+                  },
+                  {
+                    "cost": 0.9127299999999998,
+                    "index": 4,
+                    "model": "anthropic/claude-opus-4-8",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 2691,
+                      "prompt_tokens": 169091,
+                      "total_tokens": 171782
+                    }
+                  },
+                  {
+                    "cost": 0.8526400000000002,
+                    "index": 5,
+                    "model": "anthropic/claude-opus-4-8",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 2879,
+                      "prompt_tokens": 156133,
+                      "total_tokens": 159012
+                    }
+                  },
+                  {
+                    "cost": 1.3203200000000002,
+                    "index": 0,
+                    "model": "openai/gpt-5.5",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 5776,
+                      "prompt_tokens": 203267,
+                      "total_tokens": 209043
+                    }
+                  },
+                  {
+                    "cost": 1.2387740000000003,
+                    "index": 1,
+                    "model": "openai/gpt-5.5",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 3962,
+                      "prompt_tokens": 223134,
+                      "total_tokens": 227096
+                    }
+                  },
+                  {
+                    "cost": 1.3148630000000003,
+                    "index": 2,
+                    "model": "openai/gpt-5.5",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 3750,
+                      "prompt_tokens": 200192,
+                      "total_tokens": 203942
+                    }
+                  },
+                  {
+                    "cost": 1.4941380000000002,
+                    "index": 3,
+                    "model": "openai/gpt-5.5",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 6496,
+                      "prompt_tokens": 216541,
+                      "total_tokens": 223037
+                    }
+                  },
+                  {
+                    "cost": 1.2470580000000002,
+                    "index": 4,
+                    "model": "openai/gpt-5.5",
+                    "solved": false,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 6699,
+                      "prompt_tokens": 205022,
+                      "total_tokens": 211721
+                    }
+                  },
+                  {
+                    "cost": 0.7497380000000001,
+                    "index": 5,
+                    "model": "openai/gpt-5.5",
+                    "solved": true,
+                    "tier": "frontier",
+                    "usage": {
+                      "completion_tokens": 3052,
+                      "prompt_tokens": 118514,
+                      "total_tokens": 121566
+                    }
+                  }
+                ],
+                "usage": {
+                  "completion_tokens": 69846,
+                  "prompt_tokens": 3056396,
+                  "total_tokens": 3126242
+                }
+              },
+              "validation": {
+                "calls": 4,
+                "cost": 0.000575,
+                "per_call": [
+                  {
+                    "cost": 6e-06,
+                    "model": "openai/gpt-4o-mini",
+                    "usage": {
+                      "completion_tokens": 8,
+                      "prompt_tokens": 8,
+                      "total_tokens": 16
+                    },
+                    "valid": true
+                  },
+                  {
+                    "cost": 0.000144,
+                    "model": "anthropic/claude-sonnet-4-6",
+                    "usage": {
+                      "completion_tokens": 8,
+                      "prompt_tokens": 8,
+                      "total_tokens": 16
+                    },
+                    "valid": true
+                  },
+                  {
+                    "cost": 0.00024,
+                    "model": "anthropic/claude-opus-4-8",
+                    "usage": {
+                      "completion_tokens": 8,
+                      "prompt_tokens": 8,
+                      "total_tokens": 16
+                    },
+                    "valid": true
+                  },
+                  {
+                    "cost": 0.00018500000000000002,
+                    "model": "openai/gpt-5.5",
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 7,
+                      "total_tokens": 12
+                    },
+                    "valid": true
+                  }
+                ],
+                "usage": {
+                  "completion_tokens": 29,
+                  "prompt_tokens": 31,
+                  "total_tokens": 60
+                }
+              }
+            }
+          },
+          "difficulty_hint": "high",
+          "frontier_pass_at_k": 0.16666666666666666,
+          "irt_difficulty": 1.3427448117050205,
+          "irt_discrimination": 4.703802194101592,
+          "k": 6,
+          "language": "python",
+          "models": [
+            {
+              "k": 6,
+              "model": "openai/gpt-4o-mini",
+              "pass_at_k": 0.0,
+              "solves": 0,
+              "tier": "weak"
+            },
+            {
+              "k": 6,
+              "model": "anthropic/claude-sonnet-4-6",
+              "pass_at_k": 0.0,
+              "solves": 0,
+              "tier": "mid"
+            },
+            {
+              "k": 6,
+              "model": "anthropic/claude-opus-4-8",
+              "pass_at_k": 0.16666666666666666,
+              "solves": 1,
+              "tier": "frontier"
+            },
+            {
+              "k": 6,
+              "model": "openai/gpt-5.5",
+              "pass_at_k": 0.16666666666666666,
+              "solves": 1,
+              "tier": "frontier"
+            }
+          ],
+          "provenance": {
+            "created_at": "2026-07-10T12:19:38+00:00",
+            "details": {
+              "stage": "calibration"
+            },
+            "generator": "bug_combination",
+            "language": "python",
+            "seed": 18,
+            "tool_versions": {
+              "litellm": "1.90.0"
+            }
+          },
+          "reasons": [
+            "keep: frontier pass@k 0.1667 is in the low-but-nonzero band (0, 0.5000], discrimination 4.7038 >= 1.0000, and solves are nonzero"
+          ],
+          "tier_pass_rates": {
+            "frontier": 0.16666666666666666,
+            "mid": 0.0,
+            "weak": 0.0
+          }
+        },
+        "candidate": {
+          "difficulty_hint": "high",
+          "generator": "bug_combination",
+          "language": "python",
+          "mutation_patch": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex d4dd1db..cdecd4d 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) == len(self.inv):\n+        if len(self) != len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \ndiff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 36a8223..814ba46 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles or [0.25, 0.5, 0.75]\n+        quantiles = quantiles and [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+          "oracle_patch": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex cdecd4d..d4dd1db 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) != len(self.inv):\n+        if len(self) == len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \ndiff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 814ba46..36a8223 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles and [0.25, 0.5, 0.75]\n+        quantiles = quantiles or [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+          "provenance": {
+            "created_at": "2026-07-10T00:00:00+00:00",
+            "details": {
+              "constituents": [
+                {
+                  "end_line": 812,
+                  "file": "boltons/dictutils.py",
+                  "index": 0,
+                  "inverse_patch": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex cdecd4d..d4dd1db 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) != len(self.inv):\n+        if len(self) == len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \n",
+                  "mutation_patch": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex d4dd1db..cdecd4d 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) == len(self.inv):\n+        if len(self) != len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \n",
+                  "operator": "comparison_swap",
+                  "single_fault_revert": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex cdecd4d..d4dd1db 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) != len(self.inv):\n+        if len(self) == len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \n",
+                  "start_line": 776,
+                  "symbol": "OneToOne.__init__",
+                  "symbol_kind": "method"
+                },
+                {
+                  "end_line": 716,
+                  "file": "boltons/statsutils.py",
+                  "index": 1,
+                  "inverse_patch": "diff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 814ba46..36a8223 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles and [0.25, 0.5, 0.75]\n+        quantiles = quantiles or [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+                  "mutation_patch": "diff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 36a8223..814ba46 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles or [0.25, 0.5, 0.75]\n+        quantiles = quantiles and [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+                  "operator": "boolean_operator_swap",
+                  "single_fault_revert": "diff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 814ba46..36a8223 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles and [0.25, 0.5, 0.75]\n+        quantiles = quantiles or [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+                  "start_line": 641,
+                  "symbol": "Stats.describe",
+                  "symbol_kind": "method"
+                }
+              ],
+              "fault_count": 2,
+              "faults": [
+                {
+                  "end_line": 812,
+                  "file": "boltons/dictutils.py",
+                  "index": 0,
+                  "inverse_patch": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex cdecd4d..d4dd1db 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) != len(self.inv):\n+        if len(self) == len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \n",
+                  "mutation_patch": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex d4dd1db..cdecd4d 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) == len(self.inv):\n+        if len(self) != len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \n",
+                  "operator": "comparison_swap",
+                  "single_fault_revert": "diff --git a/boltons/dictutils.py b/boltons/dictutils.py\nindex cdecd4d..d4dd1db 100644\n--- a/boltons/dictutils.py\n+++ b/boltons/dictutils.py\n@@ -792,7 +792,7 @@ class OneToOne(dict):\n         dict.__init__(self, *a, **kw)\n         self.inv = self.__class__(_OTO_INV_MARKER, self)\n \n-        if len(self) != len(self.inv):\n+        if len(self) == len(self.inv):\n             # if lengths match, that means everything's unique\n             return\n \n",
+                  "start_line": 776,
+                  "symbol": "OneToOne.__init__",
+                  "symbol_kind": "method"
+                },
+                {
+                  "end_line": 716,
+                  "file": "boltons/statsutils.py",
+                  "index": 1,
+                  "inverse_patch": "diff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 814ba46..36a8223 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles and [0.25, 0.5, 0.75]\n+        quantiles = quantiles or [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+                  "mutation_patch": "diff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 36a8223..814ba46 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles or [0.25, 0.5, 0.75]\n+        quantiles = quantiles and [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+                  "operator": "boolean_operator_swap",
+                  "single_fault_revert": "diff --git a/boltons/statsutils.py b/boltons/statsutils.py\nindex 814ba46..36a8223 100644\n--- a/boltons/statsutils.py\n+++ b/boltons/statsutils.py\n@@ -699,7 +699,7 @@ class Stats:\n             raise ValueError('invalid format for describe,'\n                              ' expected one of \"dict\"/\"list\"/\"text\", not %r'\n                              % format)\n-        quantiles = quantiles and [0.25, 0.5, 0.75]\n+        quantiles = quantiles or [0.25, 0.5, 0.75]\n         q_items = []\n         for q in quantiles:\n             q_val = self.get_quantile(q)\n",
+                  "start_line": 641,
+                  "symbol": "Stats.describe",
+                  "symbol_kind": "method"
+                }
+              ],
+              "files": [
+                "boltons/dictutils.py",
+                "boltons/statsutils.py"
+              ],
+              "operation": "bug_combination",
+              "recovery": {
+                "behavior_basis": "upstream tests/test_dictutils.py::test_one_to_one",
+                "previously_untested_constituent": "OneToOne.__init__",
+                "source_task_id": "mahmoud-boltons__bug_combination__a00c108c7c90",
+                "strengthened_behavior": "OneToOne initialized from a mapping plus keyword arguments preserves its forward and inverse mapping."
+              }
+            },
+            "generator": "bug_combination",
+            "language": "python",
+            "seed": 18,
+            "tool_versions": {
+              "recovery": "legacy-workspace-reconstruction"
+            }
+          },
+          "target": {
+            "files": [
+              "boltons/dictutils.py",
+              "boltons/statsutils.py"
+            ],
+            "symbol": "OneToOne.__init__",
+            "symbols": [
+              "OneToOne.__init__",
+              "Stats.describe"
+            ]
+          }
+        },
+        "created_at": "2026-07-10T12:19:44+00:00",
+        "env_image": {
+          "base_image": "python:3.12-slim",
+          "baseline_exit_code": 0,
+          "baseline_green": true,
+          "baseline_summary": "reconstructed from previously proven legacy workspace",
+          "baseline_test_command": "python -m pytest -k 'not (test_one_to_one)'",
+          "built_at": "2026-07-10T00:00:00+00:00",
+          "commit": "979fa9b613fa8c0a455ae16ea6f2ec91c11ecafe",
+          "image_tag": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+          "install_commands": [
+            "pip install -e .",
+            "pip install pytest"
+          ],
+          "language": "python",
+          "prep_commands": [],
+          "provenance": {
+            "recovery": "legacy-workspace-reconstruction",
+            "source_task_id": "mahmoud-boltons__bug_combination__a00c108c7c90"
+          },
+          "repo_id": "mahmoud-boltons",
+          "workspace_dir": "/workspace/repo"
+        },
+        "fail_to_pass": [
+          "python -m pytest test_describe_bug.py",
+          "python -m pytest test_swe_forge_mut_1.py"
+        ],
+        "generator": "bug_combination",
+        "install_commands": [
+          "pip install -e .",
+          "pip install pytest"
+        ],
+        "language": "python",
+        "oracle_report": {
+          "alt_correct_accepted": true,
+          "details": {
+            "alt_correct": {
+              "alternatives_total": 1,
+              "gold_base": {
+                "accepted": true,
+                "f2p_passed": true,
+                "failing_test_ids": [],
+                "p2p_passed": true
+              },
+              "initial": {
+                "accepted": [
+                  "teacher_predicate_alternative"
+                ],
+                "per_alt": {
+                  "teacher_predicate_alternative": {
+                    "accepted": true,
+                    "f2p_passed": true,
+                    "failing_test_ids": [],
+                    "p2p_passed": true
+                  }
+                },
+                "rejected": []
+              },
+              "relax_enabled": false,
+              "stage": "alt_correct"
+            },
+            "differential": {
+              "added_test_paths": [],
+              "discarded_discriminators": [],
+              "final": {
+                "survivors": [],
+                "variants_killed": 1
+              },
+              "gold_base": {
+                "f2p_passed": true,
+                "failing_test_ids": [],
+                "p2p_passed": true,
+                "passes_suite": true
+              },
+              "initial": {
+                "killed": [
+                  "teacher_predicate_variant"
+                ],
+                "per_variant": {
+                  "teacher_predicate_variant": {
+                    "f2p_passed": false,
+                    "failing_test_ids": [
+                      "python -m pytest test_swe_forge_mut_1.py"
+                    ],
+                    "p2p_passed": true,
+                    "passes_suite": false
+                  }
+                },
+                "survivors": []
+              },
+              "rounds": [],
+              "stage": "differential",
+              "variants_total": 1
+            },
+            "env_image": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
+            "flakiness": {
+              "dropped": [],
+              "p2p": {
+                "broken_exit_codes": [
+                  0,
+                  0,
+                  0
+                ],
+                "broken_passed": [
+                  true,
+                  true,
+                  true
+                ],
+                "flaky": false,
+                "gold_exit_codes": [
+                  0,
+                  0,
+                  0
+                ],
+                "gold_passed": [
+                  true,
+                  true,
+                  true
+                ]
+              },
+              "p2p_command": "python -m pytest -k 'not (test_one_to_one)'",
+              "per_test": {
+                "python -m pytest test_describe_bug.py": {
+                  "broken_exit_codes": [
+                    1,
+                    1,
+                    1
+                  ],
+                  "broken_passed": [
+                    false,
+                    false,
+                    false
+                  ],
+                  "flaky": false,
+                  "gold_exit_codes": [
+                    0,
+                    0,
+                    0
+                  ],
+                  "gold_passed": [
+                    true,
+                    true,
+                    true
+                  ]
+                }
+              },
+              "runs": 3,
+              "stage": "flakiness"
+            },
+            "leak": {
+              "after": {
+                "clean": true,
+                "findings": [],
+                "markers": []
+              },
+              "before": {
+                "clean": true,
+                "findings": [],
+                "markers": []
+              },
+              "normalized": [
+                ".pytest_cache",
+                ".pytest_cache/.gitignore",
+                ".pytest_cache/CACHEDIR.TAG",
+                ".pytest_cache/README.md",
+                ".pytest_cache/v",
+                ".pytest_cache/v/cache",
+                ".pytest_cache/v/cache/nodeids",
+                "boltons/__pycache__",
+                "boltons/__pycache__/__init__.cpython-312.pyc",
+                "boltons/__pycache__/cacheutils.cpython-312.pyc",
+                "boltons/__pycache__/debugutils.cpython-312.pyc",
+                "boltons/__pycache__/dictutils.cpython-312.pyc",
+                "boltons/__pycache__/ecoutils.cpython-312.pyc",
+                "boltons/__pycache__/fileutils.cpython-312.pyc",
+                "boltons/__pycache__/formatutils.cpython-312.pyc",
+                "boltons/__pycache__/funcutils.cpython-312.pyc",
+                "boltons/__pycache__/gcutils.cpython-312.pyc",
+                "boltons/__pycache__/ioutils.cpython-312.pyc",
+                "boltons/__pycache__/iterutils.cpython-312.pyc",
+                "boltons/__pycache__/jsonutils.cpython-312.pyc",
+                "boltons/__pycache__/listutils.cpython-312.pyc",
+                "boltons/__pycache__/mathutils.cpython-312.pyc",
+                "boltons/__pycache__/namedutils.cpython-312.pyc",
+                "boltons/__pycache__/queueutils.cpython-312.pyc",
+                "boltons/__pycache__/setutils.cpython-312.pyc",
+                "boltons/__pycache__/socketutils.cpython-312.pyc",
+                "boltons/__pycache__/statsutils.cpython-312.pyc",
+                "boltons/__pycache__/strutils.cpython-312.pyc",
+                "boltons/__pycache__/tableutils.cpython-312.pyc",
+                "boltons/__pycache__/tbutils.cpython-312.pyc",
+                "boltons/__pycache__/timeutils.cpython-312.pyc",
+                "boltons/__pycache__/typeutils.cpython-312.pyc",
+                "boltons/__pycache__/urlutils.cpython-312.pyc",
+                "tests/__pycache__",
+                "tests/__pycache__/__init__.cpython-312.pyc",
+                "tests/__pycache__/conftest.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_cacheutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_debugutils_trace.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_dictutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_ecoutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_fileutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_formatutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_funcutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_funcutils_fb.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_funcutils_fb_py3.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_gcutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_ioutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_iterutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_jsonutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_listutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_mathutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_namedutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_queueutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_setutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_socketutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_statsutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_statsutils_histogram.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_strutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_tableutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_tbutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_tbutils_parsed_exc.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_timeutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_typeutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_urlutils.cpython-312-pytest-9.1.1.pyc"
+              ],
+              "removed": [],
+              "stage": "leak"
+            },
+            "multifault": {
+              "constituent_metadata_fingerprint": "621bee926ab39fd4512e7a4f5dfc45ca865baa7df8311e335716788f722baf7e",
+              "constituents": [
+                {
+                  "failed_f2p_test_ids": [
+                    "python -m pytest test_swe_forge_mut_1.py"
+                  ],
+                  "file": "boltons/dictutils.py",
+                  "index": 0,
+                  "inverse_patch_sha256": "ae0e856e8787dcffe2abaf89aa1f674d4b7fc7fd1f41302002bed213d1b831cf",
+                  "other_inverse_patches_applied": true,
+                  "p2p_passed": true,
+                  "reason": "",
+                  "repaired_indices": [
+                    1
+                  ],
+                  "verdict": "pass"
+                },
+                {
+                  "failed_f2p_test_ids": [
+                    "python -m pytest test_describe_bug.py",
+                    "python -m pytest test_swe_forge_mut_1.py"
+                  ],
+                  "file": "boltons/statsutils.py",
+                  "index": 1,
+                  "inverse_patch_sha256": "5cba72ff00996e602871eff7fd673f00dbeb2d212025d21d0e2eff289e4e7027",
+                  "other_inverse_patches_applied": true,
+                  "p2p_passed": true,
+                  "reason": "",
+                  "repaired_indices": [
+                    0
+                  ],
+                  "verdict": "pass"
+                }
+              ],
+              "p2p_command": "python -m pytest -k 'not (test_one_to_one)'",
+              "stage": "oracle.multifault",
+              "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e"
+            },
+            "mutation": {
+              "added_test_paths": [
+                "test_swe_forge_mut_1.py"
+              ],
+              "final": {
+                "kill_ratio": 0.8,
+                "killed": 52,
+                "survived": 13,
+                "tool": "cosmic-ray",
+                "total": 65
+              },
+              "initial": {
+                "kill_ratio": 0.6308,
+                "killed": 41,
+                "survived": 24,
+                "tool": "cosmic-ray",
+                "total": 65
+              },
+              "rounds": [
+                {
+                  "accepted": 1,
+                  "kill_ratio_after": 0.8,
+                  "proposed": 1,
+                  "round": 1,
+                  "survived_after": 13
+                }
+              ],
+              "stage": "mutation",
+              "threshold": 0.8,
+              "tool": "cosmic-ray"
+            },
+            "mutation_final": {
+              "measurement": {
+                "added_test_paths": [],
+                "final": {
+                  "kill_ratio": 0.8,
+                  "killed": 52,
+                  "survived": 13,
+                  "tool": "cosmic-ray",
+                  "total": 65
+                },
+                "initial": {
+                  "kill_ratio": 0.8,
+                  "killed": 52,
+                  "survived": 13,
+                  "tool": "cosmic-ray",
+                  "total": 65
+                },
+                "rounds": [],
+                "stage": "mutation",
+                "threshold": 0.8,
+                "tool": "cosmic-ray"
+              },
+              "no_synthesis": true,
+              "replacement_counts": {
+                "kill_ratio": 0.8,
+                "killed": 52,
+                "tool": "cosmic-ray",
+                "total": 65
+              },
+              "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e",
+              "threshold": 0.8
+            },
+            "p2p_broken": {
+              "command": "python -m pytest -k 'not (test_one_to_one)'",
+              "exit_code": 0,
+              "passed": true
+            },
+            "p2p_command": "python -m pytest -k 'not (test_one_to_one)'",
+            "p2p_gold": {
+              "command": "python -m pytest -k 'not (test_one_to_one)'",
+              "exit_code": 0,
+              "passed": true
+            },
+            "pipeline": {
+              "failed_gate": null,
+              "gate_order": [
+                "establish",
+                "flakiness",
+                "mutation",
+                "differential",
+                "alt_correct",
+                "multifault",
+                "leak"
+              ],
+              "gates_run": [
+                "establish",
+                "flakiness",
+                "mutation",
+                "differential",
+                "alt_correct",
+                "multifault",
+                "leak"
+              ],
+              "verdict": "pass"
+            },
+            "provided_confirmations": [
+              {
+                "confirmed": true,
+                "fails_on_broken": true,
+                "passes_on_gold": true,
+                "test_id": "python -m pytest test_describe_bug.py"
+              }
+            ],
+            "recovery_teacher_alt_correct": {
+              "cost": 0.000745,
+              "model": "anthropic/claude-opus-4-8",
+              "selected_predicate": "not len(self) != len(self.inv)",
+              "teacher_text": "not len(self) != len(self.inv)",
+              "usage": {
+                "completion_tokens": 15,
+                "prompt_tokens": 74,
+                "total_tokens": 89
+              }
+            },
+            "recovery_teacher_variant": {
+              "cost": 0.0009650000000000001,
+              "model": "anthropic/claude-opus-4-8",
+              "selected_predicate": "len(self) != len(self.inv)",
+              "teacher_text": "`len(self) != len(self.inv)`",
+              "usage": {
+                "completion_tokens": 16,
+                "prompt_tokens": 113,
+                "total_tokens": 129
+              }
+            },
+            "stage": "establish",
+            "synthesized_proposed": 0
+          },
+          "differential_pass": true,
+          "fail_to_pass": [
+            "python -m pytest test_describe_bug.py"
+          ],
+          "final_mutation_evidence": {
+            "mutants_killed": 52,
+            "mutants_total": 65,
+            "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e",
+            "threshold": 0.8,
+            "tool": "cosmic-ray"
+          },
+          "flakiness_runs": 3,
+          "generator": "bug_combination",
+          "language": "python",
+          "leak_audit": "clean",
+          "multifault_evidence": {
+            "constituents": [
+              {
+                "failed_f2p_test_ids": [
+                  "python -m pytest test_swe_forge_mut_1.py"
+                ],
+                "file": "boltons/dictutils.py",
+                "index": 0,
+                "inverse_patch_sha256": "ae0e856e8787dcffe2abaf89aa1f674d4b7fc7fd1f41302002bed213d1b831cf",
+                "other_inverse_patches_applied": true,
+                "p2p_passed": true,
+                "reason": "",
+                "repaired_indices": [
+                  1
+                ],
+                "verdict": "pass"
+              },
+              {
+                "failed_f2p_test_ids": [
+                  "python -m pytest test_describe_bug.py",
+                  "python -m pytest test_swe_forge_mut_1.py"
+                ],
+                "file": "boltons/statsutils.py",
+                "index": 1,
+                "inverse_patch_sha256": "5cba72ff00996e602871eff7fd673f00dbeb2d212025d21d0e2eff289e4e7027",
+                "other_inverse_patches_applied": true,
+                "p2p_passed": true,
+                "reason": "",
+                "repaired_indices": [
+                  0
+                ],
+                "verdict": "pass"
+              }
+            ],
+            "p2p_command": "python -m pytest -k 'not (test_one_to_one)'",
+            "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e"
+          },
+          "mutants_killed": 52,
+          "mutants_total": 65,
+          "pass_to_pass": [
+            "python -m pytest -k 'not (test_one_to_one)'"
+          ],
+          "provenance": {
+            "created_at": "2026-07-10T12:07:56+00:00",
+            "details": {
+              "detected": false,
+              "findings_after": [],
+              "findings_before": [],
+              "normalized": [
+                ".pytest_cache",
+                ".pytest_cache/.gitignore",
+                ".pytest_cache/CACHEDIR.TAG",
+                ".pytest_cache/README.md",
+                ".pytest_cache/v",
+                ".pytest_cache/v/cache",
+                ".pytest_cache/v/cache/nodeids",
+                "boltons/__pycache__",
+                "boltons/__pycache__/__init__.cpython-312.pyc",
+                "boltons/__pycache__/cacheutils.cpython-312.pyc",
+                "boltons/__pycache__/debugutils.cpython-312.pyc",
+                "boltons/__pycache__/dictutils.cpython-312.pyc",
+                "boltons/__pycache__/ecoutils.cpython-312.pyc",
+                "boltons/__pycache__/fileutils.cpython-312.pyc",
+                "boltons/__pycache__/formatutils.cpython-312.pyc",
+                "boltons/__pycache__/funcutils.cpython-312.pyc",
+                "boltons/__pycache__/gcutils.cpython-312.pyc",
+                "boltons/__pycache__/ioutils.cpython-312.pyc",
+                "boltons/__pycache__/iterutils.cpython-312.pyc",
+                "boltons/__pycache__/jsonutils.cpython-312.pyc",
+                "boltons/__pycache__/listutils.cpython-312.pyc",
+                "boltons/__pycache__/mathutils.cpython-312.pyc",
+                "boltons/__pycache__/namedutils.cpython-312.pyc",
+                "boltons/__pycache__/queueutils.cpython-312.pyc",
+                "boltons/__pycache__/setutils.cpython-312.pyc",
+                "boltons/__pycache__/socketutils.cpython-312.pyc",
+                "boltons/__pycache__/statsutils.cpython-312.pyc",
+                "boltons/__pycache__/strutils.cpython-312.pyc",
+                "boltons/__pycache__/tableutils.cpython-312.pyc",
+                "boltons/__pycache__/tbutils.cpython-312.pyc",
+                "boltons/__pycache__/timeutils.cpython-312.pyc",
+                "boltons/__pycache__/typeutils.cpython-312.pyc",
+                "boltons/__pycache__/urlutils.cpython-312.pyc",
+                "tests/__pycache__",
+                "tests/__pycache__/__init__.cpython-312.pyc",
+                "tests/__pycache__/conftest.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_cacheutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_debugutils_trace.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_dictutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_ecoutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_fileutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_formatutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_funcutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_funcutils_fb.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_funcutils_fb_py3.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_gcutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_ioutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_iterutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_jsonutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_listutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_mathutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_namedutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_queueutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_setutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_socketutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_statsutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_statsutils_histogram.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_strutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_tableutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_tbutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_tbutils_parsed_exc.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_timeutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_typeutils.cpython-312-pytest-9.1.1.pyc",
+                "tests/__pycache__/test_urlutils.cpython-312-pytest-9.1.1.pyc"
+              ],
+              "removed": [],
+              "sanitized": false,
+              "stage": "oracle.leak"
+            },
+            "generator": "bug_combination",
+            "language": "python",
+            "seed": 18,
+            "tool_versions": {
+              "cosmic-ray": "",
+              "litellm": "1.90.0"
+            }
+          },
+          "reasons": [],
+          "test_files": [
+            {
+              "content": "from boltons.dictutils import OneToOne\nfrom boltons.statsutils import Stats, describe\n\n\ndef test_describe_default_quantiles():\n    result = describe(range(7), format='dict')\n    assert result['count'] == 7\n    assert result['mean'] == 3.0\n    assert result['0.25'] == 1.5\n    assert result['0.5'] == 3\n    assert result['0.75'] == 4.5\n\n\ndef test_stats_describe_default_quantiles_list():\n    items = Stats(range(1, 8)).describe(format='list')\n    labels = [key for key, _value in items]\n    assert '0.25' in labels\n    assert '0.5' in labels\n    assert '0.75' in labels\n\n\ndef test_one_to_one_initializes_mapping_and_keywords():\n    one_to_one = OneToOne({'alpha': 1}, beta=2)\n    assert one_to_one == {'alpha': 1, 'beta': 2}\n    assert one_to_one.inv == {1: 'alpha', 2: 'beta'}\n",
+              "origin": "provided",
+              "path": "test_describe_bug.py"
+            },
+            {
+              "content": "import pytest\n\nfrom boltons.dictutils import OneToOne\nfrom boltons.statsutils import Stats\n\n\ndef test_one_to_one_basic():\n    oto = OneToOne({'a': 1, 'b': 2})\n    assert oto['a'] == 1\n    assert oto['b'] == 2\n    assert oto.inv[1] == 'a'\n    assert oto.inv[2] == 'b'\n    assert len(oto) == 2\n    assert len(oto.inv) == 2\n\n\ndef test_one_to_one_with_dupe_values_keeps_last():\n    # Values are duplicated: len(self) != len(self.inv), so it rebuilds\n    # from inv, effectively deduping so only one key survives per value.\n    oto = OneToOne({'a': 1, 'b': 1})\n    # After rebuild, inv has {1: <one of a/b>}, forward is inverse of that\n    assert len(oto) == 1\n    assert len(oto.inv) == 1\n    # the surviving value must be 1\n    assert list(oto.values()) == [1]\n    # and it must round-trip\n    only_key = list(oto.keys())[0]\n    assert only_key in ('a', 'b')\n    assert oto.inv[1] == only_key\n    assert oto[only_key] == 1\n\n\ndef test_one_to_one_unique_raises_on_dupe():\n    with pytest.raises(ValueError):\n        OneToOne.unique({'a': 1, 'b': 1})\n\n\ndef test_one_to_one_unique_ok():\n    oto = OneToOne.unique({'a': 1, 'b': 2})\n    assert oto['a'] == 1\n    assert oto.inv[2] == 'b'\n\n\ndef test_one_to_one_unique_across_inputs():\n    with pytest.raises(ValueError):\n        OneToOne.unique({'a': 2}, b=2)\n\n\ndef test_one_to_one_empty():\n    oto = OneToOne()\n    assert len(oto) == 0\n    assert len(oto.inv) == 0\n    oto['x'] = 10\n    assert oto['x'] == 10\n    assert oto.inv[10] == 'x'\n\n\ndef test_one_to_one_inv_is_populated_when_unique():\n    # len check must be == to skip rebuild for unique data\n    oto = OneToOne({'a': 1, 'b': 2, 'c': 3})\n    assert dict(oto) == {'a': 1, 'b': 2, 'c': 3}\n    assert dict(oto.inv) == {1: 'a', 2: 'b', 3: 'c'}\n\n\ndef test_one_to_one_overwrite_both_directions():\n    oto = OneToOne({'a': 1, 'b': 2})\n    oto.inv[1] = 'c'\n    assert oto.get('a') is None\n    assert oto['c'] == 1\n    assert oto.inv[1] == 'c'\n    assert len(oto) == 2\n\n\ndef test_stats_describe_text_format():\n    stats = Stats(range(1, 8))\n    text = stats.describe(format='text')\n    expected = (\n        \"count:    7\\n\"\n        \"mean:     4.0\\n\"\n        \"std_dev:  2.0\\n\"\n        \"mad:      2.0\\n\"\n        \"min:      1\\n\"\n        \"0.25:     2.5\\n\"\n        \"0.5:      4\\n\"\n        \"0.75:     5.5\\n\"\n        \"max:      7\"\n    )\n    assert text == expected\n\n\ndef test_stats_describe_ljust_padding():\n    # verify labels are ljust to 10 chars (the '%' mutation would change padding)\n    stats = Stats(range(1, 8))\n    lines = stats.describe(format='text').split('\\n')\n    for line in lines:\n        label, sep, rest = line.partition(':')\n        # the \"label:\" portion is ljust(10)\n        prefix_len = len(label) + 1  # +1 for ':'\n        # everything up to the value is padded to at least 10\n        # find where value starts\n        padded = (label + ':').ljust(10)\n        assert line.startswith(padded)\n\n\ndef test_stats_describe_dict_format():\n    stats = Stats(range(1, 8))\n    d = stats.describe(format='dict')\n    assert d['count'] == 7\n    assert d['mean'] == 4.0\n    assert d['std_dev'] == 2.0\n    assert d['mad'] == 2.0\n    assert d['min'] == 1\n    assert d['max'] == 7\n    assert d['0.25'] == 2.5\n    assert d['0.5'] == 4\n    assert d['0.75'] == 5.5\n\n\ndef test_stats_describe_list_format():\n    stats = Stats(range(1, 8))\n    lst = stats.describe(format='list')\n    keys = [k for k, v in lst]\n    assert keys == ['count', 'mean', 'std_dev', 'mad', 'min',\n                    '0.25', '0.5', '0.75', 'max']\n\n\ndef test_stats_describe_default_is_dict():\n    stats = Stats(range(1, 8))\n    ret = stats.describe()\n    assert isinstance(ret, dict)\n\n\ndef test_stats_describe_invalid_format():\n    stats = Stats(range(1, 8))\n    with pytest.raises(ValueError):\n        stats.describe(format='bogus')\n\n\ndef test_stats_describe_custom_quantiles():\n    stats = Stats(range(1, 8))\n    d = stats.describe(quantiles=[0.1, 0.9], format='dict')\n    assert '0.1' in d\n    assert '0.9' in d\n    assert '0.25' not in d\n",
+              "origin": "synthesized",
+              "path": "test_swe_forge_mut_1.py"
+            }
+          ],
+          "verdict": "pass"
+        },
+        "pass_to_pass": [
+          "python -m pytest -k 'not (test_one_to_one)'"
+        ],
+        "provenance": {
+          "created_at": "2026-07-10T12:19:44+00:00",
+          "details": {
+            "alt_correct_accepted": true,
+            "band_verdict": "keep",
+            "differential_pass": true,
+            "final_mutation_suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e",
+            "final_mutation_threshold": 0.8,
+            "flakiness_runs": 3,
+            "frontier_pass_at_k": 0.16666666666666666,
+            "generator": "bug_combination",
+            "irt_difficulty": 1.3427448117050205,
+            "irt_discrimination": 4.703802194101592,
+            "leak_audit": "clean",
+            "multifault_completeness": {
+              "constituents": [
+                {
+                  "failed_f2p_test_ids": [
+                    "python -m pytest test_swe_forge_mut_1.py"
+                  ],
+                  "file": "boltons/dictutils.py",
+                  "index": 0,
+                  "inverse_patch_sha256": "ae0e856e8787dcffe2abaf89aa1f674d4b7fc7fd1f41302002bed213d1b831cf",
+                  "other_inverse_patches_applied": true,
+                  "p2p_passed": true,
+                  "reason": "",
+                  "repaired_indices": [
+                    1
+                  ],
+                  "verdict": "pass"
+                },
+                {
+                  "failed_f2p_test_ids": [
+                    "python -m pytest test_describe_bug.py",
+                    "python -m pytest test_swe_forge_mut_1.py"
+                  ],
+                  "file": "boltons/statsutils.py",
+                  "index": 1,
+                  "inverse_patch_sha256": "5cba72ff00996e602871eff7fd673f00dbeb2d212025d21d0e2eff289e4e7027",
+                  "other_inverse_patches_applied": true,
+                  "p2p_passed": true,
+                  "reason": "",
+                  "repaired_indices": [
+                    0
+                  ],
+                  "verdict": "pass"
+                }
+              ],
+              "p2p_command": "python -m pytest -k 'not (test_one_to_one)'",
+              "suite_fingerprint": "c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e"
+            },
+            "mutants_killed": 52,
+            "mutants_total": 65,
+            "oracle_verdict": "pass",
+            "panel": [
+              {
+                "k": 6,
+                "model": "openai/gpt-4o-mini",
+                "pass_at_k": 0.0,
+                "solves": 0,
+                "tier": "weak"
+              },
+              {
+                "k": 6,
+                "model": "anthropic/claude-sonnet-4-6",
+                "pass_at_k": 0.0,
+                "solves": 0,
+                "tier": "mid"
+              },
+              {
+                "k": 6,
+                "model": "anthropic/claude-opus-4-8",
+                "pass_at_k": 0.16666666666666666,
+                "solves": 1,
+                "tier": "frontier"
+              },
+              {
+                "k": 6,
+                "model": "openai/gpt-5.5",
+                "pass_at_k": 0.16666666666666666,
+                "solves": 1,
+                "tier": "frontier"
+              }
+            ],
+            "seed": 18,
+            "tier_pass_rates": {
+              "frontier": 0.16666666666666666,
+              "mid": 0.0,
+              "weak": 0.0
+            }
+          },
+          "generator": "bug_combination",
+          "language": "python",
+          "seed": 18,
+          "tool_versions": {
+            "litellm": "1.90.0",
+            "recovery": "legacy-workspace-reconstruction"
+          }
+        },
+        "repo": "mahmoud/boltons",
+        "repo_url": "https://github.com/mahmoud/boltons.git",
+        "spec": {
+          "interface_block": "Expected interface (implement these public symbols; signatures only - bodies are up to you):\n# boltons/dictutils.py\n- def __init__(self, *args, **kwargs)  [method]  (boltons/dictutils.py)\n# boltons/statsutils.py\n- def __init__(self, name, func)  [method]  (boltons/statsutils.py)\n- def describe(self, quantiles, format)  [method]  (boltons/statsutils.py)",
+          "problem_statement": "Two modules provide utility data structures and statistical helpers. A constructor in the dictionary utilities module currently produces an incorrect result when initialized, so that a freshly built instance does not reflect the arguments provided to it and does not behave consistently with the mapping it is intended to represent.\n\nThe solver must ensure that the affected initializer correctly builds an instance from the supplied positional and keyword arguments, so that the resulting object's observable contents and behavior match what those arguments describe. The statistics helpers (a named descriptor initialized with a name and a function, and a describe operation accepting quantiles and an output format) must integrate with this corrected behavior so that the overall public interface behaves as expected.\n\nCurrently, initializing the affected object yields observable state that differs from the intended result; the goal is for initialization to yield the correct, expected state.",
+          "provenance": {
+            "created_at": "2026-07-10T00:00:00+00:00",
+            "details": {
+              "authoring_mode": "legacy-task-spec",
+              "f2p_tests": [
+                "test_describe_bug.py"
+              ],
+              "source_task_id": "mahmoud-boltons__bug_combination__a00c108c7c90"
+            },
+            "generator": "bug_combination",
+            "language": "python",
+            "seed": 18,
+            "tool_versions": {
+              "recovery": "legacy-workspace-reconstruction"
+            }
+          },
+          "requirements": [
+            "Initializing the dictionary-utilities object with the given positional and keyword arguments must produce an instance whose observable contents and behavior match the intended mapping described by those arguments, rather than the incorrect result currently produced."
+          ]
+        },
+        "task_id": "mahmoud-boltons__bug_combination__242d17b94d94"
+      }
+    }
+  ],
+  "generation_id": "031077ec9eff4e098c4359d2e3efc7f8",
+  "schema_version": 1,
+  "task_ids": [
+    "mahmoud-boltons__bug_combination__242d17b94d94"
+  ]
+}

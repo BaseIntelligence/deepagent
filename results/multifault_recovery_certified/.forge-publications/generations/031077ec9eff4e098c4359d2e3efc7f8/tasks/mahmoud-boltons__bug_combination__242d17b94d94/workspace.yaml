@@ -1,0 +1,74 @@
+task_id: mahmoud-boltons__bug_combination__242d17b94d94
+repo:
+  url: https://github.com/mahmoud/boltons.git
+  base_commit: 979fa9b613fa8c0a455ae16ea6f2ec91c11ecafe
+  path: /workspace/repo
+language: python
+prompt: 'Two modules provide utility data structures and statistical helpers. A constructor
+  in the dictionary utilities module currently produces an incorrect result when initialized,
+  so that a freshly built instance does not reflect the arguments provided to it and
+  does not behave consistently with the mapping it is intended to represent.
+
+
+  The solver must ensure that the affected initializer correctly builds an instance
+  from the supplied positional and keyword arguments, so that the resulting object''s
+  observable contents and behavior match what those arguments describe. The statistics
+  helpers (a named descriptor initialized with a name and a function, and a describe
+  operation accepting quantiles and an output format) must integrate with this corrected
+  behavior so that the overall public interface behaves as expected.
+
+
+  Currently, initializing the affected object yields observable state that differs
+  from the intended result; the goal is for initialization to yield the correct, expected
+  state.'
+requirements:
+- Initializing the dictionary-utilities object with the given positional and keyword
+  arguments must produce an instance whose observable contents and behavior match
+  the intended mapping described by those arguments, rather than the incorrect result
+  currently produced.
+interface: 'Expected interface (implement these public symbols; signatures only -
+  bodies are up to you):
+
+  # boltons/dictutils.py
+
+  - def __init__(self, *args, **kwargs)  [method]  (boltons/dictutils.py)
+
+  # boltons/statsutils.py
+
+  - def __init__(self, name, func)  [method]  (boltons/statsutils.py)
+
+  - def describe(self, quantiles, format)  [method]  (boltons/statsutils.py)'
+environment:
+  image: swe-forge-env-mahmoud_boltons:979fa9b613fa
+  base_image: python:3.12-slim
+  repo_path: /workspace/repo
+  forge_path: /workspace/forge
+  tests_path: /workspace/forge/tests
+install:
+  commands:
+  - pip install -e .
+  - pip install pytest
+  working_dir: /workspace/repo
+tests:
+  fail_to_pass:
+  - python -m pytest test_describe_bug.py
+  - python -m pytest test_swe_forge_mut_1.py
+  pass_to_pass:
+  - python -m pytest -k 'not (test_one_to_one)'
+  working_dir: /workspace/repo
+solution:
+  path: /workspace/forge
+  patch_file: patch.diff
+  deletion_patch_file: deletion_patch.diff
+  tests_path: /workspace/forge/tests
+synthetic:
+  source_type: synthetic_bug_combination
+  deletion_patch_file: deletion_patch.diff
+  strategy: bug_combination
+  generator: bug_combination
+meta:
+  generator: bug_combination
+  band_verdict: keep
+  oracle_verdict: pass
+  final_mutation_suite_fingerprint: c2c1cc5bb236e5878cf0f0d5431bf19abe56dc7c74125d97c3c81750ad8f422e
+  created_at: '2026-07-10T12:19:44+00:00'
