@@ -270,8 +270,43 @@ def _ledger(tmp_path: Path) -> RecoveryBudgetLedger:
 def _fresh_metered_calibration(
     task: object, ledger: RecoveryBudgetLedger
 ) -> CalibrationReport:
-    """Attach one validation and one rollout with exact ledger linkage."""
+    """Attach every recovery oracle/calibration call to exact ledger records."""
     calibration = task.calibration_report  # type: ignore[attr-defined]
+    oracle = task.oracle_report  # type: ignore[attr-defined]
+    teacher_gates = oracle.details["teacher_gates"]
+    assert isinstance(teacher_gates, dict)
+    for gate in ("differential", "alt_correct"):
+        evidence = teacher_gates[gate]
+        assert isinstance(evidence, dict)
+        calls = evidence["calls"]
+        assert isinstance(calls, list) and len(calls) == 1
+        call = calls[0]
+        assert isinstance(call, dict)
+        logical_call_id = f"oracle-{gate}-proposal"
+        physical_id = ledger.reserve(
+            logical_call_id=logical_call_id,
+            stage=f"oracle.{gate}",
+            model="anthropic/test-model",
+            retry=0,
+        )
+        usage = Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2)
+        ledger.settle(
+            physical_id,
+            request_id=f"{gate}-request",
+            usage=usage,
+            cost=0.01,
+            status="success",
+            finish_reason="stop",
+        )
+        settled = next(
+            item
+            for item in ledger.settled_calls()
+            if item["physical_call_id"] == physical_id
+        )
+        call["recovery_accounting"] = {
+            "logical_call_id": logical_call_id,
+            "physical_calls": [settled],
+        }
     calibration.models = [ModelSolveRecord("mid/test", "mid", 1, 1, 1.0)]
     calibration.k = 1
     validation_usage = Usage(prompt_tokens=1, completion_tokens=2, total_tokens=3)
@@ -471,6 +506,37 @@ def test_recertification_blocks_unreconciled_ledger_calls(tmp_path: Path) -> Non
     )
 
     with pytest.raises(RecertificationError, match="accounting cannot authorize"):
+        build_recertification_request(
+            generation, task.oracle_report, recovery_ledger=ledger
+        )
+
+
+def test_recertification_blocks_calibration_only_oracle_accounting(
+    tmp_path: Path,
+) -> None:
+    """Calibration ledger records cannot authorize an unlinked real oracle call."""
+    task = _task()
+    ledger = _ledger(tmp_path)
+    _fresh_metered_calibration(task, ledger)
+    teacher_gates = task.oracle_report.details["teacher_gates"]
+    assert isinstance(teacher_gates, dict)
+    differential = teacher_gates["differential"]
+    assert isinstance(differential, dict)
+    calls = differential["calls"]
+    assert isinstance(calls, list) and isinstance(calls[0], dict)
+    calls[0]["recovery_accounting"] = None
+    generation = PublishedGeneration(
+        generation_id="genuine",
+        root=Path("/tmp/genuine"),
+        tasks_dir=Path("/tmp/genuine/tasks"),
+        jsonl_path=Path("/tmp/genuine/dataset.jsonl"),
+        parquet_path=Path("/tmp/genuine/dataset.parquet"),
+        entries=(PublicationEntry(index=0, task=task),),
+    )
+
+    with pytest.raises(
+        RecertificationError, match="accounting cannot authorize publication"
+    ):
         build_recertification_request(
             generation, task.oracle_report, recovery_ledger=ledger
         )

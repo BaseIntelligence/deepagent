@@ -688,30 +688,127 @@ def reconcile_recovery_call_evidence(
     }
 
 
+def _oracle_call_context(gate: object, call_kind: object, index: int) -> str:
+    """Describe a safe oracle attestation location without serializing content."""
+    gate_name = gate if isinstance(gate, str) and gate else "unknown"
+    kind_name = call_kind if isinstance(call_kind, str) and call_kind else "unknown"
+    return f"real oracle call {gate_name}/{kind_name} at index {index}"
+
+
+def _require_oracle_recovery_evidence(
+    oracle_report: _ReportLike,
+) -> list[dict[str, object]]:
+    """Validate and collect every authoritative oracle ledger link.
+
+    Recovery reports can retain historical direct accounting for inspection, but
+    that legacy material is not an authority to publish.  Only a concrete
+    ``real_teacher`` gate attestation can link its logical call to the complete
+    set of physical attempts.  The later ledger reconciliation then proves those
+    records one-to-one against the durable reserve/settle ledger.
+    """
+    teacher_gates = oracle_report.details.get("teacher_gates")
+    if not isinstance(teacher_gates, dict):
+        return []
+
+    evidence: list[dict[str, object]] = []
+    for payload_gate, payload in teacher_gates.items():
+        if not isinstance(payload, dict):
+            continue
+        calls = payload.get("calls")
+        if not isinstance(calls, list):
+            continue
+        for index, call in enumerate(calls):
+            if not isinstance(call, dict) or call.get("real_teacher") is not True:
+                continue
+            gate = call.get("gate")
+            context = _oracle_call_context(gate, call.get("call_kind"), index)
+            if not isinstance(gate, str) or not gate.strip():
+                raise RecoveryAccountingError(f"{context} has no gate name")
+            if isinstance(payload_gate, str) and payload_gate and gate != payload_gate:
+                raise RecoveryAccountingError(
+                    f"{context} is recorded under a different teacher gate"
+                )
+            expected_stage = f"oracle.{gate}"
+            accounting = call.get("recovery_accounting")
+            if not isinstance(accounting, dict):
+                raise RecoveryAccountingError(f"{context} has no ledger linkage")
+            logical = accounting.get("logical_call_id")
+            physical_calls = accounting.get("physical_calls")
+            if not isinstance(logical, str) or not logical.strip():
+                raise RecoveryAccountingError(f"{context} has no logical call id")
+            if not isinstance(physical_calls, list) or not physical_calls:
+                raise RecoveryAccountingError(f"{context} has no physical ledger calls")
+
+            model = call.get("model")
+            status = call.get("status")
+            raw_usage = call.get("usage")
+            if not isinstance(model, str) or not model.strip():
+                raise RecoveryAccountingError(f"{context} has no model")
+            if status not in _SETTLED_STATUSES:
+                raise RecoveryAccountingError(f"{context} has invalid status")
+            if not isinstance(raw_usage, dict):
+                raise RecoveryAccountingError(f"{context} has malformed usage")
+            declared_usage = _usage_dict(raw_usage)
+            declared_cost = _money(call.get("cost"), field=f"{context} cost")
+
+            aggregate_usage = Usage()
+            aggregate_cost = Decimal()
+            retries: list[int] = []
+            for physical_index, physical in enumerate(physical_calls):
+                if not isinstance(physical, dict):
+                    raise RecoveryAccountingError(
+                        f"{context} has malformed physical call {physical_index}"
+                    )
+                child_logical = physical.get("logical_call_id")
+                if child_logical is not None and child_logical != logical:
+                    raise RecoveryAccountingError(
+                        f"{context} has mismatched logical_call_id"
+                    )
+                if physical.get("stage") != expected_stage:
+                    raise RecoveryAccountingError(f"{context} has mismatched stage")
+                if physical.get("model") != model:
+                    raise RecoveryAccountingError(f"{context} has mismatched model")
+                retry = physical.get("retry")
+                if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
+                    raise RecoveryAccountingError(f"{context} has malformed retry")
+                retries.append(retry)
+                raw_physical_usage = physical.get("usage")
+                if not isinstance(raw_physical_usage, dict):
+                    raise RecoveryAccountingError(
+                        f"{context} has malformed physical usage"
+                    )
+                aggregate_usage = aggregate_usage + Usage(
+                    **_usage_dict(raw_physical_usage)
+                )
+                aggregate_cost += _money(
+                    physical.get("cost"), field=f"{context} physical cost"
+                )
+            if retries != list(range(len(retries))):
+                raise RecoveryAccountingError(
+                    f"{context} has non-contiguous or out-of-order retries"
+                )
+            terminal = physical_calls[-1]
+            assert isinstance(terminal, dict)  # checked in the loop above
+            if terminal.get("status") != status:
+                raise RecoveryAccountingError(f"{context} has mismatched status")
+            if aggregate_usage.to_dict() != declared_usage:
+                raise RecoveryAccountingError(f"{context} has mismatched usage")
+            if aggregate_cost != declared_cost:
+                raise RecoveryAccountingError(f"{context} has mismatched cost")
+            evidence.append(
+                {
+                    "logical_call_id": logical,
+                    "physical_calls": [dict(item) for item in physical_calls],
+                }
+            )
+    return evidence
+
+
 def accounting_evidence_from_reports(
     oracle_report: _ReportLike, calibration_report: _ReportLike | None = None
 ) -> list[dict[str, object]]:
-    """Collect canonical recovery call evidence from oracle and calibration data."""
-    evidence: list[dict[str, object]] = []
-
-    teacher_gates = oracle_report.details.get("teacher_gates")
-    if isinstance(teacher_gates, dict):
-        for payload in teacher_gates.values():
-            if not isinstance(payload, dict):
-                continue
-            calls = payload.get("calls")
-            if not isinstance(calls, list):
-                continue
-            for call in calls:
-                if not isinstance(call, dict):
-                    continue
-                accounting = call.get("recovery_accounting")
-                if isinstance(accounting, dict):
-                    evidence.append(accounting)
-
-    direct_oracle = oracle_report.details.get("recovery_accounting")
-    if isinstance(direct_oracle, list):
-        evidence.extend(item for item in direct_oracle if isinstance(item, dict))
+    """Collect only authoritative oracle and calibration recovery evidence."""
+    evidence = _require_oracle_recovery_evidence(oracle_report)
 
     if calibration_report is not None:
         direct_calibration = calibration_report.details.get("recovery_accounting")
