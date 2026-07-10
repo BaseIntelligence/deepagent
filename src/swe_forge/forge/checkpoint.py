@@ -6,8 +6,8 @@ point (SIGTERM / budget-or-time ceiling / crash) has already shipped every keep
 found so far -- the machinery fix for the previously all-or-nothing Stage-5
 export that ran only after the whole sweep completed.
 
-It REUSES the Stage-5 export path unchanged -- :func:`assemble_forge_task` (the
-fail-fast export gate), :func:`export_forge_task` (the atomic temp-then-rename
+It reuses the Stage-5 private staging path -- :func:`assemble_forge_task` (the
+fail-fast export gate), :func:`_write_staged_workspace` (the non-publishing
 workspace writer), and :func:`export_dataset` (jsonl/parquet regeneration) -- and
 layers three whole-pipeline guarantees on top:
 
@@ -44,9 +44,9 @@ from swe_forge.forge.export import (
     ExportError,
     ExportRequest,
     TaskExportResult,
+    _write_staged_workspace,
     assemble_forge_task,
     export_dataset,
-    export_forge_task,
 )
 from swe_forge.forge.models import (
     ExportGateError,
@@ -523,10 +523,9 @@ class PilotCheckpoint:
                 raise PublicationError(
                     f"missing checkpoint request for newly staged task {task.task_id!r}"
                 )
-            return export_forge_task(
+            return _write_staged_workspace(
                 task,
-                stage_tasks,
-                overwrite=False,
+                stage_tasks / task.task_id,
                 adapter=self._adapter,
                 broken_tree=request.broken_tree,
             )

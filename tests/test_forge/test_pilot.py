@@ -2053,7 +2053,7 @@ def test_checkpoint_closes_admission_and_drains_accepted_keeps_in_plan_order(
     order: list[int] = []
     copied_sources: list[int] = []
     original = checkpoint._record_keep_sync
-    original_export = checkpoint_mod.export_forge_task
+    original_export = checkpoint_mod._write_staged_workspace
 
     def _blocking(index: int, request: ExportRequest):
         order.append(index)
@@ -2075,7 +2075,7 @@ def test_checkpoint_closes_admission_and_drains_accepted_keeps_in_plan_order(
         return original_export(*args, **kwargs)
 
     monkeypatch.setattr(
-        "swe_forge.forge.checkpoint.export_forge_task", _source_aware_export
+        "swe_forge.forge.checkpoint._write_staged_workspace", _source_aware_export
     )
 
     async def _drive() -> None:
@@ -2187,7 +2187,7 @@ def test_sigterm_drains_accepted_keep_before_run_root_cleanup(
     copied_markers: list[str] = []
     sources: list[Path] = []
     copy_started = threading.Event()
-    original_export = checkpoint_mod.export_forge_task
+    original_export = checkpoint_mod._write_staged_workspace
 
     def _slow_export(*args: object, **kwargs: object):
         broken = kwargs.get("broken_tree")
@@ -2203,7 +2203,9 @@ def test_sigterm_drains_accepted_keep_before_run_root_cleanup(
         kwargs["broken_tree"] = None
         return original_export(*args, **kwargs)
 
-    monkeypatch.setattr("swe_forge.forge.checkpoint.export_forge_task", _slow_export)
+    monkeypatch.setattr(
+        "swe_forge.forge.checkpoint._write_staged_workspace", _slow_export
+    )
 
     async def _drive() -> PilotOutcome:
         class KeepThenBlock(FakeProcessor):

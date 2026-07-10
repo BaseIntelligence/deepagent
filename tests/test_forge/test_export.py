@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,6 +32,7 @@ import pytest
 from swe_forge.export.jsonl import import_jsonl
 from swe_forge.export.parquet import import_parquet
 from swe_forge.forge import export as export_mod
+from swe_forge.forge.gold_eval import discover_task_dirs
 from swe_forge.forge.export import (
     ExportRequest,
     assemble_forge_task,
@@ -691,6 +694,21 @@ def test_existing_dir_without_overwrite_is_skipped(tmp_path: Path) -> None:
     assert sentinel.read_text() == "keep me"  # preserved, not half-overwritten
 
 
+def test_direct_export_is_discoverable_without_its_internal_store(
+    tmp_path: Path,
+) -> None:
+    """Generic task discovery sees only the direct workspace, not its metadata."""
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+
+    result = export_forge_task(task, tasks_root, overwrite=True)
+
+    assert result.shipped
+    assert result.path is not None
+    assert discover_task_dirs(tasks_root) == [result.path]
+    assert not (tasks_root / ".forge-task-publications").exists()
+
+
 def test_failed_midwrite_leaves_no_partial_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -707,6 +725,323 @@ def test_failed_midwrite_leaves_no_partial_dir(
     assert not (tasks_root / task.task_id).exists()
     # No leftover temp dirs either.
     assert list(tasks_root.iterdir()) == []
+
+
+def _workspace_snapshot(workspace: Path) -> dict[str, bytes]:
+    """Return the complete visible workspace bytes for overwrite assertions."""
+    return {
+        path.relative_to(workspace).as_posix(): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_direct_export_roots_do_not_share_private_generations(tmp_path: Path) -> None:
+    """Same-id workspaces under sibling task roots remain independently selected."""
+    task = _task()
+    first_root = tmp_path / "tasks-one"
+    second_root = tmp_path / "tasks-two"
+    first = export_forge_task(task, first_root, overwrite=True)
+    assert first.shipped
+    assert first.path is not None
+    before = _workspace_snapshot(first.path)
+
+    assert export_forge_task(task, second_root, overwrite=True).shipped
+    successor = _task()
+    successor.spec.problem_statement = "A root-local successor."
+    second = export_forge_task(successor, second_root, overwrite=True)
+
+    assert second.shipped
+    assert _workspace_snapshot(first.path) == before
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["workspace_write", "validation", "audit", "generation_rename", "pointer_switch"],
+)
+def test_direct_overwrite_failure_preserves_prior_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """Every direct-publication failure keeps the selected workspace unchanged."""
+    tasks_root = tmp_path / "tasks"
+    predecessor = _task()
+    first = export_forge_task(predecessor, tasks_root, overwrite=True)
+    assert first.shipped
+    assert first.path is not None
+    before = _workspace_snapshot(first.path)
+
+    successor = _task()
+    successor.spec.problem_statement = "A distinct replacement workspace."
+
+    if failure == "workspace_write":
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("injected workspace-write failure")
+
+        monkeypatch.setattr(export_mod, "_write_evaluate", _boom)
+    elif failure == "validation":
+
+        def _validation_boom(*_args: object, **_kwargs: object) -> None:
+            raise OSError("injected validation failure")
+
+        monkeypatch.setattr(export_mod, "_validate_staged_workspace", _validation_boom)
+    elif failure == "audit":
+
+        def _audit_boom(*_args: object, **_kwargs: object) -> object:
+            raise OSError("injected audit failure")
+
+        monkeypatch.setattr(export_mod, "audit_exported_workspace", _audit_boom)
+    else:
+        original_replace = export_mod.os.replace
+
+        def _replace(source: object, destination: object) -> None:
+            target = Path(destination)
+            if (
+                failure == "generation_rename" and target.parent.name == "generations"
+            ) or (failure == "pointer_switch" and target.name == "current"):
+                raise OSError(f"injected {failure} failure")
+            original_replace(source, destination)
+
+        monkeypatch.setattr(export_mod.os, "replace", _replace)
+
+    result = export_forge_task(successor, tasks_root, overwrite=True)
+
+    assert result.status == "failed"
+    assert first.path.is_dir()
+    assert _workspace_snapshot(first.path) == before
+
+
+def test_direct_overwrite_rejects_unmanaged_legacy_destinations(
+    tmp_path: Path,
+) -> None:
+    """Never delete or migrate legacy files/directories during direct overwrite."""
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+    legacy_dir = tasks_root / task.task_id
+    legacy_dir.mkdir(parents=True)
+    marker = legacy_dir / "do-not-delete"
+    marker.write_text("legacy bytes", encoding="utf-8")
+
+    skipped = export_forge_task(task, tasks_root, overwrite=False)
+    assert skipped.status == "skipped"
+    assert marker.read_text(encoding="utf-8") == "legacy bytes"
+
+    result = export_forge_task(task, tasks_root, overwrite=True)
+
+    assert result.status == "failed"
+    assert marker.read_text(encoding="utf-8") == "legacy bytes"
+    assert not (tasks_root / ".forge-task-publications").exists()
+
+    marker.unlink()
+    legacy_dir.rmdir()
+    legacy_file = tasks_root / task.task_id
+    legacy_file.write_text("legacy file bytes", encoding="utf-8")
+    result = export_forge_task(task, tasks_root, overwrite=True)
+
+    assert result.status == "failed"
+    assert legacy_file.read_text(encoding="utf-8") == "legacy file bytes"
+    assert not (tasks_root / ".forge-task-publications").exists()
+
+
+def test_direct_export_rejects_corrupted_or_cross_task_pointer(tmp_path: Path) -> None:
+    """A managed facade accepts only its own validated immutable generation."""
+    tasks_root = tmp_path / "tasks"
+    first = _task()
+    first_result = export_forge_task(first, tasks_root, overwrite=True)
+    assert first_result.shipped
+
+    other = _task(candidate=_candidate(seed=73))
+    other_result = export_forge_task(other, tasks_root, overwrite=True)
+    assert other_result.shipped
+
+    current = (tasks_root / first.task_id).resolve(
+        strict=True
+    ).parent.parent / "current"
+    current.unlink()
+    os.symlink(f"../{other.task_id}/generations/not-a-generation", current)
+
+    result = export_forge_task(first, tasks_root, overwrite=False)
+
+    assert result.status == "failed"
+    assert "invalid target" in result.reason
+    assert not list(current.parent.glob(".staging-*"))
+
+
+def test_direct_export_refuses_a_truncated_selected_generation(tmp_path: Path) -> None:
+    """A selected generation must satisfy the full workspace contract on restart."""
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+    assert export_forge_task(task, tasks_root, overwrite=True).shipped
+    selected = (tasks_root / task.task_id).resolve(strict=True)
+    (selected / "patch.diff").unlink()
+
+    result = export_forge_task(task, tasks_root, overwrite=False)
+
+    assert result.status == "failed"
+    assert "missing required files: patch.diff" in result.reason
+
+
+def test_direct_export_rejects_unmanaged_generation_store_symlink(
+    tmp_path: Path,
+) -> None:
+    """Incomplete private stores cannot redirect a first direct publication."""
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+    store = export_mod._direct_store_root(tasks_root, task.task_id)
+    store.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    os.symlink(outside, store / "generations")
+
+    result = export_forge_task(task, tasks_root, overwrite=True)
+
+    assert result.status == "failed"
+    assert "generations store is invalid" in result.reason
+    assert not list(outside.iterdir())
+
+
+def test_direct_export_rejects_symlinked_store_ancestor(tmp_path: Path) -> None:
+    """A symlinked private-store ancestor cannot redirect direct publication."""
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    os.symlink(outside, tmp_path / ".forge-task-publications")
+
+    result = export_forge_task(task, tasks_root, overwrite=True)
+
+    assert result.status == "failed"
+    assert "store ancestor is invalid" in result.reason
+    assert not list(outside.iterdir())
+
+
+def test_direct_export_rejects_unsafe_task_id_before_writing(tmp_path: Path) -> None:
+    """Task IDs cannot traverse from a direct task-root into another path."""
+    task = _task()
+    task.task_id = "../escaped"
+
+    result = export_forge_task(task, tmp_path / "tasks", overwrite=True)
+
+    assert result.status == "failed"
+    assert "unsafe export task id" in result.reason
+    assert not (tmp_path / "escaped").exists()
+
+
+def test_batch_export_refuses_unsafe_task_id_before_staging(tmp_path: Path) -> None:
+    """Batch and checkpoint assembly reject traversal before a stage is opened."""
+    out_dir = tmp_path / "out"
+
+    result = export_batch([_request(task_id="../../escaped")], out_dir)
+
+    assert len(result.refused) == 1
+    assert "unsafe export task id" in result.refused[0].reason
+    assert not (tmp_path / "escaped").exists()
+    assert not (out_dir / "tasks" / "escaped").exists()
+
+
+def test_direct_overwrite_reports_success_after_committed_pointer_switch_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A post-rename error acknowledges the already-selected complete successor."""
+    tasks_root = tmp_path / "tasks"
+    predecessor = _task()
+    assert export_forge_task(predecessor, tasks_root, overwrite=True).shipped
+    successor = _task()
+    successor.spec.problem_statement = "Pointer-selected successor."
+    original_replace = export_mod.os.replace
+
+    def _replace(source: object, destination: object) -> None:
+        result = original_replace(source, destination)
+        if Path(destination).name == "current":
+            raise OSError("reported after successful pointer replacement")
+        return result
+
+    monkeypatch.setattr(export_mod.os, "replace", _replace)
+    result = export_forge_task(successor, tasks_root, overwrite=True)
+
+    assert result.shipped
+    assert result.path is not None
+    assert (
+        b"Pointer-selected successor." in (result.path / "workspace.yaml").read_bytes()
+    )
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expects_successor"),
+    [
+        ("before_generation_rename", False),
+        ("after_generation_rename", False),
+        ("before_pointer_replace", False),
+        ("after_pointer_replace", True),
+    ],
+)
+def test_sigkill_direct_overwrite_keeps_a_complete_selected_workspace(
+    tmp_path: Path, boundary: str, expects_successor: bool
+) -> None:
+    """Direct publication exposes only an old or complete new workspace after SIGKILL."""
+    tasks_root = tmp_path / "tasks"
+    predecessor = _task()
+    first = export_forge_task(predecessor, tasks_root, overwrite=True)
+    assert first.shipped
+    assert first.path is not None
+    old_snapshot = _workspace_snapshot(first.path)
+
+    script = r"""
+import os
+import signal
+import sys
+from pathlib import Path
+
+from tests.test_forge.test_export import _task
+from swe_forge.forge import export as export_mod
+from swe_forge.forge.export import export_forge_task
+
+tasks_root = Path(sys.argv[1])
+boundary = sys.argv[2]
+successor = _task()
+successor.spec.problem_statement = "A distinct replacement workspace."
+original_replace = export_mod.os.replace
+
+def replace(source, destination):
+    target = Path(destination)
+    if boundary == "before_generation_rename" and target.parent.name == "generations":
+        os.kill(os.getpid(), signal.SIGKILL)
+    if boundary == "before_pointer_replace" and target.name == "current":
+        os.kill(os.getpid(), signal.SIGKILL)
+    result = original_replace(source, destination)
+    if boundary == "after_generation_rename" and target.parent.name == "generations":
+        os.kill(os.getpid(), signal.SIGKILL)
+    if boundary == "after_pointer_replace" and target.name == "current":
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+
+export_mod.os.replace = replace
+export_forge_task(successor, tasks_root, overwrite=True)
+"""
+    child = subprocess.run(
+        [sys.executable, "-c", script, str(tasks_root), boundary],
+        cwd="/projects/Agent-SWE",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert child.returncode == -signal.SIGKILL
+
+    visible = tasks_root / predecessor.task_id
+    assert visible.is_dir()
+    current_snapshot = _workspace_snapshot(visible)
+    if expects_successor:
+        assert (
+            b"A distinct replacement workspace." in current_snapshot["workspace.yaml"]
+        )
+    else:
+        assert current_snapshot == old_snapshot
+
+    # A new process ignores abandoned stage directories and reads the selected
+    # complete workspace rather than any incomplete staging bytes.
+    resumed = export_forge_task(predecessor, tasks_root, overwrite=False)
+    assert resumed.status == "skipped"
+    assert _workspace_snapshot(visible) == current_snapshot
 
 
 def test_forgetask_round_trips_through_dict() -> None:
@@ -777,6 +1112,14 @@ def test_identical_duplicate_task_ids_ship_exactly_one_artifact_row(
     assert len(list((tmp_path / "tasks").iterdir())) == 1
     assert len(import_jsonl(tmp_path / "dataset.jsonl")) == 1
     assert len(import_parquet(tmp_path / "dataset.parquet")) == 1
+    # Batch uses the private writer below its generation stage, not the direct
+    # task-scoped publisher.  Nested public stores would make generation
+    # validation/recovery depend on multiple independent pointers.
+    from swe_forge.forge.publication import load_published_generation
+
+    generation = load_published_generation(tmp_path)
+    assert generation is not None
+    assert not (generation.tasks_dir / ".forge-task-publications").exists()
 
 
 def test_conflicting_duplicate_task_id_aborts_without_mutating_output(

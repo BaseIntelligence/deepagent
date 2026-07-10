@@ -46,6 +46,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from importlib import metadata
@@ -68,6 +69,7 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.leak import audit_agent_tree
 from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
+from swe_forge.forge import publication
 from swe_forge.forge.publication import (
     PublicationEntry,
     PublicationError,
@@ -108,6 +110,12 @@ _GIT_ENV = {
     "GIT_COMMITTER_NAME": "swe-forge",
     "GIT_COMMITTER_EMAIL": "forge@local",
 }
+
+#: Per-direct-export store.  It lives beside, not inside, the task-root
+#: enumeration surface so generic task consumers never mistake it for a task.
+_DIRECT_STORE_DIR = ".forge-task-publications"
+_DIRECT_GENERATIONS_DIR = "generations"
+_DIRECT_CURRENT_LINK = "current"
 
 
 class ExportError(RuntimeError):
@@ -373,6 +381,7 @@ def assemble_forge_task(
             candidate.target.files,
             candidate.target.symbols,
         )
+    _validate_task_id(task_id)
 
     full_f2p = build_full_fail_to_pass(
         adapter, oracle_report.fail_to_pass, oracle_report.test_files
@@ -884,7 +893,7 @@ def audit_exported_workspace(
 
 
 # --------------------------------------------------------------------------- #
-# Single-task export (atomic, idempotent, cleanup-on-failure)
+# Single-task export (private stage writer + recoverable direct publication)
 # --------------------------------------------------------------------------- #
 @dataclass
 class TaskExportResult:
@@ -910,6 +919,265 @@ class TaskExportResult:
         }
 
 
+def _validate_staged_workspace(task: ForgeTask, task_dir: Path) -> None:
+    """Reject an incomplete staged workspace before any public selection."""
+    required = (
+        task_dir / "workspace.yaml",
+        task_dir / "patch.diff",
+        task_dir / "deletion_patch.diff",
+        task_dir / "evaluate.sh",
+    )
+    missing = [path.name for path in required if not path.is_file()]
+    if missing:
+        raise ExportError(
+            f"staged workspace is missing required files: {', '.join(sorted(missing))}"
+        )
+    if not os.access(task_dir / "evaluate.sh", os.X_OK):
+        raise ExportError("staged workspace evaluate.sh is not executable")
+
+    try:
+        workspace = yaml.safe_load((task_dir / "workspace.yaml").read_text("utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ExportError(f"staged workspace.yaml is unreadable: {exc}") from exc
+    if not isinstance(workspace, dict) or workspace.get("task_id") != task.task_id:
+        raise ExportError("staged workspace.yaml does not match its task id")
+
+    tests_dir = task_dir / "tests"
+    if not tests_dir.is_dir() or not any(
+        path.is_file() for path in tests_dir.rglob("*")
+    ):
+        raise ExportError("staged workspace has no hidden test files")
+
+
+def _write_staged_workspace(
+    task: ForgeTask,
+    task_dir: Path,
+    *,
+    adapter: LanguageAdapter | None = None,
+    broken_tree: Path | str | None = None,
+) -> TaskExportResult:
+    """Write and audit one workspace only inside a caller-owned private stage.
+
+    This intentionally has no public overwrite or publication behavior.  Batch
+    export and :class:`PilotCheckpoint` call it beneath their already-private
+    generation stage, while direct export selects the completed stage through its
+    own task-scoped immutable generation pointer.
+    """
+    if os.path.lexists(task_dir):
+        if not task_dir.is_dir() or task_dir.is_symlink() or any(task_dir.iterdir()):
+            return TaskExportResult(
+                task_id=task.task_id,
+                status="failed",
+                reason=f"staged workspace path is not an empty directory: {task_dir}",
+            )
+    else:
+        task_dir.mkdir()
+
+    if adapter is None:
+        adapter = build_default_registry().get(task.language)
+
+    try:
+        write_workspace(task, task_dir, adapter)
+        if broken_tree is not None:
+            repo_dst = task_dir / "repo"
+            shutil.copytree(broken_tree, repo_dst)
+            reinit_orphan_git(repo_dst)
+        _validate_staged_workspace(task, task_dir)
+
+        audit = audit_exported_workspace(
+            task_dir,
+            oracle_patch=task.candidate.oracle_patch,
+            test_files=task.oracle_report.test_files,
+        )
+        if not audit.passed:
+            shutil.rmtree(task_dir, ignore_errors=True)
+            return TaskExportResult(
+                task_id=task.task_id,
+                status="refused",
+                reason="leak audit failed: " + "; ".join(audit.findings),
+                leak_findings=list(audit.findings),
+            )
+        return TaskExportResult(task_id=task.task_id, status="shipped", path=task_dir)
+    except Exception as exc:  # noqa: BLE001 - cleanup then report, never partial dir
+        shutil.rmtree(task_dir, ignore_errors=True)
+        return TaskExportResult(
+            task_id=task.task_id,
+            status="failed",
+            reason=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _direct_store_root(tasks_root: Path, task_id: str) -> Path:
+    return (
+        tasks_root.parent
+        / _DIRECT_STORE_DIR
+        / _direct_store_namespace(tasks_root)
+        / task_id
+    )
+
+
+def _validate_task_id(task_id: str) -> None:
+    """Require every export ID to be one safe path component."""
+    if (
+        task_id in ("", ".", "..")
+        or "/" in task_id
+        or "\\" in task_id
+        or Path(task_id).is_absolute()
+    ):
+        raise ExportError(f"unsafe export task id: {task_id!r}")
+
+
+def _direct_store_ancestors(tasks_root: Path) -> tuple[Path, Path]:
+    """Return the store base and root-specific namespace beneath its parent."""
+    base = tasks_root.parent / _DIRECT_STORE_DIR
+    return base, base / _direct_store_namespace(tasks_root)
+
+
+def _direct_store_namespace(tasks_root: Path) -> str:
+    """Return a stable private-store namespace for this exact task root."""
+    root = tasks_root.resolve(strict=False)
+    return hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
+
+
+def _direct_facade_target(tasks_root: Path, task_id: str) -> str:
+    namespace = _direct_store_namespace(tasks_root)
+    return f"../{_DIRECT_STORE_DIR}/{namespace}/{task_id}/{_DIRECT_CURRENT_LINK}"
+
+
+def _read_selected_direct_workspace(
+    tasks_root: Path, task: ForgeTask, final_dir: Path
+) -> Path | None:
+    """Return the complete direct generation selected by ``current`` if present.
+
+    Only the expected facade symlink is managed.  Legacy files, directories,
+    arbitrary symlinks, and broken selected pointers fail closed rather than
+    being replaced or migrated destructively.
+    """
+    task_id = task.task_id
+    expected_facade = _direct_facade_target(tasks_root, task_id)
+    final_exists = os.path.lexists(final_dir)
+    if final_exists:
+        if not final_dir.is_symlink() or os.readlink(final_dir) != expected_facade:
+            raise ExportError(
+                f"refusing to replace unmanaged legacy workspace {final_dir}"
+            )
+
+    store_base, namespace = _direct_store_ancestors(tasks_root)
+    for ancestor in (store_base, namespace):
+        if os.path.lexists(ancestor) and (
+            not ancestor.is_dir() or ancestor.is_symlink()
+        ):
+            raise ExportError(f"direct export store ancestor is invalid: {ancestor}")
+
+    store = _direct_store_root(tasks_root, task_id)
+    if os.path.lexists(store) and (not store.is_dir() or store.is_symlink()):
+        raise ExportError(f"refusing to use unmanaged direct export store {store}")
+    current = store / _DIRECT_CURRENT_LINK
+    if not current.is_symlink():
+        if os.path.lexists(current):
+            raise ExportError(f"direct export pointer is not a symlink: {current}")
+        if final_exists:
+            raise ExportError(
+                f"managed direct facade has no selected generation: {final_dir}"
+            )
+        return None
+
+    target = os.readlink(current)
+    generation_name = target.removeprefix(f"{_DIRECT_GENERATIONS_DIR}/")
+    if target != f"{_DIRECT_GENERATIONS_DIR}/{generation_name}" or not re.fullmatch(
+        r"[0-9a-f]{32}", generation_name
+    ):
+        raise ExportError(f"direct export pointer has an invalid target: {current}")
+
+    generations = store / _DIRECT_GENERATIONS_DIR
+    if not generations.is_dir() or generations.is_symlink():
+        raise ExportError(f"direct export generations store is invalid: {generations}")
+    raw_workspace = generations / generation_name
+    if not raw_workspace.is_dir() or raw_workspace.is_symlink():
+        raise ExportError(
+            f"direct export pointer does not select an immutable generation: {current}"
+        )
+    try:
+        workspace = current.resolve(strict=True)
+        expected_workspace = raw_workspace.resolve(strict=True)
+    except OSError as exc:
+        raise ExportError(f"direct export pointer is broken: {current}") from exc
+    if workspace != expected_workspace:
+        raise ExportError(
+            f"direct export pointer escapes its generation store: {current}"
+        )
+    if not (workspace / "workspace.yaml").is_file():
+        raise ExportError(
+            f"direct export pointer does not select a complete workspace: {current}"
+        )
+
+    try:
+        workspace_data = yaml.safe_load(
+            (workspace / "workspace.yaml").read_text(encoding="utf-8")
+        )
+    except (OSError, yaml.YAMLError) as exc:
+        raise ExportError(
+            f"selected direct workspace.yaml is unreadable: {exc}"
+        ) from exc
+    if not isinstance(workspace_data, dict) or workspace_data.get("task_id") != task_id:
+        raise ExportError(f"direct export pointer selects the wrong task: {current}")
+    _validate_staged_workspace(task, workspace)
+
+    if final_exists and final_dir.resolve(strict=True) != workspace:
+        raise ExportError(
+            f"direct export facade resolves outside its selected workspace: {final_dir}"
+        )
+    return workspace
+
+
+def _direct_pointer_selects(store: Path, generation_id: str) -> bool:
+    """Whether ``current`` already names exactly this committed generation."""
+    current = store / _DIRECT_CURRENT_LINK
+    return (
+        current.is_symlink()
+        and os.readlink(current) == f"{_DIRECT_GENERATIONS_DIR}/{generation_id}"
+    )
+
+
+def _install_direct_facade(tasks_root: Path, task_id: str, final_dir: Path) -> None:
+    """Create the task's stable facade after a complete generation is selected."""
+    target = _direct_facade_target(tasks_root, task_id)
+    if os.path.lexists(final_dir):
+        if final_dir.is_symlink() and os.readlink(final_dir) == target:
+            return
+        raise ExportError(f"refusing to replace unmanaged legacy workspace {final_dir}")
+
+    temporary = tasks_root / f".{task_id}.facade-{uuid.uuid4().hex}"
+    try:
+        os.symlink(target, temporary)
+        os.replace(temporary, final_dir)
+        publication._fsync_path(tasks_root)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _remove_new_empty_direct_store(store: Path) -> None:
+    """Discard only a brand-new store when staging failed before any commit."""
+    generations = store / _DIRECT_GENERATIONS_DIR
+    current = store / _DIRECT_CURRENT_LINK
+    if current.is_symlink() or any(
+        generations.iterdir() if generations.exists() else ()
+    ):
+        return
+    shutil.rmtree(store, ignore_errors=True)
+    parent = store.parent
+    try:
+        parent.rmdir()
+    except OSError:
+        pass
+
+
+def _fsync_direct_store_ancestors(tasks_root: Path, store: Path) -> None:
+    """Persist newly-created store ancestry before selecting a generation."""
+    for path in (store.parent, store.parent.parent, tasks_root.parent):
+        publication._fsync_path(path)
+
+
 def export_forge_task(
     task: ForgeTask,
     tasks_root: Path | str,
@@ -918,14 +1186,13 @@ def export_forge_task(
     adapter: LanguageAdapter | None = None,
     broken_tree: Path | str | None = None,
 ) -> TaskExportResult:
-    """Write one task's workspace to ``tasks_root/<id>/`` atomically.
+    """Publish one direct workspace through a recoverable immutable generation.
 
-    Writes into a sibling temp dir first and only renames into place once the
-    workspace is complete and the leak audit passes -- so a failed mid-write or a
-    detected leak never leaves a partial/leaky ``tasks/<id>/`` behind. An existing
-    dir is skipped unless ``overwrite`` is set. When ``broken_tree`` is given it is
-    shipped as the agent-facing ``repo/`` with its history stripped to a single
-    orphan commit.
+    The visible ``tasks/<id>`` is a managed symlink to a task-scoped ``current``
+    pointer.  A successor is fully written, audited, fsynced, and renamed into
+    the immutable generation store before the pointer replacement selects it.
+    Thus overwrite failures preserve the prior workspace byte-for-byte, while
+    abandoned staging and unselected generations remain invisible on restart.
     """
     try:
         ensure_oracle_exportable(
@@ -940,51 +1207,131 @@ def export_forge_task(
             reason=str(exc),
         )
 
-    tasks_root = Path(tasks_root)
-    final_dir = tasks_root / task.task_id
+    tasks_path = Path(tasks_root)
+    if tasks_path.is_symlink():
+        return TaskExportResult(
+            task_id=task.task_id,
+            status="failed",
+            reason="refusing direct export through a managed batch tasks facade",
+        )
+    try:
+        _validate_task_id(task.task_id)
+    except ExportError as exc:
+        return TaskExportResult(
+            task_id=task.task_id,
+            status="failed",
+            reason=str(exc),
+        )
 
-    if final_dir.exists() and not overwrite:
+    final_dir = tasks_path / task.task_id
+    store = _direct_store_root(tasks_path, task.task_id)
+    final_exists = os.path.lexists(final_dir)
+    expected_facade = _direct_facade_target(tasks_path, task.task_id)
+    if (
+        final_exists
+        and not overwrite
+        and (not final_dir.is_symlink() or os.readlink(final_dir) != expected_facade)
+    ):
         return TaskExportResult(
             task_id=task.task_id,
             status="skipped",
             path=final_dir,
-            reason="task directory already exists; overwrite not requested",
+            reason="task workspace already exists; overwrite not requested",
         )
 
-    if adapter is None:
-        adapter = build_default_registry().get(task.language)
+    stage: Path | None = None
+    pointer_tmp: Path | None = None
+    store_created = False
+    generation_committed = False
 
-    tasks_root.mkdir(parents=True, exist_ok=True)
-    tmp_dir = Path(tempfile.mkdtemp(prefix=f".{task.task_id}.tmp-", dir=tasks_root))
     try:
-        write_workspace(task, tmp_dir, adapter)
-        if broken_tree is not None:
-            repo_dst = tmp_dir / "repo"
-            shutil.copytree(broken_tree, repo_dst)
-            reinit_orphan_git(repo_dst)
-
-        audit = audit_exported_workspace(
-            tmp_dir,
-            oracle_patch=task.candidate.oracle_patch,
-            test_files=task.oracle_report.test_files,
-        )
-        if not audit.passed:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        selected = _read_selected_direct_workspace(tasks_path, task, final_dir)
+        if final_exists and not overwrite:
             return TaskExportResult(
                 task_id=task.task_id,
-                status="refused",
-                reason="leak audit failed: " + "; ".join(audit.findings),
-                leak_findings=list(audit.findings),
+                status="skipped",
+                path=final_dir,
+                reason="task workspace already exists; overwrite not requested",
+            )
+        if selected is not None and not os.path.lexists(final_dir):
+            _install_direct_facade(tasks_path, task.task_id, final_dir)
+        if selected is None and os.path.lexists(final_dir):
+            raise ExportError(
+                f"unmanaged direct workspace cannot be published: {final_dir}"
             )
 
-        if final_dir.exists():
-            shutil.rmtree(final_dir)
-        os.replace(tmp_dir, final_dir)
+        tasks_root_existed = tasks_path.exists()
+        tasks_path.mkdir(parents=True, exist_ok=True)
+        if not tasks_root_existed:
+            publication._fsync_path(tasks_path.parent)
+        store_base, namespace = _direct_store_ancestors(tasks_path)
+        if not store_base.exists():
+            store_base.mkdir()
+            publication._fsync_path(store_base.parent)
+        if not namespace.exists():
+            namespace.mkdir()
+            publication._fsync_path(store_base)
+        if not store.exists():
+            store.mkdir()
+            store_created = True
+            _fsync_direct_store_ancestors(tasks_path, store)
+        generations = store / _DIRECT_GENERATIONS_DIR
+        if os.path.lexists(generations):
+            if not generations.is_dir() or generations.is_symlink():
+                raise ExportError(
+                    f"direct export generations store is invalid: {generations}"
+                )
+        else:
+            generations.mkdir()
+            publication._fsync_path(store)
+        stage = Path(tempfile.mkdtemp(prefix=".staging-", dir=store))
+        staged = _write_staged_workspace(
+            task,
+            stage,
+            adapter=adapter,
+            broken_tree=broken_tree,
+        )
+        if not staged.shipped:
+            shutil.rmtree(stage, ignore_errors=True)
+            stage = None
+            if store_created:
+                _remove_new_empty_direct_store(store)
+            return staged
+
+        publication._fsync_tree(stage)
+        generation_id = uuid.uuid4().hex
+        final_generation = generations / generation_id
+        os.replace(stage, final_generation)
+        stage = None
+        generation_committed = True
+        publication._fsync_path(generations)
+
+        pointer_tmp = store / f".current-{uuid.uuid4().hex}"
+        os.symlink(f"{_DIRECT_GENERATIONS_DIR}/{generation_id}", pointer_tmp)
+        publication._fsync_path(store)
+        try:
+            os.replace(pointer_tmp, store / _DIRECT_CURRENT_LINK)
+        except OSError:
+            # The pointer replacement is the irreversible commit point.  Some
+            # filesystems/test doubles may report an error after completing the
+            # rename, in which case expose the selected complete successor
+            # rather than falsely claiming that the old generation survived.
+            if not _direct_pointer_selects(store, generation_id):
+                raise
+        pointer_tmp = None
+        publication._fsync_path(store)
+        if selected is None:
+            # First write has no predecessor.  Overwrites retain their stable
+            # facade throughout, so no failure-prone operation follows commit.
+            _install_direct_facade(tasks_path, task.task_id, final_dir)
         return TaskExportResult(task_id=task.task_id, status="shipped", path=final_dir)
-    except Exception as exc:  # noqa: BLE001 - cleanup then report, never partial dir
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        if final_dir.exists() and not final_dir.is_dir():
-            final_dir.unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001 - preserve selected output on every failure
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
+        if pointer_tmp is not None:
+            pointer_tmp.unlink(missing_ok=True)
+        if store_created and not generation_committed:
+            _remove_new_empty_direct_store(store)
         return TaskExportResult(
             task_id=task.task_id,
             status="failed",
@@ -1133,10 +1480,9 @@ def export_batch(
             item for item in unique_entries if item.task.task_id == task.task_id
         )
         source_request = requests[request.index]
-        return export_forge_task(
+        return _write_staged_workspace(
             task,
-            stage_tasks,
-            overwrite=False,
+            stage_tasks / task.task_id,
             adapter=adapter,
             broken_tree=source_request.broken_tree,
         )
