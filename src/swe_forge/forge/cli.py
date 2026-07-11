@@ -15,6 +15,7 @@ import os
 import shutil
 import stat
 import tempfile
+from decimal import Decimal
 from pathlib import Path
 from typing import NoReturn
 
@@ -58,6 +59,8 @@ from swe_forge.forge.config import ForgeSettings
 from swe_forge.forge.envbuild import EnvBuilder
 from swe_forge.forge.export import (
     ExportRequest,
+    _write_staged_workspace,
+    assemble_forge_task,
     export_batch,
 )
 from swe_forge.forge.gold_eval import (
@@ -66,6 +69,7 @@ from swe_forge.forge.gold_eval import (
     GoldEvalReport,
     run_gold_eval,
 )
+from swe_forge.forge.gold_eval import evaluate_task_gold
 from swe_forge.forge.gold_eval import (
     DEFAULT_TIMEOUT as GOLD_EVAL_TIMEOUT,
 )
@@ -79,10 +83,16 @@ from swe_forge.forge.report import (
 )
 from swe_forge.forge.pilot import (
     DEFAULT_GENERATORS_BY_LANGUAGE,
+    LiveCandidateProcessor,
     PilotError,
     build_pilot_plans,
     default_pilot_config,
     run_pilot,
+)
+from swe_forge.forge.fresh_campaign import (
+    FreshCampaignConfig,
+    FreshCampaignError,
+    run_fresh_campaign,
 )
 from swe_forge.forge.generators import (
     GenerationError,
@@ -3697,3 +3707,126 @@ def build(
         _print_pilot_outcome(outcome)
 
     raise typer.Exit(code=0 if outcome.ok else 1)
+
+
+@app.command(name="fresh-campaign")
+def fresh_campaign(
+    out: str = typer.Option(
+        ...,
+        "--out",
+        help="Authoritative pilot_final output directory.",
+    ),
+    seeds_per_cell: int = typer.Option(
+        4, "--seeds-per-cell", help="Hard-rung candidates per generator cell."
+    ),
+    max_plans: int | None = typer.Option(
+        None, "--max-plans", help="Optional source-plan bound before fresh filtering."
+    ),
+    worst_case_cost: float = typer.Option(
+        1.0, "--worst-case-cost", help="Worst-case reserve per physical provider call."
+    ),
+    ledger: str | None = typer.Option(
+        None, "--ledger", help="Fresh campaign JSONL ledger path."
+    ),
+    authority: str | None = typer.Option(
+        None, "--authority", help="Global fresh candidate authority JSONL path."
+    ),
+    evidence: str | None = typer.Option(
+        None, "--evidence", help="Ordered Stage 0 through Stage 5 evidence path."
+    ),
+    historical_ledger: str | None = typer.Option(
+        None, "--historical-ledger", help="Immutable historical harvest ledger path."
+    ),
+    historical_dispositions: str | None = typer.Option(
+        None,
+        "--historical-dispositions",
+        help="Immutable prior disposition JSONL used for no-replay admission.",
+    ),
+    json_out: bool = typer.Option(
+        False, "--json", help="Emit the campaign result JSON."
+    ),
+) -> None:
+    """Run the independently capped, fresh-candidate Stage 0->5 campaign."""
+    base_url, api_key = resolve_panel_endpoint()
+    _require_panel_creds(base_url, api_key)
+    out_path = Path(out)
+    campaign_root = out_path / ".fresh-campaign"
+    config = FreshCampaignConfig(
+        plans=build_pilot_plans(
+            seeds_per_cell=seeds_per_cell,
+            max_plans=max_plans,
+            include_pr_mirror=False,
+            include_structural=True,
+        ),
+        out_dir=out_path,
+        ledger_path=Path(ledger) if ledger else campaign_root / "ledger.jsonl",
+        authority_path=(
+            Path(authority) if authority else campaign_root / "authority.jsonl"
+        ),
+        evidence_path=(
+            Path(evidence) if evidence else campaign_root / "stage-evidence.log"
+        ),
+        historical_ledger=Path(historical_ledger)
+        if historical_ledger
+        else Path("results/pilot_keeps/harvest_progress.json"),
+        historical_dispositions=(
+            Path(historical_dispositions)
+            if historical_dispositions
+            else Path("results/pilot_keeps/dispositions.jsonl")
+        ),
+        worst_case_cost_usd=Decimal(str(worst_case_cost)),
+    )
+    if not config.plans:
+        _fail("no source plans available for the fresh campaign")
+    panel = build_panel_from_env()
+    try:
+        processor = LiveCandidateProcessor(
+            panel=panel,
+            band_config=config.band_config,
+            kill_threshold=DEFAULT_KILL_THRESHOLD,
+            flakiness_runs=DEFAULT_FLAKINESS_RUNS,
+            concurrency=4,
+            validate_models=True,
+        )
+
+        def gold_prover(request: ExportRequest) -> bool:
+            with tempfile.TemporaryDirectory(prefix="swe-forge-fresh-gold-") as tmp:
+                task = assemble_forge_task(
+                    candidate=request.candidate,
+                    spec=request.spec,
+                    oracle_report=request.oracle_report,
+                    calibration_report=request.calibration_report,
+                    env_image=request.env_image,
+                    repo_url=request.repo_url,
+                    base_commit=request.base_commit,
+                    repo=request.repo,
+                    task_id=request.task_id,
+                )
+                result = _write_staged_workspace(
+                    task,
+                    Path(tmp) / task.task_id,
+                    broken_tree=request.broken_tree,
+                )
+                if not result.shipped or result.path is None:
+                    return False
+                proof = evaluate_task_gold(result.path, runs=2)
+                return proof.gold and proof.deterministic
+
+        outcome = asyncio.run(
+            run_fresh_campaign(
+                config,
+                processor=processor,
+                gold_prover=gold_prover,
+            )
+        )
+    except (FreshCampaignError, PilotError, MissingCredentialsError) as exc:
+        _fail(f"fresh-campaign: {exc}", api_key)
+    if json_out:
+        typer.echo(json.dumps(outcome.to_dict()))
+    else:
+        console.print(
+            f"[bold]fresh-campaign[/bold] status={outcome.status} "
+            f"reason={outcome.reason} spend={outcome.ledger.get('exact_cost_usd', 'unknown')} "
+            f"publication={outcome.publication_generation or '<none>'}"
+        )
+    raise typer.Exit(code=0 if outcome.status in {"kept", "cap_exhausted"} else 1)

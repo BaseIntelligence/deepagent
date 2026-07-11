@@ -48,6 +48,8 @@ from swe_forge.forge.calibrate.solver import (
     RolloutOutcome,
     run_solver_rollout,
 )
+from swe_forge.forge.teacher import transport_receipt_context
+from swe_forge.forge.recovery_accounting import active_campaign_context
 from swe_forge.forge.models import (
     Candidate,
     EnvImage,
@@ -291,6 +293,7 @@ async def run_panel_calibration(
     validator: ValidatorFn | None = None,
     rollout_fn: RolloutFn | None = None,
     recovery_ledger: RecoveryBudgetLedger | None = None,
+    candidate_identity: str = "",
 ) -> CalibrationRun:
     """Run ``k`` independent rollouts x each panel model and record pass@k.
 
@@ -303,6 +306,9 @@ async def run_panel_calibration(
     endpoint and the shared Docker FAIL->PASS scorer.
     """
     require_green_baseline(env_image)
+    if not candidate_identity:
+        _active_ledger, active_identity, _active_stage = active_campaign_context()
+        candidate_identity = active_identity
 
     selected_k = budget.k_for(candidate.difficulty_hint) if k is None else int(k)
     if selected_k < 0:
@@ -331,6 +337,7 @@ async def run_panel_calibration(
         num_retries=rollout_num_retries,
         command_timeout=command_timeout,
         recovery_ledger=recovery_ledger,
+        candidate_identity=candidate_identity,
     )
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -341,6 +348,11 @@ async def run_panel_calibration(
 
             async def _bounded_validate(model: PanelModel) -> ModelValidation:
                 async with semaphore:
+                    if candidate_identity:
+                        with transport_receipt_context(
+                            candidate, gate="calibration", call_kind="validation"
+                        ):
+                            return await resolved_validator(model)
                     return await resolved_validator(model)
 
             validations = list(
@@ -445,6 +457,7 @@ def _build_rollout_fn(
     num_retries: int = 3,
     command_timeout: float,
     recovery_ledger: RecoveryBudgetLedger | None,
+    candidate_identity: str = "",
 ) -> RolloutFn:
     def _solver_for(model: PanelModel) -> AgenticSolver:
         """Return an isolated solver for one concurrent rollout.
@@ -471,6 +484,21 @@ def _build_rollout_fn(
         from swe_forge.execution.docker_client import DockerClient
 
         client = docker_client if isinstance(docker_client, DockerClient) else None
+        if candidate_identity:
+            with transport_receipt_context(
+                candidate, gate="calibration", call_kind="rollout"
+            ):
+                return await run_solver_rollout(
+                    candidate,
+                    env_image,
+                    spec,
+                    oracle_report,
+                    model=model.model_string,
+                    solver=_solver_for(model),
+                    adapter=adapter,
+                    docker_client=client,
+                    command_timeout=command_timeout,
+                )
         return await run_solver_rollout(
             candidate,
             env_image,

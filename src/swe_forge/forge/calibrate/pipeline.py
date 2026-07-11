@@ -279,6 +279,7 @@ async def run_calibration(
     validator: ValidatorFn | None = None,
     rollout_fn: RolloutFn | None = None,
     recovery_ledger: RecoveryBudgetLedger | None = None,
+    candidate_identity: str = "",
 ) -> CalibrationOutcome:
     """Run the full panel calibration end to end -> a finalized CalibrationReport.
 
@@ -297,6 +298,11 @@ async def run_calibration(
             "calibration refused: oracle verdict must be 'pass'; got "
             f"{oracle_report.verdict!r}"
         )
+    if recovery_ledger is None:
+        from swe_forge.forge.recovery_accounting import active_campaign_context
+
+        recovery_ledger, active_identity, _ = active_campaign_context()
+        candidate_identity = candidate_identity or active_identity
     threshold = (
         oracle_report.final_mutation_evidence.threshold
         if oracle_report.final_mutation_evidence is not None
@@ -337,6 +343,7 @@ async def run_calibration(
         validator=validator,
         rollout_fn=rollout_fn,
         recovery_ledger=recovery_ledger,
+        candidate_identity=candidate_identity,
     )
     report = assemble_calibration_report(
         run,

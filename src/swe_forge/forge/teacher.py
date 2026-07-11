@@ -697,7 +697,21 @@ class TeacherClient:
             if context is not None
             else None
         )
-        if self._recovery_ledger is None:
+        from swe_forge.forge.recovery_accounting import active_campaign_context
+
+        active_ledger, active_candidate, active_stage = active_campaign_context()
+        ledger = self._recovery_ledger or active_ledger
+        recovery_stage = self._recovery_stage or active_stage
+        if context is not None and active_ledger is not None:
+            if context.gate in {"oracle", "differential", "alt_correct"}:
+                recovery_stage = f"oracle.{context.gate}"
+            elif context.gate == "calibration":
+                recovery_stage = (
+                    "calibration.validation"
+                    if context.call_kind == "validation"
+                    else "calibration.rollout"
+                )
+        if ledger is None:
             payload = await self._authority_complete(
                 self._authority_request(
                     routing=routing,
@@ -718,6 +732,10 @@ class TeacherClient:
                 )
             return _authority_response(payload)
 
+        if not recovery_stage:
+            raise TeacherError(
+                "recovery_stage is required when a recovery budget ledger is active"
+            )
         if self._recovery_logical_call_id:
             suffix = self._recovery_invocations
             logical_call_id = (
@@ -730,16 +748,17 @@ class TeacherClient:
         self._recovery_invocations += 1
         self.last_recovery_accounting = None
         for retry in range(self.num_retries + 1):
-            physical_call_id = self._recovery_ledger.reserve(
+            physical_call_id = ledger.reserve(
                 logical_call_id=logical_call_id,
-                stage=self._recovery_stage,
+                stage=recovery_stage,
                 model=routing.model,
                 retry=retry,
+                candidate_identity=active_candidate,
             )
             recovery = {
                 "logical_call_id": logical_call_id,
                 "physical_call_id": physical_call_id,
-                "stage": self._recovery_stage,
+                "stage": recovery_stage,
                 "model": routing.model,
                 "retry": retry,
             }
@@ -772,7 +791,7 @@ class TeacherClient:
                 request_id = sanitize_request_id(raw_request_id)
                 metering = _exact_response_metering(response)
                 if metering is None:
-                    self._recovery_ledger.mark_unknown_billing(
+                    ledger.mark_unknown_billing(
                         physical_call_id, error_type="MissingExactProviderMetering"
                     )
                     raise UnknownBillingError(
@@ -780,7 +799,7 @@ class TeacherClient:
                     )
                 usage, cost = metering
                 if not request_id:
-                    self._recovery_ledger.settle(
+                    ledger.settle(
                         physical_call_id,
                         usage=usage,
                         cost=cost,
@@ -792,7 +811,7 @@ class TeacherClient:
                     raise TeacherError(
                         "recovery LLM response omitted a safe provider request id"
                     )
-                self._recovery_ledger.settle(
+                ledger.settle(
                     physical_call_id,
                     request_id=request_id,
                     usage=usage,
@@ -801,14 +820,14 @@ class TeacherClient:
                     finish_reason=getattr(response.choices[0], "finish_reason", None),
                 )
                 accounting = _recovery_call_record(
-                    self._recovery_ledger, physical_call_id, logical_call_id
+                    ledger, physical_call_id, logical_call_id
                 )
                 self.last_recovery_accounting = accounting
                 self._recovery_history.append(accounting)
                 _set_recovery_accounting(response, accounting)
                 return response
             except asyncio.CancelledError:
-                self._recovery_ledger.mark_unknown_billing(
+                ledger.mark_unknown_billing(
                     physical_call_id, error_type="CancelledError"
                 )
                 raise
@@ -816,8 +835,7 @@ class TeacherClient:
                 from swe_forge.forge.recovery_accounting import RecoveryAccountingError
 
                 settled = {
-                    record["physical_call_id"]
-                    for record in self._recovery_ledger.settled_calls()
+                    record["physical_call_id"] for record in ledger.settled_calls()
                 }
                 if isinstance(exc, UnknownBillingError):
                     raise
@@ -829,7 +847,7 @@ class TeacherClient:
                         else None
                     )
                     if metering is None:
-                        self._recovery_ledger.mark_unknown_billing(
+                        ledger.mark_unknown_billing(
                             physical_call_id, error_type=type(exc).__name__
                         )
                         raise UnknownBillingError(
@@ -838,7 +856,7 @@ class TeacherClient:
                     usage, cost = metering
                     from swe_forge.forge.recovery_accounting import sanitize_request_id
 
-                    self._recovery_ledger.settle(
+                    ledger.settle(
                         physical_call_id,
                         request_id=sanitize_request_id(_response_request_id(response)),
                         usage=usage,
@@ -852,13 +870,13 @@ class TeacherClient:
                     )
                 if isinstance(exc, RecoveryAccountingError):
                     self.last_recovery_accounting = _recovery_call_record(
-                        self._recovery_ledger, physical_call_id, logical_call_id
+                        ledger, physical_call_id, logical_call_id
                     )
                     self._recovery_history.append(self.last_recovery_accounting)
                     raise
                 if retry >= self.num_retries:
                     self.last_recovery_accounting = _recovery_call_record(
-                        self._recovery_ledger, physical_call_id, logical_call_id
+                        ledger, physical_call_id, logical_call_id
                     )
                     self._recovery_history.append(self.last_recovery_accounting)
                     raise
@@ -1194,6 +1212,12 @@ def _recovery_call_record(
                     "run_id": call["run_id"],
                     "stage": call["stage"],
                     "model": call["model"],
+                    **(
+                        {"candidate_identity": call["candidate_identity"]}
+                        if isinstance(call.get("candidate_identity"), str)
+                        and call["candidate_identity"]
+                        else {}
+                    ),
                     "request_id": call["request_id"],
                     "retry": call["retry"],
                     "usage": call["usage"],

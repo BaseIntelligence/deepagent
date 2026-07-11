@@ -16,6 +16,8 @@ import json
 import os
 import re
 import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -36,9 +38,58 @@ _SAFE_FINISH_REASONS = frozenset(
 _SAFE_ERROR_TYPE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 _SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
+_ACTIVE_LEDGER: ContextVar[object] = ContextVar(
+    "forge_active_recovery_ledger", default=None
+)
+_ACTIVE_CANDIDATE: ContextVar[str] = ContextVar(
+    "forge_active_recovery_candidate", default=""
+)
+_ACTIVE_STAGE: ContextVar[str] = ContextVar("forge_active_recovery_stage", default="")
+
 
 class RecoveryAccountingError(RuntimeError):
     """Raised when recovery cost evidence is incomplete or inconsistent."""
+
+
+@contextmanager
+def campaign_call_context(
+    ledger: "RecoveryBudgetLedger",
+    *,
+    candidate_identity: str,
+    stage: str,
+):
+    """Make a campaign ledger the default for nested teacher/panel calls.
+
+    The context is intentionally process-local and scoped. It lets the fresh
+    campaign thread its durable ledger through existing stage implementations
+    without mutable global provider configuration or bypassing the teacher
+    transport boundary.
+    """
+    candidate = str(candidate_identity).strip()
+    stage_name = str(stage).strip()
+    if not candidate or not stage_name:
+        raise RecoveryAccountingError(
+            "campaign call context requires candidate_identity and stage"
+        )
+    ledger_token = _ACTIVE_LEDGER.set(ledger)
+    candidate_token = _ACTIVE_CANDIDATE.set(candidate)
+    stage_token = _ACTIVE_STAGE.set(stage_name)
+    try:
+        yield
+    finally:
+        _ACTIVE_STAGE.reset(stage_token)
+        _ACTIVE_CANDIDATE.reset(candidate_token)
+        _ACTIVE_LEDGER.reset(ledger_token)
+
+
+def active_campaign_context() -> tuple["RecoveryBudgetLedger | None", str, str]:
+    """Return the active ledger, candidate identity, and stage for nested calls."""
+    active = _ACTIVE_LEDGER.get()
+    return (
+        active if isinstance(active, RecoveryBudgetLedger) else None,
+        _ACTIVE_CANDIDATE.get(),
+        _ACTIVE_STAGE.get(),
+    )
 
 
 class _ReportLike(Protocol):
@@ -115,6 +166,7 @@ class _Reservation:
     retry: int
     reserved_cost: Decimal
     reserve_event: dict[str, object]
+    candidate_identity: str = ""
     settle_event: dict[str, object] | None = None
     unknown_billing_event: dict[str, object] | None = None
 
@@ -306,6 +358,7 @@ class RecoveryBudgetLedger:
                         field="reserved_cost_usd",
                     ),
                     reserve_event=event,
+                    candidate_identity=str(event.get("candidate_identity") or ""),
                 )
                 records[physical] = reservation
                 logical_reservations.setdefault(logical, []).append(reservation)
@@ -372,6 +425,14 @@ class RecoveryBudgetLedger:
                 raise RecoveryAccountingError(
                     f"settlement for {reservation.physical_call_id!r} mismatches {field}"
                 )
+        if (
+            reservation.candidate_identity
+            and event.get("candidate_identity", "") != reservation.candidate_identity
+        ):
+            raise RecoveryAccountingError(
+                f"settlement for {reservation.physical_call_id!r} mismatches "
+                "candidate_identity"
+            )
         status = event.get("status")
         if status not in _SETTLED_STATUSES:
             raise RecoveryAccountingError(
@@ -414,6 +475,14 @@ class RecoveryBudgetLedger:
                     f"unknown billing for {reservation.physical_call_id!r} "
                     f"mismatches {field}"
                 )
+        if (
+            reservation.candidate_identity
+            and event.get("candidate_identity", "") != reservation.candidate_identity
+        ):
+            raise RecoveryAccountingError(
+                f"unknown billing for {reservation.physical_call_id!r} "
+                "mismatches candidate_identity"
+            )
         error_type = event.get("error_type")
         if not isinstance(error_type, str) or not _safe_error_type(error_type):
             raise RecoveryAccountingError(
@@ -451,6 +520,7 @@ class RecoveryBudgetLedger:
         model: str,
         retry: int,
         worst_case_cost_usd: float | str | Decimal | None = None,
+        candidate_identity: str = "",
     ) -> str:
         """Durably reserve a physical request before calling a provider."""
         logical = str(logical_call_id).strip()
@@ -460,6 +530,7 @@ class RecoveryBudgetLedger:
             raise RecoveryAccountingError(
                 "logical_call_id, stage, and model must be non-empty"
             )
+        candidate_name = str(candidate_identity).strip()
         if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
             raise RecoveryAccountingError("retry must be >= 0")
         self._validate_logical_reservation(
@@ -493,6 +564,8 @@ class RecoveryBudgetLedger:
             "retry": retry,
             "reserved_cost_usd": format(reserved, "f"),
         }
+        if candidate_name:
+            event["candidate_identity"] = candidate_name
         self._append(event)
         self._records[physical] = _Reservation(
             physical_call_id=physical,
@@ -502,6 +575,7 @@ class RecoveryBudgetLedger:
             retry=retry,
             reserved_cost=reserved,
             reserve_event=event,
+            candidate_identity=candidate_name,
         )
         self._logical_reservations.setdefault(logical, []).append(
             self._records[physical]
@@ -543,6 +617,7 @@ class RecoveryBudgetLedger:
             "stage": reservation.stage,
             "model": reservation.model,
             "retry": reservation.retry,
+            "candidate_identity": reservation.candidate_identity,
             "request_id": sanitize_request_id(request_id),
             "usage": _usage_dict(usage),
             "cost_usd": _money_text(cost, field="cost_usd"),
@@ -594,6 +669,7 @@ class RecoveryBudgetLedger:
             "stage": reservation.stage,
             "model": reservation.model,
             "retry": reservation.retry,
+            "candidate_identity": reservation.candidate_identity,
             "error_type": safe_error_type,
         }
         self._validate_unknown_billing(event, reservation)
@@ -626,6 +702,12 @@ class RecoveryBudgetLedger:
                     "physical_call_id": event["physical_call_id"],
                     "stage": event["stage"],
                     "model": event["model"],
+                    **(
+                        {"candidate_identity": event["candidate_identity"]}
+                        if isinstance(event.get("candidate_identity"), str)
+                        and event["candidate_identity"]
+                        else {}
+                    ),
                     "retry": event["retry"],
                     "request_id": event["request_id"],
                     "usage": event["usage"],
@@ -691,7 +773,10 @@ def _iter_physical_calls(evidence: Iterable[object]) -> list[dict[str, object]]:
 
 
 def reconcile_recovery_call_evidence(
-    ledger: RecoveryBudgetLedger, evidence: Iterable[object]
+    ledger: RecoveryBudgetLedger,
+    evidence: Iterable[object],
+    *,
+    require_complete: bool = True,
 ) -> dict[str, object]:
     """Require one-to-one agreement between settled ledger and stage evidence.
 
@@ -732,7 +817,7 @@ def reconcile_recovery_call_evidence(
     }
     missing = sorted(set(ledger_calls) - set(evidence_by_id))
     unexpected = sorted(set(evidence_by_id) - set(ledger_calls))
-    if missing or unexpected:
+    if require_complete and (missing or unexpected):
         parts = []
         if missing:
             parts.append("missing evidence for " + ", ".join(missing))
@@ -742,7 +827,13 @@ def reconcile_recovery_call_evidence(
             "recovery call evidence is missing: " + "; ".join(parts)
         )
 
-    for physical, settled in ledger_calls.items():
+    compare_ids = set(ledger_calls) if require_complete else set(evidence_by_id)
+    for physical in compare_ids:
+        if physical not in ledger_calls:
+            raise RecoveryAccountingError(
+                f"recovery evidence cites unknown physical call {physical!r}"
+            )
+        settled = ledger_calls[physical]
         observed = evidence_by_id[physical]
         for field in (
             "run_id",
@@ -1004,13 +1095,25 @@ def reconcile_recovery_reports(
     ledger: RecoveryBudgetLedger,
     oracle_report: _ReportLike,
     calibration_report: CalibrationReport | None = None,
+    *,
+    require_complete: bool = True,
+    candidate_identity: str | None = None,
 ) -> dict[str, object]:
     """Reconcile a recovery ledger to canonical oracle/calibration evidence."""
     if calibration_report is not None:
         require_calibration_recovery_evidence(calibration_report)
+    evidence = accounting_evidence_from_reports(oracle_report, calibration_report)
+    if candidate_identity is not None:
+        for call in _iter_physical_calls(evidence):
+            observed = call.get("candidate_identity")
+            if observed != candidate_identity:
+                raise RecoveryAccountingError(
+                    "recovery evidence candidate identity does not match campaign"
+                )
     return reconcile_recovery_call_evidence(
         ledger,
-        accounting_evidence_from_reports(oracle_report, calibration_report),
+        evidence,
+        require_complete=require_complete,
     )
 
 

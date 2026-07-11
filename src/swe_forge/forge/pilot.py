@@ -123,6 +123,7 @@ from swe_forge.forge.teacher import (
     ModelRoutingError,
     Usage,
 )
+from swe_forge.forge.recovery_accounting import active_campaign_context
 
 
 class PilotError(RuntimeError):
@@ -772,6 +773,7 @@ class LiveCandidateProcessor:
                 candidate, art.env_image, adapter, art, protection
             )
 
+        active_ledger, active_identity, _ = active_campaign_context()
         oracle = await run_oracle_pipeline(
             candidate,
             art.env_image,
@@ -806,6 +808,8 @@ class LiveCandidateProcessor:
             config=self._band_config,
             command_timeout=self._command_timeout,
             adapter=adapter,
+            recovery_ledger=active_ledger,
+            candidate_identity=active_identity,
         )
         art.calibration_report = outcome.report
         _accumulate_panel_usage(art, outcome.report)

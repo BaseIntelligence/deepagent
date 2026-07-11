@@ -15,6 +15,7 @@ actually runs, so building the generator registry never needs credentials.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import contextlib
 import json
 import re
@@ -128,9 +129,10 @@ def run_sync(coro: Awaitable[_T]) -> _T:
         return asyncio.run(coro)  # type: ignore[arg-type]
 
     result: dict[str, Any] = {}
+    context = contextvars.copy_context()
 
     def _worker() -> None:
-        result["value"] = asyncio.run(coro)  # type: ignore[arg-type]
+        result["value"] = context.run(lambda: asyncio.run(coro))  # type: ignore[arg-type]
 
     thread = threading.Thread(target=_worker)
     thread.start()
