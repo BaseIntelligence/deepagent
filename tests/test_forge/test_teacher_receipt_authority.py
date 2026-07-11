@@ -56,10 +56,12 @@ async def test_root_contains_only_public_metadata_and_stays_stable_for_child(
         "environment",
         "key_id",
         "public_key",
+        "root_id",
         "version",
     }
     assert metadata["algorithm"] == "Ed25519"
     assert metadata["environment"] == "test"
+    assert metadata["root_id"]
     assert stat.S_IMODE((root / "authority-v1.json").stat().st_mode) == 0o600
     assert not (root / "issuer-v1.key").exists()
     assert verify_transport_receipt(result.transport_receipt)
@@ -123,6 +125,8 @@ def test_forged_wrong_root_or_altered_receipts_reject(
         response_commitment="b" * 64,
         ledger_linkage="not_applicable",
         issuer_key_id="0" * 64,
+        authority_domain="test",
+        authority_root_id="0" * 64,
         signature="not-a-signature",
     )
     assert not verify_transport_receipt(forged)

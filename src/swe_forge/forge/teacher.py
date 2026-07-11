@@ -205,16 +205,19 @@ class TransportReceipt:
     ledger_linkage: str
     issuer_key_id: str
     signature: str
-    version: int = 3
+    authority_domain: str = "test"
+    authority_root_id: str = "0" * 64
+    version: int = 4
 
     def __post_init__(self) -> None:
-        if self.version != 3:
+        if self.version != 4:
             raise TeacherError("transport receipt version is unsupported")
         for field_name, length in (
             ("call_id", 32),
             ("candidate_fingerprint", 64),
             ("response_commitment", 64),
             ("issuer_key_id", 64),
+            ("authority_root_id", 64),
         ):
             value = getattr(self, field_name)
             if (
@@ -223,6 +226,8 @@ class TransportReceipt:
                 or any(ch not in "0123456789abcdef" for ch in value)
             ):
                 raise TeacherError(f"transport receipt {field_name} is malformed")
+        if self.authority_domain not in {"production", "test"}:
+            raise TeacherError("transport receipt trust domain is malformed")
         if not all(
             isinstance(value, str) and value
             for value in (
@@ -257,6 +262,8 @@ class TransportReceipt:
             "response_commitment": self.response_commitment,
             "ledger_linkage": self.ledger_linkage,
             "issuer_key_id": self.issuer_key_id,
+            "authority_domain": self.authority_domain,
+            "authority_root_id": self.authority_root_id,
         }
 
     def _canonical_claims(self) -> bytes:
@@ -291,6 +298,8 @@ class TransportReceipt:
             "response_commitment",
             "ledger_linkage",
             "issuer_key_id",
+            "authority_domain",
+            "authority_root_id",
             "signature",
         }
         if set(data) != expected:
@@ -329,6 +338,8 @@ class TransportReceipt:
             response_commitment=data["response_commitment"],
             ledger_linkage=data["ledger_linkage"],
             issuer_key_id=data["issuer_key_id"],
+            authority_domain=data["authority_domain"],
+            authority_root_id=data["authority_root_id"],
             signature=data["signature"],
         )
 

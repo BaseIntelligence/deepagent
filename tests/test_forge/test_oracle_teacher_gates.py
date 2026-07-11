@@ -903,6 +903,8 @@ async def test_exact_client_with_monkeypatched_complete_text_cannot_authorize_ga
                 response_commitment="f" * 64,
                 ledger_linkage="not_applicable",
                 issuer_key_id="0" * 64,
+                authority_domain="test",
+                authority_root_id="0" * 64,
                 signature="forged-signature",
             ),
         )

@@ -10,12 +10,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import multiprocessing
 import os
+import secrets
+import select
 import stat
+import subprocess
+import sys
 import threading
-from multiprocessing.connection import Connection
-from multiprocessing.process import BaseProcess
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -29,6 +30,8 @@ class ReceiptAuthorityError(RuntimeError):
 MAX_IPC_BYTES = 1_000_000
 ROOT_NAME = "authority-v1.json"
 TEST_MARKER_NAME = "test-authority-v1.json"
+PRODUCTION_MARKER_NAME = "production-authority-v1.json"
+TRUST_DOMAINS = frozenset(("production", "test"))
 
 
 def default_authority_root() -> Path:
@@ -71,7 +74,64 @@ def _open_pinned_root(root: Path) -> int:
         raise
 
 
-def _read_pinned_public_key(root: Path) -> tuple[str, bytes]:
+def _root_identity(root: Path, environment: str) -> str:
+    canonical_root = os.path.normpath(os.path.abspath(os.fspath(root)))
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "version": 1,
+                "environment": environment,
+                "root": canonical_root,
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _read_root_environment(root: Path) -> str:
+    """Read exactly one immutable trust-domain marker from a root."""
+    root_fd = _open_pinned_root(root)
+    try:
+        names = set(os.listdir(root_fd))
+        if not names <= {ROOT_NAME, TEST_MARKER_NAME, PRODUCTION_MARKER_NAME}:
+            raise ReceiptAuthorityError(
+                "teacher receipt authority root contains private or unknown material"
+            )
+        has_test = TEST_MARKER_NAME in names
+        has_production = PRODUCTION_MARKER_NAME in names
+        if has_test == has_production:
+            raise ReceiptAuthorityError(
+                "teacher receipt authority root has no unique trust domain"
+            )
+        marker_name, expected = (
+            (TEST_MARKER_NAME, {"environment": "test"})
+            if has_test
+            else (PRODUCTION_MARKER_NAME, {"environment": "production"})
+        )
+        marker_fd = os.open(marker_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+        try:
+            marker_stat = os.fstat(marker_fd)
+            if not stat.S_ISREG(marker_stat.st_mode) or marker_stat.st_mode & 0o077:
+                raise ReceiptAuthorityError(
+                    "teacher receipt authority marker is unsafe"
+                )
+            marker = json.loads(os.read(marker_fd, 4096).decode("utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ReceiptAuthorityError(
+                "teacher receipt authority marker is malformed"
+            ) from exc
+        finally:
+            os.close(marker_fd)
+        if marker != expected:
+            raise ReceiptAuthorityError("teacher receipt authority marker is malformed")
+        return str(expected["environment"])
+    finally:
+        os.close(root_fd)
+
+
+def _read_pinned_public_key(root: Path) -> tuple[str, bytes, str]:
     root_fd = _open_pinned_root(root)
     try:
         try:
@@ -80,9 +140,17 @@ def _read_pinned_public_key(root: Path) -> tuple[str, bytes]:
             raise ReceiptAuthorityError(
                 "teacher receipt authority root is unavailable"
             ) from exc
-        if not names <= {ROOT_NAME, TEST_MARKER_NAME}:
+        if not names <= {ROOT_NAME, TEST_MARKER_NAME, PRODUCTION_MARKER_NAME}:
             raise ReceiptAuthorityError(
                 "teacher receipt authority root contains private or unknown material"
+            )
+        environment = _read_root_environment(root)
+        allowed_marker = (
+            TEST_MARKER_NAME if environment == "test" else PRODUCTION_MARKER_NAME
+        )
+        if names - {ROOT_NAME, allowed_marker}:
+            raise ReceiptAuthorityError(
+                "teacher receipt authority root has conflicting trust domains"
             )
         try:
             file_fd = os.open(ROOT_NAME, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
@@ -105,13 +173,23 @@ def _read_pinned_public_key(root: Path) -> tuple[str, bytes]:
             os.close(file_fd)
     finally:
         os.close(root_fd)
-    expected = {"version", "algorithm", "environment", "key_id", "public_key"}
+    expected = {
+        "version",
+        "algorithm",
+        "environment",
+        "root_id",
+        "key_id",
+        "public_key",
+    }
     if not isinstance(payload, dict) or set(payload) != expected:
         raise ReceiptAuthorityError("teacher receipt public root is malformed")
     if (
         payload["version"] != 1
         or payload["algorithm"] != "Ed25519"
         or payload["environment"] not in {"production", "test"}
+        or not isinstance(payload["root_id"], str)
+        or len(payload["root_id"]) != 64
+        or any(char not in "0123456789abcdef" for char in payload["root_id"])
         or not isinstance(payload["key_id"], str)
         or len(payload["key_id"]) != 64
         or any(char not in "0123456789abcdef" for char in payload["key_id"])
@@ -124,17 +202,33 @@ def _read_pinned_public_key(root: Path) -> tuple[str, bytes]:
         raise ReceiptAuthorityError("teacher receipt public root is malformed") from exc
     if (
         len(public_key) != 32
-        or hashlib.sha256(public_key).hexdigest() != payload["key_id"]
+        or payload["environment"] != environment
+        or payload["root_id"] != _root_identity(root, environment)
+        or _key_id(
+            public_key,
+            environment=environment,
+            root_id=_root_identity(root, environment),
+        )
+        != payload["key_id"]
     ):
         raise ReceiptAuthorityError("teacher receipt public root key is malformed")
-    return payload["key_id"], public_key
+    return payload["key_id"], public_key, environment
 
 
-def _authority_entry(connection: Connection, root_text: str) -> None:
-    """Import the issuer only after the fresh authority child starts."""
-    from swe_forge.forge.receipt_authority_service import authority_process
-
-    authority_process(connection, root_text)
+def _key_id(public_key: bytes, *, environment: str, root_id: str) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "algorithm": "Ed25519",
+                "environment": environment,
+                "root_id": root_id,
+                "public_key": base64.b64encode(public_key).decode("ascii"),
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _parse_message(encoded: bytes) -> dict[str, object]:
@@ -168,7 +262,7 @@ def verify_signature(*, key_id: str, claims: bytes, signature: str) -> bool:
     ):
         return False
     try:
-        pinned_id, public_key = _read_pinned_public_key(default_authority_root())
+        pinned_id, public_key, _ = _read_pinned_public_key(default_authority_root())
         if pinned_id != key_id:
             return False
         decoded_signature = base64.b64decode(signature, validate=True)
@@ -193,68 +287,89 @@ class ReceiptAuthorityClient:
         self._root = Path(default_authority_root() if root is None else root)
         self._startup_timeout = startup_timeout
         self._request_timeout = request_timeout
-        self._connection: Connection | None = None
-        self._process: BaseProcess | None = None
+        self._process: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
         self._failed = False
+        self._closed = False
 
     @property
     def is_alive(self) -> bool:
-        return self._process is not None and self._process.is_alive()
+        return self._process is not None and self._process.poll() is None
 
     @property
     def is_usable(self) -> bool:
         """Whether this supervised session can still accept new completions."""
-        return not self._failed
+        return not self._failed and not self._closed
 
     def _start(self) -> None:
-        if self._failed:
+        if self._failed or self._closed:
             raise ReceiptAuthorityError("teacher receipt authority is unavailable")
-        if self._connection is not None and self._process is not None:
+        if self._process is not None:
             return
-        # A fresh interpreter prevents caller-process monkeypatches, globals,
-        # and imported fake transports from being inherited by the authority.
-        context = multiprocessing.get_context("spawn")
-        parent, child = context.Pipe(duplex=True)
-        process = context.Process(
-            target=_authority_entry,
-            args=(child, str(self._root)),
-            name="swe-forge-teacher-authority",
-            daemon=True,
+        environment = "production"
+        if self._root.exists():
+            environment = _read_root_environment(self._root)
+        bootstrap = secrets.token_urlsafe(32)
+        child_environment = {
+            "PATH": os.environ.get("PATH", ""),
+            "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "LITELLM_MODE": "PRODUCTION",
+        }
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "swe_forge.forge.receipt_authority_service",
+                "--root",
+                str(self._root),
+                "--domain",
+                environment,
+                "--bootstrap",
+                bootstrap,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=child_environment,
+            bufsize=0,
         )
-        process.start()
-        child.close()
-        self._connection = parent
         self._process = process
         try:
             ready = self._receive(self._startup_timeout)
             if (
                 ready.get("type") != "ready"
                 or not isinstance(ready.get("key_id"), str)
-                or ready.get("environment") not in {"production", "test"}
+                or ready.get("environment") != environment
             ):
                 raise ReceiptAuthorityError("teacher receipt authority failed to start")
-            pinned_id, _ = _read_pinned_public_key(self._root)
+            pinned_id, _, pinned_environment = _read_pinned_public_key(self._root)
             if ready["key_id"] != pinned_id:
                 raise ReceiptAuthorityError("teacher receipt authority root mismatches")
+            if pinned_environment != environment:
+                raise ReceiptAuthorityError(
+                    "teacher receipt authority trust domain mismatches"
+                )
         except Exception:
             self._failed = True
             self.close()
             raise
 
     def _receive(self, timeout: float) -> dict[str, object]:
-        connection = self._connection
         process = self._process
-        if connection is None or process is None:
+        if process is None or process.stdout is None:
             raise ReceiptAuthorityError("teacher receipt authority is unavailable")
-        if timeout <= 0 or not connection.poll(timeout):
-            if not process.is_alive():
+        if timeout <= 0 or not select.select([process.stdout], [], [], timeout)[0]:
+            if process.poll() is not None:
                 raise ReceiptAuthorityError("teacher receipt authority crashed")
             raise ReceiptAuthorityError("teacher receipt authority timed out")
         try:
-            encoded = connection.recv_bytes(MAX_IPC_BYTES + 1)
-        except (EOFError, OSError) as exc:
+            encoded = process.stdout.readline(MAX_IPC_BYTES + 1)
+        except OSError as exc:
             raise ReceiptAuthorityError("teacher receipt authority crashed") from exc
+        if not encoded or not encoded.endswith(b"\n"):
+            raise ReceiptAuthorityError("teacher receipt authority IPC is malformed")
+        encoded = encoded[:-1]
         try:
             return _parse_message(encoded)
         except ReceiptAuthorityError as exc:
@@ -274,8 +389,13 @@ class ReceiptAuthorityClient:
                     raise ReceiptAuthorityError(
                         "teacher receipt authority request exceeds its bound"
                     )
-                assert self._connection is not None
-                self._connection.send_bytes(encoded)
+                process = self._process
+                if process is None or process.stdin is None:
+                    raise ReceiptAuthorityError(
+                        "teacher receipt authority is unavailable"
+                    )
+                process.stdin.write(encoded + b"\n")
+                process.stdin.flush()
                 response = self._receive(
                     self._request_timeout if timeout is None else timeout
                 )
@@ -297,19 +417,22 @@ class ReceiptAuthorityClient:
 
     def close(self) -> None:
         """Close the pipe and reap only the authority process started by this client."""
-        connection, process = self._connection, self._process
-        self._connection = None
+        self._closed = True
+        process = self._process
         self._process = None
-        if connection is not None:
-            try:
-                connection.close()
-            except OSError:
-                pass
         if process is not None:
-            process.join(timeout=0.2)
-            if process.is_alive():
+            if process.stdin is not None:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+            if process.poll() is None:
                 process.terminate()
-                process.join(timeout=2.0)
+            try:
+                process.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2.0)
 
 
 _shared_authorities: dict[Path, tuple[ReceiptAuthorityClient, int]] = {}

@@ -15,6 +15,7 @@ import json
 import os
 import re
 import stat
+import sys
 import uuid
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
@@ -35,6 +36,8 @@ litellm.drop_params = True
 MAX_IPC_BYTES = 1_000_000
 ROOT_NAME = "authority-v1.json"
 TEST_MARKER_NAME = "test-authority-v1.json"
+PRODUCTION_MARKER_NAME = "production-authority-v1.json"
+TRUST_DOMAINS = frozenset(("production", "test"))
 _SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SAFE_FINISH_REASONS = frozenset(
     ("stop", "length", "tool_calls", "function_call", "content_filter")
@@ -169,23 +172,39 @@ def initialize_test_root(root: Path) -> None:
     try:
         if _safe_file(root_fd, ROOT_NAME):
             raise AuthorityServiceError("test root already has authority metadata")
+        if _safe_file(root_fd, PRODUCTION_MARKER_NAME):
+            raise AuthorityServiceError("root is already a production authority")
         marker = _safe_file(root_fd, TEST_MARKER_NAME)
         if not marker:
             _write_json_exclusive(root_fd, TEST_MARKER_NAME, {"environment": "test"})
-            return
-        if _read_json(root_fd, TEST_MARKER_NAME) != {"environment": "test"}:
+        elif _read_json(root_fd, TEST_MARKER_NAME) != {"environment": "test"}:
             raise AuthorityServiceError("test authority marker is malformed")
     finally:
         os.close(root_fd)
 
 
-def _root_environment(root_fd: int) -> str:
-    marker = _safe_file(root_fd, TEST_MARKER_NAME)
-    if not marker:
+def _root_environment(root_fd: int, *, create_production: bool = False) -> str:
+    """Read the immutable domain marker, creating production state only in-child."""
+    has_test = _safe_file(root_fd, TEST_MARKER_NAME)
+    has_production = _safe_file(root_fd, PRODUCTION_MARKER_NAME)
+    if has_test and has_production:
+        raise AuthorityServiceError("authority root has conflicting trust domains")
+    if has_test:
+        if _read_json(root_fd, TEST_MARKER_NAME) != {"environment": "test"}:
+            raise AuthorityServiceError("test authority marker is malformed")
+        return "test"
+    if has_production:
+        if _read_json(root_fd, PRODUCTION_MARKER_NAME) != {"environment": "production"}:
+            raise AuthorityServiceError("production authority marker is malformed")
         return "production"
-    if _read_json(root_fd, TEST_MARKER_NAME) != {"environment": "test"}:
-        raise AuthorityServiceError("test authority marker is malformed")
-    return "test"
+    if not create_production:
+        raise AuthorityServiceError("authority root has no trust-domain marker")
+    if os.listdir(root_fd):
+        raise AuthorityServiceError("authority root has no trust-domain marker")
+    _write_json_exclusive(
+        root_fd, PRODUCTION_MARKER_NAME, {"environment": "production"}
+    )
+    return "production"
 
 
 def _require_public_root_contents(root_fd: int, environment: str) -> None:
@@ -193,6 +212,10 @@ def _require_public_root_contents(root_fd: int, environment: str) -> None:
     allowed = {ROOT_NAME}
     if environment == "test":
         allowed.add(TEST_MARKER_NAME)
+    elif environment == "production":
+        allowed.add(PRODUCTION_MARKER_NAME)
+    else:
+        raise AuthorityServiceError("authority root trust domain is malformed")
     try:
         entries = os.listdir(root_fd)
     except OSError as exc:
@@ -210,28 +233,62 @@ def _public_key_bytes(private_key: Ed25519PrivateKey) -> bytes:
     )
 
 
-def _key_id(public_key: bytes) -> str:
-    return hashlib.sha256(public_key).hexdigest()
+def _root_identity(root: Path, environment: str) -> str:
+    """Derive a stable identity for this exact root and trust domain."""
+    canonical_root = os.path.abspath(os.fspath(root))
+    return hashlib.sha256(
+        canonical_json(
+            {
+                "version": 1,
+                "environment": environment,
+                "root": canonical_root,
+            }
+        )
+    ).hexdigest()
 
 
-def _public_metadata(*, public_key: bytes, environment: str) -> dict[str, object]:
+def _key_id(public_key: bytes, *, environment: str, root_id: str) -> str:
+    """Bind key identity to both the trust domain and the root instance."""
+    return hashlib.sha256(
+        canonical_json(
+            {
+                "algorithm": "Ed25519",
+                "environment": environment,
+                "root_id": root_id,
+                "public_key": base64.b64encode(public_key).decode("ascii"),
+            }
+        )
+    ).hexdigest()
+
+
+def _public_metadata(
+    *, public_key: bytes, environment: str, root_id: str
+) -> dict[str, object]:
     return {
         "version": 1,
         "algorithm": "Ed25519",
         "environment": environment,
-        "key_id": _key_id(public_key),
+        "root_id": root_id,
+        "key_id": _key_id(public_key, environment=environment, root_id=root_id),
         "public_key": base64.b64encode(public_key).decode("ascii"),
     }
 
 
-def _require_pinned_key(root: Path, private_key: Ed25519PrivateKey) -> tuple[str, str]:
+def _require_pinned_key(
+    root: Path, private_key: Ed25519PrivateKey
+) -> tuple[str, str, str]:
     """Pin this child key once, then reject any replacement or restart."""
     root_fd = _open_root(root, create=True)
     try:
-        environment = _root_environment(root_fd)
+        environment = _root_environment(root_fd, create_production=True)
         _require_public_root_contents(root_fd, environment)
+        root_id = _root_identity(root, environment)
         public_key = _public_key_bytes(private_key)
-        expected = _public_metadata(public_key=public_key, environment=environment)
+        expected = _public_metadata(
+            public_key=public_key,
+            environment=environment,
+            root_id=root_id,
+        )
         metadata_exists = _safe_file(root_fd, ROOT_NAME)
         if not metadata_exists:
             try:
@@ -239,13 +296,21 @@ def _require_pinned_key(root: Path, private_key: Ed25519PrivateKey) -> tuple[str
             except FileExistsError:
                 _safe_file(root_fd, ROOT_NAME, required=True)
             else:
-                return expected["key_id"], environment  # type: ignore[return-value]
+                return (
+                    expected["key_id"],
+                    environment,
+                    root_id,
+                )  # type: ignore[return-value]
         if _read_json(root_fd, ROOT_NAME) != expected:
             raise AuthorityServiceError(
                 "authority root key does not match this authority"
             )
         _require_public_root_contents(root_fd, environment)
-        return expected["key_id"], environment  # type: ignore[return-value]
+        return (
+            expected["key_id"],
+            environment,
+            root_id,
+        )  # type: ignore[return-value]
     finally:
         os.close(root_fd)
 
@@ -622,18 +687,24 @@ def _send(connection: Connection, payload: dict[str, object]) -> None:
     connection.send_bytes(encoded)
 
 
-def authority_process(connection: Connection, root_text: str) -> None:
+_EXECUTABLE_BOOTSTRAP = False
+
+
+def _run_authority(connection: Connection, root_text: str) -> None:
     """Run the child-only provider transport and Ed25519 receipt authority."""
+    if not _EXECUTABLE_BOOTSTRAP:
+        raise AuthorityServiceError("authority requires executable bootstrap")
     try:
         root = Path(root_text)
         private_key = Ed25519PrivateKey.generate()
-        key_id, environment = _require_pinned_key(root, private_key)
+        key_id, environment, root_id = _require_pinned_key(root, private_key)
         _send(
             connection,
             {
                 "type": "ready",
                 "key_id": key_id,
                 "environment": environment,
+                "root_id": root_id,
             },
         )
     except Exception as exc:
@@ -658,7 +729,7 @@ def authority_process(connection: Connection, root_text: str) -> None:
         assert isinstance(gate, str)
         assert isinstance(call_kind, str)
         claims = {
-            "version": 3,
+            "version": 4,
             "call_id": uuid.uuid4().hex,
             "candidate_fingerprint": candidate_fingerprint,
             "gate": gate.strip(),
@@ -670,6 +741,8 @@ def authority_process(connection: Connection, root_text: str) -> None:
             "response_commitment": normalized["response_commitment"],
             "ledger_linkage": ledger_linkage,
             "issuer_key_id": key_id,
+            "authority_domain": environment,
+            "authority_root_id": root_id,
         }
         signature = base64.b64encode(private_key.sign(canonical_json(claims))).decode(
             "ascii"
@@ -699,6 +772,63 @@ def authority_process(connection: Connection, root_text: str) -> None:
     connection.close()
 
 
+def _stdio_connection() -> tuple[Connection, Connection]:
+    """Adapt newline-delimited stdin/stdout to the legacy authority loop."""
+
+    class _Pipe:
+        def recv_bytes(self, limit: int) -> bytes:
+            line = sys.stdin.buffer.readline(limit)
+            if not line:
+                raise EOFError
+            if not line.endswith(b"\n"):
+                return line
+            return line[:-1]
+
+        def send_bytes(self, value: bytes) -> None:
+            sys.stdout.buffer.write(value + b"\n")
+            sys.stdout.buffer.flush()
+
+        def close(self) -> None:
+            try:
+                sys.stdout.buffer.flush()
+            except OSError:
+                pass
+
+    pipe = _Pipe()
+    return pipe, pipe  # type: ignore[return-value]
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Executable-only authority bootstrap used by the parent subprocess."""
+    if __name__ != "__main__":
+        return 4
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", required=True)
+    parser.add_argument("--domain", choices=tuple(TRUST_DOMAINS), required=True)
+    parser.add_argument("--bootstrap", required=True)
+    args = parser.parse_args(argv)
+    if len(args.bootstrap) < 20:
+        return 2
+    root = Path(args.root)
+    try:
+        root_fd = _open_root(root, create=True)
+        try:
+            environment = _root_environment(root_fd, create_production=True)
+        finally:
+            os.close(root_fd)
+        if environment != args.domain:
+            return 3
+        global _EXECUTABLE_BOOTSTRAP
+        _EXECUTABLE_BOOTSTRAP = True
+        read_write, _ = _stdio_connection()
+        _run_authority(read_write, str(root))
+        return 0
+    except Exception:
+        return 1
+
+
 def parse_message(encoded: bytes) -> dict[str, object]:
     if len(encoded) > MAX_IPC_BYTES:
         raise AuthorityServiceError("authority IPC message exceeds its bound")
@@ -709,3 +839,7 @@ def parse_message(encoded: bytes) -> dict[str, object]:
     if not isinstance(decoded, dict):
         raise AuthorityServiceError("authority IPC message is malformed")
     return decoded
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

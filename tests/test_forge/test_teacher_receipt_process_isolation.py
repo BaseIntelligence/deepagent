@@ -77,9 +77,11 @@ async def test_authority_child_owns_transport_and_in_memory_private_key(
         "environment",
         "key_id",
         "public_key",
+        "root_id",
         "version",
     }
     assert root_payload["environment"] == "test"
+    assert root_payload["root_id"]
     assert not any(
         "key" in path.name and path.name != "authority-v1.json"
         for path in isolated_test_authority.iterdir()
@@ -302,3 +304,53 @@ def test_receipt_authority_exports_no_signing_or_issuance_capability() -> None:
     assert "receipt_authority_service" not in receipt_authority.__dict__
     assert not hasattr(receipt_authority_service, "_sign_receipt")
     assert not hasattr(teacher_module, "_issue_transport_receipt_after_provider_return")
+
+
+def test_production_entrypoint_is_not_importable_or_callable() -> None:
+    assert not hasattr(receipt_authority, "_authority_entry")
+    assert getattr(receipt_authority_service, "authority_process", None) is None
+
+
+def test_test_root_metadata_cannot_be_transplanted_or_relabeled(
+    isolated_test_authority: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = isolated_test_authority
+    authority = receipt_authority.ReceiptAuthorityClient(root=source)
+    authority.complete(
+        {
+            "type": "complete",
+            "routing": {
+                "model": "anthropic/test-model",
+                "api_base": "https://test.invalid",
+                "api_key": "test-only",
+                "num_retries": 0,
+                "timeout": 1.0,
+            },
+            "messages": [],
+            "max_tokens": 1,
+            "tools": None,
+            "tool_choice": None,
+            "response_format": None,
+            "context": None,
+            "recovery": None,
+            "test_provider_response": _test_response(),
+        },
+        timeout=5.0,
+    )
+    authority.close()
+    transplanted = source.parent / "transplanted-production"
+    transplanted.mkdir()
+    for name in ("authority-v1.json", "test-authority-v1.json"):
+        (transplanted / name).write_bytes((source / name).read_bytes())
+    (transplanted / "test-authority-v1.json").rename(
+        transplanted / "production-authority-v1.json"
+    )
+    monkeypatch.setattr(
+        receipt_authority, "default_authority_root", lambda: transplanted
+    )
+    assert not receipt_authority.verify_signature(
+        key_id="0" * 64,
+        claims=b"{}",
+        signature="not-a-signature",
+    )
