@@ -73,7 +73,11 @@ def _open_pinned_root(root: Path) -> int:
             os.close(descriptor)
             descriptor = child
         metadata = os.fstat(descriptor)
-        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_mode & 0o077:
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_mode & 0o077
+            or metadata.st_uid != os.geteuid()
+        ):
             raise ReceiptAuthorityError("teacher receipt authority root is unsafe")
         return descriptor
     except OSError as exc:
@@ -125,7 +129,11 @@ def _read_root_environment(root: Path) -> str:
         marker_fd = os.open(marker_name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
         try:
             marker_stat = os.fstat(marker_fd)
-            if not stat.S_ISREG(marker_stat.st_mode) or marker_stat.st_mode & 0o077:
+            if (
+                not stat.S_ISREG(marker_stat.st_mode)
+                or marker_stat.st_mode & 0o077
+                or marker_stat.st_uid != os.geteuid()
+            ):
                 raise ReceiptAuthorityError(
                     "teacher receipt authority marker is unsafe"
                 )
@@ -172,7 +180,11 @@ def _read_pinned_public_key(root: Path) -> tuple[str, bytes, str]:
             ) from exc
         try:
             file_metadata = os.fstat(file_fd)
-            if not stat.S_ISREG(file_metadata.st_mode) or file_metadata.st_mode & 0o077:
+            if (
+                not stat.S_ISREG(file_metadata.st_mode)
+                or file_metadata.st_mode & 0o077
+                or file_metadata.st_uid != os.geteuid()
+            ):
                 raise ReceiptAuthorityError("teacher receipt public root is unsafe")
             payload = json.loads(os.read(file_fd, 64 * 1024).decode("utf-8"))
             if os.read(file_fd, 1):
@@ -361,6 +373,18 @@ class ReceiptAuthorityClient:
         """Permit only the canonical production root or an existing test root."""
         root = self._root.absolute()
         if root == _canonical_production_root():
+            try:
+                _, _, environment = _read_pinned_public_key(root)
+            except ReceiptAuthorityError as exc:
+                raise ReceiptAuthorityError(
+                    "production authority trust material must be externally "
+                    "provisioned before Forge starts"
+                ) from exc
+            if environment != "production":
+                raise ReceiptAuthorityError(
+                    "production authority trust material must be externally "
+                    "provisioned before Forge starts"
+                )
             return "production"
         if not root.exists():
             raise ReceiptAuthorityError(
@@ -388,6 +412,10 @@ class ReceiptAuthorityClient:
         if self._process is not None:
             return
         environment = self._environment()
+        if environment == "production":
+            raise ReceiptAuthorityError(
+                "production authority must be launched by an OS-level supervisor"
+            )
         bootstrap_read, bootstrap_write = os.pipe()
         os.set_inheritable(bootstrap_read, True)
         bootstrap = secrets.token_bytes(32)

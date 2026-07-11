@@ -103,6 +103,10 @@ def _open_root(root: Path, *, create: bool) -> int:
             raise AuthorityServiceError("authority root is not a private directory")
         if metadata.st_mode & 0o077:
             raise AuthorityServiceError("authority root has unsafe permissions")
+        if metadata.st_uid != os.geteuid():
+            raise AuthorityServiceError(
+                "authority root is not owned by this authority identity"
+            )
         return descriptor
     except Exception:
         os.close(descriptor)
@@ -120,6 +124,7 @@ def _safe_file(root_fd: int, name: str, *, required: bool = False) -> bool:
         stat.S_ISLNK(metadata.st_mode)
         or not stat.S_ISREG(metadata.st_mode)
         or metadata.st_mode & 0o077
+        or metadata.st_uid != os.geteuid()
     ):
         raise AuthorityServiceError("authority metadata is unsafe")
     return True
@@ -188,8 +193,8 @@ def initialize_test_root(root: Path) -> None:
         os.close(root_fd)
 
 
-def _root_environment(root_fd: int, *, create_production: bool = False) -> str:
-    """Read the immutable domain marker, creating production state only in-child."""
+def _root_environment(root_fd: int) -> str:
+    """Read the externally established immutable trust-domain marker."""
     has_test = _safe_file(root_fd, TEST_MARKER_NAME)
     has_production = _safe_file(root_fd, PRODUCTION_MARKER_NAME)
     if has_test and has_production:
@@ -202,14 +207,7 @@ def _root_environment(root_fd: int, *, create_production: bool = False) -> str:
         if _read_json(root_fd, PRODUCTION_MARKER_NAME) != {"environment": "production"}:
             raise AuthorityServiceError("production authority marker is malformed")
         return "production"
-    if not create_production:
-        raise AuthorityServiceError("authority root has no trust-domain marker")
-    if os.listdir(root_fd):
-        raise AuthorityServiceError("authority root has no trust-domain marker")
-    _write_json_exclusive(
-        root_fd, PRODUCTION_MARKER_NAME, {"environment": "production"}
-    )
-    return "production"
+    raise AuthorityServiceError("authority root has no trust-domain marker")
 
 
 def _require_public_root_contents(root_fd: int, environment: str) -> None:
@@ -282,21 +280,11 @@ def _public_metadata(
 def _require_pinned_key(
     root: Path,
     private_key: Ed25519PrivateKey,
-    *,
-    allow_production_bootstrap: bool = False,
 ) -> tuple[str, str, str]:
-    """Pin an authority key, allowing first-write production only in main()."""
-    root_was_present = root.exists()
-    root_fd = _open_root(
-        root,
-        create=allow_production_bootstrap and not root_was_present,
-    )
+    """Match production provisioning, or first-pin only an isolated test key."""
+    root_fd = _open_root(root, create=False)
     try:
-        initializing_production = allow_production_bootstrap and not root_was_present
-        environment = _root_environment(
-            root_fd,
-            create_production=initializing_production,
-        )
+        environment = _root_environment(root_fd)
         _require_public_root_contents(root_fd, environment)
         root_id = _root_identity(root, environment)
         public_key = _public_key_bytes(private_key)
@@ -307,7 +295,7 @@ def _require_pinned_key(
         )
         metadata_exists = _safe_file(root_fd, ROOT_NAME)
         if not metadata_exists:
-            if environment == "production" and not initializing_production:
+            if environment == "production":
                 raise AuthorityServiceError("authority root is incomplete")
             try:
                 _write_json_exclusive(root_fd, ROOT_NAME, expected)
@@ -709,17 +697,21 @@ def _run_authority(
     connection: Connection,
     root_text: str,
     *,
-    allow_production_bootstrap: bool = False,
+    production_private_key: bytes | None = None,
 ) -> None:
     """Run the child-only provider transport and Ed25519 receipt authority."""
     try:
         root = Path(root_text)
-        private_key = Ed25519PrivateKey.generate()
-        key_id, environment, root_id = _require_pinned_key(
-            root,
-            private_key,
-            allow_production_bootstrap=allow_production_bootstrap,
+        private_key = (
+            Ed25519PrivateKey.generate()
+            if production_private_key is None
+            else Ed25519PrivateKey.from_private_bytes(production_private_key)
         )
+        key_id, environment, root_id = _require_pinned_key(root, private_key)
+        if (production_private_key is None) == (environment == "production"):
+            raise AuthorityServiceError(
+                "authority launch capability does not match its trust domain"
+            )
         _send(
             connection,
             {
@@ -820,8 +812,8 @@ def _stdio_connection() -> tuple[Connection, Connection]:
     return pipe, pipe  # type: ignore[return-value]
 
 
-def _consume_bootstrap_fd(descriptor: int) -> None:
-    """Consume the one-shot private bootstrap capability from an inherited FD."""
+def _consume_bootstrap_fd(descriptor: int) -> bytes:
+    """Consume a one-shot launch capability from an inherited supervisor FD."""
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISFIFO(metadata.st_mode):
@@ -844,7 +836,7 @@ def _consume_bootstrap_fd(descriptor: int) -> None:
     token = b"".join(chunks)
     if len(token) != 32:
         raise AuthorityServiceError("authority bootstrap is malformed")
-    return None
+    return token
 
 
 # The service loop and production-root writer exist only in the executable
@@ -870,21 +862,32 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         root = Path(args.root).absolute()
-        if args.domain == "production" and root != _CANONICAL_PRODUCTION_ROOT:
-            return 3
-        if args.domain == "test":
+        if args.domain == "production":
+            if root != _CANONICAL_PRODUCTION_ROOT:
+                return 3
+            root_fd = _open_root(root, create=False)
+            try:
+                if _root_environment(root_fd) != "production":
+                    return 3
+                _safe_file(root_fd, ROOT_NAME, required=True)
+                _require_public_root_contents(root_fd, "production")
+            finally:
+                os.close(root_fd)
+        else:
             root_fd = _open_root(root, create=False)
             try:
                 if _root_environment(root_fd) != "test":
                     return 3
             finally:
                 os.close(root_fd)
-        _consume_bootstrap_fd(args.bootstrap_fd)
+        launch_capability = _consume_bootstrap_fd(args.bootstrap_fd)
         read_write, _ = _stdio_connection()
         _run_authority(
             read_write,
             str(root),
-            allow_production_bootstrap=args.domain == "production",
+            production_private_key=(
+                launch_capability if args.domain == "production" else None
+            ),
         )
         return 0
     except Exception:

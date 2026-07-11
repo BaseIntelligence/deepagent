@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -9,6 +10,8 @@ import sys
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from swe_forge.forge import receipt_authority
 from swe_forge.forge import receipt_authority_service
@@ -41,6 +44,41 @@ def _test_response(text: str = "authority response") -> dict[str, object]:
         "cost": 0.0125,
         "request_id": "test-request-1",
     }
+
+
+def _provision_production_root(
+    root: Path,
+    private_key: Ed25519PrivateKey,
+) -> None:
+    root.mkdir(mode=0o700)
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.Raw,
+        serialization.PublicFormat.Raw,
+    )
+    root_id = receipt_authority._root_identity(  # noqa: SLF001 - provisioning fixture
+        root, "production"
+    )
+    payload = {
+        "version": 1,
+        "algorithm": "Ed25519",
+        "environment": "production",
+        "root_id": root_id,
+        "key_id": receipt_authority._key_id(  # noqa: SLF001 - provisioning fixture
+            public_key,
+            environment="production",
+            root_id=root_id,
+        ),
+        "public_key": base64.b64encode(public_key).decode("ascii"),
+    }
+    marker = root / "production-authority-v1.json"
+    metadata = root / "authority-v1.json"
+    marker.write_text('{"environment":"production"}\n', encoding="utf-8")
+    metadata.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+    metadata.chmod(0o600)
 
 
 @pytest.fixture
@@ -432,10 +470,254 @@ def test_direct_service_cli_and_imported_loop_cannot_bootstrap_production_root(
     assert not root.exists()
 
 
+def test_actual_executable_rejects_caller_fd_when_canonical_root_is_absent() -> None:
+    """A caller-owned inherited descriptor is not production provisioning."""
+    canonical_root = Path("/var/lib/swe_forge/teacher-receipt-authority")
+    python = sys.executable
+    command = """
+set -eu
+mkdir -p /var/lib/swe_forge
+mount -t tmpfs -o mode=0755 tmpfs /var/lib/swe_forge
+set +e
+"$@" < /dev/null
+status=$?
+set -e
+test ! -e /var/lib/swe_forge/teacher-receipt-authority
+exit "$status"
+"""
+
+    bootstrap_read, bootstrap_write = os.pipe()
+    try:
+        os.set_inheritable(bootstrap_read, True)
+        os.write(bootstrap_write, b"a" * 32)
+        os.close(bootstrap_write)
+        bootstrap_write = -1
+        attempted = subprocess.run(
+            [
+                "unshare",
+                "--mount",
+                "--fork",
+                "sh",
+                "-c",
+                command,
+                "sh",
+                python,
+                "-m",
+                "swe_forge.forge.receipt_authority_service",
+                "--root",
+                str(canonical_root),
+                "--domain",
+                "production",
+                "--bootstrap-fd",
+                str(bootstrap_read),
+            ],
+            cwd="/projects/Agent-SWE",
+            check=False,
+            capture_output=True,
+            text=True,
+            pass_fds=(bootstrap_read,),
+            timeout=5,
+        )
+    finally:
+        os.close(bootstrap_read)
+        if bootstrap_write >= 0:
+            os.close(bootstrap_write)
+
+    assert attempted.returncode != 0
+    assert "key_id" not in attempted.stdout
+    assert '"type":"result"' not in attempted.stdout
+    assert not (canonical_root / "authority-v1.json").exists()
+
+
+def test_parent_refuses_absent_production_root_before_spawning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Imported Forge Python cannot turn its child or descriptors into trust."""
+    canonical_root = tmp_path / "absent-canonical-root"
+    monkeypatch.setattr(
+        receipt_authority,
+        "_canonical_production_root",
+        lambda: canonical_root,
+    )
+    spawned = False
+
+    def forbidden_spawn(*_args: object, **_kwargs: object) -> subprocess.Popen[bytes]:
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("production startup must fail before spawning")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden_spawn)
+    authority = receipt_authority.ReceiptAuthorityClient(root=canonical_root)
+
+    with pytest.raises(
+        receipt_authority.ReceiptAuthorityError,
+        match="externally provisioned",
+    ):
+        authority.complete({})
+
+    assert not spawned
+    assert not authority.is_alive
+    assert not canonical_root.exists()
+
+
+def test_provisioned_production_root_requires_matching_supervisor_capability() -> None:
+    """Provisioning binds startup to a key caller-selected bytes cannot replace."""
+    supervisor_key = Ed25519PrivateKey.generate()
+    private_b64 = base64.b64encode(
+        supervisor_key.private_bytes(
+            serialization.Encoding.Raw,
+            serialization.PrivateFormat.Raw,
+            serialization.NoEncryption(),
+        )
+    ).decode("ascii")
+    provision_script = f"""
+from pathlib import Path
+import base64
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from tests.test_forge.test_teacher_receipt_process_isolation import (
+    _provision_production_root,
+)
+root = Path("/var/lib/swe_forge/teacher-receipt-authority")
+key = Ed25519PrivateKey.from_private_bytes(base64.b64decode("{private_b64}"))
+_provision_production_root(root, key)
+"""
+    launcher = """
+set -eu
+mkdir -p /var/lib/swe_forge
+mount -t tmpfs -o mode=0755 tmpfs /var/lib/swe_forge
+"$1" -c "$2"
+shift 2
+before="$(sha256sum \
+  /var/lib/swe_forge/teacher-receipt-authority/production-authority-v1.json \
+  /var/lib/swe_forge/teacher-receipt-authority/authority-v1.json)"
+"$@" < /dev/null
+after="$(sha256sum \
+  /var/lib/swe_forge/teacher-receipt-authority/production-authority-v1.json \
+  /var/lib/swe_forge/teacher-receipt-authority/authority-v1.json)"
+test "$before" = "$after"
+"""
+    private_bytes = supervisor_key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    outcomes: list[subprocess.CompletedProcess[str]] = []
+    for capability in (b"x" * 32, private_bytes):
+        bootstrap_read, bootstrap_write = os.pipe()
+        try:
+            os.set_inheritable(bootstrap_read, True)
+            os.write(bootstrap_write, capability)
+            os.close(bootstrap_write)
+            bootstrap_write = -1
+            outcomes.append(
+                subprocess.run(
+                    [
+                        "unshare",
+                        "--mount",
+                        "--fork",
+                        "sh",
+                        "-c",
+                        launcher,
+                        "sh",
+                        sys.executable,
+                        provision_script,
+                        sys.executable,
+                        "-m",
+                        "swe_forge.forge.receipt_authority_service",
+                        "--root",
+                        "/var/lib/swe_forge/teacher-receipt-authority",
+                        "--domain",
+                        "production",
+                        "--bootstrap-fd",
+                        str(bootstrap_read),
+                    ],
+                    cwd="/projects/Agent-SWE",
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    pass_fds=(bootstrap_read,),
+                    timeout=5,
+                )
+            )
+        finally:
+            os.close(bootstrap_read)
+            if bootstrap_write >= 0:
+                os.close(bootstrap_write)
+
+    wrong, right = outcomes
+    assert wrong.returncode == 0
+    assert '"type":"startup_error"' in wrong.stdout
+    assert "key_id" not in wrong.stdout
+    assert right.returncode == 0
+    ready = json.loads(right.stdout.splitlines()[0])
+    assert ready["type"] == "ready"
+    assert ready["environment"] == "production"
+
+
+def test_production_executable_does_not_repair_incomplete_provisioning() -> None:
+    """A marker-only deployment root remains unchanged after rejected startup."""
+    launcher = """
+set -eu
+mkdir -p /var/lib/swe_forge
+mount -t tmpfs -o mode=0755 tmpfs /var/lib/swe_forge
+mkdir -m 700 /var/lib/swe_forge/teacher-receipt-authority
+printf '%s\n' '{"environment":"production"}' > \
+  /var/lib/swe_forge/teacher-receipt-authority/production-authority-v1.json
+chmod 600 /var/lib/swe_forge/teacher-receipt-authority/production-authority-v1.json
+set +e
+"$@" < /dev/null
+status=$?
+set -e
+test "$(find /var/lib/swe_forge/teacher-receipt-authority -mindepth 1 | wc -l)" -eq 1
+test ! -e /var/lib/swe_forge/teacher-receipt-authority/authority-v1.json
+exit "$status"
+"""
+    bootstrap_read, bootstrap_write = os.pipe()
+    try:
+        os.set_inheritable(bootstrap_read, True)
+        os.write(bootstrap_write, b"x" * 32)
+        os.close(bootstrap_write)
+        bootstrap_write = -1
+        attempted = subprocess.run(
+            [
+                "unshare",
+                "--mount",
+                "--fork",
+                "sh",
+                "-c",
+                launcher,
+                "sh",
+                sys.executable,
+                "-m",
+                "swe_forge.forge.receipt_authority_service",
+                "--root",
+                "/var/lib/swe_forge/teacher-receipt-authority",
+                "--domain",
+                "production",
+                "--bootstrap-fd",
+                str(bootstrap_read),
+            ],
+            cwd="/projects/Agent-SWE",
+            check=False,
+            capture_output=True,
+            text=True,
+            pass_fds=(bootstrap_read,),
+            timeout=5,
+        )
+    finally:
+        os.close(bootstrap_read)
+        if bootstrap_write >= 0:
+            os.close(bootstrap_write)
+
+    assert attempted.returncode == 1
+    assert "key_id" not in attempted.stdout
+
+
 def test_imported_key_pinning_helper_cannot_initialize_an_absent_root(
     tmp_path: Path,
 ) -> None:
-    """Only the executable child may first-write a production trust root."""
+    """No executable or imported helper may first-write production trust."""
     root = tmp_path / "absent-production-root"
 
     assert not hasattr(receipt_authority_service, "_require_pinned_key")
