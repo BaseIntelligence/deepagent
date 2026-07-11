@@ -32,6 +32,7 @@ AUTHORITY_CLIENT_FD_ENV = "SWE_FORGE_RECEIPT_AUTHORITY_FD"
 
 AUTHORITY_MODULE = "swe_forge.forge.receipt_authority_service"
 SUPERVISOR_STARTUP_TIMEOUT = 5.0
+SUPERVISOR_CHILD_TIMEOUT = 2.0
 _SUPERVISOR_CANONICAL_ROOT = Path("/var/lib/swe_forge/teacher-receipt-authority")
 
 
@@ -80,6 +81,59 @@ def _validate_key_fd(key_fd: int) -> None:
         raise ReceiptAuthoritySupervisorError(
             "production key capability fd has an unsupported type"
         )
+
+
+def _terminate_kill_reap(
+    process: subprocess.Popen[bytes],
+    *,
+    timeout: float = SUPERVISOR_CHILD_TIMEOUT,
+) -> None:
+    """Boundedly terminate and reap one supervisor-owned child.
+
+    A child which has already exited still needs ``wait()`` so that its
+    process table entry is reaped, but it must not receive unnecessary
+    signals.  A live child gets one bounded grace period after SIGTERM.  If
+    it does not exit in that period, SIGKILL is followed by a final bounded
+    wait to reap it.
+    """
+    if timeout <= 0:
+        raise ValueError("supervisor child timeout must be positive")
+    if process.poll() is not None:
+        process.wait()
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+terminate_kill_reap = _terminate_kill_reap
+
+
+def _cleanup_supervisor_children(
+    forge: subprocess.Popen[bytes] | None,
+    authority: subprocess.Popen[bytes] | None,
+    *,
+    timeout: float,
+) -> None:
+    """Reap Forge and authority, never allowing Forge cleanup to skip authority."""
+    cleanup_error: BaseException | None = None
+    try:
+        if forge is not None:
+            _terminate_kill_reap(forge, timeout=timeout)
+    except BaseException as exc:
+        cleanup_error = exc
+    finally:
+        try:
+            if authority is not None:
+                _terminate_kill_reap(authority, timeout=timeout)
+        except BaseException as exc:
+            if cleanup_error is None:
+                cleanup_error = exc
+    if cleanup_error is not None:
+        raise cleanup_error
 
 
 def _wait_for_authority_startup(
@@ -150,6 +204,7 @@ def run_supervised(
     env: Mapping[str, str] | None = None,
     cwd: Path | str | None = None,
     startup_timeout: float = SUPERVISOR_STARTUP_TIMEOUT,
+    child_timeout: float = SUPERVISOR_CHILD_TIMEOUT,
 ) -> int:
     """Run ``command`` with a supervisor-owned production authority.
 
@@ -157,21 +212,27 @@ def run_supervised(
     reads it, copies it into Python memory, places it in an environment, or
     passes it to the Forge command.  The authority consumes and closes it.
     """
-    if not command:
-        raise ReceiptAuthoritySupervisorError("supervised Forge command is empty")
-    if startup_timeout <= 0:
-        raise ReceiptAuthoritySupervisorError("supervisor startup timeout is invalid")
-    authority_root = _canonical_root() if root is None else Path(root).absolute()
-    _validate_production_root(authority_root)
-    _validate_key_fd(key_fd)
-
-    supervisor_socket, authority_socket = socket.socketpair(
-        socket.AF_UNIX, socket.SOCK_STREAM
-    )
+    owned_key_fd = key_fd if key_fd >= 3 else -1
+    supervisor_socket: socket.socket | None = None
+    authority_socket: socket.socket | None = None
     authority: subprocess.Popen[bytes] | None = None
     forge: subprocess.Popen[bytes] | None = None
-    forge_fd = supervisor_socket.fileno()
     try:
+        if not command:
+            raise ReceiptAuthoritySupervisorError("supervised Forge command is empty")
+        if startup_timeout <= 0:
+            raise ReceiptAuthoritySupervisorError(
+                "supervisor startup timeout is invalid"
+            )
+        if child_timeout <= 0:
+            raise ReceiptAuthoritySupervisorError("supervisor child timeout is invalid")
+        authority_root = _canonical_root() if root is None else Path(root).absolute()
+        _validate_production_root(authority_root)
+        _validate_key_fd(key_fd)
+        supervisor_socket, authority_socket = socket.socketpair(
+            socket.AF_UNIX, socket.SOCK_STREAM
+        )
+        forge_fd = supervisor_socket.fileno()
         authority_environment = {
             "PATH": os.environ.get("PATH", ""),
             "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
@@ -203,7 +264,9 @@ def run_supervised(
         # The supervisor must not retain the capability while Forge runs.
         os.close(key_fd)
         key_fd = -1
+        owned_key_fd = -1
         authority_socket.close()
+        authority_socket = None
         _wait_for_authority_startup(
             authority, supervisor_socket, authority_root, startup_timeout
         )
@@ -228,39 +291,46 @@ def run_supervised(
             close_fds=True,
         )
         supervisor_socket.close()
+        supervisor_socket = None
         forge_status = forge.wait()
         if forge_status < 0:
             return 128 + -forge_status
         return int(forge_status)
-    except (OSError, subprocess.SubprocessError) as exc:
+    except OSError as exc:
         raise ReceiptAuthoritySupervisorError(
             "production receipt authority supervisor failed"
         ) from exc
     finally:
-        if key_fd >= 0:
-            try:
-                os.close(key_fd)
-            except OSError:
-                pass
+        execution_error = sys.exc_info()[1]
+        cleanup_error: BaseException | None = None
         try:
-            authority_socket.close()
-        except OSError:
-            pass
-        try:
-            supervisor_socket.close()
-        except OSError:
-            pass
-        if forge is not None and forge.poll() is None:
-            forge.terminate()
-            forge.wait(timeout=2.0)
-        if authority is not None:
-            if authority.poll() is None:
-                authority.terminate()
             try:
-                authority.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                authority.kill()
-                authority.wait(timeout=2.0)
+                _cleanup_supervisor_children(
+                    forge,
+                    authority,
+                    timeout=child_timeout,
+                )
+            except BaseException as exc:
+                cleanup_error = exc
+        finally:
+            if authority_socket is not None:
+                try:
+                    authority_socket.close()
+                except OSError:
+                    pass
+            if supervisor_socket is not None:
+                try:
+                    supervisor_socket.close()
+                except OSError:
+                    pass
+            if owned_key_fd >= 0:
+                try:
+                    os.close(owned_key_fd)
+                except OSError:
+                    pass
+                owned_key_fd = -1
+        if cleanup_error is not None and execution_error is None:
+            raise cleanup_error
 
 
 def supervise(
@@ -271,6 +341,7 @@ def supervise(
     env: Mapping[str, str] | None = None,
     cwd: Path | str | None = None,
     startup_timeout: float = SUPERVISOR_STARTUP_TIMEOUT,
+    child_timeout: float = SUPERVISOR_CHILD_TIMEOUT,
 ) -> int:
     """Compatibility alias for callers embedding the trusted wrapper."""
     return run_supervised(
@@ -280,6 +351,7 @@ def supervise(
         env=env,
         cwd=cwd,
         startup_timeout=startup_timeout,
+        child_timeout=child_timeout,
     )
 
 
@@ -313,7 +385,9 @@ if __name__ == "__main__":
 
 __all__ = [
     "AUTHORITY_CLIENT_FD_ENV",
+    "SUPERVISOR_CHILD_TIMEOUT",
     "ReceiptAuthoritySupervisorError",
+    "terminate_kill_reap",
     "run_supervised",
     "supervise",
 ]
