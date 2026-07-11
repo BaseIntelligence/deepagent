@@ -14,12 +14,13 @@ import hashlib
 import json
 import os
 import re
+import socket
 import stat
 import sys
 import uuid
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
-from multiprocessing.connection import Connection
+from typing import Protocol
 from pathlib import Path
 
 os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
@@ -47,6 +48,14 @@ _SAFE_FINISH_REASONS = frozenset(
 
 class AuthorityServiceError(RuntimeError):
     """Raised inside the authority child for an unsafe request or root."""
+
+
+class _AuthorityConnection(Protocol):
+    def recv_bytes(self, limit: int) -> bytes: ...
+
+    def send_bytes(self, value: bytes) -> None: ...
+
+    def close(self) -> None: ...
 
 
 class ProviderTransportError(RuntimeError):
@@ -686,7 +695,7 @@ def _completion(
     }
 
 
-def _send(connection: Connection, payload: dict[str, object]) -> None:
+def _send(connection: _AuthorityConnection, payload: dict[str, object]) -> None:
     encoded = canonical_json(payload)
     if len(encoded) > MAX_IPC_BYTES:
         raise AuthorityServiceError("authority IPC response exceeds its bound")
@@ -694,7 +703,7 @@ def _send(connection: Connection, payload: dict[str, object]) -> None:
 
 
 def _run_authority(
-    connection: Connection,
+    connection: _AuthorityConnection,
     root_text: str,
     *,
     production_private_key: bytes | None = None,
@@ -786,7 +795,7 @@ def _run_authority(
     connection.close()
 
 
-def _stdio_connection() -> tuple[Connection, Connection]:
+def _stdio_connection() -> tuple[_AuthorityConnection, _AuthorityConnection]:
     """Adapt newline-delimited stdin/stdout to the legacy authority loop."""
 
     class _Pipe:
@@ -812,12 +821,57 @@ def _stdio_connection() -> tuple[Connection, Connection]:
     return pipe, pipe  # type: ignore[return-value]
 
 
-def _consume_bootstrap_fd(descriptor: int) -> bytes:
-    """Consume a one-shot launch capability from an inherited supervisor FD."""
+class _SocketConnection:
+    """Newline-framed bounded ``Connection`` adapter for a Unix socketpair."""
+
+    def __init__(self, descriptor: int) -> None:
+        try:
+            self._socket = socket.socket(fileno=descriptor)
+        except OSError as exc:
+            raise AuthorityServiceError("authority IPC socket is unavailable") from exc
+        self._buffer = bytearray()
+
+    def recv_bytes(self, limit: int) -> bytes:
+        while b"\n" not in self._buffer:
+            try:
+                chunk = self._socket.recv(min(64 * 1024, limit + 1 - len(self._buffer)))
+            except OSError as exc:
+                raise AuthorityServiceError(
+                    "authority IPC socket is unavailable"
+                ) from exc
+            if not chunk:
+                if self._buffer:
+                    raise AuthorityServiceError("authority IPC frame is malformed")
+                raise EOFError
+            self._buffer.extend(chunk)
+            if len(self._buffer) > limit:
+                return bytes(self._buffer)
+        end = self._buffer.index(b"\n")
+        encoded = bytes(self._buffer[:end])
+        del self._buffer[: end + 1]
+        return encoded
+
+    def send_bytes(self, value: bytes) -> None:
+        try:
+            self._socket.sendall(value + b"\n")
+        except OSError as exc:
+            raise AuthorityServiceError("authority IPC socket is unavailable") from exc
+
+    def close(self) -> None:
+        try:
+            self._socket.close()
+        except OSError:
+            pass
+
+
+def _consume_capability_fd(descriptor: int, *, require_pipe: bool) -> bytes:
+    """Consume a one-shot raw Ed25519 capability from an inherited FD."""
     try:
         metadata = os.fstat(descriptor)
-        if not stat.S_ISFIFO(metadata.st_mode):
+        if require_pipe and not stat.S_ISFIFO(metadata.st_mode):
             raise AuthorityServiceError("authority bootstrap is unavailable")
+        if not require_pipe and stat.S_ISSOCK(metadata.st_mode):
+            raise AuthorityServiceError("authority key capability is unavailable")
         chunks: list[bytes] = []
         while True:
             chunk = os.read(descriptor, 32 - sum(map(len, chunks)) + 1)
@@ -835,8 +889,13 @@ def _consume_bootstrap_fd(descriptor: int) -> bytes:
             pass
     token = b"".join(chunks)
     if len(token) != 32:
-        raise AuthorityServiceError("authority bootstrap is malformed")
+        raise AuthorityServiceError("authority key capability is malformed")
     return token
+
+
+def _consume_bootstrap_fd(descriptor: int) -> bytes:
+    """Consume the legacy test-domain launch token from a pipe."""
+    return _consume_capability_fd(descriptor, require_pipe=True)
 
 
 # The service loop and production-root writer exist only in the executable
@@ -856,13 +915,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
     parser.add_argument("--domain", choices=tuple(TRUST_DOMAINS), required=True)
-    parser.add_argument("--bootstrap-fd", type=int, required=True)
+    parser.add_argument("--bootstrap-fd", type=int)
+    parser.add_argument("--key-fd", type=int)
+    parser.add_argument("--ipc-fd", type=int)
     args = parser.parse_args(argv)
-    if args.bootstrap_fd < 3:
-        return 2
     try:
         root = Path(args.root).absolute()
         if args.domain == "production":
+            if (
+                args.key_fd is None
+                or args.ipc_fd is None
+                or args.key_fd < 3
+                or args.ipc_fd < 3
+            ):
+                return 2
             if root != _CANONICAL_PRODUCTION_ROOT:
                 return 3
             root_fd = _open_root(root, create=False)
@@ -873,7 +939,27 @@ def main(argv: list[str] | None = None) -> int:
                 _require_public_root_contents(root_fd, "production")
             finally:
                 os.close(root_fd)
+            try:
+                key_metadata = os.fstat(args.key_fd)
+                ipc_metadata = os.fstat(args.ipc_fd)
+            except OSError:
+                return 2
+            if not (
+                stat.S_ISREG(key_metadata.st_mode)
+                or stat.S_ISFIFO(key_metadata.st_mode)
+            ) or not stat.S_ISSOCK(ipc_metadata.st_mode):
+                return 2
+            launch_capability = _consume_capability_fd(args.key_fd, require_pipe=False)
+            connection = _SocketConnection(args.ipc_fd)
+            _run_authority(
+                connection,
+                str(root),
+                production_private_key=launch_capability,
+            )
+            return 0
         else:
+            if args.bootstrap_fd is None or args.bootstrap_fd < 3:
+                return 2
             root_fd = _open_root(root, create=False)
             try:
                 if _root_environment(root_fd) != "test":
@@ -885,9 +971,7 @@ def main(argv: list[str] | None = None) -> int:
         _run_authority(
             read_write,
             str(root),
-            production_private_key=(
-                launch_capability if args.domain == "production" else None
-            ),
+            production_private_key=None,
         )
         return 0
     except Exception:

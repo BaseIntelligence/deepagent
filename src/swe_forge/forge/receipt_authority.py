@@ -13,10 +13,12 @@ import json
 import os
 import secrets
 import select
+import socket
 import stat
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
@@ -33,6 +35,7 @@ TEST_MARKER_NAME = "test-authority-v1.json"
 PRODUCTION_MARKER_NAME = "production-authority-v1.json"
 TRUST_DOMAINS = frozenset(("production", "test"))
 _CANONICAL_PRODUCTION_ROOT = Path("/var/lib/swe_forge/teacher-receipt-authority")
+AUTHORITY_CLIENT_FD_ENV = "SWE_FORGE_RECEIPT_AUTHORITY_FD"
 
 
 def _canonical_production_root(
@@ -365,6 +368,8 @@ class ReceiptAuthorityClient:
         self._startup_timeout = startup_timeout
         self._request_timeout = request_timeout
         self._process: subprocess.Popen[bytes] | None = None
+        self._socket: socket.socket | None = None
+        self._socket_buffer = bytearray()
         self._lock = threading.Lock()
         self._failed = False
         self._closed = False
@@ -399,6 +404,8 @@ class ReceiptAuthorityClient:
 
     @property
     def is_alive(self) -> bool:
+        if self._socket is not None:
+            return True
         return self._process is not None and self._process.poll() is None
 
     @property
@@ -413,9 +420,32 @@ class ReceiptAuthorityClient:
             return
         environment = self._environment()
         if environment == "production":
-            raise ReceiptAuthorityError(
-                "production authority must be launched by an OS-level supervisor"
-            )
+            descriptor_text = os.environ.get(AUTHORITY_CLIENT_FD_ENV, "")
+            if not descriptor_text.isdecimal() or int(descriptor_text) < 3:
+                raise ReceiptAuthorityError(
+                    "production authority supervisor transport is unavailable"
+                )
+            descriptor = int(descriptor_text)
+            try:
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISSOCK(metadata.st_mode):
+                    raise ReceiptAuthorityError(
+                        "production authority supervisor transport is malformed"
+                    )
+                attached = socket.socket(fileno=os.dup(descriptor))
+                attached.setblocking(True)
+            except (OSError, ValueError) as exc:
+                raise ReceiptAuthorityError(
+                    "production authority supervisor transport is unavailable"
+                ) from exc
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            self._socket = attached
+            ready = self._receive(self._startup_timeout)
+            self._validate_ready(ready, environment)
+            return
         bootstrap_read, bootstrap_write = os.pipe()
         os.set_inheritable(bootstrap_read, True)
         bootstrap = secrets.token_bytes(32)
@@ -455,25 +485,69 @@ class ReceiptAuthorityClient:
         self._process = process
         try:
             ready = self._receive(self._startup_timeout)
-            if (
-                ready.get("type") != "ready"
-                or not isinstance(ready.get("key_id"), str)
-                or ready.get("environment") != environment
-            ):
-                raise ReceiptAuthorityError("teacher receipt authority failed to start")
-            pinned_id, _, pinned_environment = _read_pinned_public_key(self._root)
-            if ready["key_id"] != pinned_id:
-                raise ReceiptAuthorityError("teacher receipt authority root mismatches")
-            if pinned_environment != environment:
-                raise ReceiptAuthorityError(
-                    "teacher receipt authority trust domain mismatches"
-                )
+            self._validate_ready(ready, environment)
         except Exception:
             self._failed = True
             self.close()
             raise
 
+    def _validate_ready(self, ready: dict[str, object], environment: str) -> None:
+        if (
+            ready.get("type") != "ready"
+            or not isinstance(ready.get("key_id"), str)
+            or not isinstance(ready.get("root_id"), str)
+            or ready.get("environment") != environment
+        ):
+            raise ReceiptAuthorityError("teacher receipt authority failed to start")
+        pinned_id, _, pinned_environment = _read_pinned_public_key(self._root)
+        if ready["key_id"] != pinned_id:
+            raise ReceiptAuthorityError("teacher receipt authority root mismatches")
+        if ready["root_id"] != _root_identity(self._root, environment):
+            raise ReceiptAuthorityError("teacher receipt authority root mismatches")
+        if pinned_environment != environment:
+            raise ReceiptAuthorityError(
+                "teacher receipt authority trust domain mismatches"
+            )
+
     def _receive(self, timeout: float) -> dict[str, object]:
+        if self._socket is not None:
+            deadline = time.monotonic() + timeout
+            if timeout <= 0:
+                raise ReceiptAuthorityError("teacher receipt authority timed out")
+            while b"\n" not in self._socket_buffer:
+                remaining = deadline - time.monotonic()
+                if (
+                    remaining <= 0
+                    or not select.select([self._socket], [], [], remaining)[0]
+                ):
+                    raise ReceiptAuthorityError("teacher receipt authority timed out")
+                try:
+                    chunk = self._socket.recv(
+                        min(
+                            64 * 1024,
+                            MAX_IPC_BYTES + 1 - len(self._socket_buffer),
+                        )
+                    )
+                except OSError as exc:
+                    raise ReceiptAuthorityError(
+                        "teacher receipt authority crashed"
+                    ) from exc
+                if not chunk:
+                    raise ReceiptAuthorityError("teacher receipt authority crashed")
+                self._socket_buffer.extend(chunk)
+                if len(self._socket_buffer) > MAX_IPC_BYTES:
+                    raise ReceiptAuthorityError(
+                        "teacher receipt authority IPC is malformed"
+                    )
+            end = self._socket_buffer.index(b"\n")
+            encoded = bytes(self._socket_buffer[:end])
+            del self._socket_buffer[: end + 1]
+            try:
+                return _parse_message(encoded)
+            except ReceiptAuthorityError as exc:
+                raise ReceiptAuthorityError(
+                    "teacher receipt authority IPC is malformed"
+                ) from exc
         process = self._process
         if process is None or process.stdout is None:
             raise ReceiptAuthorityError("teacher receipt authority is unavailable")
@@ -508,12 +582,20 @@ class ReceiptAuthorityClient:
                         "teacher receipt authority request exceeds its bound"
                     )
                 process = self._process
-                if process is None or process.stdin is None:
-                    raise ReceiptAuthorityError(
-                        "teacher receipt authority is unavailable"
-                    )
-                process.stdin.write(encoded + b"\n")
-                process.stdin.flush()
+                if self._socket is not None:
+                    try:
+                        self._socket.sendall(encoded + b"\n")
+                    except OSError as exc:
+                        raise ReceiptAuthorityError(
+                            "teacher receipt authority crashed"
+                        ) from exc
+                else:
+                    if process is None or process.stdin is None:
+                        raise ReceiptAuthorityError(
+                            "teacher receipt authority is unavailable"
+                        )
+                    process.stdin.write(encoded + b"\n")
+                    process.stdin.flush()
                 response = self._receive(
                     self._request_timeout if timeout is None else timeout
                 )
@@ -534,8 +616,16 @@ class ReceiptAuthorityClient:
                 raise ReceiptAuthorityError("teacher receipt authority failed") from exc
 
     def close(self) -> None:
-        """Close the pipe and reap only the authority process started by this client."""
+        """Close client-owned transport and reap only a child this client spawned."""
         self._closed = True
+        attached = self._socket
+        self._socket = None
+        if attached is not None:
+            try:
+                attached.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            attached.close()
         process = self._process
         self._process = None
         if process is not None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -561,98 +562,276 @@ def test_parent_refuses_absent_production_root_before_spawning(
     assert not canonical_root.exists()
 
 
-def test_provisioned_production_root_requires_matching_supervisor_capability() -> None:
-    """Provisioning binds startup to a key caller-selected bytes cannot replace."""
-    supervisor_key = Ed25519PrivateKey.generate()
-    private_b64 = base64.b64encode(
-        supervisor_key.private_bytes(
-            serialization.Encoding.Raw,
-            serialization.PrivateFormat.Raw,
-            serialization.NoEncryption(),
+def test_production_client_rejects_mismatched_supervisor_ready_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A supervisor socket is not trusted until ready metadata matches the root."""
+    root = tmp_path / "production-authority"
+    key = Ed25519PrivateKey.generate()
+    _provision_production_root(root, key)
+    monkeypatch.setattr(receipt_authority, "_canonical_production_root", lambda: root)
+    supervisor, client_socket = socket.socketpair()
+    transport_fd = os.dup(client_socket.fileno())
+    monkeypatch.setenv(
+        receipt_authority.AUTHORITY_CLIENT_FD_ENV,
+        str(transport_fd),
+    )
+    supervisor.sendall(
+        json.dumps(
+            {
+                "type": "ready",
+                "environment": "production",
+                "key_id": "0" * 64,
+                "root_id": receipt_authority._root_identity(root, "production"),
+            },
+            separators=(",", ":"),
+        ).encode()
+        + b"\n"
+    )
+    client = receipt_authority.ReceiptAuthorityClient(root=root, startup_timeout=1)
+    with pytest.raises(
+        receipt_authority.ReceiptAuthorityError, match="root mismatches"
+    ):
+        client.complete({})
+    client_socket.close()
+    supervisor.close()
+    assert not client.is_alive
+
+
+def test_production_client_rejects_malformed_supervisor_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed inherited IPC fails closed without starting a child."""
+    root = tmp_path / "production-authority"
+    _provision_production_root(root, Ed25519PrivateKey.generate())
+    monkeypatch.setattr(receipt_authority, "_canonical_production_root", lambda: root)
+    supervisor, client_socket = socket.socketpair()
+    transport_fd = os.dup(client_socket.fileno())
+    monkeypatch.setenv(
+        receipt_authority.AUTHORITY_CLIENT_FD_ENV,
+        str(transport_fd),
+    )
+    supervisor.sendall(b"not-json\n")
+    client = receipt_authority.ReceiptAuthorityClient(root=root, startup_timeout=1)
+    with pytest.raises(
+        receipt_authority.ReceiptAuthorityError, match="IPC is malformed"
+    ):
+        client.complete({})
+    client_socket.close()
+    supervisor.close()
+    assert not client.is_alive
+
+
+def test_provisioned_production_root_requires_matching_supervisor_capability(
+    tmp_path: Path,
+) -> None:
+    """A caller-owned legacy bootstrap fd cannot initialize production trust."""
+    root = tmp_path / "would-be-production-root"
+    bootstrap_read, bootstrap_write = os.pipe()
+    try:
+        os.set_inheritable(bootstrap_read, True)
+        os.write(bootstrap_write, b"x" * 32)
+        os.close(bootstrap_write)
+        bootstrap_write = -1
+        attempted = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "swe_forge.forge.receipt_authority_service",
+                "--root",
+                str(root),
+                "--domain",
+                "production",
+                "--bootstrap-fd",
+                str(bootstrap_read),
+            ],
+            cwd="/projects/Agent-SWE",
+            check=False,
+            capture_output=True,
+            text=True,
+            pass_fds=(bootstrap_read,),
+            timeout=5,
         )
-    ).decode("ascii")
-    provision_script = f"""
-from pathlib import Path
-import base64
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from tests.test_forge.test_teacher_receipt_process_isolation import (
-    _provision_production_root,
+    finally:
+        os.close(bootstrap_read)
+        if bootstrap_write >= 0:
+            os.close(bootstrap_write)
+    assert attempted.returncode != 0
+    assert "key_id" not in attempted.stdout
+    assert '"type":"ready"' not in attempted.stdout
+    assert not root.exists()
+
+
+def test_supervisor_transport_completes_production_teacher_and_fresh_verifier(
+    tmp_path: Path,
+) -> None:
+    """The trusted wrapper carries the key, while Forge receives only IPC."""
+    provider_dir = tmp_path / "provider"
+    provider_dir.mkdir()
+    (provider_dir / "litellm.py").write_text(
+        """
+drop_params = False
+
+class Value:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+async def acompletion(**kwargs):
+    return Value(
+        id="offline-production-request",
+        choices=[Value(
+            message=Value(content="offline production teacher", tool_calls=[]),
+            finish_reason="stop",
+        )],
+        usage=Value(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        _hidden_params={"response_cost": 0.0},
+    )
+""",
+        encoding="utf-8",
+    )
+    forge_script = """
+import asyncio
+import json
+import subprocess
+import sys
+from swe_forge.forge.teacher import (
+    TeacherClient,
+    TransportReceipt,
+    transport_receipt_context,
+    verify_transport_receipt,
 )
+
+class Candidate:
+    def to_dict(self):
+        return {"candidate": "supervisor-production"}
+
+def fresh_verify(receipt):
+    script = '''
+import json
+import sys
+from swe_forge.forge.teacher import TransportReceipt, verify_transport_receipt
+receipt = TransportReceipt.from_private_dict(json.loads(sys.argv[1]))
+raise SystemExit(0 if verify_transport_receipt(receipt) else 1)
+'''
+    return subprocess.run(
+        [sys.executable, "-c", script, json.dumps(receipt)],
+        check=False,
+    ).returncode == 0
+
+async def run():
+    client = TeacherClient(
+        base_url="https://offline.invalid",
+        api_key="offline-key",
+        model="anthropic/offline",
+    )
+    with transport_receipt_context(
+        Candidate(), gate="supervisor", call_kind="completion"
+    ):
+        result = await client.complete_text("complete offline")
+    receipt = result.transport_receipt
+    fresh = receipt is not None and fresh_verify(receipt.to_private_dict())
+    print(json.dumps({
+        "text": result.text,
+        "tokens": result.usage.total_tokens,
+        "receipt": receipt is not None and verify_transport_receipt(receipt),
+        "fresh": fresh,
+    }, sort_keys=True), flush=True)
+    await client.aclose()
+    raise SystemExit(0 if receipt is not None and fresh else 1)
+
+asyncio.run(run())
+"""
+    supervisor_script = f"""
+import base64
+import json
+import os
+import sys
+from pathlib import Path
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from swe_forge.forge import receipt_authority
+from swe_forge.forge.receipt_authority_supervisor import run_supervised
+
 root = Path("/var/lib/swe_forge/teacher-receipt-authority")
-key = Ed25519PrivateKey.from_private_bytes(base64.b64decode("{private_b64}"))
-_provision_production_root(root, key)
-"""
-    launcher = """
-set -eu
-mkdir -p /var/lib/swe_forge
-mount -t tmpfs -o mode=0755 tmpfs /var/lib/swe_forge
-"$1" -c "$2"
-shift 2
-before="$(sha256sum \
-  /var/lib/swe_forge/teacher-receipt-authority/production-authority-v1.json \
-  /var/lib/swe_forge/teacher-receipt-authority/authority-v1.json)"
-"$@" < /dev/null
-after="$(sha256sum \
-  /var/lib/swe_forge/teacher-receipt-authority/production-authority-v1.json \
-  /var/lib/swe_forge/teacher-receipt-authority/authority-v1.json)"
-test "$before" = "$after"
-"""
-    private_bytes = supervisor_key.private_bytes(
+root.mkdir(mode=0o700)
+key = Ed25519PrivateKey.generate()
+public_key = key.public_key().public_bytes(
+    serialization.Encoding.Raw, serialization.PublicFormat.Raw
+)
+root_id = receipt_authority._root_identity(root, "production")
+metadata = {{
+    "version": 1,
+    "algorithm": "Ed25519",
+    "environment": "production",
+    "root_id": root_id,
+    "key_id": receipt_authority._key_id(
+        public_key, environment="production", root_id=root_id
+    ),
+    "public_key": base64.b64encode(public_key).decode("ascii"),
+}}
+(root / "production-authority-v1.json").write_text(
+    '{{"environment":"production"}}\\n', encoding="utf-8"
+)
+(root / "authority-v1.json").write_text(
+    json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\\n",
+    encoding="utf-8",
+)
+for path in root.iterdir():
+    path.chmod(0o600)
+root.chmod(0o700)
+
+read_fd, write_fd = os.pipe()
+os.write(
+    write_fd,
+    key.private_bytes(
         serialization.Encoding.Raw,
         serialization.PrivateFormat.Raw,
         serialization.NoEncryption(),
+    ),
+)
+os.close(write_fd)
+os.environ["PYTHONPATH"] = {str(provider_dir)!r} + ":" + os.environ.get(
+    "PYTHONPATH", ""
+)
+raise SystemExit(run_supervised(
+    [sys.executable, "-c", {forge_script!r}],
+    key_fd=read_fd,
+))
+"""
+    attempted = subprocess.run(
+        [
+            "unshare",
+            "--mount",
+            "--fork",
+            "sh",
+            "-c",
+            'mount -t tmpfs -o mode=0755 tmpfs /var/lib/swe_forge; exec "$@"',
+            "sh",
+            sys.executable,
+            "-c",
+            supervisor_script,
+        ],
+        cwd="/projects/Agent-SWE",
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": f"{provider_dir}:/projects/Agent-SWE/src",
+        },
+        timeout=10,
     )
-    outcomes: list[subprocess.CompletedProcess[str]] = []
-    for capability in (b"x" * 32, private_bytes):
-        bootstrap_read, bootstrap_write = os.pipe()
-        try:
-            os.set_inheritable(bootstrap_read, True)
-            os.write(bootstrap_write, capability)
-            os.close(bootstrap_write)
-            bootstrap_write = -1
-            outcomes.append(
-                subprocess.run(
-                    [
-                        "unshare",
-                        "--mount",
-                        "--fork",
-                        "sh",
-                        "-c",
-                        launcher,
-                        "sh",
-                        sys.executable,
-                        provision_script,
-                        sys.executable,
-                        "-m",
-                        "swe_forge.forge.receipt_authority_service",
-                        "--root",
-                        "/var/lib/swe_forge/teacher-receipt-authority",
-                        "--domain",
-                        "production",
-                        "--bootstrap-fd",
-                        str(bootstrap_read),
-                    ],
-                    cwd="/projects/Agent-SWE",
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    pass_fds=(bootstrap_read,),
-                    timeout=5,
-                )
-            )
-        finally:
-            os.close(bootstrap_read)
-            if bootstrap_write >= 0:
-                os.close(bootstrap_write)
-
-    wrong, right = outcomes
-    assert wrong.returncode == 0
-    assert '"type":"startup_error"' in wrong.stdout
-    assert "key_id" not in wrong.stdout
-    assert right.returncode == 0
-    ready = json.loads(right.stdout.splitlines()[0])
-    assert ready["type"] == "ready"
-    assert ready["environment"] == "production"
+    assert attempted.returncode == 0, attempted.stderr
+    result = json.loads(attempted.stdout.strip())
+    assert result == {
+        "fresh": True,
+        "receipt": True,
+        "text": "offline production teacher",
+        "tokens": 5,
+    }
+    assert "offline-key" not in attempted.stdout
 
 
 def test_production_executable_does_not_repair_incomplete_provisioning() -> None:
@@ -710,7 +889,7 @@ exit "$status"
         if bootstrap_write >= 0:
             os.close(bootstrap_write)
 
-    assert attempted.returncode == 1
+    assert attempted.returncode != 0
     assert "key_id" not in attempted.stdout
 
 
