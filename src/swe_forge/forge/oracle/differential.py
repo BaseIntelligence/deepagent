@@ -605,7 +605,8 @@ def reconstruct_suite_tests(
     the adapter so the differential gate runs the entire hidden suite against
     gold and each variant.
     """
-    tests: list[HiddenTest] = []
+    grouped_files: dict[str, list[HiddenTestFile]] = {}
+    grouped_origins: dict[str, str] = {}
     for tf in test_files:
         if not tf.content:
             continue
@@ -616,14 +617,18 @@ def reconstruct_suite_tests(
                 break
         if test_id is None:
             test_id = adapter.test_command((tf.path,))
-        tests.append(
-            HiddenTest(
-                test_id=test_id,
-                files=(HiddenTestFile(path=tf.path, content=tf.content),),
-                origin=tf.origin,
-            )
+        grouped_files.setdefault(test_id, []).append(
+            HiddenTestFile(path=tf.path, content=tf.content)
         )
-    return tests
+        grouped_origins.setdefault(test_id, tf.origin)
+    return [
+        HiddenTest(
+            test_id=test_id,
+            files=tuple(files),
+            origin=grouped_origins[test_id],
+        )
+        for test_id, files in grouped_files.items()
+    ]
 
 
 class DockerDifferentialRunner:

@@ -50,6 +50,7 @@ from swe_forge.forge.oracle.alt_correct import (
 )
 from swe_forge.forge.oracle.alt_correct_synth import TeacherAltCorrectGenerator
 from swe_forge.forge.oracle.establish import HiddenTest, HiddenTestFile, TestRun
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 
 
 # --------------------------------------------------------------------------- #
@@ -573,6 +574,8 @@ async def test_public_alt_audit_round_trips_only_through_protected_serialization
         "gold_public_suite_passed",
         "public_valid_alternatives",
         "invalid_teacher_proposals",
+        "pre_relax_suite_fingerprint",
+        "final_suite_fingerprint",
     }
     assert public["details"]["alt_correct"]["public_valid_alternatives"] == 1
     assert "public_suite_sha256" in public["details"]["alt_correct"]
@@ -622,6 +625,18 @@ async def test_build_report_relax_removes_dropped_test_files() -> None:
     # the over-fit F2P id and its test file are removed; the surviving F2P remains
     assert report.fail_to_pass == [f2p]
     assert [tf.path for tf in report.test_files] == ["tests/test_x.py"]
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    assert audit["version"] == 2
+    pre_relax = audit["pre_relax_suite"]
+    final = audit["final_suite"]
+    assert isinstance(pre_relax, dict) and isinstance(final, dict)
+    assert pre_relax["identities"] == sorted([f2p, overfit])
+    assert pre_relax["identity_count"] == 2
+    assert final["identities"] == [f2p]
+    assert final["identity_count"] == 1
+    assert pre_relax["suite_fingerprint"] == final_suite_fingerprint(prior.test_files)
+    assert final["suite_fingerprint"] == final_suite_fingerprint(report.test_files)
 
 
 async def test_relaxation_invalidates_prior_final_mutation_evidence() -> None:

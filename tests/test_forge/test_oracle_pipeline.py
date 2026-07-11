@@ -90,10 +90,43 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
-def _alt_correct_audit() -> dict[str, object]:
+def _suite_receipt(
+    test_files: list[OracleTestFile],
+    identities: list[str] | None = None,
+) -> dict[str, object]:
+    suite_identities = sorted(identities or _F2P)
+    files = [
+        {
+            "path": test_file.path,
+            "content_sha256": hashlib.sha256(
+                (
+                    test_file.content
+                    if test_file.content.endswith("\n")
+                    else test_file.content + "\n"
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+        for test_file in test_files
+        if test_file.content
+    ]
     return {
-        "version": 1,
+        "identities": suite_identities,
+        "identity_count": len(suite_identities),
+        "identity_sha256": hashlib.sha256(
+            "".join(f"{identity}\n" for identity in suite_identities).encode("utf-8")
+        ).hexdigest(),
+        "suite_fingerprint": final_suite_fingerprint(test_files),
+        "files": files,
+    }
+
+
+def _alt_correct_audit() -> dict[str, object]:
+    test_files = [OracleTestFile(path="tests/hidden/test_total.py", content="x = 1\n")]
+    return {
+        "version": 2,
         "original_public_suite_sha256": "a" * 64,
+        "pre_relax_suite": _suite_receipt(test_files),
+        "final_suite": _suite_receipt(test_files),
         "gold": {
             "public": {"passed": True, "exit_code": 0},
             "filtered_p2p": {"passed": True, "exit_code": 0},
@@ -191,6 +224,8 @@ def _pass_report(**overrides: object) -> OracleReport:
                 "gold_public_suite_passed": True,
                 "public_valid_alternatives": 1,
                 "invalid_teacher_proposals": [],
+                "pre_relax_suite_fingerprint": final_suite_fingerprint(test_files),
+                "final_suite_fingerprint": final_suite_fingerprint(test_files),
             },
         },
         "protected_alt_correct_audit": _alt_correct_audit(),
@@ -517,7 +552,8 @@ def test_alt_correct_audit_reconciles_hidden_coverage_and_summary_identities() -
     problems = verify_pass_consistency(report)
 
     assert any(
-        "gold hidden test identities do not match final suite" in p for p in problems
+        "gold hidden test identities do not match pre-relax suite" in p
+        for p in problems
     )
     with pytest.raises(ExportRefusedError):
         ensure_oracle_exportable(report, calibration_kept=True)
@@ -552,6 +588,189 @@ def test_alt_correct_audit_requires_complete_relaxed_execution_evidence() -> Non
     initial["relaxed"]["hidden"][0]["exit_code"] = 1
     assert any(
         "relaxed public-green alternative has a non-green hidden result" in problem
+        for problem in verify_pass_consistency(report)
+    )
+
+
+def _relaxed_audit_report() -> OracleReport:
+    report = _pass_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    final_files = list(report.test_files)
+    overfit_id = "python -m pytest tests/hidden/test_overfit.py"
+    pre_files = [
+        *final_files,
+        OracleTestFile(path="tests/hidden/test_overfit.py", content="x = 2\n"),
+    ]
+    audit["pre_relax_suite"] = _suite_receipt(pre_files, [*_F2P, overfit_id])
+    audit["final_suite"] = _suite_receipt(final_files)
+    report.details["alt_correct"]["pre_relax_suite_fingerprint"] = audit[  # type: ignore[index]
+        "pre_relax_suite"
+    ]["suite_fingerprint"]
+    report.details["alt_correct"]["final_suite_fingerprint"] = audit[  # type: ignore[index]
+        "final_suite"
+    ]["suite_fingerprint"]
+    for record in [
+        audit["gold"],
+        audit["alternatives"]["alt_1"],  # type: ignore[index]
+    ]:
+        assert isinstance(record, dict)
+        hidden = record["hidden"]
+        assert isinstance(hidden, list)
+        hidden.append({"test_id": overfit_id, "exit_code": 0})
+        record["relaxed"] = {
+            "public": dict(record["public"]),  # type: ignore[arg-type]
+            "filtered_p2p": dict(record["filtered_p2p"]),  # type: ignore[arg-type]
+            "hidden": [
+                {"test_id": _F2P[0], "exit_code": 0},
+            ],
+        }
+    alternative = audit["alternatives"]["alt_1"]  # type: ignore[index]
+    assert isinstance(alternative, dict)
+    initial_hidden = alternative["hidden"]
+    assert isinstance(initial_hidden, list)
+    initial_hidden[1]["exit_code"] = 1  # type: ignore[index]
+    return report
+
+
+def _replace_effective_gold_identity(audit: dict[str, object]) -> None:
+    gold = audit["gold"]
+    assert isinstance(gold, dict)
+    relaxed = gold["relaxed"]
+    assert isinstance(relaxed, dict)
+    hidden = relaxed["hidden"]
+    assert isinstance(hidden, list)
+    hidden[0] = {
+        "test_id": "python -m pytest tests/hidden/test_overfit.py",
+        "exit_code": 0,
+    }
+
+
+def test_relaxed_audit_reconciles_initial_pre_relax_and_effective_final_suites() -> (
+    None
+):
+    assert verify_pass_consistency(_relaxed_audit_report()) == []
+
+
+def test_relaxed_audit_rejects_substituted_pre_relax_evidence() -> None:
+    report = _relaxed_audit_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    stale_id = "python -m pytest tests/hidden/test_stale.py"
+    audit["pre_relax_suite"] = _suite_receipt(
+        [OracleTestFile(path="tests/hidden/test_stale.py", content="x = 3\n")],
+        [stale_id],
+    )
+    audit["gold"]["hidden"][0]["test_id"] = stale_id  # type: ignore[index]
+    audit["gold"]["hidden"].pop()  # type: ignore[index]
+    audit["alternatives"]["alt_1"]["hidden"][0]["test_id"] = stale_id  # type: ignore[index]
+    audit["alternatives"]["alt_1"]["hidden"].pop()  # type: ignore[index]
+
+    assert any(
+        "public pre-relax suite fingerprint does not match protected audit" in problem
+        for problem in verify_pass_consistency(report)
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (
+            lambda report: report.protected_alt_correct_audit["pre_relax_suite"].update(  # type: ignore[index,union-attr]
+                {"identity_count": 0}
+            ),
+            "pre-relax suite identity count is inconsistent",
+        ),
+        (
+            lambda report: report.protected_alt_correct_audit["final_suite"].update(  # type: ignore[index,union-attr]
+                {"identity_sha256": "f" * 64}
+            ),
+            "final suite identity digest is inconsistent",
+        ),
+        (
+            lambda report: report.protected_alt_correct_audit["final_suite"].update(  # type: ignore[index,union-attr]
+                {"suite_fingerprint": "f" * 64}
+            ),
+            "final suite fingerprint does not match file manifest",
+        ),
+        (
+            lambda report: report.details["alt_correct"].update(  # type: ignore[index]
+                {"final_suite_fingerprint": "f" * 64}
+            ),
+            "public final suite fingerprint does not match protected audit",
+        ),
+    ],
+)
+def test_suite_receipts_reconcile_counts_digests_and_public_fingerprints(
+    mutate: object, expected: str
+) -> None:
+    report = _relaxed_audit_report()
+    assert callable(mutate)
+    mutate(report)
+
+    assert any(expected in problem for problem in verify_pass_consistency(report))
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(report, calibration_kept=True)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (
+            lambda audit: audit["gold"]["relaxed"].update({"hidden": []}),  # type: ignore[index]
+            "relaxed gold hidden result is incomplete",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["relaxed"]["hidden"].append(  # type: ignore[index]
+                {
+                    "test_id": "python -m pytest tests/hidden/test_overfit.py",
+                    "exit_code": 0,
+                }
+            ),
+            "relaxed alternative hidden test identities do not match final suite",
+        ),
+        (
+            lambda audit: audit["gold"]["relaxed"]["hidden"].append(  # type: ignore[index]
+                {"test_id": _F2P[0], "exit_code": 0}
+            ),
+            "duplicate hidden test identity",
+        ),
+        (
+            _replace_effective_gold_identity,
+            "relaxed gold hidden test identities do not match final suite",
+        ),
+    ],
+)
+def test_relaxed_audit_rejects_incomplete_extra_duplicate_or_stale_effective_evidence(
+    mutate: object, expected: str
+) -> None:
+    report = _relaxed_audit_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict) and callable(mutate)
+    mutate(audit)
+
+    assert any(expected in problem for problem in verify_pass_consistency(report))
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(report, calibration_kept=True)
+
+
+def test_non_relaxed_audit_requires_identical_pre_and_final_suite_receipts() -> None:
+    report = _pass_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    stale_id = "python -m pytest tests/hidden/test_stale.py"
+    audit["pre_relax_suite"] = _suite_receipt(
+        [OracleTestFile(path="tests/hidden/test_stale.py", content="x = 3\n")],
+        [stale_id],
+    )
+    report.details["alt_correct"]["pre_relax_suite_fingerprint"] = audit[  # type: ignore[index]
+        "pre_relax_suite"
+    ]["suite_fingerprint"]
+    audit["gold"]["hidden"][0]["test_id"] = stale_id  # type: ignore[index]
+    audit["alternatives"]["alt_1"]["hidden"][0]["test_id"] = stale_id  # type: ignore[index]
+
+    assert any(
+        "non-relaxed audit pre-relax suite does not match final suite" in problem
         for problem in verify_pass_consistency(report)
     )
 

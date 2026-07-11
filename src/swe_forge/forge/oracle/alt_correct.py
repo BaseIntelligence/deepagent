@@ -50,6 +50,7 @@ from swe_forge.forge.models import (
     GeneratedSpec,
     ModelError,
     OracleReport,
+    OracleTestFile,
     Provenance,
     require_green_baseline,
 )
@@ -59,6 +60,7 @@ from swe_forge.forge.oracle.establish import (
     HiddenTest,
     TreeState,
 )
+from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.teacher_evidence import (
     append_execution,
     evidence_calls,
@@ -334,8 +336,49 @@ def _safe_public_summary(details: dict[str, object]) -> dict[str, object]:
         "gold_public_suite_passed",
         "public_valid_alternatives",
         "invalid_teacher_proposals",
+        "pre_relax_suite_fingerprint",
+        "final_suite_fingerprint",
     )
     return {key: details.get(key) for key in keys}
+
+
+def _hidden_identity_digest(identities: Sequence[str]) -> str:
+    """Hash canonical hidden-test identities without retaining their bodies."""
+    return hashlib.sha256(
+        "".join(f"{identity}\n" for identity in sorted(identities)).encode("utf-8")
+    ).hexdigest()
+
+
+def _suite_audit_receipt(
+    language: str,
+    fail_to_pass: Sequence[str],
+    test_files: Sequence[OracleTestFile],
+) -> dict[str, object]:
+    """Capture a protected, content-bound identity receipt for one hidden suite."""
+    adapter = build_default_registry().get(language)
+    suite_tests = reconstruct_suite_tests(adapter, fail_to_pass, test_files)
+    identities = sorted(test.test_id for test in suite_tests)
+    files = [
+        {
+            "path": test_file.path,
+            "content_sha256": hashlib.sha256(
+                (
+                    test_file.content
+                    if test_file.content.endswith("\n")
+                    else test_file.content + "\n"
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+        for test_file in test_files
+        if test_file.content
+    ]
+    return {
+        "identities": identities,
+        "identity_count": len(identities),
+        "identity_sha256": _hidden_identity_digest(identities),
+        "suite_fingerprint": final_suite_fingerprint(test_files),
+        "files": files,
+    }
 
 
 async def assess_alt_correct(
@@ -357,7 +400,7 @@ async def assess_alt_correct(
     """
     gold_base = await runner.score_gold()
     protected_audit: dict[str, object] = {
-        "version": 1,
+        "version": 2,
         "original_public_suite_sha256": hashlib.sha256(
             original_public_command.encode("utf-8")
         ).hexdigest(),
@@ -688,6 +731,30 @@ def build_alt_correct_report(
         if drop_paths:
             test_files = [tf for tf in test_files if tf.path not in drop_paths]
 
+    protected_audit = dict(outcome.protected_audit)
+    if protected_audit:
+        protected_audit["version"] = 2
+        pre_relax_suite = _suite_audit_receipt(
+            prior_report.language,
+            prior_report.fail_to_pass,
+            prior_report.test_files,
+        )
+        final_suite = _suite_audit_receipt(
+            prior_report.language,
+            fail_to_pass,
+            test_files,
+        )
+        protected_audit["pre_relax_suite"] = pre_relax_suite
+        protected_audit["final_suite"] = final_suite
+        public_audit = details["alt_correct"]
+        assert isinstance(public_audit, dict)
+        public_audit.update(
+            {
+                "pre_relax_suite_fingerprint": pre_relax_suite["suite_fingerprint"],
+                "final_suite_fingerprint": final_suite["suite_fingerprint"],
+            }
+        )
+
     base_prov = prior_report.provenance
     provenance = Provenance(
         generator=candidate.generator,
@@ -722,9 +789,7 @@ def build_alt_correct_report(
         leak_audit=prior_report.leak_audit,
         provenance=provenance,
         details=details,
-        protected_alt_correct_audit=(
-            dict(outcome.protected_audit) if outcome.protected_audit else None
-        ),
+        protected_alt_correct_audit=protected_audit or None,
         protected_teacher_transport_receipts=list(
             prior_report.protected_teacher_transport_receipts
         ),

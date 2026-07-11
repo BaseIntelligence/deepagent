@@ -20,8 +20,6 @@ real panel + Docker scoring); here the report is a deterministic fixture.
 
 from __future__ import annotations
 
-import hashlib
-
 import pytest
 
 from swe_forge.forge.calibrate.filter import (
@@ -48,6 +46,10 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -372,35 +374,13 @@ def _passing_oracle() -> OracleReport:
                 "differential": {"calls": [call("differential")]},
                 "alt_correct": {"calls": [call("alt_correct")]},
             },
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(test_files),
         },
-        protected_alt_correct_audit={
-            "version": 1,
-            "original_public_suite_sha256": "a" * 64,
-            "gold": {
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [{"test_id": "tests/test_x.py::test_a", "exit_code": 0}],
-            },
-            "alternatives": {
-                "alt_1": {
-                    "proposal_sha256": hashlib.sha256(
-                        b"calc.py\0def subtract(): ...\n\0"
-                    ).hexdigest(),
-                    "patches": [
-                        {"path": "calc.py", "content": "def subtract(): ...\n"}
-                    ],
-                    "public": {"passed": True, "exit_code": 0},
-                    "filtered_p2p": {"passed": True, "exit_code": 0},
-                    "hidden": [{"test_id": "tests/test_x.py::test_a", "exit_code": 0}],
-                }
-            },
-        },
+        protected_alt_correct_audit=protected_alt_correct_audit(
+            test_files,
+            ["tests/test_x.py::test_a"],
+            [("calc.py", "def subtract(): ...\n")],
+        ),
     )
 
 

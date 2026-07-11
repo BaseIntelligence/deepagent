@@ -20,7 +20,6 @@ manual integration check and the user-testing validator.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shlex
@@ -41,6 +40,7 @@ from swe_forge.forge.export import (
     audit_exported_workspace,
     audit_git_history,
     build_full_fail_to_pass,
+    direct_protected_alt_correct_audit_path,
     direct_protected_teacher_receipts_path,
     export_batch,
     export_forge_task,
@@ -70,7 +70,11 @@ from swe_forge.forge.publication import (
     protected_teacher_receipts_path,
 )
 from swe_forge.forge.teacher import Usage, candidate_transport_fingerprint
-from tests.test_forge.receipt_helpers import signed_transport_receipt
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
+    signed_transport_receipt,
+)
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -168,42 +172,27 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
-def _alt_correct_audit() -> dict[str, object]:
-    return {
-        "version": 1,
-        "original_public_suite_sha256": "a" * 64,
-        "gold": {
-            "public": {"passed": True, "exit_code": 0},
-            "filtered_p2p": {"passed": True, "exit_code": 0},
-            "hidden": [
-                {
-                    "test_id": "python -m pytest tests/hidden/test_total.py",
-                    "exit_code": 0,
-                }
-            ],
-        },
-        "alternatives": {
-            "alt_1": {
-                "proposal_sha256": hashlib.sha256(
-                    b"src/m.py\0def total(items, tax_rate):\n    return sum(items)\n\0"
-                ).hexdigest(),
-                "patches": [
-                    {
-                        "path": "src/m.py",
-                        "content": "def total(items, tax_rate):\n    return sum(items)\n",
-                    }
-                ],
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [
-                    {
-                        "test_id": "python -m pytest tests/hidden/test_total.py",
-                        "exit_code": 0,
-                    }
-                ],
-            }
-        },
-    }
+def _alt_correct_audit(
+    test_files: list[OracleTestFile] | None = None,
+) -> dict[str, object]:
+    if test_files is None:
+        test_files = [
+            OracleTestFile(
+                path="tests/hidden/test_total.py",
+                content=(
+                    "from src.m import total\n\n\n"
+                    "def test_total():\n    assert total([100], 0.1) == 110\n"
+                ),
+            )
+        ]
+    test_ids = [
+        f"python -m pytest {shlex.quote(test_file.path)}" for test_file in test_files
+    ]
+    return protected_alt_correct_audit(
+        test_files,
+        test_ids,
+        [("src/m.py", "def total(items, tax_rate):\n    return sum(items)\n")],
+    )
 
 
 def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> None:
@@ -285,14 +274,9 @@ def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
         provenance=_provenance(),
         details={
             "teacher_gates": _teacher_gate_evidence(),
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(test_files),
         },
-        protected_alt_correct_audit=_alt_correct_audit(),
+        protected_alt_correct_audit=_alt_correct_audit(test_files),
     )
     if extra_survivor:
         audit = report.protected_alt_correct_audit
@@ -505,6 +489,8 @@ def test_exported_test_bytes_match_final_mutation_fingerprint(tmp_path: Path) ->
         threshold=0.8,
         tool="fake-tool",
     )
+    report.protected_alt_correct_audit = _alt_correct_audit(report.test_files)
+    report.details["alt_correct"] = protected_alt_correct_summary(report.test_files)
 
     result = export_batch([_request(oracle_report=report)], tmp_path)
     task_dir = result.shipped[0].path
@@ -1316,6 +1302,32 @@ def test_direct_export_rejects_invalid_protected_teacher_receipts(
     assert "protected teacher receipts" in replay.reason
 
 
+@pytest.mark.parametrize("corruption", ["missing", "malformed", "mismatched"])
+def test_direct_export_rejects_invalid_protected_alt_audit(
+    tmp_path: Path, corruption: str
+) -> None:
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+    first = export_forge_task(task, tasks_root)
+    assert first.shipped
+    assert first.path is not None
+    audit_path = direct_protected_alt_correct_audit_path(first.path)
+    assert audit_path is not None
+
+    if corruption == "missing":
+        audit_path.unlink()
+    elif corruption == "malformed":
+        audit_path.write_text("{broken", encoding="utf-8")
+    else:
+        audit = json.loads(audit_path.read_text(encoding="utf-8"))
+        audit["final_suite"]["suite_fingerprint"] = "c" * 64
+        audit_path.write_text(json.dumps(audit), encoding="utf-8")
+
+    replay = export_forge_task(task, tasks_root)
+    assert replay.status == "failed"
+    assert "protected alt-correct audit" in replay.reason
+
+
 @pytest.mark.parametrize("corruption", ["missing", "altered", "wrong_key", "replayed"])
 def test_publication_rejects_missing_altered_or_replayed_transport_receipts(
     tmp_path: Path, corruption: str
@@ -1395,11 +1407,8 @@ def _set_hidden_test_path(report: OracleReport, path: str) -> None:
         threshold=evidence.threshold,
         tool=evidence.tool,
     )
-    audit = report.protected_alt_correct_audit
-    assert isinstance(audit, dict)
-    hidden = [{"test_id": f"python -m pytest {shlex.quote(path)}", "exit_code": 0}]
-    audit["gold"]["hidden"] = hidden  # type: ignore[index]
-    audit["alternatives"]["alt_1"]["hidden"] = list(hidden)  # type: ignore[index]
+    report.protected_alt_correct_audit = _alt_correct_audit(report.test_files)
+    report.details["alt_correct"] = protected_alt_correct_summary(report.test_files)
 
 
 @pytest.mark.parametrize("path", ["/tmp/forge-escape.py", "../forge-escape.py"])

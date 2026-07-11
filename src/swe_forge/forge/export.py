@@ -70,7 +70,11 @@ from swe_forge.forge.models import (
     _utc_now_iso,
 )
 from swe_forge.forge.oracle.leak import audit_agent_tree
-from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
+from swe_forge.forge.oracle.pipeline import (
+    ExportRefusedError,
+    ensure_oracle_exportable,
+    parse_protected_alt_correct_audit,
+)
 from swe_forge.forge.teacher import candidate_transport_fingerprint
 from swe_forge.forge import publication
 from swe_forge.forge.publication import (
@@ -1128,6 +1132,7 @@ def _read_selected_direct_workspace(
     if not isinstance(workspace_data, dict) or workspace_data.get("task_id") != task_id:
         raise ExportError(f"direct export pointer selects the wrong task: {current}")
     _validate_staged_workspace(task, workspace)
+    _read_direct_protected_alt_correct_audit(task, workspace)
     _read_direct_protected_teacher_receipts(task, workspace)
 
     if final_exists and final_dir.resolve(strict=True) != workspace:
@@ -1206,6 +1211,68 @@ def direct_protected_teacher_receipts_path(
         return None
     store = workspace.parent.parent
     return store / _DIRECT_PROTECTED_RECEIPTS_DIR / f"{workspace.name}.json"
+
+
+def direct_protected_alt_correct_audit_path(
+    task_dir: Path | str,
+) -> Path | None:
+    """Return the selected direct export's protected alt-correct audit path."""
+    workspace = Path(task_dir).resolve()
+    if workspace.parent.name != _DIRECT_GENERATIONS_DIR or not re.fullmatch(
+        r"[0-9a-f]{32}", workspace.name
+    ):
+        return None
+    store = workspace.parent.parent
+    return store / _DIRECT_PROTECTED_AUDIT_DIR / f"{workspace.name}.json"
+
+
+def _read_direct_protected_alt_correct_audit(task: ForgeTask, workspace: Path) -> None:
+    """Rehydrate and validate the selected generation's private alt audit."""
+    hardened = (
+        task.oracle_report.alt_correct_accepted
+        and "alt_correct" in task.oracle_report.details
+    )
+    if not hardened:
+        return
+    path = direct_protected_alt_correct_audit_path(workspace)
+    if path is None:
+        raise ExportError("selected direct workspace has no alt-correct audit path")
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ExportError(
+            f"protected alt-correct audit is missing for {task.task_id!r}"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_mode & 0o077
+    ):
+        raise ExportError(f"protected alt-correct audit is unsafe for {task.task_id!r}")
+    try:
+        payload = parse_protected_alt_correct_audit(path.read_text(encoding="utf-8"))
+        report = OracleReport.from_protected_dict(
+            {
+                **task.oracle_report.to_protected_dict(),
+                "protected_alt_correct_audit": payload,
+            }
+        )
+        ensure_oracle_exportable(
+            report,
+            candidate=task.candidate,
+            calibration_kept=task.calibration_report.is_keep,
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+        ModelError,
+        ExportRefusedError,
+    ) as exc:
+        raise ExportError(
+            f"protected alt-correct audit is invalid for {task.task_id!r}: {exc}"
+        ) from exc
 
 
 def _read_direct_protected_teacher_receipts(task: ForgeTask, workspace: Path) -> None:

@@ -26,6 +26,10 @@ from swe_forge.forge.oracle.multifault import (
 )
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.pipeline import verify_pass_consistency
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
+)
 
 P2P = "python -m pytest -q"
 F2P = "python -m pytest tests/hidden/test_total.py"
@@ -384,35 +388,13 @@ def _pass_report(
                 "differential": {"calls": [call("differential")]},
                 "alt_correct": {"calls": [call("alt_correct")]},
             },
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(tests),
         },
-        protected_alt_correct_audit={
-            "version": 1,
-            "original_public_suite_sha256": "a" * 64,
-            "gold": {
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [{"test_id": F2P, "exit_code": 0}],
-            },
-            "alternatives": {
-                "alt_1": {
-                    "proposal_sha256": hashlib.sha256(
-                        b"src/alpha.py\0def alpha(): ...\n\0"
-                    ).hexdigest(),
-                    "patches": [
-                        {"path": "src/alpha.py", "content": "def alpha(): ...\n"}
-                    ],
-                    "public": {"passed": True, "exit_code": 0},
-                    "filtered_p2p": {"passed": True, "exit_code": 0},
-                    "hidden": [{"test_id": F2P, "exit_code": 0}],
-                }
-            },
-        },
+        protected_alt_correct_audit=protected_alt_correct_audit(
+            tests,
+            [F2P],
+            [("src/alpha.py", "def alpha(): ...\n")],
+        ),
     )
 
 

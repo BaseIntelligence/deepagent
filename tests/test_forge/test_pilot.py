@@ -27,7 +27,6 @@ feature's manual integration run and the user-testing validator.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from pathlib import Path
 import signal
 import shutil
@@ -82,7 +81,11 @@ from swe_forge.forge.teacher import (
     Usage,
     candidate_transport_fingerprint,
 )
-from tests.test_forge.receipt_helpers import signed_transport_receipt
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
+    signed_transport_receipt,
+)
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -229,39 +232,12 @@ def _teacher_gate_evidence() -> dict[str, object]:
     }
 
 
-def _alt_correct_audit() -> dict[str, object]:
-    return {
-        "version": 1,
-        "original_public_suite_sha256": "a" * 64,
-        "gold": {
-            "public": {"passed": True, "exit_code": 0},
-            "filtered_p2p": {"passed": True, "exit_code": 0},
-            "hidden": [
-                {
-                    "test_id": "python -m pytest tests/hidden/test_total.py",
-                    "exit_code": 0,
-                }
-            ],
-        },
-        "alternatives": {
-            "alt_1": {
-                "proposal_sha256": hashlib.sha256(
-                    b"src/m.py\0def total(xs): return sum(xs)\n\0"
-                ).hexdigest(),
-                "patches": [
-                    {"path": "src/m.py", "content": "def total(xs): return sum(xs)\n"}
-                ],
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [
-                    {
-                        "test_id": "python -m pytest tests/hidden/test_total.py",
-                        "exit_code": 0,
-                    }
-                ],
-            }
-        },
-    }
+def _alt_correct_audit(test_files: list[OracleTestFile]) -> dict[str, object]:
+    return protected_alt_correct_audit(
+        test_files,
+        ["python -m pytest tests/hidden/test_total.py"],
+        [("src/m.py", "def total(xs): return sum(xs)\n")],
+    )
 
 
 def _oracle_pass(plan: CandidatePlan) -> OracleReport:
@@ -297,14 +273,9 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
         leak_audit="clean",
         details={
             "teacher_gates": _teacher_gate_evidence(),
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(test_files),
         },
-        protected_alt_correct_audit=_alt_correct_audit(),
+        protected_alt_correct_audit=_alt_correct_audit(test_files),
         provenance=_provenance(plan),
     )
     candidate = _candidate(plan)

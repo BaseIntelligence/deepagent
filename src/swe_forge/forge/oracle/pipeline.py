@@ -56,6 +56,7 @@ from swe_forge.forge.oracle.differential import (
     DEFAULT_NUM_VARIANTS,
     VariantGenerator,
     VariantStrengthSynthesizer,
+    reconstruct_suite_tests,
     run_differential_gate,
 )
 from swe_forge.forge.oracle.establish import (
@@ -103,18 +104,37 @@ GATE_ORDER: tuple[str, ...] = (
 #: fields are not mutually consistent (a defensive guard - should never fire in a
 #: correct gate, but the pipeline refuses to emit an inconsistent ``pass``).
 REASON_PIPELINE_INCONSISTENT = "pipeline_inconsistent_pass"
-_ALT_CORRECT_AUDIT_VERSION = 1
+_ALT_CORRECT_AUDIT_VERSION = 2
 _ALT_CORRECT_PUBLIC_SUMMARY_KEYS = frozenset(
     {
         "public_suite_sha256",
         "gold_public_suite_passed",
         "public_valid_alternatives",
         "invalid_teacher_proposals",
+        "pre_relax_suite_fingerprint",
+        "final_suite_fingerprint",
     }
 )
 _ALT_CORRECT_AUDIT_KEYS = frozenset(
-    {"version", "original_public_suite_sha256", "gold", "alternatives"}
+    {
+        "version",
+        "original_public_suite_sha256",
+        "pre_relax_suite",
+        "final_suite",
+        "gold",
+        "alternatives",
+    }
 )
+_ALT_CORRECT_SUITE_RECEIPT_KEYS = frozenset(
+    {
+        "identities",
+        "identity_count",
+        "identity_sha256",
+        "suite_fingerprint",
+        "files",
+    }
+)
+_ALT_CORRECT_SUITE_FILE_KEYS = frozenset({"path", "content_sha256"})
 _ALT_CORRECT_GOLD_RECORD_KEYS = frozenset({"public", "filtered_p2p", "hidden"})
 _ALT_CORRECT_ALTERNATIVE_RECORD_KEYS = frozenset(
     {"proposal_sha256", "patches", "public", "filtered_p2p", "hidden"}
@@ -258,20 +278,117 @@ def _expected_hidden_test_ids(report: OracleReport) -> set[str] | None:
     """Rebuild the exact hidden-test identities recorded by the alt gate."""
     try:
         adapter = build_default_registry().get(report.language)
+        hidden_tests = reconstruct_suite_tests(
+            adapter, report.fail_to_pass, report.test_files
+        )
     except Exception:  # noqa: BLE001 - malformed report evidence is non-exportable
         return None
-    expected: set[str] = set()
+    expected = {test.test_id for test in hidden_tests}
+    if len(expected) != len(hidden_tests):
+        return None
+    for test_id in expected:
+        if not _is_audit_test_id(test_id):
+            return None
+    return expected or None
+
+
+def _hidden_identity_digest(identities: Sequence[str]) -> str:
+    return hashlib.sha256(
+        "".join(f"{identity}\n" for identity in sorted(identities)).encode("utf-8")
+    ).hexdigest()
+
+
+def _suite_file_manifest(
+    report: OracleReport,
+) -> tuple[tuple[str, str], ...] | None:
+    files: list[tuple[str, str]] = []
+    paths: set[str] = set()
     for test_file in report.test_files:
         if not test_file.content:
             continue
-        matches = [
-            test_id for test_id in report.fail_to_pass if test_file.path in test_id
-        ]
-        test_id = matches[0] if matches else adapter.test_command((test_file.path,))
-        if not _is_audit_test_id(test_id) or test_id in expected:
+        if not _is_audit_patch_path(test_file.path) or test_file.path in paths:
             return None
-        expected.add(test_id)
-    return expected or None
+        paths.add(test_file.path)
+        content = (
+            test_file.content
+            if test_file.content.endswith("\n")
+            else test_file.content + "\n"
+        )
+        files.append(
+            (test_file.path, hashlib.sha256(content.encode("utf-8")).hexdigest())
+        )
+    return tuple(sorted(files))
+
+
+def _suite_fingerprint_from_manifest(files: Sequence[tuple[str, str]]) -> str:
+    canonical = json.dumps(
+        [
+            {"path": path, "content_sha256": content_sha256}
+            for path, content_sha256 in sorted(files)
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _audit_suite_receipt(
+    value: object, label: str
+) -> tuple[tuple[str, ...], str, tuple[tuple[str, str], ...]] | str:
+    """Validate a receipt binding hidden-test identities to a concrete suite."""
+    if not _has_exact_keys(value, _ALT_CORRECT_SUITE_RECEIPT_KEYS):
+        return f"alt_correct: {label} suite receipt has an unsafe schema"
+    assert isinstance(value, dict)
+    identities_value = value["identities"]
+    if not isinstance(identities_value, list) or not identities_value:
+        return f"alt_correct: {label} suite identities are incomplete"
+    if any(not _is_audit_test_id(identity) for identity in identities_value):
+        return f"alt_correct: {label} suite identities are malformed"
+    identities = tuple(identities_value)
+    if len(set(identities)) != len(identities):
+        return f"alt_correct: {label} suite identities are duplicated"
+    if identities != tuple(sorted(identities)):
+        return f"alt_correct: {label} suite identities are not canonical"
+    identity_count = value["identity_count"]
+    if (
+        not isinstance(identity_count, int)
+        or isinstance(identity_count, bool)
+        or identity_count != len(identities)
+    ):
+        return f"alt_correct: {label} suite identity count is inconsistent"
+    identity_sha256 = value["identity_sha256"]
+    if not _is_sha256(identity_sha256) or identity_sha256 != _hidden_identity_digest(
+        identities
+    ):
+        return f"alt_correct: {label} suite identity digest is inconsistent"
+    suite_fingerprint = value["suite_fingerprint"]
+    if not _is_sha256(suite_fingerprint):
+        return f"alt_correct: {label} suite fingerprint is malformed"
+    files_value = value["files"]
+    if not isinstance(files_value, list) or not files_value:
+        return f"alt_correct: {label} suite file manifest is incomplete"
+    files: list[tuple[str, str]] = []
+    paths: set[str] = set()
+    for item in files_value:
+        if not _has_exact_keys(item, _ALT_CORRECT_SUITE_FILE_KEYS):
+            return f"alt_correct: {label} suite file manifest is malformed"
+        assert isinstance(item, dict)
+        path = item["path"]
+        content_sha256 = item["content_sha256"]
+        if (
+            not _is_audit_patch_path(path)
+            or not _is_sha256(content_sha256)
+            or path in paths
+        ):
+            return f"alt_correct: {label} suite file manifest is malformed"
+        assert isinstance(path, str) and isinstance(content_sha256, str)
+        paths.add(path)
+        files.append((path, content_sha256))
+    manifest = tuple(sorted(files))
+    if suite_fingerprint != _suite_fingerprint_from_manifest(manifest):
+        return f"alt_correct: {label} suite fingerprint does not match file manifest"
+    return identities, suite_fingerprint, manifest
 
 
 def _audit_execution_record(
@@ -341,6 +458,45 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
         return ["alt_correct: public suite digest is missing or malformed"]
     if summary_digest != audit_digest:
         return ["alt_correct: public suite digest does not match protected audit"]
+    pre_relax_suite = _audit_suite_receipt(audit["pre_relax_suite"], "pre-relax")
+    if isinstance(pre_relax_suite, str):
+        return [pre_relax_suite]
+    final_suite = _audit_suite_receipt(audit["final_suite"], "final")
+    if isinstance(final_suite, str):
+        return [final_suite]
+    (
+        pre_relax_hidden_ids,
+        pre_relax_fingerprint,
+        pre_relax_files,
+    ) = pre_relax_suite
+    final_hidden_ids, final_fingerprint, final_files = final_suite
+    if public_details["pre_relax_suite_fingerprint"] != pre_relax_fingerprint:
+        return [
+            "alt_correct: public pre-relax suite fingerprint does not match "
+            "protected audit"
+        ]
+    if public_details["final_suite_fingerprint"] != final_fingerprint:
+        return [
+            "alt_correct: public final suite fingerprint does not match protected audit"
+        ]
+    expected_final_hidden_ids = _expected_hidden_test_ids(report)
+    expected_final_files = _suite_file_manifest(report)
+    if expected_final_hidden_ids is None or final_hidden_ids != tuple(
+        sorted(expected_final_hidden_ids)
+    ):
+        return ["alt_correct: final suite identities do not match final hidden suite"]
+    if expected_final_files is None or final_files != expected_final_files:
+        return [
+            "alt_correct: final suite file manifest does not match final hidden suite"
+        ]
+    try:
+        expected_final_fingerprint = final_suite_fingerprint(report.test_files)
+    except Exception:  # noqa: BLE001 - malformed suite evidence is non-exportable
+        return ["alt_correct: final suite fingerprint cannot be reconciled"]
+    if final_fingerprint != expected_final_fingerprint:
+        return [
+            "alt_correct: final suite fingerprint does not match final hidden suite"
+        ]
     gold = audit["gold"]
     if not isinstance(gold, dict) or set(gold) not in (
         _ALT_CORRECT_GOLD_RECORD_KEYS,
@@ -360,11 +516,18 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
         return ["alt_correct: gold filtered P2P result is not green"]
     if not gold_hidden_green:
         return ["alt_correct: gold hidden result is not green"]
-    expected_hidden_ids = _expected_hidden_test_ids(report)
-    if expected_hidden_ids is None or gold_hidden_ids != expected_hidden_ids:
-        return ["alt_correct: gold hidden test identities do not match final suite"]
+    if gold_hidden_ids != set(pre_relax_hidden_ids):
+        return ["alt_correct: gold hidden test identities do not match pre-relax suite"]
     effective_gold_hidden_ids = gold_hidden_ids
     relaxed_audit = "relaxed" in gold
+    if not relaxed_audit and (
+        pre_relax_hidden_ids != final_hidden_ids
+        or pre_relax_fingerprint != final_fingerprint
+        or pre_relax_files != final_files
+    ):
+        return [
+            "alt_correct: non-relaxed audit pre-relax suite does not match final suite"
+        ]
     if relaxed_audit:
         gold_relaxed = _audit_execution_record(gold["relaxed"], "relaxed gold")
         if isinstance(gold_relaxed, str):
@@ -381,10 +544,10 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
             return ["alt_correct: relaxed gold filtered P2P result is not green"]
         if not gold_relaxed_hidden_green:
             return ["alt_correct: relaxed gold hidden result is not green"]
-        if not effective_gold_hidden_ids <= gold_hidden_ids:
+        if effective_gold_hidden_ids != set(final_hidden_ids):
             return [
                 "alt_correct: relaxed gold hidden test identities do not match "
-                "initial evidence"
+                "final suite"
             ]
 
     alternatives = audit["alternatives"]
@@ -444,14 +607,14 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
                 return [
                     "alt_correct: public-green alternative has a non-green filtered P2P result"
                 ]
-            if not initial_hidden_green:
+            if not initial_hidden_green and not relaxed_audit:
                 return [
                     "alt_correct: public-green alternative has a non-green hidden result"
                 ]
-            if initial_hidden_ids != gold_hidden_ids:
+            if initial_hidden_ids != set(pre_relax_hidden_ids):
                 return [
                     "alt_correct: alternative hidden test identities do not match "
-                    "gold evidence"
+                    "pre-relax suite"
                 ]
             public_green += 1
         else:
@@ -491,10 +654,10 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
                 "alt_correct: relaxed public-green alternative has a non-green "
                 "hidden result"
             ]
-        if relaxed_hidden_ids != effective_gold_hidden_ids:
+        if relaxed_hidden_ids != set(final_hidden_ids):
             return [
                 "alt_correct: relaxed alternative hidden test identities do not "
-                "match effective gold evidence"
+                "match final suite"
             ]
     if public_green < 1:
         return [

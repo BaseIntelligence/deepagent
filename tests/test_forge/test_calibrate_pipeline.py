@@ -23,7 +23,6 @@ validator.
 
 from __future__ import annotations
 
-import hashlib
 import json
 
 import pytest
@@ -60,7 +59,11 @@ from swe_forge.forge.teacher import (
     Usage,
     candidate_transport_fingerprint,
 )
-from tests.test_forge.receipt_helpers import signed_transport_receipt
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
+    signed_transport_receipt,
+)
 
 P2P = "python -m pytest"
 F2P = "python -m pytest tests/test_subtract.py"
@@ -178,35 +181,13 @@ def _oracle_report(
         leak_audit="clean",
         details={
             "teacher_gates": _teacher_gate_evidence(),
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(test_files),
         },
-        protected_alt_correct_audit={
-            "version": 1,
-            "original_public_suite_sha256": "a" * 64,
-            "gold": {
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [{"test_id": F2P, "exit_code": 0}],
-            },
-            "alternatives": {
-                "alt_1": {
-                    "proposal_sha256": hashlib.sha256(
-                        b"calc.py\0def subtract(): ...\n\0"
-                    ).hexdigest(),
-                    "patches": [
-                        {"path": "calc.py", "content": "def subtract(): ...\n"}
-                    ],
-                    "public": {"passed": True, "exit_code": 0},
-                    "filtered_p2p": {"passed": True, "exit_code": 0},
-                    "hidden": [{"test_id": F2P, "exit_code": 0}],
-                }
-            },
-        },
+        protected_alt_correct_audit=protected_alt_correct_audit(
+            test_files,
+            [F2P],
+            [("calc.py", "def subtract(): ...\n")],
+        ),
     )
 
 

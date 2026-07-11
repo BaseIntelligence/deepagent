@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -62,6 +61,10 @@ from swe_forge.forge.teacher import (
     TransportReceipt,
     Usage,
     candidate_transport_fingerprint,
+)
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
 )
 
 
@@ -784,43 +787,13 @@ def _pass_report(*, teacher_gates: object) -> OracleReport:
         leak_audit="clean",
         details={
             "teacher_gates": teacher_gates,
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(tests),
         },
-        protected_alt_correct_audit={
-            "version": 1,
-            "original_public_suite_sha256": "a" * 64,
-            "gold": {
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [
-                    {
-                        "test_id": "python -m pytest tests/hidden.py",
-                        "exit_code": 0,
-                    }
-                ],
-            },
-            "alternatives": {
-                "alt_1": {
-                    "proposal_sha256": hashlib.sha256(
-                        b"src/m.py\0def f(): return 1\n\0"
-                    ).hexdigest(),
-                    "patches": [{"path": "src/m.py", "content": "def f(): return 1\n"}],
-                    "public": {"passed": True, "exit_code": 0},
-                    "filtered_p2p": {"passed": True, "exit_code": 0},
-                    "hidden": [
-                        {
-                            "test_id": "python -m pytest tests/hidden.py",
-                            "exit_code": 0,
-                        }
-                    ],
-                }
-            },
-        },
+        protected_alt_correct_audit=protected_alt_correct_audit(
+            tests,
+            ["python -m pytest tests/hidden.py"],
+            [("src/m.py", "def f(): return 1\n")],
+        ),
     )
 
 

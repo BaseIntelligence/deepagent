@@ -686,6 +686,26 @@ def test_reconstruct_suite_tests_uses_f2p_command_and_builds_others() -> None:
     assert [t.files[0].path for t in tests] == ["tests/test_x.py", "tests/mut_k.py"]
 
 
+def test_reconstruct_suite_tests_groups_multi_file_f2p_identity() -> None:
+    adapter = PythonAdapter()
+    command = "python -m pytest tests/test_a.py tests/test_b.py"
+    tests = reconstruct_suite_tests(
+        adapter,
+        [command],
+        [
+            OracleTestFile(path="tests/test_a.py", content="A", origin="provided"),
+            OracleTestFile(path="tests/test_b.py", content="B", origin="provided"),
+        ],
+    )
+
+    assert len(tests) == 1
+    assert tests[0].test_id == command
+    assert [file.path for file in tests[0].files] == [
+        "tests/test_a.py",
+        "tests/test_b.py",
+    ]
+
+
 # --------------------------------------------------------------------------- #
 # Null implementations
 # --------------------------------------------------------------------------- #

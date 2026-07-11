@@ -45,7 +45,11 @@ from swe_forge.forge.teacher import (
     Usage,
     candidate_transport_fingerprint,
 )
-from tests.test_forge.receipt_helpers import signed_transport_receipt
+from tests.test_forge.receipt_helpers import (
+    protected_alt_correct_audit,
+    protected_alt_correct_summary,
+    signed_transport_receipt,
+)
 
 _TASK_ID = CERTIFIED_RECOVERY_TASK_ID
 _F2P = "python -m pytest tests/hidden/test_repair.py"
@@ -189,35 +193,13 @@ def _oracle(candidate: Candidate) -> OracleReport:
                 "differential": _teacher_evidence("differential"),
                 "alt_correct": _teacher_evidence("alt_correct"),
             },
-            "alt_correct": {
-                "public_suite_sha256": "a" * 64,
-                "gold_public_suite_passed": True,
-                "public_valid_alternatives": 1,
-                "invalid_teacher_proposals": [],
-            },
+            "alt_correct": protected_alt_correct_summary(tests),
         },
-        protected_alt_correct_audit={
-            "version": 1,
-            "original_public_suite_sha256": "a" * 64,
-            "gold": {
-                "public": {"passed": True, "exit_code": 0},
-                "filtered_p2p": {"passed": True, "exit_code": 0},
-                "hidden": [{"test_id": _F2P, "exit_code": 0}],
-            },
-            "alternatives": {
-                "alt_1": {
-                    "proposal_sha256": hashlib.sha256(
-                        b"src/alpha.py\0def alpha(): ...\n\0"
-                    ).hexdigest(),
-                    "patches": [
-                        {"path": "src/alpha.py", "content": "def alpha(): ...\n"}
-                    ],
-                    "public": {"passed": True, "exit_code": 0},
-                    "filtered_p2p": {"passed": True, "exit_code": 0},
-                    "hidden": [{"test_id": _F2P, "exit_code": 0}],
-                }
-            },
-        },
+        protected_alt_correct_audit=protected_alt_correct_audit(
+            tests,
+            [_F2P],
+            [("src/alpha.py", "def alpha(): ...\n")],
+        ),
     )
     gates = report.details["teacher_gates"]
     assert isinstance(gates, dict)
