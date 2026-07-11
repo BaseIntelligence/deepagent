@@ -266,22 +266,44 @@ def _proposal_digest(alt: AltImpl) -> str:
 
 def _protected_alt_record(alt: AltImpl, score: AltScore) -> dict[str, object]:
     """Build audit-only source and execution evidence for one materialized alt."""
-    return {
+    record: dict[str, object] = {
         "proposal_sha256": _proposal_digest(alt),
         "patches": [{"path": file.path, "content": file.content} for file in alt.files],
         "public": {
             "passed": score.public_suite_passed,
             "exit_code": score.public_suite_exit_code,
         },
-        "filtered_p2p": {
+    }
+    if score.public_suite_passed:
+        record["filtered_p2p"] = {
             "passed": score.p2p_passed,
             "exit_code": score.p2p_exit_code,
-        },
-        "hidden": [
+        }
+        record["hidden"] = [
             {"test_id": test_id, "exit_code": exit_code}
             for test_id, exit_code in score.hidden_test_exits
-        ],
+        ]
+    return record
+
+
+def _protected_gold_record(score: AltScore) -> dict[str, object]:
+    """Build gold evidence, retaining only observed phases after a public failure."""
+    record: dict[str, object] = {
+        "public": {
+            "passed": score.public_suite_passed,
+            "exit_code": score.public_suite_exit_code,
+        }
     }
+    if score.public_suite_passed:
+        record["filtered_p2p"] = {
+            "passed": score.p2p_passed,
+            "exit_code": score.p2p_exit_code,
+        }
+        record["hidden"] = [
+            {"test_id": test_id, "exit_code": exit_code}
+            for test_id, exit_code in score.hidden_test_exits
+        ]
+    return record
 
 
 def _safe_public_audit(
@@ -339,20 +361,7 @@ async def assess_alt_correct(
         "original_public_suite_sha256": hashlib.sha256(
             original_public_command.encode("utf-8")
         ).hexdigest(),
-        "gold": {
-            "public": {
-                "passed": gold_base.public_suite_passed,
-                "exit_code": gold_base.public_suite_exit_code,
-            },
-            "filtered_p2p": {
-                "passed": gold_base.p2p_passed,
-                "exit_code": gold_base.p2p_exit_code,
-            },
-            "hidden": [
-                {"test_id": test_id, "exit_code": exit_code}
-                for test_id, exit_code in gold_base.hidden_test_exits
-            ],
-        },
+        "gold": _protected_gold_record(gold_base),
         "alternatives": {},
     }
     details: dict[str, object] = {
@@ -545,8 +554,11 @@ async def _attempt_relax(
         )
 
     gold_relaxed = await runner.score_gold(exclude=overfit_ids)
+    gold_audit = protected_audit["gold"]
+    assert isinstance(gold_audit, dict)
+    gold_audit["relaxed"] = _protected_gold_record(gold_relaxed)
     still_failing: list[str] = []
-    for alt, _ in rejected:
+    for alt in alternatives:
         relaxed_score = await runner.score_alt(alt, exclude=overfit_ids)
         audit_alternatives = protected_audit["alternatives"]
         assert isinstance(audit_alternatives, dict)

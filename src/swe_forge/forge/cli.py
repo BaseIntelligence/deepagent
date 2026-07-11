@@ -132,6 +132,7 @@ from swe_forge.forge.oracle.differential_synth import (
     DifferentialKillSynthesizer,
     TeacherVariantGenerator,
 )
+from swe_forge.forge.oracle.pipeline import parse_protected_alt_correct_audit
 from swe_forge.forge.oracle.mutation_synth import MutationKillSynthesizer
 from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
 from swe_forge.forge.oracle.teacher_evidence import teacher_gate_evidence_issues
@@ -1584,9 +1585,15 @@ def _load_oracle_report(report_file: str) -> OracleReport:
         protected_path = _protected_oracle_report_path(path)
         protected: dict[str, object] = {}
         if protected_path.is_file():
-            protected = json.loads(protected_path.read_text(encoding="utf-8"))
-            if not isinstance(protected, dict):
+            protected_payload = parse_protected_alt_correct_audit(
+                protected_path.read_text(encoding="utf-8")
+            )
+            protected = protected_payload
+            if set(protected) != {"protected_alt_correct_audit"}:
                 raise ModelError("protected oracle audit is not an object")
+            audit = protected["protected_alt_correct_audit"]
+            if not isinstance(audit, dict):
+                raise ModelError("protected oracle audit is malformed")
         receipts_path = _protected_teacher_receipts_path(path)
         if receipts_path.exists():
             metadata = receipts_path.lstat()
@@ -1615,7 +1622,7 @@ def _load_oracle_report(report_file: str) -> OracleReport:
                     + ")"
                 )
         return report
-    except (json.JSONDecodeError, KeyError, ModelError) as exc:
+    except (json.JSONDecodeError, KeyError, ModelError, ValueError) as exc:
         _fail(f"invalid oracle report JSON: {exc}")
 
 

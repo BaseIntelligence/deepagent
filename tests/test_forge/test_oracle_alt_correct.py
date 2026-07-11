@@ -405,7 +405,8 @@ async def test_public_red_alternative_is_invalid_teacher_proposal_not_overfit(
     assert "relax" not in outcome.details
     audit = outcome.protected_audit
     assert audit["alternatives"]["alt_public_red"]["public"]["passed"] is False
-    assert audit["alternatives"]["alt_public_red"]["hidden"] == []
+    assert "filtered_p2p" not in audit["alternatives"]["alt_public_red"]
+    assert "hidden" not in audit["alternatives"]["alt_public_red"]
 
 
 async def test_public_green_hidden_red_remains_an_overfit_rejection() -> None:

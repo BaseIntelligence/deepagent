@@ -192,7 +192,16 @@ def _alt_correct_audit() -> dict[str, object]:
     return {
         "version": 1,
         "original_public_suite_sha256": "a" * 64,
-        "gold": {"public": {"passed": True, "exit_code": 0}},
+        "gold": {
+            "public": {"passed": True, "exit_code": 0},
+            "filtered_p2p": {"passed": True, "exit_code": 0},
+            "hidden": [
+                {
+                    "test_id": "python -m pytest tests/hidden/test_total.py",
+                    "exit_code": 0,
+                }
+            ],
+        },
         "alternatives": {
             "alt_1": {
                 "proposal_sha256": hashlib.sha256(

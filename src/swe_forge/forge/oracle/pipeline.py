@@ -32,6 +32,9 @@ through every gate and never branches on language itself.
 from __future__ import annotations
 
 import hashlib
+import json
+import re
+from pathlib import PurePosixPath
 from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING
 
@@ -109,6 +112,21 @@ _ALT_CORRECT_PUBLIC_SUMMARY_KEYS = frozenset(
         "invalid_teacher_proposals",
     }
 )
+_ALT_CORRECT_AUDIT_KEYS = frozenset(
+    {"version", "original_public_suite_sha256", "gold", "alternatives"}
+)
+_ALT_CORRECT_GOLD_RECORD_KEYS = frozenset({"public", "filtered_p2p", "hidden"})
+_ALT_CORRECT_ALTERNATIVE_RECORD_KEYS = frozenset(
+    {"proposal_sha256", "patches", "public", "filtered_p2p", "hidden"}
+)
+_ALT_CORRECT_RED_ALTERNATIVE_RECORD_KEYS = frozenset(
+    {"proposal_sha256", "patches", "public"}
+)
+_ALT_CORRECT_EXECUTION_KEYS = frozenset({"public", "filtered_p2p", "hidden"})
+_ALT_CORRECT_STATUS_KEYS = frozenset({"passed", "exit_code"})
+_ALT_CORRECT_HIDDEN_RESULT_KEYS = frozenset({"test_id", "exit_code"})
+_ALT_CORRECT_PATCH_KEYS = frozenset({"path", "content"})
+_AUDIT_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,127}$")
 
 #: One bound gate: consumes the prior report (``None`` for the first gate) and
 #: returns the extended report. The orchestration threads these uniformly.
@@ -132,7 +150,149 @@ def _is_sha256(value: object) -> bool:
 
 
 def _is_exit_code(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 255
+
+
+def parse_protected_alt_correct_audit(value: str) -> dict[str, object]:
+    """Parse a private audit while rejecting JSON duplicate object members."""
+
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        parsed: dict[str, object] = {}
+        for key, item in pairs:
+            if key in parsed:
+                raise ValueError(
+                    f"protected alt-correct audit contains duplicate object key {key!r}"
+                )
+            parsed[key] = item
+        return parsed
+
+    payload = json.loads(value, object_pairs_hook=reject_duplicate_keys)
+    if not isinstance(payload, dict):
+        raise ValueError("protected alt-correct audit must be an object")
+    return payload
+
+
+def _has_exact_keys(value: object, keys: frozenset[str]) -> bool:
+    return isinstance(value, dict) and set(value) == keys
+
+
+def _is_audit_identifier(value: object) -> bool:
+    return isinstance(value, str) and bool(_AUDIT_IDENTIFIER_RE.fullmatch(value))
+
+
+def _is_audit_test_id(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value == value.strip()
+        and "\x00" not in value
+        and "\n" not in value
+        and "\r" not in value
+    )
+
+
+def _is_audit_patch_path(value: object) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    if "\x00" in value or "\\" in value:
+        return False
+    path = PurePosixPath(value)
+    return not path.is_absolute() and ".." not in path.parts and path.parts != (".",)
+
+
+def _audit_status(value: object, label: str) -> tuple[bool, int] | str:
+    if not _has_exact_keys(value, _ALT_CORRECT_STATUS_KEYS):
+        return f"alt_correct: {label} is malformed"
+    assert isinstance(value, dict)
+    passed = value["passed"]
+    exit_code = value["exit_code"]
+    if not isinstance(passed, bool) or not _is_exit_code(exit_code):
+        return f"alt_correct: {label} is malformed"
+    assert isinstance(exit_code, int)
+    if passed is not (exit_code == 0):
+        return f"alt_correct: {label} is malformed"
+    return passed, exit_code
+
+
+def _audit_hidden_results(value: object, label: str) -> tuple[set[str], bool] | str:
+    if not isinstance(value, list) or not value:
+        return f"alt_correct: {label} is incomplete"
+    identities: set[str] = set()
+    all_green = True
+    for result in value:
+        if not _has_exact_keys(result, _ALT_CORRECT_HIDDEN_RESULT_KEYS):
+            return f"alt_correct: {label} is malformed"
+        assert isinstance(result, dict)
+        test_id = result["test_id"]
+        exit_code = result["exit_code"]
+        if not _is_audit_test_id(test_id) or not _is_exit_code(exit_code):
+            return f"alt_correct: {label} is malformed"
+        assert isinstance(test_id, str) and isinstance(exit_code, int)
+        if test_id in identities:
+            return "alt_correct: duplicate hidden test identity"
+        identities.add(test_id)
+        all_green = all_green and exit_code == 0
+    return identities, all_green
+
+
+def _audit_patches(value: object) -> str | None:
+    if not isinstance(value, list) or not value:
+        return "alt_correct: protected alternative audit is incomplete"
+    paths: set[str] = set()
+    for patch in value:
+        if not _has_exact_keys(patch, _ALT_CORRECT_PATCH_KEYS):
+            return "alt_correct: alternative patch is malformed"
+        assert isinstance(patch, dict)
+        path = patch["path"]
+        content = patch["content"]
+        if not _is_audit_patch_path(path) or not isinstance(content, str):
+            return "alt_correct: alternative patch is malformed"
+        assert isinstance(path, str)
+        if path in paths:
+            return "alt_correct: duplicate patch path"
+        paths.add(path)
+    return None
+
+
+def _expected_hidden_test_ids(report: OracleReport) -> set[str] | None:
+    """Rebuild the exact hidden-test identities recorded by the alt gate."""
+    try:
+        adapter = build_default_registry().get(report.language)
+    except Exception:  # noqa: BLE001 - malformed report evidence is non-exportable
+        return None
+    expected: set[str] = set()
+    for test_file in report.test_files:
+        if not test_file.content:
+            continue
+        matches = [
+            test_id for test_id in report.fail_to_pass if test_file.path in test_id
+        ]
+        test_id = matches[0] if matches else adapter.test_command((test_file.path,))
+        if not _is_audit_test_id(test_id) or test_id in expected:
+            return None
+        expected.add(test_id)
+    return expected or None
+
+
+def _audit_execution_record(
+    value: object, label: str
+) -> tuple[bool, bool, set[str], bool] | str:
+    if not _has_exact_keys(value, _ALT_CORRECT_EXECUTION_KEYS):
+        return f"alt_correct: {label} has an unsafe schema"
+    assert isinstance(value, dict)
+    public = _audit_status(value["public"], f"{label} public result")
+    if isinstance(public, str):
+        return public
+    filtered = _audit_status(value["filtered_p2p"], f"{label} filtered P2P result")
+    if isinstance(filtered, str):
+        return filtered
+    hidden = _audit_hidden_results(value["hidden"], f"{label} hidden result")
+    if isinstance(hidden, str):
+        return hidden
+    public_passed, _ = public
+    filtered_passed, _ = filtered
+    hidden_ids, hidden_green = hidden
+    return public_passed, filtered_passed, hidden_ids, hidden_green
 
 
 def _patches_digest(patches: Sequence[dict[str, object]]) -> str:
@@ -164,9 +324,16 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
     audit = report.protected_alt_correct_audit
     if not isinstance(audit, dict):
         return ["alt_correct: protected public-validity audit is missing"]
-    if audit.get("version") != _ALT_CORRECT_AUDIT_VERSION:
+    if set(audit) != _ALT_CORRECT_AUDIT_KEYS:
+        return ["alt_correct: protected public-validity audit has an unsafe schema"]
+    version = audit["version"]
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version != _ALT_CORRECT_AUDIT_VERSION
+    ):
         return ["alt_correct: protected public-validity audit version is unsupported"]
-    audit_digest = audit.get("original_public_suite_sha256")
+    audit_digest = audit["original_public_suite_sha256"]
     if not _is_sha256(audit_digest):
         return ["alt_correct: protected public suite digest is malformed"]
     summary_digest = public_details.get("public_suite_sha256")
@@ -174,71 +341,161 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
         return ["alt_correct: public suite digest is missing or malformed"]
     if summary_digest != audit_digest:
         return ["alt_correct: public suite digest does not match protected audit"]
-    gold = audit.get("gold")
-    if not isinstance(gold, dict):
-        return ["alt_correct: protected gold public result is missing"]
-    gold_public = gold.get("public")
-    if not isinstance(gold_public, dict):
-        return ["alt_correct: protected gold public result is malformed"]
-    gold_passed = gold_public.get("passed")
-    gold_exit = gold_public.get("exit_code")
-    if not isinstance(gold_passed, bool) or not _is_exit_code(gold_exit):
-        return ["alt_correct: protected gold public result is malformed"]
-    if gold_passed and gold_exit != 0:
-        return ["alt_correct: protected gold public result is malformed"]
+    gold = audit["gold"]
+    if not isinstance(gold, dict) or set(gold) not in (
+        _ALT_CORRECT_GOLD_RECORD_KEYS,
+        _ALT_CORRECT_GOLD_RECORD_KEYS | {"relaxed"},
+    ):
+        return ["alt_correct: protected gold record has an unsafe schema"]
+    assert isinstance(gold, dict)
+    gold_evidence = _audit_execution_record(
+        {key: gold[key] for key in _ALT_CORRECT_EXECUTION_KEYS}, "gold"
+    )
+    if isinstance(gold_evidence, str):
+        return [gold_evidence]
+    gold_passed, gold_p2p_passed, gold_hidden_ids, gold_hidden_green = gold_evidence
     if gold_passed is not True:
         return ["alt_correct: gold did not pass the original public suite"]
-    alternatives = audit.get("alternatives")
+    if not gold_p2p_passed:
+        return ["alt_correct: gold filtered P2P result is not green"]
+    if not gold_hidden_green:
+        return ["alt_correct: gold hidden result is not green"]
+    expected_hidden_ids = _expected_hidden_test_ids(report)
+    if expected_hidden_ids is None or gold_hidden_ids != expected_hidden_ids:
+        return ["alt_correct: gold hidden test identities do not match final suite"]
+    effective_gold_hidden_ids = gold_hidden_ids
+    relaxed_audit = "relaxed" in gold
+    if relaxed_audit:
+        gold_relaxed = _audit_execution_record(gold["relaxed"], "relaxed gold")
+        if isinstance(gold_relaxed, str):
+            return [gold_relaxed]
+        (
+            gold_relaxed_public_passed,
+            gold_relaxed_p2p_passed,
+            effective_gold_hidden_ids,
+            gold_relaxed_hidden_green,
+        ) = gold_relaxed
+        if not gold_relaxed_public_passed:
+            return ["alt_correct: relaxed gold public result is not green"]
+        if not gold_relaxed_p2p_passed:
+            return ["alt_correct: relaxed gold filtered P2P result is not green"]
+        if not gold_relaxed_hidden_green:
+            return ["alt_correct: relaxed gold hidden result is not green"]
+        if not effective_gold_hidden_ids <= gold_hidden_ids:
+            return [
+                "alt_correct: relaxed gold hidden test identities do not match "
+                "initial evidence"
+            ]
+
+    alternatives = audit["alternatives"]
     if not isinstance(alternatives, dict) or not alternatives:
         return ["alt_correct: protected alternative audit is missing"]
 
     public_green = 0
     invalid_alternatives: list[str] = []
+    seen_alt_ids: set[str] = set()
     for alt_id, record in alternatives.items():
-        if not isinstance(alt_id, str) or not alt_id or not isinstance(record, dict):
+        if not _is_audit_identifier(alt_id):
+            return ["alt_correct: alternative identity is malformed"]
+        assert isinstance(alt_id, str)
+        if alt_id in seen_alt_ids:
+            return ["alt_correct: duplicate alternative identity"]
+        seen_alt_ids.add(alt_id)
+        if not isinstance(record, dict):
             return ["alt_correct: protected alternative audit is malformed"]
-        proposal_digest = record.get("proposal_sha256")
-        patches = record.get("patches")
-        public = record.get("public")
-        if (
-            not _is_sha256(proposal_digest)
-            or not isinstance(patches, list)
-            or not patches
-            or not isinstance(public, dict)
+        public = _audit_status(record.get("public"), "alternative public result")
+        if isinstance(public, str):
+            return [public]
+        public_passed, _ = public
+        required_record_keys = (
+            _ALT_CORRECT_ALTERNATIVE_RECORD_KEYS
+            if public_passed
+            else _ALT_CORRECT_RED_ALTERNATIVE_RECORD_KEYS
+        )
+        has_relaxed_record = "relaxed" in record
+        if set(record) not in (
+            required_record_keys,
+            required_record_keys | {"relaxed"},
         ):
+            return ["alt_correct: alternative record has an unsafe schema"]
+        if not _is_sha256(record["proposal_sha256"]):
             return ["alt_correct: protected alternative audit is incomplete"]
-        if any(
-            not isinstance(patch, dict)
-            or not isinstance(patch.get("path"), str)
-            or not patch["path"]
-            or not isinstance(patch.get("content"), str)
-            for patch in patches
-        ):
-            return ["alt_correct: protected alternative audit is malformed"]
+        patches = record["patches"]
+        patch_issue = _audit_patches(patches)
+        if patch_issue:
+            return [patch_issue]
+        assert isinstance(patches, list)
         typed_patches = [patch for patch in patches if isinstance(patch, dict)]
+        proposal_digest = record["proposal_sha256"]
         if proposal_digest != _patches_digest(typed_patches):
             return [
                 "alt_correct: protected alternative proposal digest does not "
                 "match materialized patches"
             ]
-        public_passed = public.get("passed")
-        public_exit = public.get("exit_code")
-        if not isinstance(public_passed, bool) or not _is_exit_code(public_exit):
-            return ["alt_correct: alternative public result is malformed"]
-        if public_passed and public_exit != 0:
-            return ["alt_correct: alternative public result is malformed"]
-        if not public_passed and public_exit == 0:
-            return ["alt_correct: alternative public result is malformed"]
-        if public.get("passed") is True:
-            public_green += 1
-            hidden = record.get("hidden")
-            if not isinstance(hidden, list) or not hidden:
+        if public_passed:
+            initial = _audit_execution_record(
+                {key: record[key] for key in _ALT_CORRECT_EXECUTION_KEYS},
+                "alternative",
+            )
+            if isinstance(initial, str):
+                return [initial]
+            _, initial_p2p_passed, initial_hidden_ids, initial_hidden_green = initial
+            if not initial_p2p_passed:
                 return [
-                    "alt_correct: public-green alternative has no hidden per-node "
-                    "execution evidence"
+                    "alt_correct: public-green alternative has a non-green filtered P2P result"
                 ]
+            if not initial_hidden_green:
+                return [
+                    "alt_correct: public-green alternative has a non-green hidden result"
+                ]
+            if initial_hidden_ids != gold_hidden_ids:
+                return [
+                    "alt_correct: alternative hidden test identities do not match "
+                    "gold evidence"
+                ]
+            public_green += 1
         else:
             invalid_alternatives.append(alt_id)
+
+        if not relaxed_audit and has_relaxed_record:
+            return [
+                "alt_correct: alternative relaxed record exists without effective "
+                "gold evidence"
+            ]
+        if relaxed_audit and public_passed and not has_relaxed_record:
+            return [
+                "alt_correct: relaxed audit is missing effective alternative evidence"
+            ]
+        if not has_relaxed_record:
+            continue
+        if not public_passed:
+            return ["alt_correct: public-red alternative has a relaxed record"]
+        relaxed = _audit_execution_record(record["relaxed"], "relaxed alternative")
+        if isinstance(relaxed, str):
+            return [relaxed]
+        (
+            relaxed_public_passed,
+            relaxed_p2p_passed,
+            relaxed_hidden_ids,
+            relaxed_hidden_green,
+        ) = relaxed
+        if not relaxed_public_passed:
+            return ["alt_correct: relaxed alternative public result is not green"]
+        if not relaxed_p2p_passed:
+            return [
+                "alt_correct: relaxed public-green alternative has a non-green "
+                "filtered P2P result"
+            ]
+        if not relaxed_hidden_green:
+            return [
+                "alt_correct: relaxed public-green alternative has a non-green "
+                "hidden result"
+            ]
+        if relaxed_hidden_ids != effective_gold_hidden_ids:
+            return [
+                "alt_correct: relaxed alternative hidden test identities do not "
+                "match effective gold evidence"
+            ]
     if public_green < 1:
         return [
             "alt_correct: no executable real-teacher alternative passed the "
@@ -247,7 +504,14 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
 
     if public_details.get("gold_public_suite_passed") is not True:
         return ["alt_correct: public gold summary is not green"]
-    if public_details.get("public_valid_alternatives") != public_green:
+    summary_count = public_details.get("public_valid_alternatives")
+    if (
+        not isinstance(summary_count, int)
+        or isinstance(summary_count, bool)
+        or summary_count < 0
+        or summary_count > len(alternatives)
+        or summary_count != public_green
+    ):
         return ["alt_correct: public-valid alternative count does not match audit"]
     invalid_summary = public_details.get("invalid_teacher_proposals")
     if (

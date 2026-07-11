@@ -45,6 +45,7 @@ from swe_forge.forge.oracle.pipeline import (
     ensure_oracle_exportable,
     is_oracle_exportable,
     orchestrate_gates,
+    parse_protected_alt_correct_audit,
     run_oracle_pipeline,
     verify_pass_consistency,
 )
@@ -385,6 +386,181 @@ def test_alt_correct_export_requires_matching_hardened_public_audit(
     assert any(expected in problem for problem in problems)
     with pytest.raises(ExportRefusedError):
         ensure_oracle_exportable(report, calibration_kept=True)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (
+            lambda audit: audit.update({"version": True}),
+            "version is unsupported",
+        ),
+        (
+            lambda audit: audit["gold"]["public"].update({"exit_code": True}),  # type: ignore[index]
+            "gold public result is malformed",
+        ),
+        (
+            lambda audit: audit["gold"]["filtered_p2p"].update(  # type: ignore[index]
+                {"exit_code": 0.0}
+            ),
+            "gold filtered P2P result is malformed",
+        ),
+        (
+            lambda audit: audit["gold"]["hidden"][0].update({"exit_code": False}),  # type: ignore[index]
+            "gold hidden result is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["public"].update(  # type: ignore[index]
+                {"passed": 1}
+            ),
+            "alternative public result is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["filtered_p2p"].update(  # type: ignore[index]
+                {"exit_code": 0.0}
+            ),
+            "alternative filtered P2P result is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["hidden"][0].update(  # type: ignore[index]
+                {"exit_code": True}
+            ),
+            "alternative hidden result is malformed",
+        ),
+        (
+            lambda audit: audit.update({"unexpected": None}),
+            "audit has an unsafe schema",
+        ),
+        (
+            lambda audit: audit["gold"].pop("filtered_p2p"),  # type: ignore[index]
+            "gold record has an unsafe schema",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"].update(  # type: ignore[index]
+                {"unexpected": None}
+            ),
+            "alternative record has an unsafe schema",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["patches"][0].update(  # type: ignore[index]
+                {"unexpected": None}
+            ),
+            "alternative patch is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["patches"][0].update(  # type: ignore[index]
+                {"path": "../escape.py"}
+            ),
+            "alternative patch is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"].update(  # type: ignore[index]
+                {"": audit["alternatives"]["alt_1"]}
+            ),
+            "alternative identity is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["patches"].append(  # type: ignore[index]
+                dict(audit["alternatives"]["alt_1"]["patches"][0])
+            ),
+            "duplicate patch path",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["hidden"].append(  # type: ignore[index]
+                dict(audit["alternatives"]["alt_1"]["hidden"][0])
+            ),
+            "duplicate hidden test identity",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["hidden"][0].update(  # type: ignore[index]
+                {"test_id": " \t"}
+            ),
+            "hidden result is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["filtered_p2p"].update(  # type: ignore[index]
+                {"passed": True, "exit_code": 1}
+            ),
+            "alternative filtered P2P result is malformed",
+        ),
+        (
+            lambda audit: audit["alternatives"]["alt_1"]["hidden"][0].update(  # type: ignore[index]
+                {"exit_code": 1}
+            ),
+            "public-green alternative has a non-green hidden result",
+        ),
+    ],
+)
+def test_alt_correct_audit_requires_exact_schema_and_scalar_types(
+    mutate: object, expected: str
+) -> None:
+    report = _pass_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict) and callable(mutate)
+    mutate(audit)
+
+    problems = verify_pass_consistency(report)
+
+    assert any(expected in problem for problem in problems)
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(report, calibration_kept=True)
+
+
+def test_alt_correct_audit_reconciles_hidden_coverage_and_summary_identities() -> None:
+    report = _pass_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    audit["gold"]["hidden"].append(  # type: ignore[index]
+        {"test_id": "python -m pytest tests/hidden/test_missing.py", "exit_code": 0}
+    )
+
+    problems = verify_pass_consistency(report)
+
+    assert any(
+        "gold hidden test identities do not match final suite" in p for p in problems
+    )
+    with pytest.raises(ExportRefusedError):
+        ensure_oracle_exportable(report, calibration_kept=True)
+
+    report = _pass_report()
+    report.details["alt_correct"]["public_valid_alternatives"] = True  # type: ignore[index]
+    assert any(
+        "public-valid alternative count does not match audit" in problem
+        for problem in verify_pass_consistency(report)
+    )
+
+
+def test_alt_correct_audit_requires_complete_relaxed_execution_evidence() -> None:
+    report = _pass_report()
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    initial = audit["alternatives"]["alt_1"]  # type: ignore[index]
+    gold = audit["gold"]  # type: ignore[index]
+    gold["relaxed"] = {
+        "public": dict(gold["public"]),
+        "filtered_p2p": dict(gold["filtered_p2p"]),
+        "hidden": [dict(result) for result in gold["hidden"]],
+    }
+    initial["relaxed"] = {
+        "public": dict(initial["public"]),
+        "filtered_p2p": dict(initial["filtered_p2p"]),
+        "hidden": [dict(result) for result in initial["hidden"]],
+    }
+
+    assert verify_pass_consistency(report) == []
+
+    initial["relaxed"]["hidden"][0]["exit_code"] = 1
+    assert any(
+        "relaxed public-green alternative has a non-green hidden result" in problem
+        for problem in verify_pass_consistency(report)
+    )
+
+
+def test_private_audit_parser_rejects_duplicate_alternative_json_keys() -> None:
+    with pytest.raises(ValueError, match="duplicate object key 'alt_1'"):
+        parse_protected_alt_correct_audit(
+            '{"alternatives": {"alt_1": {}, "alt_1": {}}}'
+        )
 
 
 def test_custom_final_mutation_threshold_is_exportable() -> None:

@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -263,7 +264,7 @@ def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
                 origin="synthesized",
             )
         )
-    return OracleReport(
+    report = OracleReport(
         language="python",
         generator="ast_mutation",
         verdict="pass",
@@ -296,6 +297,22 @@ def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
         },
         protected_alt_correct_audit=_alt_correct_audit(),
     )
+    if extra_survivor:
+        audit = report.protected_alt_correct_audit
+        assert isinstance(audit, dict)
+        hidden = [
+            {
+                "test_id": "python -m pytest tests/hidden/test_total.py",
+                "exit_code": 0,
+            },
+            {
+                "test_id": "python -m pytest tests/hidden/test_survivor.py",
+                "exit_code": 0,
+            },
+        ]
+        audit["gold"]["hidden"] = hidden  # type: ignore[index]
+        audit["alternatives"]["alt_1"]["hidden"] = list(hidden)  # type: ignore[index]
+    return report
 
 
 def _oracle_reject() -> OracleReport:
@@ -837,6 +854,22 @@ def test_direct_export_retains_private_alt_correct_audit_outside_workspace(
     )
 
 
+def test_batch_export_refuses_malformed_private_alt_audit_before_writing(
+    tmp_path: Path,
+) -> None:
+    request = _request()
+    audit = request.oracle_report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    audit["version"] = True
+
+    result = export_batch([request], tmp_path)
+
+    assert result.shipped == []
+    assert len(result.refused) == 1
+    assert "alt_correct" in result.refused[0].reason
+    assert list((tmp_path / "tasks").iterdir()) == []
+
+
 def test_failed_midwrite_leaves_no_partial_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1282,7 +1315,8 @@ def test_publication_rejects_missing_altered_or_replayed_transport_receipts(
 
 
 @pytest.mark.parametrize(
-    "corruption", ["missing", "malformed", "mismatched", "patch_mismatch"]
+    "corruption",
+    ["missing", "malformed", "duplicate_key", "mismatched", "patch_mismatch"],
 )
 def test_hardened_publication_refuses_missing_or_invalid_private_alt_audit(
     tmp_path: Path, corruption: str
@@ -1297,6 +1331,11 @@ def test_hardened_publication_refuses_missing_or_invalid_private_alt_audit(
         audit_path.unlink()
     elif corruption == "malformed":
         audit_path.write_text("{broken", encoding="utf-8")
+    elif corruption == "duplicate_key":
+        audit_path.write_text(
+            '{"version": 1, "version": 1, "alternatives": {}}',
+            encoding="utf-8",
+        )
     elif corruption == "mismatched":
         audit = json.loads(audit_path.read_text(encoding="utf-8"))
         audit["original_public_suite_sha256"] = "c" * 64
@@ -1328,6 +1367,11 @@ def _set_hidden_test_path(report: OracleReport, path: str) -> None:
         threshold=evidence.threshold,
         tool=evidence.tool,
     )
+    audit = report.protected_alt_correct_audit
+    assert isinstance(audit, dict)
+    hidden = [{"test_id": f"python -m pytest {shlex.quote(path)}", "exit_code": 0}]
+    audit["gold"]["hidden"] = hidden  # type: ignore[index]
+    audit["alternatives"]["alt_1"]["hidden"] = list(hidden)  # type: ignore[index]
 
 
 @pytest.mark.parametrize("path", ["/tmp/forge-escape.py", "../forge-escape.py"])

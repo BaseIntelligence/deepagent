@@ -27,7 +27,11 @@ import fcntl
 from swe_forge.export.jsonl import import_jsonl
 from swe_forge.export.parquet import import_parquet
 from swe_forge.forge.models import ForgeTask, OracleReport
-from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
+from swe_forge.forge.oracle.pipeline import (
+    ExportRefusedError,
+    ensure_oracle_exportable,
+    parse_protected_alt_correct_audit,
+)
 
 if TYPE_CHECKING:
     from swe_forge.forge.export import TaskExportResult
@@ -402,15 +406,11 @@ def _rehydrate_protected_alt_correct_audit(root: Path, task: ForgeTask) -> Forge
             f"protected alt-correct audit has unsafe permissions for {task.task_id!r}"
         )
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = parse_protected_alt_correct_audit(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise PublicationError(
             f"protected alt-correct audit is unreadable for {task.task_id!r}"
         ) from exc
-    if not isinstance(payload, dict):
-        raise PublicationError(
-            f"protected alt-correct audit is malformed for {task.task_id!r}"
-        )
     try:
         report = OracleReport.from_protected_dict(
             {

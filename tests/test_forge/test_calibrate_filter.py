@@ -382,7 +382,11 @@ def _passing_oracle() -> OracleReport:
         protected_alt_correct_audit={
             "version": 1,
             "original_public_suite_sha256": "a" * 64,
-            "gold": {"public": {"passed": True, "exit_code": 0}},
+            "gold": {
+                "public": {"passed": True, "exit_code": 0},
+                "filtered_p2p": {"passed": True, "exit_code": 0},
+                "hidden": [{"test_id": "tests/test_x.py::test_a", "exit_code": 0}],
+            },
             "alternatives": {
                 "alt_1": {
                     "proposal_sha256": hashlib.sha256(
@@ -392,6 +396,7 @@ def _passing_oracle() -> OracleReport:
                         {"path": "calc.py", "content": "def subtract(): ...\n"}
                     ],
                     "public": {"passed": True, "exit_code": 0},
+                    "filtered_p2p": {"passed": True, "exit_code": 0},
                     "hidden": [{"test_id": "tests/test_x.py::test_a", "exit_code": 0}],
                 }
             },

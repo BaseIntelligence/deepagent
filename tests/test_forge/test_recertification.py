@@ -199,7 +199,11 @@ def _oracle(candidate: Candidate) -> OracleReport:
         protected_alt_correct_audit={
             "version": 1,
             "original_public_suite_sha256": "a" * 64,
-            "gold": {"public": {"passed": True, "exit_code": 0}},
+            "gold": {
+                "public": {"passed": True, "exit_code": 0},
+                "filtered_p2p": {"passed": True, "exit_code": 0},
+                "hidden": [{"test_id": _F2P, "exit_code": 0}],
+            },
             "alternatives": {
                 "alt_1": {
                     "proposal_sha256": hashlib.sha256(
@@ -209,6 +213,7 @@ def _oracle(candidate: Candidate) -> OracleReport:
                         {"path": "src/alpha.py", "content": "def alpha(): ...\n"}
                     ],
                     "public": {"passed": True, "exit_code": 0},
+                    "filtered_p2p": {"passed": True, "exit_code": 0},
                     "hidden": [{"test_id": _F2P, "exit_code": 0}],
                 }
             },
