@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import py_compile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable
@@ -134,6 +135,54 @@ def test_approved_input_manifest_rehydrates_only_a_verified_private_snapshot(
     verified.cleanup()
 
 
+def test_source_only_manifest_ignores_preexisting_and_generated_bytecode(
+    tmp_path: Path,
+) -> None:
+    """Runtime bytecode cannot change approved source bytes or snapshots."""
+    workspace, budget, manifest = _write_recovery_fixture(tmp_path)
+    cache_dir = workspace / "tests" / "__pycache__"
+    cache_dir.mkdir()
+    preexisting = cache_dir / "preexisting.cpython-312.pyc"
+    preexisting.write_bytes(b"preexisting bytecode")
+    legacy = workspace / "tests" / "legacy-optimized.pyo"
+    legacy.write_bytes(b"legacy optimized bytecode")
+
+    first = alternate_recovery._verify_approved_recovery_inputs(
+        workspace,
+        budget,
+        repository_root=tmp_path,
+        manifest=manifest,
+    )
+    try:
+        py_compile.compile(
+            workspace / "tests" / "test_hidden.py",
+            cfile=cache_dir / "generated.cpython-312.pyc",
+            doraise=True,
+        )
+        assert preexisting.is_file()
+        assert legacy.is_file()
+        assert (cache_dir / "generated.cpython-312.pyc").is_file()
+
+        second = alternate_recovery._verify_approved_recovery_inputs(
+            workspace,
+            budget,
+            repository_root=tmp_path,
+            manifest=manifest,
+        )
+        try:
+            assert first.manifest_digest == manifest.digest == second.manifest_digest
+            assert first.workspace_digests == second.workspace_digests
+            assert not (first.snapshot_root / "tests" / "__pycache__").exists()
+            assert not (second.snapshot_root / "tests" / "__pycache__").exists()
+            assert (second.snapshot_root / "tests" / "test_hidden.py").read_bytes() == (
+                workspace / "tests" / "test_hidden.py"
+            ).read_bytes()
+        finally:
+            second.cleanup()
+    finally:
+        first.cleanup()
+
+
 @pytest.mark.parametrize(
     "mutation",
     [
@@ -158,6 +207,21 @@ def test_approved_input_manifest_rehydrates_only_a_verified_private_snapshot(
                 "x = 1\n", encoding="utf-8"
             ),
             id="hidden-test-extra",
+        ),
+        pytest.param(
+            lambda workspace, _budget: (
+                workspace / "tests" / "test_hidden.py"
+            ).write_text(
+                "def test_hidden():\n    assert False\n",
+                encoding="utf-8",
+            ),
+            id="hidden-test-bytes-changed",
+        ),
+        pytest.param(
+            lambda workspace, _budget: (
+                workspace / "tests" / "test_hidden.py"
+            ).unlink(),
+            id="hidden-test-removed",
         ),
         pytest.param(
             lambda workspace, _budget: (

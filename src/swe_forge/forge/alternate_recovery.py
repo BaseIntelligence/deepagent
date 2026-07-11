@@ -73,6 +73,10 @@ from swe_forge.forge.recovery_authority import (
     default_authority_root,
 )
 from swe_forge.forge.report import GoldSummary, build_benchmark_report, write_report
+from swe_forge.forge.source_manifest import (
+    is_approved_source_path,
+    is_runtime_bytecode_directory,
+)
 from swe_forge.forge.teacher import TeacherClient
 
 ALTERNATE_RECOVERY_TASK_ID = "mahmoud-boltons__bug_combination__7bb4e61cc98c"
@@ -518,7 +522,11 @@ def _read_tree_at(
     label: str,
     ignored_top_level: frozenset[str] = frozenset(),
 ) -> dict[str, bytes]:
-    """Canonical, symlink-safe walk over every consumed file in a retained tree."""
+    """Walk every approved source byte in a retained tree without following links.
+
+    The shared source-only policy ignores CPython runtime bytecode. All
+    remaining entries are still exact, symlink-safe manifest inputs.
+    """
 
     entries: dict[str, bytes] = {}
 
@@ -532,6 +540,8 @@ def _read_tree_at(
         canonical_names: set[str] = set()
         for name in names:
             if is_root and name in ignored_top_level:
+                continue
+            if is_runtime_bytecode_directory(name):
                 continue
             normalized = unicodedata.normalize("NFC", name)
             alias_key = normalized.casefold()
@@ -563,6 +573,8 @@ def _read_tree_at(
                 finally:
                     os.close(child_fd)
             elif stat.S_ISREG(metadata.st_mode):
+                if not is_approved_source_path(relative):
+                    continue
                 content, _identity = _read_regular_at(
                     current_fd, name, label=f"{label}/{relative}"
                 )
@@ -1271,9 +1283,12 @@ def rehydrate_alternate(
         raise AlternateRecoveryError("retained alternate patches must end in newlines")
     frozen_tests: list[OracleTestFile] = []
     for test_path in sorted(path for path in tests_dir.rglob("*") if path.is_file()):
+        relative_path = test_path.relative_to(tests_dir).as_posix()
+        if not is_approved_source_path(relative_path):
+            continue
         frozen_tests.append(
             OracleTestFile(
-                path=test_path.relative_to(tests_dir).as_posix(),
+                path=relative_path,
                 content=test_path.read_text(encoding="utf-8"),
                 origin="provided",
             )
