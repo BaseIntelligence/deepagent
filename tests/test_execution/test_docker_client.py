@@ -534,6 +534,18 @@ class TestDockerClient:
                 assert exists is False
 
     @pytest.mark.asyncio
+    async def test_inspect_image_returns_daemon_metadata(self):
+        with patch("swe_forge.execution.docker_client.Docker") as mock_docker_cls:
+            mock_docker = MockDocker()
+            mock_docker_cls.return_value = mock_docker
+
+            async with DockerClient() as client:
+                metadata = await client.inspect_image("python:3.11-slim")
+
+            assert metadata == {"Id": "sha256:image-id"}
+            mock_docker.images.inspect.assert_awaited_once_with("python:3.11-slim")
+
+    @pytest.mark.asyncio
     async def test_ensure_image_already_exists(self):
         with patch("swe_forge.execution.docker_client.Docker") as mock_docker_cls:
             mock_docker = MockDocker()

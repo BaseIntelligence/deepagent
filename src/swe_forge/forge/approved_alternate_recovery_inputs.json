@@ -1,10 +1,12 @@
 {
+  "approved_image_id": "sha256:1896e83f10bfabd33e25ff3eb22406ddab9bb698ac2fb282beb1c455d3e6528b",
+  "approved_image_tag": "swe-forge-env-mahmoud_boltons:979fa9b613fa",
   "budget_relative": "results/pilot_keeps/harvest_progress.json",
   "budget_sha256": "804a75f668e6778cff89fe3e82c7f0d45186c748b947ca8f3ccc267c8329599a",
   "hidden_tests": {
-    "file_count": 1,
+    "file_count": 2,
     "path": "tests",
-    "tree_sha256": "ff64fcf916bf34b78e3b75a3625e4b38c6c2ee16384d595fb7fe7dc6bd7384d1"
+    "tree_sha256": "56e23d10224e193de16c44b11da755f718b04332292e274bafa251e79492bf99"
   },
   "manifest_id": "alternate-recovery-inputs-v1",
   "repository": {
@@ -12,7 +14,7 @@
     "path": "repo",
     "tree_sha256": "1624adc7a5b6ebc1d08b325c425fd5ce661faa2b626b932abeeeb5f7250d6715"
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "task_id": "mahmoud-boltons__bug_combination__7bb4e61cc98c",
   "workspace_files": {
     "deletion_patch.diff": "b49840093bada6586e2b7e15ce7668a813e1156c2be8fb46bd5324c0417f1596",

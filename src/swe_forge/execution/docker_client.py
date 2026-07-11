@@ -465,6 +465,16 @@ class DockerClient:
         except AioDockerError:
             return False
 
+    async def inspect_image(self, image: str) -> dict[str, object]:
+        """Return the daemon's metadata for one already-local image reference."""
+        try:
+            metadata = await self._client.images.inspect(image)
+        except AioDockerError as exc:
+            raise DockerError(f"Failed to inspect image: {image}") from exc
+        if not isinstance(metadata, dict):
+            raise DockerError(f"Image inspection returned invalid metadata: {image}")
+        return metadata
+
     async def ensure_image(self, image: str) -> None:
         """Ensure an image exists, pulling if necessary."""
         if not await self.image_exists(image):

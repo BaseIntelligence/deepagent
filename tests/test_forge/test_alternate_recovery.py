@@ -17,7 +17,6 @@ from swe_forge.forge.alternate_recovery import (
     ApprovedInputManifest,
     ApprovedTree,
     UPDATE_WRAPPER_F2P_COMMAND,
-    UPDATE_WRAPPER_F2P_CONTENT,
     UPDATE_WRAPPER_F2P_PATH,
     AlternateRecoveryError,
     RecoveryCertification,
@@ -36,6 +35,12 @@ def _tree_digest(entries: dict[str, bytes]) -> str:
             f"{path}\0{_sha256(content)}\n" for path, content in sorted(entries.items())
         ).encode("utf-8")
     )
+
+
+_APPROVED_IMAGE_TAG = "swe-forge-env-test:immutable"
+_APPROVED_IMAGE_ID = (
+    "sha256:1896e83f10bfabd33e25ff3eb22406ddab9bb698ac2fb282beb1c455d3e6528b"
+)
 
 
 def _write_recovery_fixture(root: Path) -> tuple[Path, Path, ApprovedInputManifest]:
@@ -83,6 +88,8 @@ def _write_recovery_fixture(root: Path) -> tuple[Path, Path, ApprovedInputManife
             file_count=len(repo_files),
             tree_sha256=_tree_digest(repo_files),
         ),
+        approved_image_tag=_APPROVED_IMAGE_TAG,
+        approved_image_id=_APPROVED_IMAGE_ID,
     )
     return workspace, budget, manifest
 
@@ -260,6 +267,57 @@ def test_approved_input_manifest_rejects_duplicate_casefolded_tree_paths(
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("schema_version", True),
+        ("schema_version", 1.0),
+        ("hidden_tests.file_count", True),
+        ("hidden_tests.file_count", 1.0),
+        ("repository.file_count", False),
+        ("repository.file_count", 2.0),
+        ("approved_image_tag", True),
+        ("approved_image_id", "sha256:not-a-digest"),
+    ],
+)
+def test_approved_manifest_rejects_boolean_or_malformed_schema_scalars(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    _workspace, _budget, manifest = _write_recovery_fixture(tmp_path)
+    payload = manifest.to_dict()
+    if "." in field:
+        parent, child = field.split(".", 1)
+        assert isinstance(payload[parent], dict)
+        payload[parent][child] = value
+    else:
+        payload[field] = value
+
+    with pytest.raises(AlternateRecoveryError, match="approved manifest"):
+        ApprovedInputManifest.from_dict(payload)
+
+
+def test_approved_manifest_requires_exact_image_and_root_schema(
+    tmp_path: Path,
+) -> None:
+    _workspace, _budget, manifest = _write_recovery_fixture(tmp_path)
+
+    missing_image = manifest.to_dict()
+    missing_image.pop("approved_image_id")
+    with pytest.raises(AlternateRecoveryError, match="approved manifest"):
+        ApprovedInputManifest.from_dict(missing_image)
+
+    extra_root = manifest.to_dict()
+    extra_root["unapproved"] = "value"
+    with pytest.raises(AlternateRecoveryError, match="approved manifest"):
+        ApprovedInputManifest.from_dict(extra_root)
+
+    extra_tree = manifest.to_dict()
+    assert isinstance(extra_tree["hidden_tests"], dict)
+    extra_tree["hidden_tests"]["unexpected"] = "value"
+    with pytest.raises(AlternateRecoveryError, match="approved manifest"):
+        ApprovedInputManifest.from_dict(extra_tree)
+
+
 def test_manifest_rejection_has_no_recovery_side_effects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -292,21 +350,36 @@ def test_update_wrapper_hidden_test_is_upstream_grounded_and_named() -> None:
         "test_update_wrapper_wraps_basic.py::"
         "test_wraps_basic_regular_function_preserves_metadata_and_wrapped"
     )
-    assert "from boltons.funcutils import wraps" in UPDATE_WRAPPER_F2P_CONTENT
-    assert "@wraps(source)" in UPDATE_WRAPPER_F2P_CONTENT
-    assert "wrapped(3)" in UPDATE_WRAPPER_F2P_CONTENT
-    assert "wrapped.__name__ == source.__name__" in UPDATE_WRAPPER_F2P_CONTENT
-    assert "wrapped.__doc__ == source.__doc__" in UPDATE_WRAPPER_F2P_CONTENT
-    assert "wrapped.__wrapped__ is source" in UPDATE_WRAPPER_F2P_CONTENT
+    retained = (
+        Path(__file__).parents[2]
+        / "results"
+        / "pilot_keeps"
+        / "tasks"
+        / ALTERNATE_RECOVERY_TASK_ID
+        / "tests"
+        / UPDATE_WRAPPER_F2P_PATH
+    ).read_text(encoding="utf-8")
+    assert "from boltons.funcutils import wraps" in retained
+    assert "@wraps(source)" in retained
+    assert "wrapped(3)" in retained
+    assert "wrapped.__name__ == source.__name__" in retained
+    assert "wrapped.__doc__ == source.__doc__" in retained
+    assert "wrapped.__wrapped__ is source" in retained
 
 
-def test_update_wrapper_hidden_test_is_added_without_changing_existing_suite() -> None:
+def test_update_wrapper_hidden_test_must_be_retained_without_source_injection() -> None:
+    wrapper_content = "def test_wrapper():\n    assert True\n"
     existing = [
         OracleTestFile(
             path="test_complement_bug.py",
             content="def test_complement():\n    assert True\n",
             origin="provided",
-        )
+        ),
+        OracleTestFile(
+            path=UPDATE_WRAPPER_F2P_PATH,
+            content=wrapper_content,
+            origin="provided",
+        ),
     ]
 
     recovered = RecoveryCertification.freeze_suite(existing)
@@ -316,12 +389,118 @@ def test_update_wrapper_hidden_test_is_added_without_changing_existing_suite() -
         UPDATE_WRAPPER_F2P_PATH,
     ]
     assert recovered[0] is existing[0]
-    assert recovered[1].content == UPDATE_WRAPPER_F2P_CONTENT
+    assert recovered[1] is existing[1]
+    assert recovered[1].content == wrapper_content
     assert recovered[1].origin == "provided"
 
 
-def test_update_wrapper_hidden_test_refuses_conflicting_path() -> None:
-    conflicting = [
+@pytest.mark.parametrize(
+    "tests",
+    [
+        pytest.param([], id="missing-wrapper"),
+        pytest.param(
+            [
+                OracleTestFile(
+                    path=UPDATE_WRAPPER_F2P_PATH,
+                    content="one\n",
+                    origin="provided",
+                ),
+                OracleTestFile(
+                    path=UPDATE_WRAPPER_F2P_PATH,
+                    content="two\n",
+                    origin="provided",
+                ),
+            ],
+            id="duplicate-wrapper",
+        ),
+    ],
+)
+def test_update_wrapper_hidden_test_refuses_missing_or_duplicate_path(
+    tests: list[OracleTestFile],
+) -> None:
+    with pytest.raises(AlternateRecoveryError, match="update-wrapper test"):
+        RecoveryCertification.freeze_suite(tests)
+
+
+@pytest.mark.asyncio
+async def test_approved_image_tag_must_resolve_to_the_pinned_immutable_id(
+    tmp_path: Path,
+) -> None:
+    _workspace, _budget, manifest = _write_recovery_fixture(tmp_path)
+
+    class InspectingClient:
+        def __init__(self, image_id: str) -> None:
+            self.image_id = image_id
+            self.inspected: list[str] = []
+
+        async def __aenter__(self) -> "InspectingClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def inspect_image(self, tag: str) -> dict[str, object]:
+            self.inspected.append(tag)
+            return {"Id": self.image_id}
+
+    accepted = InspectingClient(_APPROVED_IMAGE_ID)
+    resolved = await alternate_recovery.resolve_approved_image_id(
+        manifest, client_factory=lambda: accepted
+    )
+    assert resolved == _APPROVED_IMAGE_ID
+    assert accepted.inspected == [_APPROVED_IMAGE_TAG]
+
+    retargeted = InspectingClient(
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    with pytest.raises(AlternateRecoveryError, match="immutable image"):
+        await alternate_recovery.resolve_approved_image_id(
+            manifest, client_factory=lambda: retargeted
+        )
+    assert retargeted.inspected == [_APPROVED_IMAGE_TAG]
+
+
+def test_image_rejection_precedes_authority_work_and_live_side_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, budget, manifest = _write_recovery_fixture(tmp_path)
+    output = tmp_path / "pilot_final"
+    work = tmp_path / "work"
+    authority_root = tmp_path / "machine-global-authority"
+    monkeypatch.setattr(alternate_recovery, "APPROVED_INPUT_MANIFEST", manifest)
+    monkeypatch.setattr(alternate_recovery, "_CANONICAL_RECOVERY_OUTPUT", output)
+    monkeypatch.setattr(
+        alternate_recovery, "default_authority_root", lambda: authority_root
+    )
+
+    async def reject_image(_manifest: ApprovedInputManifest) -> str:
+        raise AlternateRecoveryError("immutable image validation rejected")
+
+    monkeypatch.setattr(
+        alternate_recovery,
+        "resolve_approved_image_id",
+        reject_image,
+        raising=False,
+    )
+
+    with pytest.raises(AlternateRecoveryError, match="immutable image validation"):
+        asyncio.run(
+            alternate_recovery.run_final_alternate_recovery(
+                out_dir=output,
+                source_workspace=workspace,
+                budget_progress=budget,
+                work_root=work,
+                repository_root=tmp_path,
+            )
+        )
+
+    assert not output.exists()
+    assert not work.exists()
+    assert not authority_root.exists()
+
+
+def test_update_wrapper_hidden_test_preserves_its_manifest_bound_bytes() -> None:
+    retained = [
         OracleTestFile(
             path=UPDATE_WRAPPER_F2P_PATH,
             content="def test_different():\n    assert True\n",
@@ -329,8 +508,50 @@ def test_update_wrapper_hidden_test_refuses_conflicting_path() -> None:
         )
     ]
 
-    with pytest.raises(AlternateRecoveryError, match="different content"):
-        RecoveryCertification.freeze_suite(conflicting)
+    assert RecoveryCertification.freeze_suite(retained) == retained
+
+
+def test_rehydration_uses_the_manifest_bound_wrapper_and_immutable_image() -> None:
+    repository_root = Path(__file__).parents[2]
+    workspace = (
+        repository_root
+        / "results"
+        / "pilot_keeps"
+        / "tasks"
+        / ALTERNATE_RECOVERY_TASK_ID
+    )
+    inputs = alternate_recovery.verify_approved_recovery_inputs(
+        workspace,
+        repository_root / "results" / "pilot_keeps" / "harvest_progress.json",
+        repository_root=repository_root,
+    )
+    try:
+        alternate = alternate_recovery.rehydrate_alternate(inputs)
+        wrapper = next(
+            test for test in alternate.tests if test.path == UPDATE_WRAPPER_F2P_PATH
+        )
+        assert wrapper.content == (
+            workspace / "tests" / UPDATE_WRAPPER_F2P_PATH
+        ).read_text(encoding="utf-8")
+        assert alternate.env_image.image_tag == inputs.approved_image_id
+        assert alternate.env_image.image_tag != inputs.approved_image_tag
+        assert alternate.env_image.provenance["immutable_image_id"] == (
+            inputs.approved_image_id
+        )
+        assert (
+            alternate.candidate.provenance.details["recovery"]["immutable_image_id"]
+            == inputs.approved_image_id
+        )
+        with pytest.raises(AlternateRecoveryError, match="unapproved immutable image"):
+            alternate_recovery.rehydrate_alternate(
+                inputs,
+                immutable_image_id=(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                ),
+            )
+    finally:
+        inputs.cleanup()
 
 
 def test_original_budget_verification_is_exact_and_caps_incremental_attempt(
@@ -408,7 +629,7 @@ def test_crashed_global_claim_reconciles_without_restarting_live_work(
     class SimulatedCrash(BaseException):
         pass
 
-    def crash_after_claim(_verified: object) -> object:
+    def crash_after_claim(_verified: object, **_kwargs: object) -> object:
         nonlocal rehydrate_calls
         rehydrate_calls += 1
         raise SimulatedCrash()
@@ -419,6 +640,13 @@ def test_crashed_global_claim_reconciles_without_restarting_live_work(
         alternate_recovery, "default_authority_root", lambda: authority_root
     )
     monkeypatch.setattr(alternate_recovery, "rehydrate_alternate", crash_after_claim)
+
+    async def resolve_fixture_image(_manifest: ApprovedInputManifest) -> str:
+        return _APPROVED_IMAGE_ID
+
+    monkeypatch.setattr(
+        alternate_recovery, "resolve_approved_image_id", resolve_fixture_image
+    )
 
     with pytest.raises(SimulatedCrash):
         asyncio.run(

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -19,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Callable, Literal, Protocol, Sequence
 
 import yaml  # type: ignore[import-untyped]
 
@@ -84,25 +85,6 @@ UPDATE_WRAPPER_F2P_NODE = (
     "test_wraps_basic_regular_function_preserves_metadata_and_wrapped"
 )
 UPDATE_WRAPPER_F2P_COMMAND = f"python -m pytest {UPDATE_WRAPPER_F2P_NODE}"
-UPDATE_WRAPPER_F2P_CONTENT = """\
-from boltons.funcutils import wraps
-
-
-def test_wraps_basic_regular_function_preserves_metadata_and_wrapped():
-    def source(value):
-        '''Return a value through the original callable.'''
-        return value * 2
-
-    @wraps(source)
-    def wrapped(*args, **kwargs):
-        return source(*args, **kwargs)
-
-    assert wrapped(3) == 6
-    assert wrapped.__name__ == source.__name__
-    assert wrapped.__doc__ == source.__doc__
-    assert wrapped.__wrapped__ is source
-"""
-
 _CANONICAL_AUDIT_ARTIFACTS = (
     "certification.json",
     "gold_eval.json",
@@ -121,7 +103,7 @@ _APPROVED_MANIFEST_RESOURCE = Path(__file__).with_name(
 # the retained bytes cannot amend the approval, and editing the manifest resource
 # without the reviewed source change below fails closed.
 APPROVED_INPUT_MANIFEST_DIGEST = (
-    "a3130d75dfd2b4fe37d9ecc785ed837cf3e4ffd0945fbc227ca49ca28a4a2e5a"
+    "10cf157be10fd8d9429d441e129419c26ebb174d9ed9b71d0f3105a8620c73f5"
 )
 
 
@@ -157,7 +139,9 @@ class ApprovedInputManifest:
     workspace_files: dict[str, str]
     hidden_tests: ApprovedTree
     repository: ApprovedTree
-    schema_version: int = 1
+    approved_image_tag: str
+    approved_image_id: str
+    schema_version: int = 2
 
     @property
     def digest(self) -> str:
@@ -177,12 +161,29 @@ class ApprovedInputManifest:
             "workspace_files": dict(sorted(self.workspace_files.items())),
             "hidden_tests": self.hidden_tests.to_dict(),
             "repository": self.repository.to_dict(),
+            "approved_image_tag": self.approved_image_tag,
+            "approved_image_id": self.approved_image_id,
         }
 
     @classmethod
     def from_dict(cls, payload: object) -> "ApprovedInputManifest":
         if not isinstance(payload, dict):
             raise AlternateRecoveryError("approved manifest must be an object")
+        expected_root_fields = {
+            "schema_version",
+            "manifest_id",
+            "task_id",
+            "workspace_relative",
+            "budget_relative",
+            "budget_sha256",
+            "workspace_files",
+            "hidden_tests",
+            "repository",
+            "approved_image_tag",
+            "approved_image_id",
+        }
+        if set(payload) != expected_root_fields:
+            raise AlternateRecoveryError("approved manifest has an invalid schema")
 
         def text(name: str) -> str:
             value = payload.get(name)
@@ -192,14 +193,18 @@ class ApprovedInputManifest:
 
         def tree(name: str) -> ApprovedTree:
             value = payload.get(name)
-            if not isinstance(value, dict):
+            if not isinstance(value, dict) or set(value) != {
+                "path",
+                "file_count",
+                "tree_sha256",
+            }:
                 raise AlternateRecoveryError(f"approved manifest lacks {name} tree")
             path = value.get("path")
             count = value.get("file_count")
             digest = value.get("tree_sha256")
             if (
                 not isinstance(path, str)
-                or not isinstance(count, int)
+                or type(count) is not int
                 or count < 0
                 or not isinstance(digest, str)
                 or not _is_sha256(digest)
@@ -221,11 +226,19 @@ class ApprovedInputManifest:
             _validate_relative_path(path, label="approved manifest path")
             files[path] = digest
         schema = payload.get("schema_version")
-        if schema != 1:
+        if type(schema) is not int or schema != 2:
             raise AlternateRecoveryError("approved manifest schema is unsupported")
         budget_digest = text("budget_sha256")
         if not _is_sha256(budget_digest):
             raise AlternateRecoveryError("approved manifest has invalid budget digest")
+        approved_image_tag = text("approved_image_tag")
+        if not _is_docker_image_tag(approved_image_tag):
+            raise AlternateRecoveryError("approved manifest has an invalid image tag")
+        approved_image_id = text("approved_image_id")
+        if not _is_immutable_image_id(approved_image_id):
+            raise AlternateRecoveryError(
+                "approved manifest has an invalid immutable image ID"
+            )
         manifest = cls(
             manifest_id=text("manifest_id"),
             task_id=text("task_id"),
@@ -235,6 +248,8 @@ class ApprovedInputManifest:
             workspace_files=files,
             hidden_tests=tree("hidden_tests"),
             repository=tree("repository"),
+            approved_image_tag=approved_image_tag,
+            approved_image_id=approved_image_id,
             schema_version=schema,
         )
         _validate_relative_path(manifest.workspace_relative, label="workspace path")
@@ -266,14 +281,24 @@ class VerifiedRecoveryInputs:
     snapshot_root: Path
     budget_bytes: bytes
     workspace_digests: dict[str, str]
+    approved_image_tag: str
+    approved_image_id: str
 
-    def audit_evidence(self) -> dict[str, object]:
+    def audit_evidence(
+        self, immutable_image_id: str | None = None
+    ) -> dict[str, object]:
         """Return the only recovery-input evidence safe for publication."""
 
+        immutable_image_id = immutable_image_id or self.approved_image_id
+        if immutable_image_id != self.approved_image_id:
+            raise AlternateRecoveryError(
+                "recovery evidence received an unapproved immutable image ID"
+            )
         return {
             "manifest_id": self.manifest_id,
             "manifest_digest": self.manifest_digest,
             "verified_input_digests": dict(sorted(self.workspace_digests.items())),
+            "immutable_image_id": immutable_image_id,
         }
 
     def cleanup(self) -> None:
@@ -317,6 +342,80 @@ def _is_sha256(value: object) -> bool:
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value)
     )
+
+
+def _is_immutable_image_id(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"sha256:[0-9a-f]{64}", value) is not None
+    )
+
+
+def _is_docker_image_tag(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and re.fullmatch(r"[a-z0-9][a-z0-9._/-]*:[A-Za-z0-9_][A-Za-z0-9_.-]*", value)
+        is not None
+    )
+
+
+def _validate_approved_manifest_object(manifest: ApprovedInputManifest) -> None:
+    """Apply the untrusted JSON schema checks to direct test/library inputs too."""
+
+    if not isinstance(manifest, ApprovedInputManifest):
+        raise AlternateRecoveryError("approved manifest must be an object")
+    ApprovedInputManifest.from_dict(manifest.to_dict())
+
+
+class _ImageInspector(Protocol):
+    async def __aenter__(self) -> "_ImageInspector": ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: object | None,
+    ) -> None: ...
+
+    async def inspect_image(self, image: str) -> dict[str, object]: ...
+
+
+async def resolve_approved_image_id(
+    manifest: ApprovedInputManifest,
+    *,
+    client_factory: Callable[[], _ImageInspector] | None = None,
+) -> str:
+    """Resolve the sole mutable image tag before recovery authority or side effects.
+
+    The tag is only an approved lookup key.  All execution receives this exact
+    resolved content ID, so retargeting the tag after preflight cannot affect
+    containers, evidence, or publication.
+    """
+
+    if not isinstance(manifest, ApprovedInputManifest):
+        raise AlternateRecoveryError("approved manifest is required for image lookup")
+    _validate_approved_manifest_object(manifest)
+    if client_factory is None:
+        from swe_forge.execution.docker_client import DockerClient
+
+        client_factory = DockerClient
+    try:
+        async with client_factory() as client:
+            metadata = await client.inspect_image(manifest.approved_image_tag)
+    except Exception as exc:
+        raise AlternateRecoveryError(
+            "approved Docker image could not be resolved"
+        ) from exc
+    image_id = metadata.get("Id") if isinstance(metadata, dict) else None
+    if not _is_immutable_image_id(image_id):
+        raise AlternateRecoveryError(
+            "approved Docker image returned a malformed immutable image ID"
+        )
+    if image_id != manifest.approved_image_id:
+        raise AlternateRecoveryError(
+            "approved Docker image tag does not resolve to its immutable image ID"
+        )
+    return image_id
 
 
 def _validate_relative_path(path: str, *, label: str) -> None:
@@ -489,6 +588,17 @@ def _canonical_tree_digest(entries: dict[str, bytes]) -> str:
     ).hexdigest()
 
 
+def _no_duplicate_json_object_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _verified_tree_digests(
     entries: dict[str, bytes], tree: ApprovedTree, *, label: str
 ) -> str:
@@ -505,8 +615,8 @@ def _verified_tree_digests(
 def _load_approved_input_manifest() -> ApprovedInputManifest:
     try:
         raw = _APPROVED_MANIFEST_RESOURCE.read_bytes()
-        payload = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
+        payload = json.loads(raw, object_pairs_hook=_no_duplicate_json_object_keys)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise AlternateRecoveryError("approved input manifest is unavailable") from exc
     manifest = ApprovedInputManifest.from_dict(payload)
     if manifest.digest != APPROVED_INPUT_MANIFEST_DIGEST:
@@ -631,6 +741,7 @@ def _verify_approved_recovery_inputs(
 ) -> VerifiedRecoveryInputs:
     """Pin, fully enumerate, and snapshot recovery inputs before any side effect."""
 
+    _validate_approved_manifest_object(manifest)
     root = _strict_absolute_path(repository_root, label="repository root")
     workspace = _strict_absolute_path(source_workspace, label="source workspace")
     budget = _strict_absolute_path(budget_progress, label="budget progress")
@@ -658,6 +769,8 @@ def _verify_approved_recovery_inputs(
         snapshot_root=snapshot,
         budget_bytes=first_budget,
         workspace_digests=digests,
+        approved_image_tag=manifest.approved_image_tag,
+        approved_image_id=manifest.approved_image_id,
     )
 
 
@@ -808,24 +921,15 @@ class RecoveryCertification:
     def freeze_suite(
         tests: Sequence[OracleTestFile],
     ) -> list[OracleTestFile]:
-        """Append the fixed upstream-grounded update-wrapper test exactly once."""
+        """Require the digest-bound update-wrapper test exactly once."""
 
         frozen = list(tests)
-        existing = next(
-            (test for test in frozen if test.path == UPDATE_WRAPPER_F2P_PATH),
-            None,
-        )
-        if existing is None:
-            frozen.append(
-                OracleTestFile(
-                    path=UPDATE_WRAPPER_F2P_PATH,
-                    content=UPDATE_WRAPPER_F2P_CONTENT,
-                    origin="provided",
-                )
-            )
-        elif existing.content != UPDATE_WRAPPER_F2P_CONTENT:
+        wrapper_tests = [
+            test for test in frozen if test.path == UPDATE_WRAPPER_F2P_PATH
+        ]
+        if len(wrapper_tests) != 1:
             raise AlternateRecoveryError(
-                "alternate recovery update-wrapper test path has different content"
+                "alternate recovery requires exactly one retained update-wrapper test"
             )
         return frozen
 
@@ -1105,13 +1209,18 @@ def _required_text(value: object, *, name: str) -> str:
 
 
 def rehydrate_alternate(
-    approved_inputs: VerifiedRecoveryInputs,
+    approved_inputs: VerifiedRecoveryInputs, *, immutable_image_id: str | None = None
 ) -> RehydratedAlternate:
     """Rebuild a candidate exclusively from a verified private snapshot."""
 
     if not isinstance(approved_inputs, VerifiedRecoveryInputs):
         raise AlternateRecoveryError(
             "alternate recovery requires approved immutable recovery inputs"
+        )
+    immutable_image_id = immutable_image_id or approved_inputs.approved_image_id
+    if immutable_image_id != approved_inputs.approved_image_id:
+        raise AlternateRecoveryError(
+            "alternate recovery received an unapproved immutable image ID"
         )
     root = approved_inputs.snapshot_root
     workspace = _read_workspace_yaml(root / "workspace.yaml")
@@ -1149,6 +1258,13 @@ def rehydrate_alternate(
         raise AlternateRecoveryError("retained alternate workspace lacks metadata")
     if not isinstance(repo_data, dict):
         raise AlternateRecoveryError("retained alternate workspace lacks repository")
+    retained_image_tag = _required_text(
+        environment.get("image"), name="environment.image"
+    )
+    if retained_image_tag != approved_inputs.approved_image_tag:
+        raise AlternateRecoveryError(
+            "retained alternate workspace image tag is not the approved tag"
+        )
     oracle_patch = patch_path.read_text(encoding="utf-8")
     mutation_patch = mutation_path.read_text(encoding="utf-8")
     if not oracle_patch.endswith("\n") or not mutation_patch.endswith("\n"):
@@ -1208,6 +1324,7 @@ def rehydrate_alternate(
                     "approved_manifest_id": approved_inputs.manifest_id,
                     "approved_manifest_digest": approved_inputs.manifest_digest,
                     "verified_input_digests": approved_inputs.workspace_digests,
+                    "immutable_image_id": immutable_image_id,
                 },
             },
         ),
@@ -1240,7 +1357,7 @@ def rehydrate_alternate(
     env_image = EnvImage(
         repo_id="mahmoud-boltons",
         language="python",
-        image_tag=_required_text(environment.get("image"), name="environment.image"),
+        image_tag=immutable_image_id,
         base_image=str(environment.get("base_image", "python:3.12-slim")),
         commit=_required_text(repo_data.get("base_commit"), name="repo.base_commit"),
         workspace_dir=_required_text(environment.get("repo_path"), name="repo_path"),
@@ -1250,7 +1367,12 @@ def rehydrate_alternate(
         baseline_green=True,
         baseline_exit_code=0,
         baseline_summary="rehydrated immutable alternate, public suite reverified",
-        provenance={"alternate_recovery": task_id},
+        provenance={
+            "alternate_recovery": task_id,
+            "approved_manifest_id": approved_inputs.manifest_id,
+            "approved_manifest_digest": approved_inputs.manifest_digest,
+            "immutable_image_id": immutable_image_id,
+        },
     )
     return RehydratedAlternate(
         task_id=task_id,
@@ -1549,6 +1671,7 @@ def _keep_stage_writer(
                 "approved_manifest_id": alternate.manifest_id,
                 "approved_manifest_digest": alternate.manifest_digest,
                 "verified_input_digests": dict(alternate.verified_input_digests),
+                "immutable_image_id": alternate.env_image.image_tag,
                 "suite_fingerprint": oracle_report.final_mutation_evidence.suite_fingerprint
                 if oracle_report.final_mutation_evidence
                 else "",
@@ -1592,9 +1715,18 @@ async def run_final_alternate_recovery(
         budget_progress,
         repository_root=repository_root,
     )
-    verified_budget = _verify_original_budget_bytes(approved_inputs.budget_bytes)
     try:
         output = _require_canonical_recovery_output(out_dir)
+        resolved_image_id = await resolve_approved_image_id(APPROVED_INPUT_MANIFEST)
+        if resolved_image_id != approved_inputs.approved_image_id:
+            raise AlternateRecoveryError(
+                "resolved immutable image does not match verified recovery inputs"
+            )
+    except Exception:
+        approved_inputs.cleanup()
+        raise
+    verified_budget = _verify_original_budget_bytes(approved_inputs.budget_bytes)
+    try:
         authority = RecoveryAttemptAuthority(
             default_authority_root(), ALTERNATE_RECOVERY_TASK_ID
         )
@@ -1656,7 +1788,9 @@ async def run_final_alternate_recovery(
             task_id=ALTERNATE_RECOVERY_TASK_ID,
         )
         write_recovery_certification(output, pending)
-        alternate = rehydrate_alternate(approved_inputs)
+        alternate = rehydrate_alternate(
+            approved_inputs, immutable_image_id=resolved_image_id
+        )
         _write_json(work / "budget-verification.json", verified_budget.__dict__)
         _write_json(
             work / "preflight.json",
@@ -1667,7 +1801,7 @@ async def run_final_alternate_recovery(
                 "k": 6,
                 "band_high": 0.5,
                 "discrimination_threshold": 1.0,
-                **approved_inputs.audit_evidence(),
+                **approved_inputs.audit_evidence(resolved_image_id),
                 "budget": verified_budget.__dict__,
             },
         )
@@ -1778,7 +1912,6 @@ __all__ = [
     "INCREMENTAL_RECOVERY_CAP_USD",
     "ORIGINAL_MISSION_BUDGET_USD",
     "UPDATE_WRAPPER_F2P_COMMAND",
-    "UPDATE_WRAPPER_F2P_CONTENT",
     "UPDATE_WRAPPER_F2P_NODE",
     "UPDATE_WRAPPER_F2P_PATH",
     "ApprovedInputManifest",
@@ -1790,6 +1923,7 @@ __all__ = [
     "VerifiedOriginalBudget",
     "VerifiedRecoveryInputs",
     "rehydrate_alternate",
+    "resolve_approved_image_id",
     "run_final_alternate_recovery",
     "run_normal_oracle_gates",
     "verify_original_budget",
