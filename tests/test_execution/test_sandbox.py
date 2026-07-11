@@ -6,6 +6,7 @@ the sandbox functionality without requiring a running Docker daemon.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,6 +16,8 @@ from swe_forge.execution.sandbox import (
     DockerSandbox,
     SandboxConfig,
     SandboxState,
+    docker_name_prefix,
+    scoped_docker_name,
 )
 from swe_forge.execution.container import (
     ContainerSpec,
@@ -194,6 +197,26 @@ class TestDockerSandboxInit:
         assert sandbox1.container_name != sandbox2.container_name
         assert sandbox1.container_name.startswith("swe-sandbox-")
         assert sandbox2.container_name.startswith("swe-sandbox-")
+
+    def test_run_scoped_container_prefix_is_applied_and_reset(self):
+        client = create_mock_client()
+        with docker_name_prefix("swe-forge-fresh-run123"):
+            sandbox = DockerSandbox(client)
+            already_scoped = scoped_docker_name(
+                "swe-forge-fresh-run123-oracle-establish"
+            )
+
+        unscoped = DockerSandbox(client)
+        assert sandbox.container_name.startswith("swe-forge-fresh-run123-swe-sandbox-")
+        assert already_scoped == "swe-forge-fresh-run123-oracle-establish"
+        assert unscoped.container_name.startswith("swe-sandbox-")
+
+    @pytest.mark.asyncio
+    async def test_run_scoped_prefix_propagates_to_worker_threads(self):
+        with docker_name_prefix("swe-forge-fresh-run123"):
+            name = await asyncio.to_thread(scoped_docker_name, "swe-forge-env-build")
+
+        assert name == "swe-forge-fresh-run123-swe-forge-env-build"
 
 
 class TestDockerSandboxContextManager:

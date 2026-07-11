@@ -90,6 +90,7 @@ from swe_forge.forge.pilot import (
     run_pilot,
 )
 from swe_forge.forge.fresh_campaign import (
+    DockerEvidenceCollector,
     FreshCampaignConfig,
     FreshCampaignError,
     run_fresh_campaign,
@@ -3817,6 +3818,7 @@ def fresh_campaign(
                 config,
                 processor=processor,
                 gold_prover=gold_prover,
+                docker_evidence=DockerEvidenceCollector(config.run_id),
             )
         )
     except (FreshCampaignError, PilotError, MissingCredentialsError) as exc:

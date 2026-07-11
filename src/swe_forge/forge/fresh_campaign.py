@@ -22,6 +22,7 @@ from fcntl import LOCK_EX, LOCK_UN, flock
 from pathlib import Path
 from typing import Protocol
 
+from swe_forge.execution.sandbox import docker_name_prefix
 from swe_forge.forge.calibrate.filter import DEFAULT_BAND_FILTER, BandFilterConfig
 from swe_forge.forge.export import (
     ExportRequest,
@@ -511,12 +512,27 @@ class DockerResource:
     status: str
     started_at: str
 
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "identity": self.identity,
+            "status": self.status,
+            "started_at": self.started_at,
+        }
+
 
 @dataclass(frozen=True)
 class DockerSnapshot:
     protected: tuple[DockerResource, ...] = ()
     mission_owned: tuple[DockerResource, ...] = ()
     dangling_images: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "protected": [resource.to_dict() for resource in self.protected],
+            "mission_owned": [resource.to_dict() for resource in self.mission_owned],
+            "dangling_images": list(self.dangling_images),
+        }
 
 
 def _parse_docker_rows(raw: str) -> tuple[DockerResource, ...]:
@@ -586,7 +602,9 @@ class DockerEvidenceCollector:
             )
         )
         owned = tuple(
-            resource for resource in resources if resource.name.startswith(prefix)
+            resource
+            for resource in resources
+            if resource.name == prefix or resource.name.startswith(f"{prefix}-")
         )
         images = tuple(
             line.strip()
@@ -626,7 +644,7 @@ class DockerEvidenceCollector:
             )
         before_owned = {item.name for item in before.mission_owned}
         after_owned = {item.name for item in after.mission_owned}
-        if after_owned - before_owned:
+        if after_owned:
             raise FreshCampaignError(
                 "fresh campaign left mission-owned Docker resources"
             )
@@ -841,7 +859,13 @@ async def run_fresh_campaign(
         )
     recorder = StageEvidence(config.evidence_path)
     before = docker_evidence.snapshot() if docker_evidence else None
+    if before is not None and before.mission_owned:
+        raise FreshCampaignError(
+            "fresh campaign run prefix already owns Docker resources"
+        )
     result = FreshCampaignResult("running", "", config.run_id)
+    if before is not None:
+        result.docker_evidence["before"] = before.to_dict()
     current = load_published_generation(config.out_dir)
     expected_generation = current.generation_id if current is not None else ""
     result.publication_expected_generation = expected_generation
@@ -851,99 +875,111 @@ async def run_fresh_campaign(
     pending_request: ExportRequest | None = None
     pending_identity = ""
     try:
-        recorder.mark(0)
-        recorder.mark(1)
-        recorder.mark(2)
-        recorder.mark(3)
-        recorder.mark(4)
-        for plan in fresh_boltons_plans(config.plans, authority):
-            if ledger.remaining_cap < config.worst_case_cost_usd:
-                result.status = "cap_exhausted"
-                result.reason = "no next request fits within the remaining $50 cap"
+        if docker_evidence is not None:
+            result.docker_evidence["induced_failure"] = (
+                docker_evidence.induced_failure_teardown(("sh", "-c", "exit 97"))
+            )
+        with docker_name_prefix(f"swe-forge-fresh-{config.run_id}"):
+            recorder.mark(0)
+            recorder.mark(1)
+            recorder.mark(2)
+            recorder.mark(3)
+            recorder.mark(4)
+            for plan in fresh_boltons_plans(config.plans, authority):
+                if ledger.remaining_cap < config.worst_case_cost_usd:
+                    result.status = "cap_exhausted"
+                    result.reason = "no next request fits within the remaining $50 cap"
+                    break
+                claim = authority.claim(
+                    plan,
+                    reason="fresh unprocessed boltons hard-rung candidate",
+                )
+                identity = claim.identity
+                with ledger.call_context(
+                    candidate_identity=identity, stage="fresh-campaign.stage-1-4"
+                ):
+                    artifacts = await processor.process(
+                        plan, config.out_dir / f".{identity}"
+                    )
+                if ledger.unresolved:
+                    raise FreshCampaignError(
+                        "provider billing is unresolved; publication is forbidden"
+                    )
+                request = _keep_export_request(artifacts)
+                disposition: dict[str, object] = {
+                    "identity": identity,
+                    "fresh_reason": claim.reason,
+                    "plan": plan.to_dict(),
+                    "stage": "processed",
+                }
+                if request is None:
+                    disposition["stage"] = "dropped"
+                    disposition["reason"] = (
+                        artifacts.failure_reason or "not oracle keep"
+                    )
+                    result.dispositions.append(disposition)
+                    authority.terminalize(
+                        identity, status="dropped", reason=str(disposition["reason"])
+                    )
+                    continue
+                if not gold_prover(request):
+                    disposition["stage"] = "gold_failed"
+                    disposition["reason"] = "gold proof did not pass"
+                    result.dispositions.append(disposition)
+                    authority.terminalize(
+                        identity,
+                        status="gold_failed",
+                        reason="gold proof did not pass",
+                    )
+                    continue
+                calibration = artifacts.calibration_report
+                if calibration is None:
+                    raise FreshCampaignError(
+                        "candidate has no calibration report before publication"
+                    )
+                band_decision = calibration.details.get("band_filter")
+                band_high = (
+                    band_decision.get("band_high")
+                    if isinstance(band_decision, dict)
+                    else None
+                )
+                if band_high != 0.5:
+                    raise FreshCampaignError("candidate changed band_high from 0.5")
+                if calibration.irt_discrimination < 1.0:
+                    raise FreshCampaignError(
+                        "candidate discrimination is below the unchanged threshold"
+                    )
+                try:
+                    if artifacts.oracle_report is None:
+                        raise FreshCampaignError("candidate has no oracle report")
+                    reconciliation = reconcile_recovery_reports(
+                        ledger.accounting_ledger,
+                        artifacts.oracle_report,
+                        artifacts.calibration_report,
+                        require_complete=False,
+                        candidate_identity=identity,
+                    )
+                except (RecoveryAccountingError, AttributeError) as exc:
+                    raise FreshCampaignError(
+                        "candidate recovery evidence did not reconcile before publication"
+                    ) from exc
+                result.ledger = reconciliation
+                result.status = "kept"
+                result.reason = "first newly certified oracle/calibration/gold keep"
+                pending_request = request
+                pending_identity = identity
+                result.dispositions.append({**disposition, "stage": "kept"})
                 break
-            claim = authority.claim(
-                plan,
-                reason="fresh unprocessed boltons hard-rung candidate",
-            )
-            identity = claim.identity
-            with ledger.call_context(
-                candidate_identity=identity, stage="fresh-campaign.stage-1-4"
-            ):
-                artifacts = await processor.process(
-                    plan, config.out_dir / f".{identity}"
-                )
-            if ledger.unresolved:
-                raise FreshCampaignError(
-                    "provider billing is unresolved; publication is forbidden"
-                )
-            request = _keep_export_request(artifacts)
-            disposition: dict[str, object] = {
-                "identity": identity,
-                "fresh_reason": claim.reason,
-                "plan": plan.to_dict(),
-                "stage": "processed",
-            }
-            if request is None:
-                disposition["stage"] = "dropped"
-                disposition["reason"] = artifacts.failure_reason or "not oracle keep"
-                result.dispositions.append(disposition)
-                authority.terminalize(
-                    identity, status="dropped", reason=str(disposition["reason"])
-                )
-                continue
-            if not gold_prover(request):
-                disposition["stage"] = "gold_failed"
-                disposition["reason"] = "gold proof did not pass"
-                result.dispositions.append(disposition)
-                authority.terminalize(
-                    identity, status="gold_failed", reason="gold proof did not pass"
-                )
-                continue
-            calibration = artifacts.calibration_report
-            if calibration is None:
-                raise FreshCampaignError(
-                    "candidate has no calibration report before publication"
-                )
-            band_decision = calibration.details.get("band_filter")
-            band_high = (
-                band_decision.get("band_high")
-                if isinstance(band_decision, dict)
-                else None
-            )
-            if band_high != 0.5:
-                raise FreshCampaignError("candidate changed band_high from 0.5")
-            if calibration.irt_discrimination < 1.0:
-                raise FreshCampaignError(
-                    "candidate discrimination is below the unchanged threshold"
-                )
-            try:
-                if artifacts.oracle_report is None:
-                    raise FreshCampaignError("candidate has no oracle report")
-                reconciliation = reconcile_recovery_reports(
-                    ledger.accounting_ledger,
-                    artifacts.oracle_report,
-                    artifacts.calibration_report,
-                    require_complete=False,
-                    candidate_identity=identity,
-                )
-            except (RecoveryAccountingError, AttributeError) as exc:
-                raise FreshCampaignError(
-                    "candidate recovery evidence did not reconcile before publication"
-                ) from exc
-            result.ledger = reconciliation
-            result.status = "kept"
-            result.reason = "first newly certified oracle/calibration/gold keep"
-            pending_request = request
-            pending_identity = identity
-            result.dispositions.append({**disposition, "stage": "kept"})
-            break
-        else:
-            result.status = "cap_exhausted"
-            result.reason = "candidate supply exhausted before a certified keep"
+            else:
+                result.status = "cap_exhausted"
+                result.reason = "candidate supply exhausted before a certified keep"
         result.ledger = ledger.reconcile()
         if docker_evidence and before is not None:
             after = docker_evidence.snapshot()
-            result.docker_evidence = DockerEvidenceCollector.compare(before, after)
+            result.docker_evidence["after"] = after.to_dict()
+            result.docker_evidence["comparison"] = DockerEvidenceCollector.compare(
+                before, after
+            )
         recorder.mark(5)
         result.exit_status = 0
         result.stage_markers = tuple(recorder.markers)
@@ -978,7 +1014,10 @@ async def run_fresh_campaign(
         recorder.complete(1)
         if docker_evidence and before is not None:
             after = docker_evidence.snapshot()
-            result.docker_evidence = DockerEvidenceCollector.compare(before, after)
+            result.docker_evidence["after"] = after.to_dict()
+            result.docker_evidence["comparison"] = DockerEvidenceCollector.compare(
+                before, after
+            )
         raise
 
 

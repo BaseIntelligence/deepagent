@@ -38,6 +38,7 @@ from swe_forge.forge.adapters import (
     NoAdapterFoundError,
     build_default_registry,
 )
+from swe_forge.execution.sandbox import scoped_docker_name
 from swe_forge.forge.models import EnvImage, RepoSpec
 
 # Failure kinds (recorded on a rejected build so install/build vs test failures
@@ -479,7 +480,9 @@ class EnvBuilder:
         return _Checkout(ok=True, head=head)
 
     def _unique_name(self, role: str) -> str:
-        return f"{self._namespace}-{role}-{self._run_id}-{uuid.uuid4().hex[:8]}"
+        return scoped_docker_name(
+            f"{self._namespace}-{role}-{self._run_id}-{uuid.uuid4().hex[:8]}"
+        )
 
     def _image_tag(self, repo_id: str, commit: str) -> str:
         name = re.sub(r"[^a-z0-9._-]+", "_", repo_id.strip().lower()).strip("._-")

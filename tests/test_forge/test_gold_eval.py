@@ -264,6 +264,19 @@ def test_runs_use_distinct_container_names(tmp_path: Path) -> None:
     assert all(n.startswith("swe-forge-goldeval-") for n in names)
 
 
+def test_campaign_prefix_scopes_gold_container_names(tmp_path: Path) -> None:
+    from swe_forge.execution.sandbox import docker_name_prefix
+
+    d = _make_task_dir(tmp_path, "acme__ast__campaignproof01")
+    with docker_name_prefix("swe-forge-fresh-run123"):
+        result = evaluate_task_gold(d, runs=2, runner=_const_runner(_GOLD_OUT))
+
+    assert all(
+        run.container_name.startswith("swe-forge-fresh-run123-swe-forge-goldeval-")
+        for run in result.runs
+    )
+
+
 # --------------------------------------------------------------------------- #
 # VAL-EXPORT-010: gold == 100% across the entire shipped set
 # --------------------------------------------------------------------------- #

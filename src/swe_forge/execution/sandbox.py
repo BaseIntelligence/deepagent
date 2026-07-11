@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging import getLogger
@@ -29,6 +32,31 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 logger = getLogger(__name__)
+
+_DOCKER_NAME_PREFIX: ContextVar[str] = ContextVar(
+    "swe_forge_docker_name_prefix", default=""
+)
+
+
+def scoped_docker_name(name: str) -> str:
+    """Prefix a temporary Docker resource with the active run owner."""
+    prefix = _DOCKER_NAME_PREFIX.get()
+    if not prefix or name == prefix or name.startswith(f"{prefix}-"):
+        return name
+    return f"{prefix}-{name}"
+
+
+@contextmanager
+def docker_name_prefix(prefix: str) -> Iterator[None]:
+    """Scope temporary Docker names to one evidence-owning campaign run."""
+    normalized = prefix.strip().rstrip("-")
+    if not normalized:
+        raise ValueError("Docker name prefix must not be empty")
+    token = _DOCKER_NAME_PREFIX.set(normalized)
+    try:
+        yield
+    finally:
+        _DOCKER_NAME_PREFIX.reset(token)
 
 
 @dataclass
@@ -114,7 +142,9 @@ class DockerSandbox:
 
         # Generate unique container name to avoid collisions
         unique_suffix = uuid.uuid4().hex[:8]
-        self._container_name = f"{self._config.name}-{unique_suffix}"
+        self._container_name = (
+            f"{scoped_docker_name(self._config.name)}-{unique_suffix}"
+        )
 
         self._state = SandboxState()
         self._manager: ContainerManager | None = None
@@ -144,7 +174,7 @@ class DockerSandbox:
             pids_limit=spec.pids_limit,
         )
         sandbox = cls(client, config)
-        sandbox._container_name = spec.name
+        sandbox._container_name = scoped_docker_name(spec.name)
         return sandbox
 
     async def __aenter__(self) -> "DockerSandbox":

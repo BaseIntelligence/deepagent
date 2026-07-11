@@ -37,6 +37,7 @@ from typing import Callable, NamedTuple
 
 import yaml  # type: ignore[import-untyped]
 
+from swe_forge.execution.sandbox import scoped_docker_name
 from swe_forge.forge.export import FORGE_DIR, REPO_DIR
 
 #: Independent fresh-container runs per task. >=2 proves determinism (no flip).
@@ -156,7 +157,7 @@ def resolve_eval_image(task_dir: Path | str) -> str:
 
 def _container_name(prefix: str, task_id: str) -> str:
     slug = _NAME_SANITIZE_RE.sub("-", task_id)[:32].strip("-_.") or "task"
-    return f"{prefix}-{slug}-{uuid.uuid4().hex[:8]}"
+    return scoped_docker_name(f"{prefix}-{slug}-{uuid.uuid4().hex[:8]}")
 
 
 # --------------------------------------------------------------------------- #

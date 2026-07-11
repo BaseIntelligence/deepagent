@@ -197,6 +197,96 @@ def test_docker_snapshot_protects_resources_and_detects_teardown() -> None:
         DockerEvidenceCollector.compare(before, changed)
 
 
+def test_docker_snapshot_classifies_only_exact_run_prefix() -> None:
+    rows = "\n".join(
+        json.dumps(
+            {
+                "Names": name,
+                "ID": identity,
+                "Status": "Up 1 minute",
+                "CreatedAt": "2026-07-11 00:00:00 +0000 UTC",
+            }
+        )
+        for name, identity in (
+            ("mission-test-pg", "protected"),
+            ("swe-forge-fresh-run123-oracle-establish", "owned-1"),
+            ("swe-forge-fresh-run123-failure", "owned-2"),
+            ("swe-forge-fresh-run1234-unrelated", "other"),
+            ("swe-forge-oracle-establish", "generic"),
+        )
+    )
+
+    def command_runner(command: object) -> str:
+        return rows if "ps" in command else ""
+
+    snapshot = DockerEvidenceCollector(
+        "run123", command_runner=command_runner
+    ).snapshot()
+    assert [item.name for item in snapshot.protected] == ["mission-test-pg"]
+    assert [item.name for item in snapshot.mission_owned] == [
+        "swe-forge-fresh-run123-failure",
+        "swe-forge-fresh-run123-oracle-establish",
+    ]
+
+
+def test_compare_rejects_any_owned_resource_remaining() -> None:
+    owned = DockerResource("swe-forge-fresh-run123-oracle", "id", "running", "start")
+    before = DockerSnapshot(mission_owned=(owned,))
+    with pytest.raises(FreshCampaignError, match="mission-owned"):
+        DockerEvidenceCollector.compare(before, before)
+
+
+def test_campaign_collects_docker_evidence_before_processing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+
+    class Evidence:
+        def snapshot(self) -> DockerSnapshot:
+            events.append("snapshot")
+            return DockerSnapshot()
+
+        def induced_failure_teardown(self, command: object) -> dict[str, object]:
+            events.append("induced")
+            assert command == ("sh", "-c", "exit 97")
+            return {"exit_code": 97, "container_name": "failure", "teardown": True}
+
+    class Processor:
+        async def process(
+            self, _plan: CandidatePlan, _workdir: Path
+        ) -> SimpleNamespace:
+            events.append("process")
+            assert events[:2] == ["snapshot", "induced"]
+            return SimpleNamespace(
+                failure_reason="oracle reject",
+                oracle_report=None,
+                calibration_report=None,
+            )
+
+    monkeypatch.setattr(campaign, "_keep_export_request", lambda _art: None)
+    config = FreshCampaignConfig(
+        plans=[_plan()],
+        out_dir=tmp_path / "output",
+        ledger_path=tmp_path / "fresh.jsonl",
+        authority_path=tmp_path / "claims.jsonl",
+        evidence_path=tmp_path / "evidence.log",
+        worst_case_cost_usd=Decimal("50"),
+    )
+    result = asyncio.run(
+        run_fresh_campaign(
+            config,
+            processor=Processor(),  # type: ignore[arg-type]
+            gold_prover=lambda _request: True,
+            publisher=lambda _request, *, result: "generation-1",
+            docker_evidence=Evidence(),  # type: ignore[arg-type]
+        )
+    )
+    assert events == ["snapshot", "induced", "process", "snapshot"]
+    assert result.docker_evidence["induced_failure"]["exit_code"] == 97
+    assert result.docker_evidence["before"]["protected"] == []
+    assert result.docker_evidence["after"]["mission_owned"] == []
+
+
 def test_fresh_campaign_stops_after_first_keep_and_marks_all_stages(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

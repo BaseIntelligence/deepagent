@@ -418,6 +418,23 @@ class TestBuilderHappyPath:
         # The build container is torn down by id even on success.
         assert fake.removed_containers == [f"cid-{build_name}"]
 
+    def test_campaign_prefix_scopes_temporary_container_names(
+        self, py_repo: Path
+    ) -> None:
+        from swe_forge.execution.sandbox import docker_name_prefix
+
+        fake = FakeDocker(exec_results=[_OK, _OK, _OK])
+        with docker_name_prefix("swe-forge-fresh-run123"):
+            result = _build(fake, py_repo)
+
+        assert fake.run_names[0].startswith(
+            "swe-forge-fresh-run123-swe-forge-env-build-testrun-"
+        )
+        assert fake.ephemeral_names[0].startswith(
+            "swe-forge-fresh-run123-swe-forge-env-baseline-testrun-"
+        )
+        assert result.image_tag == "swe-forge-env-demo_py:0123456789ab"
+
     def test_rebuild_removes_superseded_image_no_dangling(self, py_repo: Path) -> None:
         fake = FakeDocker(
             exec_results=[_OK, _OK, _OK],
