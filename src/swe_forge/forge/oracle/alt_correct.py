@@ -63,6 +63,7 @@ from swe_forge.forge.oracle.teacher_evidence import (
     append_execution,
     evidence_calls,
     gate_evidence,
+    protected_transport_receipts,
     teacher_gate_failure_reason,
     teacher_gate_evidence_issues,
 )
@@ -712,6 +713,9 @@ def build_alt_correct_report(
         protected_alt_correct_audit=(
             dict(outcome.protected_audit) if outcome.protected_audit else None
         ),
+        protected_teacher_transport_receipts=list(
+            prior_report.protected_teacher_transport_receipts
+        ),
     )
 
 
@@ -974,9 +978,12 @@ async def run_alt_correct_gate(
         executable=outcome.alternatives_total,
     )
     evidence = gate_evidence(teacher_calls)
+    private_receipts = protected_transport_receipts(teacher_calls)
     evidence_issues = teacher_gate_evidence_issues(
         {"teacher_gates": {"alt_correct": evidence}},
         gates=("alt_correct",),
+        candidate=candidate,
+        protected_receipts=private_receipts,
     )
     if not authoritative_teacher_generator or evidence_issues:
         outcome.verdict = "reject"
@@ -990,7 +997,7 @@ async def run_alt_correct_gate(
                 evidence_issues
             )
         outcome.reasons = [reason]
-    return build_alt_correct_report(
+    report = build_alt_correct_report(
         candidate,
         prior_report,
         outcome,
@@ -998,3 +1005,8 @@ async def run_alt_correct_gate(
         base_tests=base_tests,
         extra_details={"teacher_gates": {"alt_correct": evidence}},
     )
+    report.protected_teacher_transport_receipts = [
+        *prior_report.protected_teacher_transport_receipts,
+        *private_receipts,
+    ]
+    return report

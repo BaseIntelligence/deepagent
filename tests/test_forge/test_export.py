@@ -65,6 +65,12 @@ from swe_forge.forge.publication import (
     PublicationError,
     load_published_generation,
     protected_alt_correct_audit_path,
+    protected_teacher_receipts_path,
+)
+from swe_forge.forge.teacher import (
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
 )
 
 _TS = "2026-01-01T00:00:00+00:00"
@@ -201,6 +207,45 @@ def _alt_correct_audit() -> dict[str, object]:
     }
 
 
+def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> None:
+    """Make exported pass fixtures use private concrete-transport authority."""
+    gates = report.details.get("teacher_gates")
+    if not isinstance(gates, dict):
+        return
+    receipts: list[dict[str, object]] = []
+    for gate, payload in gates.items():
+        if not isinstance(gate, str) or not isinstance(payload, dict):
+            continue
+        calls = payload.get("calls")
+        if not isinstance(calls, list):
+            continue
+        for index, call in enumerate(calls):
+            if not isinstance(call, dict) or call.get("real_teacher") is not True:
+                continue
+            call.setdefault("recovery_accounting", None)
+            usage = call.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            receipt = TransportReceipt(
+                call_id=f"{len(receipts) + 1:032x}",
+                candidate_fingerprint=candidate_transport_fingerprint(candidate),
+                gate=gate,
+                call_kind=str(call["call_kind"]),
+                model=str(call["model"]),
+                usage=Usage(
+                    prompt_tokens=int(usage["prompt_tokens"]),
+                    completion_tokens=int(usage["completion_tokens"]),
+                    total_tokens=int(usage["total_tokens"]),
+                ),
+                cost=float(call["cost"]),
+                receipt_secret=f"{index + 1:064x}",
+            )
+            call["call_id"] = receipt.call_id
+            call["receipt_commitment"] = receipt.commitment
+            receipts.append(receipt.to_private_dict())
+    report.protected_teacher_transport_receipts = receipts
+
+
 def _oracle_pass(*, extra_survivor: bool = False) -> OracleReport:
     test_files = [
         OracleTestFile(
@@ -295,6 +340,10 @@ def _request(**overrides: object) -> ExportRequest:
         "repo_url": "https://github.com/acme/demo.git",
     }
     fields.update(overrides)
+    _attach_transport_receipts(
+        fields["oracle_report"],  # type: ignore[arg-type]
+        fields["candidate"],  # type: ignore[arg-type]
+    )
     return ExportRequest(**fields)  # type: ignore[arg-type]
 
 
@@ -391,6 +440,8 @@ def test_assemble_refuses_multifault_without_constituent_metadata_or_proof() -> 
 
 def test_assemble_accepts_nondefault_final_mutation_threshold() -> None:
     report = _oracle_pass()
+    candidate = _candidate()
+    _attach_transport_receipts(report, candidate)
     evidence = report.final_mutation_evidence
     assert evidence is not None
     report.final_mutation_evidence = FinalMutationEvidence(
@@ -402,7 +453,7 @@ def test_assemble_accepts_nondefault_final_mutation_threshold() -> None:
     )
 
     task = assemble_forge_task(
-        candidate=_candidate(),
+        candidate=candidate,
         spec=_spec(),
         oracle_report=report,
         calibration_report=_calibration(keep=True),
@@ -1179,6 +1230,55 @@ def test_published_generation_privileged_loader_rehydrates_alt_correct_audit(
     ]
     assert raw_proposal not in manifest
     assert "protected_alt_correct_audit" not in manifest
+
+
+def test_transport_receipts_are_private_mode_0600_and_absent_from_public_export(
+    tmp_path: Path,
+) -> None:
+    result = export_batch([_request()], tmp_path)
+    generation = load_published_generation(tmp_path)
+    assert generation is not None
+
+    receipt_path = protected_teacher_receipts_path(
+        generation.root, result.shipped[0].task_id
+    )
+    assert receipt_path.is_file()
+    assert receipt_path.stat().st_mode & 0o777 == 0o600
+    secret = json.loads(receipt_path.read_text(encoding="utf-8"))[0]["receipt_secret"]
+    public_files = [
+        path
+        for path in generation.root.rglob("*")
+        if path.is_file() and ".protected-audit" not in path.parts
+    ]
+    assert public_files
+    assert all(
+        secret not in path.read_text(encoding="utf-8", errors="ignore")
+        for path in public_files
+    )
+
+
+@pytest.mark.parametrize("corruption", ["missing", "altered", "replayed"])
+def test_publication_rejects_missing_altered_or_replayed_transport_receipts(
+    tmp_path: Path, corruption: str
+) -> None:
+    result = export_batch([_request()], tmp_path)
+    generation = load_published_generation(tmp_path)
+    assert generation is not None
+    receipt_path = protected_teacher_receipts_path(
+        generation.root, result.shipped[0].task_id
+    )
+    if corruption == "missing":
+        receipt_path.unlink()
+    else:
+        receipts = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if corruption == "altered":
+            receipts[0]["model"] = "anthropic/other"
+        else:
+            receipts.append(dict(receipts[0]))
+        receipt_path.write_text(json.dumps(receipts), encoding="utf-8")
+
+    with pytest.raises(PublicationError, match="protected teacher receipts"):
+        load_published_generation(tmp_path)
 
 
 @pytest.mark.parametrize(

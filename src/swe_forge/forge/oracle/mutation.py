@@ -550,6 +550,9 @@ def build_mutation_report(
         mutants_killed=outcome.mutants_killed,
         provenance=provenance,
         details=details,
+        protected_teacher_transport_receipts=list(
+            prior_report.protected_teacher_transport_receipts
+        ),
     )
 
 
@@ -681,6 +684,9 @@ def build_final_mutation_report(
         provenance=provenance,
         details=details,
         protected_alt_correct_audit=prior_report.protected_alt_correct_audit,
+        protected_teacher_transport_receipts=list(
+            prior_report.protected_teacher_transport_receipts
+        ),
     )
 
 

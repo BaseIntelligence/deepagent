@@ -822,6 +822,11 @@ class OracleReport:
     protected_alt_correct_audit: dict[str, object] | None = field(
         default=None, repr=False
     )
+    # Concrete-transport receipts authorize teacher gate evidence. Like raw
+    # alternatives, receipt secrets never enter public serialization.
+    protected_teacher_transport_receipts: list[dict[str, object]] = field(
+        default_factory=list, repr=False
+    )
 
     def __post_init__(self) -> None:
         if self.language not in SUPPORTED_LANGUAGES:
@@ -894,6 +899,9 @@ class OracleReport:
             if self.protected_alt_correct_audit is not None
             else None
         )
+        data["protected_teacher_transport_receipts"] = [
+            dict(receipt) for receipt in self.protected_teacher_transport_receipts
+        ]
         return data
 
     @classmethod
@@ -962,6 +970,16 @@ class OracleReport:
         report.protected_alt_correct_audit = (
             dict(audit) if isinstance(audit, dict) else None
         )
+        receipts = data.get("protected_teacher_transport_receipts", [])
+        if not isinstance(receipts, list) or not all(
+            isinstance(receipt, dict) for receipt in receipts
+        ):
+            raise ModelError(
+                "protected_teacher_transport_receipts must be a list of objects"
+            )
+        report.protected_teacher_transport_receipts = [
+            dict(receipt) for receipt in receipts
+        ]
         return report
 
 

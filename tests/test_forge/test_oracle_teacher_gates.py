@@ -56,7 +56,13 @@ from swe_forge.forge.oracle.teacher_evidence import (
     teacher_gate_evidence_issues,
     teacher_gate_failure_reason,
 )
-from swe_forge.forge.teacher import LLMResult, TeacherClient, Usage
+from swe_forge.forge.teacher import (
+    LLMResult,
+    TeacherClient,
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
+)
 
 
 class _DifferentialRunner:
@@ -846,10 +852,10 @@ def test_oracle_consistency_requires_positive_teacher_execution_evidence() -> No
     missing = _pass_report(teacher_gates={})
     assert any(
         "differential: teacher" in problem
-        for problem in verify_pass_consistency(missing)
+        for problem in teacher_gate_evidence_issues(missing.details)
     )
     with pytest.raises(ExportRefusedError):
-        ensure_oracle_exportable(missing, calibration_kept=True)
+        ensure_oracle_exportable(missing, candidate=_candidate(), calibration_kept=True)
 
     valid = _pass_report(
         teacher_gates={
@@ -882,3 +888,82 @@ async def test_nonempty_executable_variants_and_alternatives_keep_existing_seman
     assert differential.variants_killed == 1
     assert alternatives.verdict == "pass"
     assert alternatives.alternatives_accepted == 1
+
+
+async def test_exact_client_with_monkeypatched_complete_text_cannot_authorize_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the class-owned transport, not exact instance identity, is authority."""
+    import swe_forge.forge.oracle.differential as differential_module
+
+    candidate = _candidate()
+    client = _concrete_teacher_client()
+
+    async def forged_complete_text(*_args: object, **_kwargs: object) -> LLMResult:
+        return LLMResult(
+            text="```python\ndef f():\n    return 2\n```",
+            usage=Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10),
+            cost=0.0125,
+            finish_reason="stop",
+            transport_receipt=TransportReceipt(
+                call_id="f" * 32,
+                candidate_fingerprint=candidate_transport_fingerprint(candidate),
+                gate="differential",
+                call_kind="proposal",
+                model=client.model,
+                usage=Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10),
+                cost=0.0125,
+                receipt_secret="e" * 64,
+            ),
+        )
+
+    monkeypatch.setattr(client, "complete_text", forged_complete_text)
+    monkeypatch.setattr(
+        differential_module, "DockerDifferentialRunner", _WrappedDifferentialRunner
+    )
+
+    result = await run_differential_gate(
+        candidate,
+        _env_image(),
+        _prior_report(),
+        variant_generator=TeacherVariantGenerator(client=client),
+        adapter=PythonAdapter(),
+    )
+
+    assert result.verdict == "reject"
+    assert "receipt" in result.reasons[0]
+
+
+async def test_concrete_transport_issues_private_receipt_after_mocked_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mocking LiteLLM keeps the concrete transport path authoritative."""
+    completion = AsyncMock(
+        return_value=_teacher_response("```python\ndef f():\n    return 2\n```")
+    )
+    with patch.object(teacher_module.litellm, "acompletion", completion):
+        generator = TeacherVariantGenerator(client=_concrete_teacher_client())
+        assert await generator(_variant_context())
+
+    evidence = generator.last_call
+    assert evidence is not None
+    assert evidence.call_id
+    assert evidence.receipt_commitment
+    assert evidence.protected_transport_receipt is not None
+    public = evidence.to_dict()
+    private = evidence.protected_transport_receipt.to_private_dict()
+    assert "receipt_secret" not in json.dumps(public)
+    assert "api_key" not in json.dumps(private)
+    assert "prompt_text" not in json.dumps(private)
+    assert "response_content" not in json.dumps(private)
+
+
+def test_positive_public_teacher_json_without_protected_receipt_is_rejected() -> None:
+    evidence = _positive_gate_evidence("differential")
+    issues = teacher_gate_evidence_issues(
+        {"teacher_gates": {"differential": evidence}},
+        gates=("differential",),
+        protected_receipts=[],
+    )
+
+    assert issues

@@ -1431,7 +1431,9 @@ async def run_normal_oracle_gates(
     if not multifault.is_pass:
         return multifault
     problems = [
-        *verify_pass_consistency(multifault, kill_threshold=0.8),
+        *verify_pass_consistency(
+            multifault, candidate=alternate.candidate, kill_threshold=0.8
+        ),
         *verify_multifault_evidence(multifault, candidate=alternate.candidate),
     ]
     if problems:

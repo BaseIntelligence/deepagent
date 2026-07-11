@@ -137,6 +137,9 @@ def strengthen_recovery_duplicate_value_invariant(
         provenance=report.provenance,
         details=details,
         protected_alt_correct_audit=report.protected_alt_correct_audit,
+        protected_teacher_transport_receipts=list(
+            report.protected_teacher_transport_receipts
+        ),
     )
 
 
@@ -823,6 +826,9 @@ def build_multifault_report(
         provenance=prior_report.provenance,
         details=details,
         protected_alt_correct_audit=prior_report.protected_alt_correct_audit,
+        protected_teacher_transport_receipts=list(
+            prior_report.protected_teacher_transport_receipts
+        ),
     )
 
 

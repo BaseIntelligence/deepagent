@@ -56,7 +56,11 @@ from swe_forge.forge.models import (
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.calibrate.runner import CalibrationRunnerError
 from swe_forge.forge.panel import ModelValidation, PanelModel
-from swe_forge.forge.teacher import Usage
+from swe_forge.forge.teacher import (
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
+)
 
 P2P = "python -m pytest"
 F2P = "python -m pytest tests/test_subtract.py"
@@ -201,6 +205,32 @@ def _oracle_report(
     )
 
 
+def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> None:
+    gates = report.details["teacher_gates"]
+    assert isinstance(gates, dict)
+    receipts: list[dict[str, object]] = []
+    for index, (gate, payload) in enumerate(gates.items(), start=1):
+        assert isinstance(gate, str) and isinstance(payload, dict)
+        calls = payload["calls"]
+        assert isinstance(calls, list) and isinstance(calls[0], dict)
+        call = calls[0]
+        call["recovery_accounting"] = None
+        receipt = TransportReceipt(
+            call_id=f"{index:032x}",
+            candidate_fingerprint=candidate_transport_fingerprint(candidate),
+            gate=gate,
+            call_kind=str(call["call_kind"]),
+            model=str(call["model"]),
+            usage=Usage(**call["usage"]),  # type: ignore[arg-type]
+            cost=float(call["cost"]),
+            receipt_secret=f"{index:064x}",
+        )
+        call["call_id"] = receipt.call_id
+        call["receipt_commitment"] = receipt.commitment
+        receipts.append(receipt.to_private_dict())
+    report.protected_teacher_transport_receipts = receipts
+
+
 def _panel() -> list[PanelModel]:
     return [
         PanelModel(
@@ -294,11 +324,14 @@ async def _run(
     k: int | None = 4,
     config: BandFilterConfig | None = None,
 ) -> CalibrationOutcome:
+    candidate = _candidate(language, difficulty_hint)
+    oracle = _oracle_report(language)
+    _attach_transport_receipts(oracle, candidate)
     return await run_calibration(
-        _candidate(language, difficulty_hint),
+        candidate,
         _env_image(language),
         _spec(language),
-        _oracle_report(language),
+        oracle,
         _panel(),
         k=k,
         config=config or BandFilterConfig(),

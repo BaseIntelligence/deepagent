@@ -356,6 +356,9 @@ def build_flakiness_report(
         flakiness_runs=outcome.flakiness_runs,
         provenance=provenance,
         details=details,
+        protected_teacher_transport_receipts=list(
+            establish_report.protected_teacher_transport_receipts
+        ),
     )
 
 

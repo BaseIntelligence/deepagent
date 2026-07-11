@@ -261,7 +261,10 @@ def _alt_correct_public_validity_issues(report: OracleReport) -> list[str]:
 
 
 def verify_pass_consistency(
-    report: OracleReport, *, kill_threshold: float = DEFAULT_KILL_THRESHOLD
+    report: OracleReport,
+    *,
+    candidate: Candidate | None = None,
+    kill_threshold: float = DEFAULT_KILL_THRESHOLD,
 ) -> list[str]:
     """Return the ways a ``pass`` report's gate fields are mutually inconsistent.
 
@@ -331,7 +334,17 @@ def verify_pass_consistency(
     if not report.alt_correct_accepted:
         problems.append("alt_correct: alt_correct_accepted is false")
     problems.extend(_alt_correct_public_validity_issues(report))
+    # Preserve public-evidence hygiene checks for legacy readers, then enforce
+    # receipt authority whenever the boundary has the candidate binding.
     problems.extend(teacher_gate_evidence_issues(report.details))
+    if candidate is not None:
+        problems.extend(
+            teacher_gate_evidence_issues(
+                report.details,
+                candidate=candidate,
+                protected_receipts=report.protected_teacher_transport_receipts,
+            )
+        )
     if not (
         report.leak_audit.startswith("clean")
         or report.leak_audit.startswith("sanitized")
@@ -353,6 +366,7 @@ def _reject_for_inconsistency(
 async def orchestrate_gates(
     gates: Sequence[tuple[str, GateStep]],
     *,
+    candidate: Candidate | None = None,
     kill_threshold: float = DEFAULT_KILL_THRESHOLD,
 ) -> OracleReport:
     """Run ``gates`` in order, stopping at the first that does not pass.
@@ -382,7 +396,9 @@ async def orchestrate_gates(
         raise OraclePipelineError("no gate produced a report")
 
     if failed_gate is None:
-        problems = verify_pass_consistency(report, kill_threshold=kill_threshold)
+        problems = verify_pass_consistency(
+            report, candidate=candidate, kill_threshold=kill_threshold
+        )
         if problems:
             report = _reject_for_inconsistency(report, problems)
             failed_gate = "consistency"
@@ -608,7 +624,9 @@ async def run_oracle_pipeline(
             mutation_timeout=mutation_timeout,
         )
 
-    return await orchestrate_gates(gates, kill_threshold=kill_threshold)
+    return await orchestrate_gates(
+        gates, candidate=candidate, kill_threshold=kill_threshold
+    )
 
 
 def is_oracle_exportable(
@@ -627,7 +645,9 @@ def is_oracle_exportable(
     )
     return (
         report.verdict == "pass"
-        and not verify_pass_consistency(report, kill_threshold=threshold)
+        and not verify_pass_consistency(
+            report, candidate=candidate, kill_threshold=threshold
+        )
         and not verify_multifault_evidence(report, candidate=candidate)
     )
 
@@ -660,7 +680,7 @@ def ensure_oracle_exportable(
             else DEFAULT_KILL_THRESHOLD
         )
     consistency_problems = verify_pass_consistency(
-        report, kill_threshold=final_threshold
+        report, candidate=candidate, kill_threshold=final_threshold
     )
     consistency_problems.extend(verify_multifault_evidence(report, candidate=candidate))
     if consistency_problems:

@@ -538,6 +538,9 @@ def build_leak_report(
         provenance=provenance,
         details=details,
         protected_alt_correct_audit=prior_report.protected_alt_correct_audit,
+        protected_teacher_transport_receipts=list(
+            prior_report.protected_teacher_transport_receipts
+        ),
     )
 
 

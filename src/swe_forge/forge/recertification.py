@@ -254,7 +254,9 @@ def validate_certified_recovery_task(task: ForgeTask) -> None:
     """Require the genuine recovery task and every current export invariant."""
     validate_certified_recovery_source(task)
     threshold = _final_evidence(task.oracle_report).threshold
-    problems = verify_pass_consistency(task.oracle_report, kill_threshold=threshold)
+    problems = verify_pass_consistency(
+        task.oracle_report, candidate=task.candidate, kill_threshold=threshold
+    )
     if problems:
         raise RecertificationError(
             "certified recovery oracle evidence is inconsistent: "
@@ -449,7 +451,9 @@ async def recertify_final_oracle(
     )
     if recertified.is_pass:
         problems = [
-            *verify_pass_consistency(recertified, kill_threshold=threshold),
+            *verify_pass_consistency(
+                recertified, candidate=task.candidate, kill_threshold=threshold
+            ),
             *verify_multifault_evidence(recertified, candidate=task.candidate),
         ]
         if problems:

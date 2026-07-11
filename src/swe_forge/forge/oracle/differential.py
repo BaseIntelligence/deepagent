@@ -60,6 +60,7 @@ from swe_forge.forge.oracle.teacher_evidence import (
     append_execution,
     evidence_calls,
     gate_evidence,
+    protected_transport_receipts,
     teacher_gate_failure_reason,
     teacher_gate_evidence_issues,
 )
@@ -582,6 +583,9 @@ def build_differential_report(
         differential_pass=outcome.differential_pass,
         provenance=provenance,
         details=details,
+        protected_teacher_transport_receipts=list(
+            prior_report.protected_teacher_transport_receipts
+        ),
     )
 
 
@@ -856,9 +860,12 @@ async def run_differential_gate(
         executable=outcome.variants_total,
     )
     evidence = gate_evidence(teacher_calls)
+    private_receipts = protected_transport_receipts(teacher_calls)
     evidence_issues = teacher_gate_evidence_issues(
         {"teacher_gates": {"differential": evidence}},
         gates=("differential",),
+        candidate=candidate,
+        protected_receipts=private_receipts,
     )
     if not authoritative_teacher_generator or evidence_issues:
         outcome.verdict = "reject"
@@ -872,10 +879,15 @@ async def run_differential_gate(
                 evidence_issues
             )
         outcome.reasons = [reason]
-    return build_differential_report(
+    report = build_differential_report(
         candidate,
         prior_report,
         outcome,
         env_image=env_image,
         extra_details={"teacher_gates": {"differential": evidence}},
     )
+    report.protected_teacher_transport_receipts = [
+        *prior_report.protected_teacher_transport_receipts,
+        *private_receipts,
+    ]
+    return report

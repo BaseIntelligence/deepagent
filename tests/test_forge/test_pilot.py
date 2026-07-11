@@ -78,7 +78,11 @@ from swe_forge.forge.pilot import (
     default_pilot_config,
     run_pilot,
 )
-from swe_forge.forge.teacher import Usage
+from swe_forge.forge.teacher import (
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
+)
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -270,7 +274,7 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
             ),
         )
     ]
-    return OracleReport(
+    report = OracleReport(
         language=plan.language,
         generator=plan.generator,
         verdict="pass",
@@ -303,6 +307,31 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
         protected_alt_correct_audit=_alt_correct_audit(),
         provenance=_provenance(plan),
     )
+    candidate = _candidate(plan)
+    gates = report.details["teacher_gates"]
+    assert isinstance(gates, dict)
+    receipts: list[dict[str, object]] = []
+    for index, (gate, payload) in enumerate(gates.items(), start=1):
+        assert isinstance(gate, str) and isinstance(payload, dict)
+        calls = payload["calls"]
+        assert isinstance(calls, list) and isinstance(calls[0], dict)
+        call = calls[0]
+        call["recovery_accounting"] = None
+        receipt = TransportReceipt(
+            call_id=f"{index:032x}",
+            candidate_fingerprint=candidate_transport_fingerprint(candidate),
+            gate=gate,
+            call_kind=str(call["call_kind"]),
+            model=str(call["model"]),
+            usage=Usage(**call["usage"]),  # type: ignore[arg-type]
+            cost=float(call["cost"]),
+            receipt_secret=f"{index:064x}",
+        )
+        call["call_id"] = receipt.call_id
+        call["receipt_commitment"] = receipt.commitment
+        receipts.append(receipt.to_private_dict())
+    report.protected_teacher_transport_receipts = receipts
+    return report
 
 
 def _oracle_reject(plan: CandidatePlan) -> OracleReport:

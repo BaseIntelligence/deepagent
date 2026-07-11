@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -73,6 +74,7 @@ from swe_forge.forge.oracle.multifault import (
     MultiFaultError,
 )
 from swe_forge.forge.oracle.teacher_evidence import teacher_gate_evidence_issues
+from swe_forge.forge.publication import protected_teacher_receipts_path
 
 #: Default frontier threshold for HEADLINE B. The keep band includes
 #: ``band_high`` itself, so the independently stated headline threshold must sit
@@ -139,6 +141,7 @@ class TaskProvenance:
     oracle_verdict: str
     band_verdict: str
     panel: list[dict[str, object]]
+    protected_teacher_transport_receipts: object = field(default=None, repr=False)
     raw: dict[str, object] = field(default_factory=dict)
     details: dict[str, object] = field(default_factory=dict)
 
@@ -183,6 +186,24 @@ class TaskProvenance:
             if isinstance(panel_raw, list)
             else []
         )
+        protected_receipts: object = None
+        resolved = task_path.resolve()
+        if resolved.parent.name == "tasks":
+            receipt_path = protected_teacher_receipts_path(
+                resolved.parent.parent, task_path.name
+            )
+            try:
+                metadata = receipt_path.lstat()
+                if (
+                    stat.S_ISREG(metadata.st_mode)
+                    and not stat.S_ISLNK(metadata.st_mode)
+                    and not metadata.st_mode & 0o077
+                ):
+                    protected_receipts = json.loads(
+                        receipt_path.read_text(encoding="utf-8")
+                    )
+            except (OSError, json.JSONDecodeError):
+                protected_receipts = None
 
         def _pick(*keys: str, default: object = "") -> object:
             for source in (details, prov, ws_meta):
@@ -206,6 +227,7 @@ class TaskProvenance:
             oracle_verdict=str(_pick("oracle_verdict")),
             band_verdict=str(_pick("band_verdict")),
             panel=panel,
+            protected_teacher_transport_receipts=protected_receipts,
             raw=prov,
             details=details,
         )
@@ -336,7 +358,13 @@ def _completeness_missing(prov: TaskProvenance, kill_threshold: float) -> list[s
                 missing.append(f"panel:{tier}")
     if prov.frontier_rate is None:
         missing.append("frontier_pass_at_k")
-    missing.extend(teacher_gate_evidence_issues(prov.details))
+    missing.extend(
+        teacher_gate_evidence_issues(
+            prov.details,
+            candidate=prov.details.get("candidate_transport_fingerprint"),
+            protected_receipts=prov.protected_teacher_transport_receipts,
+        )
+    )
     missing.extend(_multifault_evidence_issues(prov))
 
     return missing
@@ -454,7 +482,13 @@ def _consistency_issues(prov: TaskProvenance, config: BandFilterConfig) -> list[
             f"irt_discrimination {discrimination:.4f} < keep threshold "
             f"{config.discrimination_threshold:.4f}"
         )
-    issues.extend(teacher_gate_evidence_issues(prov.details))
+    issues.extend(
+        teacher_gate_evidence_issues(
+            prov.details,
+            candidate=prov.details.get("candidate_transport_fingerprint"),
+            protected_receipts=prov.protected_teacher_transport_receipts,
+        )
+    )
     issues.extend(_multifault_evidence_issues(prov))
     return issues
 

@@ -501,7 +501,8 @@ async def test_reject_reproduces_on_same_inputs() -> None:
 async def test_run_pipeline_threads_injected_gates() -> None:
     calls: list[str] = []
     report = await run_oracle_pipeline(_candidate(), _env_image(), gates=_gates(calls))
-    assert report.verdict == "pass"
+    assert report.verdict == "reject"
+    assert any("teacher" in reason for reason in report.reasons)
     assert calls == list(GATE_ORDER)
 
 
@@ -543,7 +544,8 @@ async def test_default_pipeline_final_remeasures_after_alt_correct(
 
     report = await run_oracle_pipeline(_candidate(), _env_image())
 
-    assert report.verdict == "pass"
+    assert report.verdict == "reject"
+    assert any("teacher" in reason for reason in report.reasons)
     assert calls == [
         "establish",
         "flakiness",

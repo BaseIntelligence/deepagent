@@ -38,7 +38,9 @@ from swe_forge.forge.teacher import (
     LLMResult,
     TeacherClient,
     Usage,
+    is_authoritative_transport_receipt,
     is_concrete_teacher_client,
+    transport_receipt_context,
 )
 
 logger = getLogger(__name__)
@@ -139,11 +141,16 @@ class TeacherVariantGenerator:
         client = self._resolve_client()
         real_teacher = is_concrete_teacher_client(client)
         try:
-            result = await client.complete_text(
-                self._user_message(ctx, teacher_source),
-                system=_VARIANT_SYSTEM_PROMPT,
-                max_tokens=self._max_tokens,
-            )
+            with transport_receipt_context(
+                ctx.candidate,
+                gate="differential",
+                call_kind="proposal",
+            ):
+                result = await client.complete_text(
+                    self._user_message(ctx, teacher_source),
+                    system=_VARIANT_SYSTEM_PROMPT,
+                    max_tokens=self._max_tokens,
+                )
         except Exception as exc:  # pragma: no cover - network/endpoint failures
             self.teacher_calls.append(
                 TeacherGateCallEvidence(
@@ -275,11 +282,16 @@ class DifferentialKillSynthesizer:
         client = self._resolve_client()
         real_teacher = is_concrete_teacher_client(client)
         try:
-            result = await client.complete_text(
-                self._user_message(ctx, path),
-                system=_KILL_SYSTEM_PROMPT,
-                max_tokens=self._max_tokens,
-            )
+            with transport_receipt_context(
+                ctx.candidate,
+                gate="differential",
+                call_kind="strengthen",
+            ):
+                result = await client.complete_text(
+                    self._user_message(ctx, path),
+                    system=_KILL_SYSTEM_PROMPT,
+                    max_tokens=self._max_tokens,
+                )
         except Exception as exc:  # pragma: no cover - network/endpoint failures
             self.teacher_calls.append(
                 TeacherGateCallEvidence(
@@ -376,6 +388,12 @@ def _proposal_evidence(
     executable: int | None = None,
 ) -> TeacherGateCallEvidence:
     """Build a source-free metadata record from a teacher result."""
+    candidate_receipt = getattr(result, "transport_receipt", None)
+    receipt = (
+        candidate_receipt
+        if is_authoritative_transport_receipt(candidate_receipt)
+        else None
+    )
     return TeacherGateCallEvidence(
         gate=gate,
         call_kind=call_kind,
@@ -398,6 +416,9 @@ def _proposal_evidence(
             else max(0, executable)
         ),
         recovery_accounting=_result_recovery(result),
+        call_id=receipt.call_id if receipt is not None else "",
+        receipt_commitment=receipt.commitment if receipt is not None else "",
+        protected_transport_receipt=receipt,
     )
 
 

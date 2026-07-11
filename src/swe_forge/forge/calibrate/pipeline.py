@@ -303,7 +303,9 @@ async def run_calibration(
         else DEFAULT_KILL_THRESHOLD
     )
     problems = [
-        *verify_pass_consistency(oracle_report, kill_threshold=threshold),
+        *verify_pass_consistency(
+            oracle_report, candidate=candidate, kill_threshold=threshold
+        ),
         *verify_multifault_evidence(oracle_report, candidate=candidate),
     ]
     if problems:

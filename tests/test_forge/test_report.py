@@ -46,6 +46,11 @@ from swe_forge.forge.models import (
     ModelSolveRecord,
     Provenance,
 )
+from swe_forge.forge.teacher import (
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
+)
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.oracle.multifault import (
     ConstituentVerdict,
@@ -285,6 +290,32 @@ def _oracle_pass(*, language: str, generator: str):  # type: ignore[no-untyped-d
     )
 
 
+def _attach_transport_receipts(report, candidate: Candidate) -> None:  # type: ignore[no-untyped-def]
+    gates = report.details["teacher_gates"]
+    assert isinstance(gates, dict)
+    receipts = []
+    for index, (gate, payload) in enumerate(gates.items(), start=1):
+        assert isinstance(gate, str) and isinstance(payload, dict)
+        calls = payload["calls"]
+        assert isinstance(calls, list) and isinstance(calls[0], dict)
+        call = calls[0]
+        call["recovery_accounting"] = None
+        receipt = TransportReceipt(
+            call_id=f"{index:032x}",
+            candidate_fingerprint=candidate_transport_fingerprint(candidate),
+            gate=gate,
+            call_kind=str(call["call_kind"]),
+            model=str(call["model"]),
+            usage=Usage(**call["usage"]),  # type: ignore[arg-type]
+            cost=float(call["cost"]),
+            receipt_secret=f"{index:064x}",
+        )
+        call["call_id"] = receipt.call_id
+        call["receipt_commitment"] = receipt.commitment
+        receipts.append(receipt.to_private_dict())
+    report.protected_teacher_transport_receipts = receipts
+
+
 def _calibration(
     *,
     language: str,
@@ -344,10 +375,13 @@ def _request(
     repo_url: str = "https://github.com/acme/demo.git",
     **cal: object,
 ) -> ExportRequest:
+    candidate = _candidate(language=language, generator=generator, seed=seed)
+    report = _oracle_pass(language=language, generator=generator)
+    _attach_transport_receipts(report, candidate)
     return ExportRequest(
-        candidate=_candidate(language=language, generator=generator, seed=seed),
+        candidate=candidate,
         spec=_spec(language=language),
-        oracle_report=_oracle_pass(language=language, generator=generator),
+        oracle_report=report,
         calibration_report=_calibration(language=language, **cal),  # type: ignore[arg-type]
         env_image=_env_image(language=language),
         repo_url=repo_url,

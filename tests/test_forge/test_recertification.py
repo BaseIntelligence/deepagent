@@ -41,7 +41,11 @@ from swe_forge.forge.recertification import (
     validate_certified_recovery_task,
 )
 from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
-from swe_forge.forge.teacher import Usage
+from swe_forge.forge.teacher import (
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
+)
 
 _TASK_ID = CERTIFIED_RECOVERY_TASK_ID
 _F2P = "python -m pytest tests/hidden/test_repair.py"
@@ -152,7 +156,7 @@ def _oracle(candidate: Candidate) -> OracleReport:
             for index, item in enumerate(constituents)
         ),
     )
-    return OracleReport(
+    report = OracleReport(
         language="python",
         generator="bug_combination",
         verdict="pass",
@@ -210,6 +214,30 @@ def _oracle(candidate: Candidate) -> OracleReport:
             },
         },
     )
+    gates = report.details["teacher_gates"]
+    assert isinstance(gates, dict)
+    receipts: list[dict[str, object]] = []
+    for index, (gate, payload) in enumerate(gates.items(), start=1):
+        assert isinstance(gate, str) and isinstance(payload, dict)
+        calls = payload["calls"]
+        assert isinstance(calls, list) and isinstance(calls[0], dict)
+        call = calls[0]
+        call["recovery_accounting"] = None
+        receipt = TransportReceipt(
+            call_id=f"{index:032x}",
+            candidate_fingerprint=candidate_transport_fingerprint(candidate),
+            gate=gate,
+            call_kind=str(call["call_kind"]),
+            model=str(call["model"]),
+            usage=Usage(**call["usage"]),  # type: ignore[arg-type]
+            cost=float(call["cost"]),
+            receipt_secret=f"{index:064x}",
+        )
+        call["call_id"] = receipt.call_id
+        call["receipt_commitment"] = receipt.commitment
+        receipts.append(receipt.to_private_dict())
+    report.protected_teacher_transport_receipts = receipts
+    return report
 
 
 def _calibration() -> CalibrationReport:

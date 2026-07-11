@@ -11,7 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Iterable, Literal
 
-from swe_forge.forge.teacher import Usage
+from swe_forge.forge.teacher import (
+    TransportReceipt,
+    Usage,
+    candidate_transport_fingerprint,
+)
 
 TeacherCallStatus = Literal["success", "error", "not_called"]
 
@@ -34,6 +38,34 @@ _FORBIDDEN_KEYS = frozenset(
         "raw_response",
         "message",
         "error",
+    }
+)
+
+_PUBLIC_CALL_KEYS = frozenset(
+    {
+        "gate",
+        "call_kind",
+        "real_teacher",
+        "status",
+        "response_kind",
+        "model",
+        "usage",
+        "cost",
+        "finish_reason",
+        "requested_proposals",
+        "received_proposals",
+        "parsed_proposals",
+        "identical_proposals",
+        "invalid_proposals",
+        "discarded_proposals",
+        "execution_attempted",
+        "execution_completed",
+        "execution_errors",
+        "executable_proposals",
+        "error_type",
+        "recovery_accounting",
+        "call_id",
+        "receipt_commitment",
     }
 )
 
@@ -63,6 +95,11 @@ class TeacherGateCallEvidence:
     executable_proposals: int = 0
     error_type: str = ""
     recovery_accounting: dict[str, object] | None = None
+    call_id: str = ""
+    receipt_commitment: str = ""
+    protected_transport_receipt: TransportReceipt | None = field(
+        default=None, repr=False
+    )
 
     def with_execution(
         self,
@@ -111,6 +148,8 @@ class TeacherGateCallEvidence:
                 if self.recovery_accounting is not None
                 else None
             ),
+            "call_id": self.call_id,
+            "receipt_commitment": self.receipt_commitment,
         }
 
 
@@ -127,6 +166,17 @@ def call_records(
 ) -> list[dict[str, object]]:
     """Convert typed records to JSON-safe evidence."""
     return [call.to_dict() for call in calls]
+
+
+def protected_transport_receipts(
+    calls: list[TeacherGateCallEvidence] | tuple[TeacherGateCallEvidence, ...],
+) -> list[dict[str, object]]:
+    """Return private receipt records for persistence outside public artifacts."""
+    return [
+        call.protected_transport_receipt.to_private_dict()
+        for call in calls
+        if call.protected_transport_receipt is not None
+    ]
 
 
 def append_execution(
@@ -189,9 +239,11 @@ def _nonnegative_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def _safe_record(record: dict[str, object]) -> bool:
+def _safe_record(record: dict[str, object], *, strict_schema: bool = False) -> bool:
     """Reject records that carry a known secret/raw-content field."""
-    if _FORBIDDEN_KEYS & set(record):
+    if (strict_schema and set(record) != _PUBLIC_CALL_KEYS) or _FORBIDDEN_KEYS & set(
+        record
+    ):
         return False
     usage = record.get("usage")
     if not isinstance(usage, dict):
@@ -284,6 +336,8 @@ def teacher_gate_evidence_issues(
     details: object,
     *,
     gates: Iterable[str] = ("differential", "alt_correct"),
+    candidate: object | None = None,
+    protected_receipts: object = None,
 ) -> list[str]:
     """Return non-vacuity and hygiene defects for a passing oracle report."""
     if not isinstance(details, dict):
@@ -293,7 +347,12 @@ def teacher_gate_evidence_issues(
     if not isinstance(gate_payloads, dict):
         return ["teacher evidence is missing"]
 
-    issues: list[str] = []
+    require_receipts = candidate is not None or protected_receipts is not None
+    receipt_map, receipt_issues = (
+        _receipt_map(protected_receipts, candidate) if require_receipts else ({}, [])
+    )
+    issues: list[str] = list(receipt_issues)
+    consumed_call_ids: set[str] = set()
     for gate in requested_gates:
         payload = gate_payloads.get(gate)
         if not isinstance(payload, dict):
@@ -303,7 +362,11 @@ def teacher_gate_evidence_issues(
         if not isinstance(calls, list):
             issues.append(f"{gate}: teacher calls are missing")
             continue
-        if not all(isinstance(call, dict) and _safe_record(call) for call in calls):
+        if not all(
+            isinstance(call, dict)
+            and _safe_record(call, strict_schema=require_receipts)
+            for call in calls
+        ):
             issues.append(f"{gate}: teacher evidence is malformed or unsafe")
             continue
 
@@ -323,6 +386,17 @@ def teacher_gate_evidence_issues(
             if accounting:
                 accounting_problems.extend(accounting)
                 continue
+            if require_receipts:
+                receipt_issue = _receipt_issue_for_call(
+                    call,
+                    gate=gate,
+                    candidate=candidate,
+                    receipt_map=receipt_map,
+                    consumed_call_ids=consumed_call_ids,
+                )
+                if receipt_issue is not None:
+                    accounting_problems.append(receipt_issue)
+                    continue
             if (
                 call.get("status") == "success"
                 and call.get("response_kind") == "content"
@@ -349,6 +423,95 @@ def teacher_gate_evidence_issues(
                 "parse and execution evidence"
             )
     return issues
+
+
+def _receipt_map(
+    protected_receipts: object, candidate: object | None
+) -> tuple[dict[str, TransportReceipt], list[str]]:
+    """Parse unique private receipts without leaking their contents in errors."""
+    if not isinstance(protected_receipts, list):
+        return {}, ["teacher transport receipts are missing"]
+    parsed: dict[str, TransportReceipt] = {}
+    issues: list[str] = []
+    for raw in protected_receipts:
+        try:
+            receipt = TransportReceipt.from_private_dict(raw)
+        except Exception:
+            issues.append("teacher transport receipt is malformed")
+            continue
+        if receipt.call_id in parsed:
+            issues.append("teacher transport receipt call id is duplicated")
+            continue
+        parsed[receipt.call_id] = receipt
+    if candidate is None:
+        return parsed, issues
+    try:
+        fingerprint = _candidate_fingerprint(candidate)
+    except Exception:
+        return parsed, [*issues, "teacher transport candidate binding is unavailable"]
+    for receipt in parsed.values():
+        if receipt.candidate_fingerprint != fingerprint:
+            issues.append("teacher transport receipt candidate binding mismatches")
+    return parsed, issues
+
+
+def _candidate_fingerprint(candidate: object) -> str:
+    """Accept a Candidate object internally or its safe public fingerprint."""
+    if (
+        isinstance(candidate, str)
+        and len(candidate) == 64
+        and all(character in "0123456789abcdef" for character in candidate)
+    ):
+        return candidate
+    return candidate_transport_fingerprint(candidate)
+
+
+def _receipt_issue_for_call(
+    call: dict[str, object],
+    *,
+    gate: str,
+    candidate: object | None,
+    receipt_map: dict[str, TransportReceipt],
+    consumed_call_ids: set[str],
+) -> str | None:
+    """Return an attributable mismatch for one authoritative public call."""
+    call_id = call.get("call_id")
+    commitment = call.get("receipt_commitment")
+    if not isinstance(call_id, str) or not call_id:
+        return "teacher transport receipt call id is missing"
+    if not isinstance(commitment, str) or len(commitment) != 64:
+        return "teacher transport receipt commitment is missing"
+    if call_id in consumed_call_ids:
+        return "teacher transport receipt call id is replayed"
+    receipt = receipt_map.get(call_id)
+    if receipt is None:
+        return "teacher transport receipt is missing"
+    consumed_call_ids.add(call_id)
+    if receipt.commitment != commitment:
+        return "teacher transport receipt commitment mismatches"
+    if (
+        receipt.gate != gate
+        or receipt.call_kind != call.get("call_kind")
+        or receipt.model != call.get("model")
+    ):
+        return "teacher transport receipt gate, kind, or model mismatches"
+    usage = call.get("usage")
+    if not isinstance(usage, dict) or receipt.usage.to_dict() != usage:
+        return "teacher transport receipt usage mismatches"
+    cost = call.get("cost")
+    if (
+        not isinstance(cost, (int, float))
+        or isinstance(cost, bool)
+        or float(receipt.cost) != float(cost)
+    ):
+        return "teacher transport receipt cost mismatches"
+    if candidate is not None:
+        try:
+            if receipt.candidate_fingerprint != _candidate_fingerprint(candidate):
+                return "teacher transport receipt candidate binding mismatches"
+        except Exception:
+            return "teacher transport candidate binding is unavailable"
+    return None
 
 
 def aggregate_teacher_gate_usage(details: object) -> tuple[Usage, float]:
@@ -390,6 +553,7 @@ __all__ = [
     "call_records",
     "evidence_calls",
     "gate_evidence",
+    "protected_transport_receipts",
     "teacher_gate_failure_reason",
     "teacher_gate_evidence_issues",
 ]

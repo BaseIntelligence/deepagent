@@ -69,6 +69,7 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.leak import audit_agent_tree
 from swe_forge.forge.oracle.pipeline import ExportRefusedError, ensure_oracle_exportable
+from swe_forge.forge.teacher import candidate_transport_fingerprint
 from swe_forge.forge import publication
 from swe_forge.forge.publication import (
     PublicationEntry,
@@ -117,6 +118,7 @@ _DIRECT_STORE_DIR = ".forge-task-publications"
 _DIRECT_GENERATIONS_DIR = "generations"
 _DIRECT_CURRENT_LINK = "current"
 _DIRECT_PROTECTED_AUDIT_DIR = ".protected-audit"
+_DIRECT_PROTECTED_RECEIPTS_DIR = ".protected-teacher-receipts"
 
 
 class ExportError(RuntimeError):
@@ -312,6 +314,7 @@ def _build_provenance(
         "differential_pass": oracle_report.differential_pass,
         "alt_correct_accepted": oracle_report.alt_correct_accepted,
         "teacher_gates": teacher_gates,
+        "candidate_transport_fingerprint": candidate_transport_fingerprint(candidate),
         "leak_audit": oracle_report.leak_audit,
         # Keep the final per-constituent proof in the shipped provenance. A
         # report consumer can therefore audit every leave-one-broken verdict
@@ -1221,6 +1224,39 @@ def _write_direct_protected_alt_correct_audit(
     return path
 
 
+def _write_direct_protected_teacher_receipts(
+    store: Path, generation_id: str, task: ForgeTask
+) -> Path | None:
+    """Persist source-free teacher authority outside the direct workspace."""
+    details = task.oracle_report.details
+    if not isinstance(details.get("teacher_gates"), dict):
+        return None
+    receipts = task.oracle_report.protected_teacher_transport_receipts
+    if not receipts:
+        raise ExportError(
+            f"protected teacher receipts are missing for {task.task_id!r}"
+        )
+    directory = store / _DIRECT_PROTECTED_RECEIPTS_DIR
+    if directory.exists() and (not directory.is_dir() or directory.is_symlink()):
+        raise ExportError(f"direct protected receipt store is invalid: {directory}")
+    directory.mkdir(exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    path = directory / f"{generation_id}.json"
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(receipts, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.chmod(path, 0o600)
+    publication._fsync_path(path)
+    publication._fsync_path(directory)
+    publication._fsync_path(store)
+    return path
+
+
 def export_forge_task(
     task: ForgeTask,
     tasks_root: Path | str,
@@ -1285,6 +1321,7 @@ def export_forge_task(
     stage: Path | None = None
     pointer_tmp: Path | None = None
     direct_audit_path: Path | None = None
+    direct_receipt_path: Path | None = None
     store_created = False
     generation_committed = False
 
@@ -1346,6 +1383,9 @@ def export_forge_task(
         direct_audit_path = _write_direct_protected_alt_correct_audit(
             store, generation_id, task
         )
+        direct_receipt_path = _write_direct_protected_teacher_receipts(
+            store, generation_id, task
+        )
         publication._fsync_tree(stage)
         final_generation = generations / generation_id
         os.replace(stage, final_generation)
@@ -1377,6 +1417,8 @@ def export_forge_task(
             shutil.rmtree(stage, ignore_errors=True)
         if direct_audit_path is not None and not generation_committed:
             direct_audit_path.unlink(missing_ok=True)
+        if direct_receipt_path is not None and not generation_committed:
+            direct_receipt_path.unlink(missing_ok=True)
         if pointer_tmp is not None:
             pointer_tmp.unlink(missing_ok=True)
         if store_created and not generation_committed:

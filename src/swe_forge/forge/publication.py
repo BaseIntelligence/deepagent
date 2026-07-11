@@ -40,6 +40,7 @@ _MANIFEST_NAME = "manifest.json"
 _SCHEMA_VERSION = 1
 _PROTECTED_AUDIT_DIR = ".protected-audit"
 _ALT_CORRECT_AUDIT_DIR = "alt-correct"
+_TEACHER_RECEIPTS_DIR = "teacher-transport-receipts"
 
 
 class PublicationError(RuntimeError):
@@ -227,9 +228,27 @@ def _read_manifest(root: Path) -> PublishedGeneration:
             raise PublicationError(
                 f"publication manifest {manifest_path} has duplicate index"
             )
-        task = _rehydrate_protected_alt_correct_audit(
-            root, ForgeTask.from_dict(raw["task"])
+        task = _rehydrate_protected_teacher_receipts(
+            root,
+            _rehydrate_protected_alt_correct_audit(
+                root, ForgeTask.from_dict(raw["task"])
+            ),
         )
+        try:
+            ensure_oracle_exportable(
+                task.oracle_report,
+                candidate=task.candidate,
+                calibration_kept=task.calibration_report.is_keep,
+            )
+        except ExportRefusedError as exc:
+            prefix = (
+                "protected alt-correct audit is invalid"
+                if "alt_correct:" in str(exc)
+                else "protected teacher receipts are invalid"
+                if "teacher transport" in str(exc)
+                else "protected oracle evidence is invalid"
+            )
+            raise PublicationError(f"{prefix} for {task.task_id!r}: {exc}") from exc
         if task.task_id in seen_ids:
             raise PublicationError(
                 f"publication manifest {manifest_path} has duplicate task id"
@@ -339,6 +358,11 @@ def protected_alt_correct_audit_path(root: Path | str, task_id: str) -> Path:
     )
 
 
+def protected_teacher_receipts_path(root: Path | str, task_id: str) -> Path:
+    """Return the non-public source-free receipt sidecar for one task."""
+    return Path(root) / _PROTECTED_AUDIT_DIR / _TEACHER_RECEIPTS_DIR / f"{task_id}.json"
+
+
 def _requires_protected_alt_correct_audit(task: ForgeTask) -> bool:
     """Whether this report was emitted by hardened alt-correct validation."""
     return (
@@ -394,14 +418,59 @@ def _rehydrate_protected_alt_correct_audit(root: Path, task: ForgeTask) -> Forge
                 "protected_alt_correct_audit": payload,
             }
         )
-        ensure_oracle_exportable(
-            report,
-            candidate=task.candidate,
-            calibration_kept=task.calibration_report.is_keep,
-        )
-    except (ExportRefusedError, ValueError, TypeError) as exc:
+    except (ValueError, TypeError) as exc:
         raise PublicationError(
             f"protected alt-correct audit is invalid for {task.task_id!r}: {exc}"
+        ) from exc
+    return replace(task, oracle_report=report)
+
+
+def _requires_protected_teacher_receipts(task: ForgeTask) -> bool:
+    """Every public teacher-gate record must have a matching private receipt."""
+    details = task.oracle_report.details
+    return isinstance(details.get("teacher_gates"), dict)
+
+
+def _rehydrate_protected_teacher_receipts(root: Path, task: ForgeTask) -> ForgeTask:
+    """Restore protected receipts, then rerun the export gate before use."""
+    if not _requires_protected_teacher_receipts(task):
+        return task
+    path = protected_teacher_receipts_path(root, task.task_id)
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise PublicationError(
+            f"protected teacher receipts are missing for {task.task_id!r}"
+        ) from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        raise PublicationError(
+            f"protected teacher receipts are not a regular private file for "
+            f"{task.task_id!r}"
+        )
+    if metadata.st_mode & 0o077:
+        raise PublicationError(
+            f"protected teacher receipts have unsafe permissions for {task.task_id!r}"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PublicationError(
+            f"protected teacher receipts are unreadable for {task.task_id!r}"
+        ) from exc
+    if not isinstance(payload, list):
+        raise PublicationError(
+            f"protected teacher receipts are malformed for {task.task_id!r}"
+        )
+    try:
+        report = OracleReport.from_protected_dict(
+            {
+                **task.oracle_report.to_protected_dict(),
+                "protected_teacher_transport_receipts": payload,
+            }
+        )
+    except (ValueError, TypeError) as exc:
+        raise PublicationError(
+            f"protected teacher receipts are invalid for {task.task_id!r}: {exc}"
         ) from exc
     return replace(task, oracle_report=report)
 
@@ -432,6 +501,30 @@ def _write_protected_alt_correct_audit(
         raise PublicationError(
             f"protected alt-correct audit is missing for {entry.task.task_id!r}"
         )
+
+
+def _write_protected_teacher_receipts(stage: Path, entry: PublicationEntry) -> None:
+    """Persist transport authority only in a privileged source-free sidecar."""
+    task = entry.task
+    if not _requires_protected_teacher_receipts(task):
+        return
+    receipts = task.oracle_report.protected_teacher_transport_receipts
+    if not receipts:
+        raise PublicationError(
+            f"protected teacher receipts are missing for {task.task_id!r}"
+        )
+    target = protected_teacher_receipts_path(stage, task.task_id)
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(target.parent, 0o700)
+    descriptor = os.open(
+        target,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(receipts, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.chmod(target, 0o600)
 
 
 def _publish_generation_locked(
@@ -543,6 +636,7 @@ def _publish_generation_locked(
         )
         for entry in accepted:
             _write_protected_alt_correct_audit(stage, entry, previous)
+            _write_protected_teacher_receipts(stage, entry)
         if metadata_writer is not None:
             metadata_writer(stage, accepted)
         generation_id = uuid.uuid4().hex
@@ -629,4 +723,5 @@ __all__ = [
     "load_published_generation",
     "publish_generation",
     "protected_alt_correct_audit_path",
+    "protected_teacher_receipts_path",
 ]

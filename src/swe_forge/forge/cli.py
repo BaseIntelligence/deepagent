@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 from pathlib import Path
 from typing import NoReturn
@@ -133,6 +134,7 @@ from swe_forge.forge.oracle.differential_synth import (
 )
 from swe_forge.forge.oracle.mutation_synth import MutationKillSynthesizer
 from swe_forge.forge.oracle.test_synth import AgenticTestSynthesizer
+from swe_forge.forge.oracle.teacher_evidence import teacher_gate_evidence_issues
 from swe_forge.forge.panel import (
     PANEL_BASE_URL_VAR,
     PANEL_API_KEY_VAR,
@@ -1580,12 +1582,39 @@ def _load_oracle_report(report_file: str) -> OracleReport:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         protected_path = _protected_oracle_report_path(path)
+        protected: dict[str, object] = {}
         if protected_path.is_file():
             protected = json.loads(protected_path.read_text(encoding="utf-8"))
             if not isinstance(protected, dict):
                 raise ModelError("protected oracle audit is not an object")
-            return OracleReport.from_protected_dict({**data, **protected})
-        return OracleReport.from_dict(data)
+        receipts_path = _protected_teacher_receipts_path(path)
+        if receipts_path.exists():
+            metadata = receipts_path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or stat.S_ISLNK(metadata.st_mode)
+                or metadata.st_mode & 0o077
+            ):
+                raise ModelError("protected teacher receipt sidecar is unsafe")
+            receipts = json.loads(receipts_path.read_text(encoding="utf-8"))
+            if not isinstance(receipts, list):
+                raise ModelError("protected teacher receipt sidecar is malformed")
+            protected["protected_teacher_transport_receipts"] = receipts
+        report = OracleReport.from_protected_dict({**data, **protected})
+        if report.verdict == "pass" and isinstance(
+            report.details.get("teacher_gates"), dict
+        ):
+            issues = teacher_gate_evidence_issues(
+                report.details,
+                protected_receipts=report.protected_teacher_transport_receipts,
+            )
+            if issues:
+                raise ModelError(
+                    "protected teacher transport receipt is invalid ("
+                    + "; ".join(issues)
+                    + ")"
+                )
+        return report
     except (json.JSONDecodeError, KeyError, ModelError) as exc:
         _fail(f"invalid oracle report JSON: {exc}")
 
@@ -1593,6 +1622,11 @@ def _load_oracle_report(report_file: str) -> OracleReport:
 def _protected_oracle_report_path(report_path: Path) -> Path:
     """Return the mode-0600 non-agent-facing sidecar for raw proposal evidence."""
     return report_path.with_name(f"{report_path.stem}.protected.json")
+
+
+def _protected_teacher_receipts_path(report_path: Path) -> Path:
+    """Return the 0600 sidecar for source-free teacher transport receipts."""
+    return report_path.with_name(f"{report_path.stem}.transport-receipts.json")
 
 
 def _write_oracle_report(out: str, report: OracleReport) -> None:
@@ -1608,21 +1642,39 @@ def _write_oracle_report(out: str, report: OracleReport) -> None:
     protected_path = _protected_oracle_report_path(report_path)
     if report.protected_alt_correct_audit is None:
         protected_path.unlink(missing_ok=True)
+    else:
+        descriptor = os.open(
+            protected_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(
+                {"protected_alt_correct_audit": report.protected_alt_correct_audit},
+                handle,
+                indent=2,
+                sort_keys=True,
+            )
+            handle.write("\n")
+        os.chmod(protected_path, 0o600)
+    receipts_path = _protected_teacher_receipts_path(report_path)
+    if not report.protected_teacher_transport_receipts:
+        receipts_path.unlink(missing_ok=True)
         return
-    descriptor = os.open(
-        protected_path,
+    receipt_descriptor = os.open(
+        receipts_path,
         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
         0o600,
     )
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+    with os.fdopen(receipt_descriptor, "w", encoding="utf-8") as handle:
         json.dump(
-            {"protected_alt_correct_audit": report.protected_alt_correct_audit},
+            report.protected_teacher_transport_receipts,
             handle,
             indent=2,
             sort_keys=True,
         )
         handle.write("\n")
-    os.chmod(protected_path, 0o600)
+    os.chmod(receipts_path, 0o600)
 
 
 @app.command(name="oracle-flakiness")

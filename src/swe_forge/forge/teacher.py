@@ -21,13 +21,19 @@ names the absent environment variable and never echoes the key.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import hashlib
 import json
+import math
 from decimal import Decimal, InvalidOperation
 import os
+import secrets
 import uuid
+import weakref
 from collections.abc import Awaitable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Union
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Union
 
 # LiteLLM auto-loads a local .env on import while in its default "DEV" mode. That
 # would repopulate credentials from .env even after an explicit `env -u`, which
@@ -142,6 +148,7 @@ class LLMResult:
     finish_reason: str | None = None
     tool_calls: list[NormalizedToolCall] = field(default_factory=list)
     recovery_accounting: dict[str, object] | None = None
+    transport_receipt: "TransportReceipt | None" = field(default=None, repr=False)
     raw: Any = field(default=None, repr=False)
 
     def to_dict(self, *, include_tools: bool = False) -> dict[str, Any]:
@@ -184,6 +191,213 @@ class AgenticResult:
 
 
 ToolExecutor = Callable[[NormalizedToolCall], Union[str, Awaitable[str]]]
+
+
+@dataclass(frozen=True)
+class TransportReceipt:
+    """Private proof that the concrete teacher transport completed one call.
+
+    Receipts deliberately contain only binding metadata and a random secret. They
+    never retain endpoint details, prompts, responses, credentials, or provider
+    payloads. The public record carries only :attr:`commitment`.
+    """
+
+    call_id: str
+    candidate_fingerprint: str
+    gate: str
+    call_kind: str
+    model: str
+    usage: Usage
+    cost: float
+    receipt_secret: str
+    version: int = 1
+
+    def __post_init__(self) -> None:
+        if self.version != 1:
+            raise TeacherError("transport receipt version is unsupported")
+        if len(self.call_id) != 32 or any(
+            ch not in "0123456789abcdef" for ch in self.call_id
+        ):
+            raise TeacherError("transport receipt call id is malformed")
+        if len(self.candidate_fingerprint) != 64 or any(
+            ch not in "0123456789abcdef" for ch in self.candidate_fingerprint
+        ):
+            raise TeacherError("transport receipt candidate fingerprint is malformed")
+        if not self.gate or not self.call_kind or not self.model:
+            raise TeacherError("transport receipt binding is incomplete")
+        if (
+            not isinstance(self.cost, (int, float))
+            or isinstance(self.cost, bool)
+            or not math.isfinite(float(self.cost))
+            or float(self.cost) < 0.0
+        ):
+            raise TeacherError("transport receipt cost is malformed")
+        if len(self.receipt_secret) != 64 or any(
+            ch not in "0123456789abcdef" for ch in self.receipt_secret
+        ):
+            raise TeacherError("transport receipt secret is malformed")
+
+    def _commitment_payload(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "call_id": self.call_id,
+            "candidate_fingerprint": self.candidate_fingerprint,
+            "gate": self.gate,
+            "call_kind": self.call_kind,
+            "model": self.model,
+            "usage": self.usage.to_dict(),
+            "cost": float(self.cost),
+            "receipt_secret": self.receipt_secret,
+        }
+
+    @property
+    def commitment(self) -> str:
+        """Return the safe public commitment binding this private receipt."""
+        encoded = json.dumps(
+            self._commitment_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    def to_private_dict(self) -> dict[str, object]:
+        """Serialize the protected, source-free sidecar representation."""
+        return self._commitment_payload()
+
+    @classmethod
+    def from_private_dict(cls, data: object) -> "TransportReceipt":
+        """Parse one exact, source-free private receipt schema."""
+        if not isinstance(data, dict):
+            raise TeacherError("transport receipt is not an object")
+        expected = {
+            "version",
+            "call_id",
+            "candidate_fingerprint",
+            "gate",
+            "call_kind",
+            "model",
+            "usage",
+            "cost",
+            "receipt_secret",
+        }
+        if set(data) != expected:
+            raise TeacherError("transport receipt has an unsafe schema")
+        usage = data["usage"]
+        if not isinstance(usage, dict) or set(usage) != {
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        }:
+            raise TeacherError("transport receipt usage is malformed")
+        values: dict[str, int] = {}
+        for field_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = usage[field_name]
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise TeacherError("transport receipt usage is malformed")
+            values[field_name] = value
+        version = data["version"]
+        if not isinstance(version, int) or isinstance(version, bool):
+            raise TeacherError("transport receipt version is malformed")
+        for field_name in (
+            "call_id",
+            "candidate_fingerprint",
+            "gate",
+            "call_kind",
+            "model",
+            "receipt_secret",
+        ):
+            if not isinstance(data[field_name], str):
+                raise TeacherError("transport receipt binding is malformed")
+        cost = data["cost"]
+        if not isinstance(cost, (int, float)) or isinstance(cost, bool):
+            raise TeacherError("transport receipt cost is malformed")
+        return cls(
+            version=version,
+            call_id=data["call_id"],
+            candidate_fingerprint=data["candidate_fingerprint"],
+            gate=data["gate"],
+            call_kind=data["call_kind"],
+            model=data["model"],
+            usage=Usage(**values),
+            cost=float(cost),
+            receipt_secret=data["receipt_secret"],
+        )
+
+
+@dataclass(frozen=True)
+class _TransportReceiptContext:
+    """Request-local authority binding supplied by a concrete gate generator."""
+
+    candidate_fingerprint: str
+    gate: str
+    call_kind: str
+
+
+_TRANSPORT_RECEIPT_CONTEXT: contextvars.ContextVar[_TransportReceiptContext | None] = (
+    contextvars.ContextVar("forge_teacher_transport_receipt_context", default=None)
+)
+_ISSUED_TRANSPORT_RECEIPTS: weakref.WeakValueDictionary[int, TransportReceipt] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def is_authoritative_transport_receipt(receipt: TransportReceipt | None) -> bool:
+    """Return whether this exact receipt was minted by concrete transport."""
+    return (
+        receipt is not None and _ISSUED_TRANSPORT_RECEIPTS.get(id(receipt)) is receipt
+    )
+
+
+def candidate_transport_fingerprint(candidate: object) -> str:
+    """Hash a Candidate's canonical public data without retaining source bytes."""
+    to_dict = getattr(candidate, "to_dict", None)
+    if not callable(to_dict):
+        raise TeacherError(
+            "teacher transport receipt requires a serializable candidate"
+        )
+    try:
+        encoded = json.dumps(
+            to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise TeacherError(
+            "teacher transport receipt cannot canonicalize candidate"
+        ) from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@contextmanager
+def transport_receipt_context(
+    candidate: object,
+    *,
+    gate: str,
+    call_kind: str,
+) -> Iterator[None]:
+    """Authorize receipt issuance for exactly one concrete transport call.
+
+    Gate generators set this request-local context immediately around their
+    class-owned ``TeacherClient.complete_text`` call. A fake or monkeypatched
+    outer helper cannot manufacture a receipt because issuance occurs only in
+    :meth:`TeacherClient._acompletion` after LiteLLM returns.
+    """
+    if not isinstance(gate, str) or not gate.strip():
+        raise TeacherError("teacher transport receipt requires a non-empty gate")
+    if not isinstance(call_kind, str) or not call_kind.strip():
+        raise TeacherError("teacher transport receipt requires a non-empty call kind")
+    token = _TRANSPORT_RECEIPT_CONTEXT.set(
+        _TransportReceiptContext(
+            candidate_fingerprint=candidate_transport_fingerprint(candidate),
+            gate=gate.strip(),
+            call_kind=call_kind.strip(),
+        )
+    )
+    try:
+        yield
+    finally:
+        _TRANSPORT_RECEIPT_CONTEXT.reset(token)
 
 
 def split_model(model: str) -> tuple[str, str]:
@@ -430,6 +644,24 @@ class TeacherClient:
             return messages
         return [dict(message) for message in prompt]
 
+    def _issue_transport_receipt(self, response: Any) -> None:
+        """Attach a protected receipt after this concrete transport returns."""
+        context = _TRANSPORT_RECEIPT_CONTEXT.get()
+        if context is None or type(self) is not TeacherClient:
+            return
+        receipt = TransportReceipt(
+            call_id=uuid.uuid4().hex,
+            candidate_fingerprint=context.candidate_fingerprint,
+            gate=context.gate,
+            call_kind=context.call_kind,
+            model=self.routing.model,
+            usage=_usage_from_response(response),
+            cost=_cost_from_response(response),
+            receipt_secret=secrets.token_hex(32),
+        )
+        _ISSUED_TRANSPORT_RECEIPTS[id(receipt)] = receipt
+        _set_transport_receipt(response, receipt)
+
     async def _acompletion(
         self,
         messages: list[Message],
@@ -459,7 +691,9 @@ class TeacherClient:
         if response_format is not None:
             kwargs["response_format"] = response_format
         if self._recovery_ledger is None:
-            return await litellm.acompletion(**kwargs)
+            response = await litellm.acompletion(**kwargs)
+            self._issue_transport_receipt(response)
+            return response
 
         # LiteLLM's internal retry loop cannot expose each physical provider
         # attempt. Own recovery retries here so every attempt is pre-reserved
@@ -528,6 +762,7 @@ class TeacherClient:
                 self.last_recovery_accounting = accounting
                 self._recovery_history.append(accounting)
                 _set_recovery_accounting(response, accounting)
+                self._issue_transport_receipt(response)
                 return response
             except asyncio.CancelledError:
                 self._recovery_ledger.mark_unknown_billing(
@@ -604,6 +839,7 @@ class TeacherClient:
             finish_reason=getattr(choice, "finish_reason", None),
             tool_calls=_normalize_tool_calls(message),
             recovery_accounting=_get_recovery_accounting(resp),
+            transport_receipt=_get_transport_receipt(resp),
             raw=resp,
         )
 
@@ -843,5 +1079,32 @@ def _get_recovery_accounting(resp: Any) -> dict[str, object] | None:
     if isinstance(hidden, dict):
         value = hidden.get("_forge_recovery_accounting")
         if isinstance(value, dict):
+            return value
+    return None
+
+
+def _set_transport_receipt(resp: Any, receipt: TransportReceipt) -> None:
+    """Attach a private receipt without putting it in public result metadata."""
+    try:
+        setattr(resp, "_forge_transport_receipt", receipt)
+        return
+    except (AttributeError, TypeError):
+        pass
+    hidden = getattr(resp, "_hidden_params", None)
+    if isinstance(hidden, dict):
+        hidden["_forge_transport_receipt"] = receipt
+        return
+    raise TeacherError("cannot retain required transport receipt on LLM response")
+
+
+def _get_transport_receipt(resp: Any) -> TransportReceipt | None:
+    """Read the in-memory receipt only from supported trusted response shapes."""
+    direct = getattr(resp, "_forge_transport_receipt", None)
+    if isinstance(direct, TransportReceipt):
+        return direct
+    hidden = getattr(resp, "_hidden_params", None)
+    if isinstance(hidden, dict):
+        value = hidden.get("_forge_transport_receipt")
+        if isinstance(value, TransportReceipt):
             return value
     return None
