@@ -858,16 +858,39 @@ def _copy_agent_visible(src: Path, dst: Path) -> None:
     """Copy the AGENT-VISIBLE subset of an exported task dir to ``dst``.
 
     Excludes the benchmark-only solution/harness files (gold + mutation patches,
-    the hidden ``tests/`` suite, the scorer scripts) so the leak audit scans only
-    what the solver would actually see (statement/requirements/interface +, when
-    shipped, the broken repo tree).
+    the hidden ``tests/`` suite, the scorer scripts) and nested Git internals so
+    the leak audit scans only what the solver would actually see
+    (statement/requirements/interface +, when shipped, the broken repo tree).
+    ``DockerAgentTreeProvider`` emits the same boundary by excluding the repo's
+    ``.git`` directory before exporting it.  The separate
+    :func:`audit_git_history` call below intentionally still inspects the real
+    exported workspace, including that directory.
     """
+
     dst.mkdir(parents=True, exist_ok=True)
     for path in src.iterdir():
         if path.is_dir():
-            if path.name in _BENCHMARK_ONLY_DIRS:
+            if path.name in _BENCHMARK_ONLY_DIRS or path.name == ".git":
                 continue
-            shutil.copytree(path, dst / path.name)
+            if path.name == "repo":
+                # The Docker provider's workspace is the exported repository,
+                # so its ``--exclude=./.git`` removes exactly this directory.
+                # Do not recursively hide unrelated nested repositories that
+                # the provider would leave in the tar stream.
+                repo_root = path.resolve()
+
+                def _ignore_repo_git(directory: str, names: list[str]) -> set[str]:
+                    if Path(directory).resolve() == repo_root and ".git" in names:
+                        return {".git"}
+                    return set()
+
+                shutil.copytree(
+                    path,
+                    dst / path.name,
+                    ignore=_ignore_repo_git,
+                )
+            else:
+                shutil.copytree(path, dst / path.name)
         else:
             if path.name in _BENCHMARK_ONLY_NAMES:
                 continue

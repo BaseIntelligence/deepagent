@@ -714,6 +714,143 @@ def test_leak_audit_clean_on_exported_tree(tmp_path: Path) -> None:
     assert audit.risk_score == 0.0
 
 
+def test_leak_audit_ignores_single_orphan_git_reflogs(tmp_path: Path) -> None:
+    """The static scan matches DockerAgentTreeProvider's repo boundary.
+
+    A shipped repository keeps one orphan commit and therefore legitimately has
+    ``.git/logs``. Those internals are not agent-visible content, while the
+    separate history audit still checks the real repository below.
+    """
+    result = export_batch([_request()], tmp_path)
+    task_dir = result.shipped[0].path
+    assert task_dir is not None
+    repo = task_dir / "repo"
+    repo.mkdir()
+    (repo / "source.py").write_text("value = 'broken'\n", encoding="utf-8")
+    reinit_orphan_git(repo)
+    reflog = repo / ".git" / "logs" / "HEAD"
+    assert reflog.is_file()
+    reflog.write_text("reflog metadata only\n", encoding="utf-8")
+
+    audit = audit_exported_workspace(
+        task_dir,
+        oracle_patch=_candidate().oracle_patch,
+        test_files=_oracle_pass().test_files,
+    )
+
+    assert audit.passed is True
+    assert audit.findings == []
+    assert audit.risk_score == 0.0
+
+
+def test_exported_audit_still_rejects_multi_commit_git_history(
+    tmp_path: Path,
+) -> None:
+    result = export_batch([_request()], tmp_path)
+    task_dir = result.shipped[0].path
+    assert task_dir is not None
+    repo = task_dir / "repo"
+    repo.mkdir()
+    (repo / "history.py").write_text("history = 'gold'\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "test",
+        "GIT_AUTHOR_EMAIL": "test@example.invalid",
+        "GIT_COMMITTER_NAME": "test",
+        "GIT_COMMITTER_EMAIL": "test@example.invalid",
+    }
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "gold"],
+        check=True,
+        env=env,
+    )
+    (repo / "history.py").write_text("history = 'second commit'\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "second"],
+        check=True,
+        env=env,
+    )
+
+    audit = audit_exported_workspace(
+        task_dir,
+        oracle_patch=_candidate().oracle_patch,
+        test_files=_oracle_pass().test_files,
+    )
+
+    assert audit.passed is False
+    assert any("git_history" in finding for finding in audit.findings)
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        "__pycache__/cached.pyc",
+        "coverage/index.html",
+        "build/output.txt",
+        "logs/run.log",
+    ],
+)
+def test_exported_audit_rejects_real_build_cache_and_log_artifacts(
+    tmp_path: Path, artifact: str
+) -> None:
+    result = export_batch([_request()], tmp_path)
+    task_dir = result.shipped[0].path
+    assert task_dir is not None
+    repo = task_dir / "repo"
+    repo.mkdir()
+    reinit_orphan_git(repo)
+    artifact_path = repo / artifact
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("generated artifact\n", encoding="utf-8")
+
+    audit = audit_exported_workspace(
+        task_dir,
+        oracle_patch=_candidate().oracle_patch,
+        test_files=_oracle_pass().test_files,
+    )
+
+    assert audit.passed is False
+    assert any("build_cache_artifact" in finding for finding in audit.findings)
+
+
+def test_historical_pilot_keeps_are_audit_only_regression_fixtures() -> None:
+    """The five historical tasks stay clean without becoming current output."""
+    root = Path(__file__).parents[2]
+    historical = root / "results" / "pilot_keeps" / "tasks"
+    task_dirs = sorted(path for path in historical.iterdir() if path.is_dir())
+    assert len(task_dirs) == 5
+
+    for task_dir in task_dirs:
+        hidden = [
+            OracleTestFile(
+                path=path.relative_to(task_dir / "tests").as_posix(),
+                content=path.read_text(encoding="utf-8", errors="ignore"),
+            )
+            for path in sorted((task_dir / "tests").rglob("*"))
+            if path.is_file()
+        ]
+        audit = audit_exported_workspace(
+            task_dir,
+            oracle_patch=(task_dir / "patch.diff").read_text(encoding="utf-8"),
+            test_files=hidden,
+        )
+        assert audit.passed is True, (task_dir.name, audit.findings)
+        assert audit.findings == []
+        assert audit.risk_score == 0.0
+
+    certification = json.loads(
+        (root / "results" / "pilot_final" / "certification.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert certification["passed"] is False
+    assert certification["task_ids"] == []
+    assert certification["state"] == "tombstone"
+
+
 def test_planted_leak_blocks_shipping(tmp_path: Path) -> None:
     # The spec leaks a verbatim gold line -> it lands in workspace.yaml prompt.
     leaky = _request(spec=_spec(problem=f"Implement total. Gold:\n{_GOLD_LINE}\n"))
