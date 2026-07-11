@@ -15,6 +15,7 @@ from swe_forge.forge.teacher import (
     TransportReceipt,
     Usage,
     candidate_transport_fingerprint,
+    verify_transport_receipt,
 )
 
 TeacherCallStatus = Literal["success", "error", "not_called"]
@@ -438,6 +439,9 @@ def _receipt_map(
             receipt = TransportReceipt.from_private_dict(raw)
         except Exception:
             issues.append("teacher transport receipt is malformed")
+            continue
+        if not verify_transport_receipt(receipt):
+            issues.append("teacher transport receipt issuer signature is invalid")
             continue
         if receipt.call_id in parsed:
             issues.append("teacher transport receipt call id is duplicated")

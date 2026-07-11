@@ -922,7 +922,8 @@ async def test_exact_client_with_monkeypatched_complete_text_cannot_authorize_ga
                 model=client.model,
                 usage=Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10),
                 cost=0.0125,
-                receipt_secret="e" * 64,
+                issuer_key_id="0" * 32,
+                signature="e" * 64,
             ),
         )
 
@@ -961,7 +962,7 @@ async def test_concrete_transport_issues_private_receipt_after_mocked_provider(
     assert evidence.protected_transport_receipt is not None
     public = evidence.to_dict()
     private = evidence.protected_transport_receipt.to_private_dict()
-    assert "receipt_secret" not in json.dumps(public)
+    assert "issuer_key_id" not in json.dumps(public)
     assert "api_key" not in json.dumps(private)
     assert "prompt_text" not in json.dumps(private)
     assert "response_content" not in json.dumps(private)

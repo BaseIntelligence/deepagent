@@ -42,10 +42,10 @@ from swe_forge.forge.recertification import (
 )
 from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
 from swe_forge.forge.teacher import (
-    TransportReceipt,
     Usage,
     candidate_transport_fingerprint,
 )
+from tests.test_forge.receipt_helpers import signed_transport_receipt
 
 _TASK_ID = CERTIFIED_RECOVERY_TASK_ID
 _F2P = "python -m pytest tests/hidden/test_repair.py"
@@ -228,7 +228,7 @@ def _oracle(candidate: Candidate) -> OracleReport:
         assert isinstance(calls, list) and isinstance(calls[0], dict)
         call = calls[0]
         call["recovery_accounting"] = None
-        receipt = TransportReceipt(
+        receipt = signed_transport_receipt(
             call_id=f"{index:032x}",
             candidate_fingerprint=candidate_transport_fingerprint(candidate),
             gate=gate,
@@ -236,7 +236,6 @@ def _oracle(candidate: Candidate) -> OracleReport:
             model=str(call["model"]),
             usage=Usage(**call["usage"]),  # type: ignore[arg-type]
             cost=float(call["cost"]),
-            receipt_secret=f"{index:064x}",
         )
         call["call_id"] = receipt.call_id
         call["receipt_commitment"] = receipt.commitment

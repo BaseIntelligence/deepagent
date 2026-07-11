@@ -44,6 +44,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 import uuid
@@ -62,6 +63,7 @@ from swe_forge.forge.models import (
     ExportGateError,
     ForgeTask,
     GeneratedSpec,
+    ModelError,
     OracleReport,
     OracleTestFile,
     Provenance,
@@ -1126,6 +1128,7 @@ def _read_selected_direct_workspace(
     if not isinstance(workspace_data, dict) or workspace_data.get("task_id") != task_id:
         raise ExportError(f"direct export pointer selects the wrong task: {current}")
     _validate_staged_workspace(task, workspace)
+    _read_direct_protected_teacher_receipts(task, workspace)
 
     if final_exists and final_dir.resolve(strict=True) != workspace:
         raise ExportError(
@@ -1185,6 +1188,72 @@ def _fsync_direct_store_ancestors(tasks_root: Path, store: Path) -> None:
 def _direct_protected_alt_correct_audit_path(store: Path, generation_id: str) -> Path:
     """Return a direct export's non-agent-facing raw alt-correct evidence path."""
     return store / _DIRECT_PROTECTED_AUDIT_DIR / f"{generation_id}.json"
+
+
+def direct_protected_teacher_receipts_path(
+    task_dir: Path | str,
+) -> Path | None:
+    """Return the selected direct export's protected receipt sidecar path.
+
+    Direct workspaces are immutable generations at
+    ``<store>/generations/<generation-id>``. Anything else is not a managed
+    direct workspace and deliberately has no corresponding protected sidecar.
+    """
+    workspace = Path(task_dir).resolve()
+    if workspace.parent.name != _DIRECT_GENERATIONS_DIR or not re.fullmatch(
+        r"[0-9a-f]{32}", workspace.name
+    ):
+        return None
+    store = workspace.parent.parent
+    return store / _DIRECT_PROTECTED_RECEIPTS_DIR / f"{workspace.name}.json"
+
+
+def _read_direct_protected_teacher_receipts(task: ForgeTask, workspace: Path) -> None:
+    """Fail closed if the selected direct generation loses receipt authority."""
+    details = task.oracle_report.details
+    if not isinstance(details.get("teacher_gates"), dict):
+        return
+    path = direct_protected_teacher_receipts_path(workspace)
+    if path is None:
+        raise ExportError("selected direct workspace has no receipt sidecar path")
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ExportError(
+            f"protected teacher receipts are missing for {task.task_id!r}"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_mode & 0o077
+    ):
+        raise ExportError(f"protected teacher receipts are unsafe for {task.task_id!r}")
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ExportError(
+            f"protected teacher receipts are unreadable for {task.task_id!r}"
+        ) from exc
+    if not isinstance(payload, list):
+        raise ExportError(
+            f"protected teacher receipts are malformed for {task.task_id!r}"
+        )
+    try:
+        report = OracleReport.from_protected_dict(
+            {
+                **task.oracle_report.to_protected_dict(),
+                "protected_teacher_transport_receipts": payload,
+            }
+        )
+        ensure_oracle_exportable(
+            report,
+            candidate=task.candidate,
+            calibration_kept=task.calibration_report.is_keep,
+        )
+    except (ExportRefusedError, ModelError, TypeError, ValueError) as exc:
+        raise ExportError(
+            f"protected teacher receipts are invalid for {task.task_id!r}: {exc}"
+        ) from exc
 
 
 def _write_direct_protected_alt_correct_audit(

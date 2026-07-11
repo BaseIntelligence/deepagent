@@ -57,10 +57,10 @@ from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.calibrate.runner import CalibrationRunnerError
 from swe_forge.forge.panel import ModelValidation, PanelModel
 from swe_forge.forge.teacher import (
-    TransportReceipt,
     Usage,
     candidate_transport_fingerprint,
 )
+from tests.test_forge.receipt_helpers import signed_transport_receipt
 
 P2P = "python -m pytest"
 F2P = "python -m pytest tests/test_subtract.py"
@@ -220,7 +220,7 @@ def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> No
         assert isinstance(calls, list) and isinstance(calls[0], dict)
         call = calls[0]
         call["recovery_accounting"] = None
-        receipt = TransportReceipt(
+        receipt = signed_transport_receipt(
             call_id=f"{index:032x}",
             candidate_fingerprint=candidate_transport_fingerprint(candidate),
             gate=gate,
@@ -228,7 +228,6 @@ def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> No
             model=str(call["model"]),
             usage=Usage(**call["usage"]),  # type: ignore[arg-type]
             cost=float(call["cost"]),
-            receipt_secret=f"{index:064x}",
         )
         call["call_id"] = receipt.call_id
         call["receipt_commitment"] = receipt.commitment

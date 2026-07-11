@@ -27,7 +27,6 @@ import json
 import math
 from decimal import Decimal, InvalidOperation
 import os
-import secrets
 import uuid
 import weakref
 from collections.abc import Awaitable, Sequence
@@ -44,6 +43,7 @@ os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
 import litellm  # noqa: E402  (must follow the LITELLM_MODE guard above)
 
 from swe_forge.forge.config import ForgeSettings  # noqa: E402
+from swe_forge.forge import receipt_authority  # noqa: E402
 
 if TYPE_CHECKING:
     from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
@@ -197,9 +197,10 @@ ToolExecutor = Callable[[NormalizedToolCall], Union[str, Awaitable[str]]]
 class TransportReceipt:
     """Private proof that the concrete teacher transport completed one call.
 
-    Receipts deliberately contain only binding metadata and a random secret. They
-    never retain endpoint details, prompts, responses, credentials, or provider
-    payloads. The public record carries only :attr:`commitment`.
+    Receipts deliberately contain only source-free binding claims, the host
+    issuer key id, and an issuer signature. They never retain endpoint details,
+    prompts, responses, credentials, provider payloads, or signing key material.
+    The public record carries only :attr:`commitment`.
     """
 
     call_id: str
@@ -209,11 +210,12 @@ class TransportReceipt:
     model: str
     usage: Usage
     cost: float
-    receipt_secret: str
-    version: int = 1
+    issuer_key_id: str
+    signature: str
+    version: int = 2
 
     def __post_init__(self) -> None:
-        if self.version != 1:
+        if self.version != 2:
             raise TeacherError("transport receipt version is unsupported")
         if len(self.call_id) != 32 or any(
             ch not in "0123456789abcdef" for ch in self.call_id
@@ -232,12 +234,16 @@ class TransportReceipt:
             or float(self.cost) < 0.0
         ):
             raise TeacherError("transport receipt cost is malformed")
-        if len(self.receipt_secret) != 64 or any(
-            ch not in "0123456789abcdef" for ch in self.receipt_secret
+        if len(self.issuer_key_id) != 32 or any(
+            ch not in "0123456789abcdef" for ch in self.issuer_key_id
         ):
-            raise TeacherError("transport receipt secret is malformed")
+            raise TeacherError("transport receipt issuer key id is malformed")
+        if len(self.signature) != 64 or any(
+            ch not in "0123456789abcdef" for ch in self.signature
+        ):
+            raise TeacherError("transport receipt signature is malformed")
 
-    def _commitment_payload(self) -> dict[str, object]:
+    def _signed_claims_payload(self) -> dict[str, object]:
         return {
             "version": self.version,
             "call_id": self.call_id,
@@ -247,14 +253,21 @@ class TransportReceipt:
             "model": self.model,
             "usage": self.usage.to_dict(),
             "cost": float(self.cost),
-            "receipt_secret": self.receipt_secret,
+            "issuer_key_id": self.issuer_key_id,
         }
+
+    def _canonical_claims(self) -> bytes:
+        return json.dumps(
+            self._signed_claims_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
     @property
     def commitment(self) -> str:
         """Return the safe public commitment binding this private receipt."""
         encoded = json.dumps(
-            self._commitment_payload(),
+            self.to_private_dict(),
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
@@ -262,7 +275,7 @@ class TransportReceipt:
 
     def to_private_dict(self) -> dict[str, object]:
         """Serialize the protected, source-free sidecar representation."""
-        return self._commitment_payload()
+        return {**self._signed_claims_payload(), "signature": self.signature}
 
     @classmethod
     def from_private_dict(cls, data: object) -> "TransportReceipt":
@@ -278,7 +291,8 @@ class TransportReceipt:
             "model",
             "usage",
             "cost",
-            "receipt_secret",
+            "issuer_key_id",
+            "signature",
         }
         if set(data) != expected:
             raise TeacherError("transport receipt has an unsafe schema")
@@ -304,7 +318,8 @@ class TransportReceipt:
             "gate",
             "call_kind",
             "model",
-            "receipt_secret",
+            "issuer_key_id",
+            "signature",
         ):
             if not isinstance(data[field_name], str):
                 raise TeacherError("transport receipt binding is malformed")
@@ -320,8 +335,18 @@ class TransportReceipt:
             model=data["model"],
             usage=Usage(**values),
             cost=float(cost),
-            receipt_secret=data["receipt_secret"],
+            issuer_key_id=data["issuer_key_id"],
+            signature=data["signature"],
         )
+
+
+def verify_transport_receipt(receipt: TransportReceipt | None) -> bool:
+    """Verify a receipt against the durable host-held issuer authority."""
+    return receipt is not None and receipt_authority.verify_signature(
+        key_id=receipt.issuer_key_id,
+        claims=receipt._canonical_claims(),
+        signature=receipt.signature,
+    )
 
 
 @dataclass(frozen=True)
@@ -336,6 +361,10 @@ class _TransportReceiptContext:
 _TRANSPORT_RECEIPT_CONTEXT: contextvars.ContextVar[_TransportReceiptContext | None] = (
     contextvars.ContextVar("forge_teacher_transport_receipt_context", default=None)
 )
+_CONCRETE_PROVIDER_RETURN: contextvars.ContextVar[object | None] = (
+    contextvars.ContextVar("forge_teacher_concrete_provider_return", default=None)
+)
+_PROVIDER_RETURN_CAPABILITY = object()
 _ISSUED_TRANSPORT_RECEIPTS: weakref.WeakValueDictionary[int, TransportReceipt] = (
     weakref.WeakValueDictionary()
 )
@@ -344,7 +373,9 @@ _ISSUED_TRANSPORT_RECEIPTS: weakref.WeakValueDictionary[int, TransportReceipt] =
 def is_authoritative_transport_receipt(receipt: TransportReceipt | None) -> bool:
     """Return whether this exact receipt was minted by concrete transport."""
     return (
-        receipt is not None and _ISSUED_TRANSPORT_RECEIPTS.get(id(receipt)) is receipt
+        receipt is not None
+        and _ISSUED_TRANSPORT_RECEIPTS.get(id(receipt)) is receipt
+        and verify_transport_receipt(receipt)
     )
 
 
@@ -644,24 +675,6 @@ class TeacherClient:
             return messages
         return [dict(message) for message in prompt]
 
-    def _issue_transport_receipt(self, response: Any) -> None:
-        """Attach a protected receipt after this concrete transport returns."""
-        context = _TRANSPORT_RECEIPT_CONTEXT.get()
-        if context is None or type(self) is not TeacherClient:
-            return
-        receipt = TransportReceipt(
-            call_id=uuid.uuid4().hex,
-            candidate_fingerprint=context.candidate_fingerprint,
-            gate=context.gate,
-            call_kind=context.call_kind,
-            model=self.routing.model,
-            usage=_usage_from_response(response),
-            cost=_cost_from_response(response),
-            receipt_secret=secrets.token_hex(32),
-        )
-        _ISSUED_TRANSPORT_RECEIPTS[id(receipt)] = receipt
-        _set_transport_receipt(response, receipt)
-
     async def _acompletion(
         self,
         messages: list[Message],
@@ -692,7 +705,16 @@ class TeacherClient:
             kwargs["response_format"] = response_format
         if self._recovery_ledger is None:
             response = await litellm.acompletion(**kwargs)
-            self._issue_transport_receipt(response)
+            token = _CONCRETE_PROVIDER_RETURN.set(_PROVIDER_RETURN_CAPABILITY)
+            try:
+                _issue_transport_receipt_after_provider_return(
+                    response,
+                    context=_TRANSPORT_RECEIPT_CONTEXT.get(),
+                    model=routing.model,
+                    client_type=type(self),
+                )
+            finally:
+                _CONCRETE_PROVIDER_RETURN.reset(token)
             return response
 
         # LiteLLM's internal retry loop cannot expose each physical provider
@@ -762,7 +784,16 @@ class TeacherClient:
                 self.last_recovery_accounting = accounting
                 self._recovery_history.append(accounting)
                 _set_recovery_accounting(response, accounting)
-                self._issue_transport_receipt(response)
+                token = _CONCRETE_PROVIDER_RETURN.set(_PROVIDER_RETURN_CAPABILITY)
+                try:
+                    _issue_transport_receipt_after_provider_return(
+                        response,
+                        context=_TRANSPORT_RECEIPT_CONTEXT.get(),
+                        model=routing.model,
+                        client_type=type(self),
+                    )
+                finally:
+                    _CONCRETE_PROVIDER_RETURN.reset(token)
                 return response
             except asyncio.CancelledError:
                 self._recovery_ledger.mark_unknown_billing(
@@ -1009,6 +1040,58 @@ def is_concrete_teacher_client(client: object) -> bool:
     non-authoritative.
     """
     return type(client) is TeacherClient
+
+
+def _issue_transport_receipt_after_provider_return(
+    response: Any,
+    *,
+    context: _TransportReceiptContext | None,
+    model: str,
+    client_type: type[object],
+) -> None:
+    """Issue only while the exact concrete LiteLLM call has just returned."""
+    if (
+        _CONCRETE_PROVIDER_RETURN.get() is not _PROVIDER_RETURN_CAPABILITY
+        or context is None
+        or client_type is not TeacherClient
+    ):
+        return
+    issuer_key_id = receipt_authority.issuer_key_id()
+    usage = _usage_from_response(response)
+    cost = _cost_from_response(response)
+    call_id = uuid.uuid4().hex
+    claims = {
+        "version": 2,
+        "call_id": call_id,
+        "candidate_fingerprint": context.candidate_fingerprint,
+        "gate": context.gate,
+        "call_kind": context.call_kind,
+        "model": model,
+        "usage": usage.to_dict(),
+        "cost": cost,
+        "issuer_key_id": issuer_key_id,
+    }
+    encoded = json.dumps(
+        claims,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    key_id, signature = receipt_authority._sign_claims(encoded)
+    if key_id != issuer_key_id:
+        raise TeacherError("teacher receipt issuer key changed during signing")
+    receipt = TransportReceipt(
+        call_id=call_id,
+        candidate_fingerprint=context.candidate_fingerprint,
+        gate=context.gate,
+        call_kind=context.call_kind,
+        model=model,
+        usage=usage,
+        cost=cost,
+        issuer_key_id=key_id,
+        signature=signature,
+    )
+    _ISSUED_TRANSPORT_RECEIPTS[id(receipt)] = receipt
+    _set_transport_receipt(response, receipt)
 
 
 def _response_request_id(resp: Any) -> str:

@@ -41,6 +41,7 @@ from swe_forge.forge.export import (
     audit_exported_workspace,
     audit_git_history,
     build_full_fail_to_pass,
+    direct_protected_teacher_receipts_path,
     export_batch,
     export_forge_task,
     forge_task_id,
@@ -68,11 +69,8 @@ from swe_forge.forge.publication import (
     protected_alt_correct_audit_path,
     protected_teacher_receipts_path,
 )
-from swe_forge.forge.teacher import (
-    TransportReceipt,
-    Usage,
-    candidate_transport_fingerprint,
-)
+from swe_forge.forge.teacher import Usage, candidate_transport_fingerprint
+from tests.test_forge.receipt_helpers import signed_transport_receipt
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -227,7 +225,7 @@ def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> No
             usage = call.get("usage")
             if not isinstance(usage, dict):
                 continue
-            receipt = TransportReceipt(
+            receipt = signed_transport_receipt(
                 call_id=f"{len(receipts) + 1:032x}",
                 candidate_fingerprint=candidate_transport_fingerprint(candidate),
                 gate=gate,
@@ -239,7 +237,6 @@ def _attach_transport_receipts(report: OracleReport, candidate: Candidate) -> No
                     total_tokens=int(usage["total_tokens"]),
                 ),
                 cost=float(call["cost"]),
-                receipt_secret=f"{index + 1:064x}",
             )
             call["call_id"] = receipt.call_id
             call["receipt_commitment"] = receipt.commitment
@@ -1277,7 +1274,7 @@ def test_transport_receipts_are_private_mode_0600_and_absent_from_public_export(
     )
     assert receipt_path.is_file()
     assert receipt_path.stat().st_mode & 0o777 == 0o600
-    secret = json.loads(receipt_path.read_text(encoding="utf-8"))[0]["receipt_secret"]
+    signature = json.loads(receipt_path.read_text(encoding="utf-8"))[0]["signature"]
     public_files = [
         path
         for path in generation.root.rglob("*")
@@ -1285,12 +1282,41 @@ def test_transport_receipts_are_private_mode_0600_and_absent_from_public_export(
     ]
     assert public_files
     assert all(
-        secret not in path.read_text(encoding="utf-8", errors="ignore")
+        signature not in path.read_text(encoding="utf-8", errors="ignore")
         for path in public_files
     )
 
 
-@pytest.mark.parametrize("corruption", ["missing", "altered", "replayed"])
+@pytest.mark.parametrize("corruption", ["missing", "altered", "wrong_key", "replayed"])
+def test_direct_export_rejects_invalid_protected_teacher_receipts(
+    tmp_path: Path, corruption: str
+) -> None:
+    task = _task()
+    tasks_root = tmp_path / "tasks"
+    first = export_forge_task(task, tasks_root)
+    assert first.shipped
+    assert first.path is not None
+    receipt_path = direct_protected_teacher_receipts_path(first.path)
+    assert receipt_path is not None
+
+    if corruption == "missing":
+        receipt_path.unlink()
+    else:
+        receipts = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if corruption == "altered":
+            receipts[0]["model"] = "anthropic/other"
+        elif corruption == "wrong_key":
+            receipts[0]["issuer_key_id"] = "0" * 32
+        else:
+            receipts.append(dict(receipts[0]))
+        receipt_path.write_text(json.dumps(receipts), encoding="utf-8")
+
+    replay = export_forge_task(task, tasks_root)
+    assert replay.status == "failed"
+    assert "protected teacher receipts" in replay.reason
+
+
+@pytest.mark.parametrize("corruption", ["missing", "altered", "wrong_key", "replayed"])
 def test_publication_rejects_missing_altered_or_replayed_transport_receipts(
     tmp_path: Path, corruption: str
 ) -> None:
@@ -1306,6 +1332,8 @@ def test_publication_rejects_missing_altered_or_replayed_transport_receipts(
         receipts = json.loads(receipt_path.read_text(encoding="utf-8"))
         if corruption == "altered":
             receipts[0]["model"] = "anthropic/other"
+        elif corruption == "wrong_key":
+            receipts[0]["issuer_key_id"] = "0" * 32
         else:
             receipts.append(dict(receipts[0]))
         receipt_path.write_text(json.dumps(receipts), encoding="utf-8")

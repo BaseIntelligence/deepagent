@@ -79,10 +79,10 @@ from swe_forge.forge.pilot import (
     run_pilot,
 )
 from swe_forge.forge.teacher import (
-    TransportReceipt,
     Usage,
     candidate_transport_fingerprint,
 )
+from tests.test_forge.receipt_helpers import signed_transport_receipt
 
 _TS = "2026-01-01T00:00:00+00:00"
 _GOLD_LINE = "    return compute_total_with_tax(items, tax_rate)"
@@ -317,7 +317,7 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
         assert isinstance(calls, list) and isinstance(calls[0], dict)
         call = calls[0]
         call["recovery_accounting"] = None
-        receipt = TransportReceipt(
+        receipt = signed_transport_receipt(
             call_id=f"{index:032x}",
             candidate_fingerprint=candidate_transport_fingerprint(candidate),
             gate=gate,
@@ -325,7 +325,6 @@ def _oracle_pass(plan: CandidatePlan) -> OracleReport:
             model=str(call["model"]),
             usage=Usage(**call["usage"]),  # type: ignore[arg-type]
             cost=float(call["cost"]),
-            receipt_secret=f"{index:064x}",
         )
         call["call_id"] = receipt.call_id
         call["receipt_commitment"] = receipt.commitment

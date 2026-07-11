@@ -52,6 +52,7 @@ from swe_forge.forge.calibrate.filter import (
     DEFAULT_BAND_HIGH,
     BandFilterConfig,
 )
+from swe_forge.forge.export import direct_protected_teacher_receipts_path
 from swe_forge.forge.gold_eval import (
     DEFAULT_DETERMINISM_RUNS,
     EvalRun,
@@ -188,10 +189,14 @@ class TaskProvenance:
         )
         protected_receipts: object = None
         resolved = task_path.resolve()
+        receipt_path: Path | None
         if resolved.parent.name == "tasks":
             receipt_path = protected_teacher_receipts_path(
                 resolved.parent.parent, task_path.name
             )
+        else:
+            receipt_path = direct_protected_teacher_receipts_path(resolved)
+        if receipt_path is not None:
             try:
                 metadata = receipt_path.lstat()
                 if (
