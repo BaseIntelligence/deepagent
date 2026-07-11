@@ -156,6 +156,9 @@ class RecoveryBudgetLedger:
             self._fsync_file()
             self._fsync_parent()
         self._records = self._load_records()
+        self._logical_reservations = self._index_logical_reservations(
+            self._records.values()
+        )
 
     def _fsync_file(self) -> None:
         descriptor = os.open(self.path, os.O_RDONLY)
@@ -179,8 +182,62 @@ class RecoveryBudgetLedger:
             os.fsync(handle.fileno())
         self._fsync_parent()
 
+    @staticmethod
+    def _index_logical_reservations(
+        records: Iterable[_Reservation],
+    ) -> dict[str, list[_Reservation]]:
+        """Return physical reservations grouped by their durable logical owner."""
+        logical_reservations: dict[str, list[_Reservation]] = {}
+        for reservation in records:
+            logical_reservations.setdefault(reservation.logical_call_id, []).append(
+                reservation
+            )
+        return logical_reservations
+
+    @staticmethod
+    def _validate_logical_reservation(
+        logical_reservations: dict[str, list[_Reservation]],
+        *,
+        logical_call_id: str,
+        stage: str,
+        model: str,
+        retry: int,
+    ) -> None:
+        """Require a logical owner to append its sole contiguous retry sequence."""
+        previous = logical_reservations.get(logical_call_id, [])
+        if not previous:
+            if retry != 0:
+                raise RecoveryAccountingError(
+                    f"logical call {logical_call_id!r} must start at retry 0"
+                )
+            return
+
+        owner = previous[0]
+        if stage != owner.stage:
+            raise RecoveryAccountingError(
+                f"logical call {logical_call_id!r} is already owned by stage "
+                f"{owner.stage!r}"
+            )
+        if model != owner.model:
+            raise RecoveryAccountingError(
+                f"logical call {logical_call_id!r} is already owned by model "
+                f"{owner.model!r}"
+            )
+
+        expected_retry = len(previous)
+        if retry < expected_retry:
+            raise RecoveryAccountingError(
+                f"duplicate logical retry {retry} for logical call {logical_call_id!r}"
+            )
+        if retry != expected_retry:
+            raise RecoveryAccountingError(
+                f"logical call {logical_call_id!r} must reserve contiguous retry "
+                f"{expected_retry}"
+            )
+
     def _load_records(self) -> dict[str, _Reservation]:
         records: dict[str, _Reservation] = {}
+        logical_reservations: dict[str, list[_Reservation]] = {}
         for line_no, raw_line in enumerate(
             self.path.read_text(encoding="utf-8").splitlines(), start=1
         ):
@@ -231,7 +288,14 @@ class RecoveryBudgetLedger:
                     raise RecoveryAccountingError(
                         f"ledger reserve at line {line_no} is malformed"
                     )
-                records[physical] = _Reservation(
+                self._validate_logical_reservation(
+                    logical_reservations,
+                    logical_call_id=logical,
+                    stage=stage,
+                    model=model,
+                    retry=retry,
+                )
+                reservation = _Reservation(
                     physical_call_id=physical,
                     logical_call_id=logical,
                     stage=stage,
@@ -243,47 +307,49 @@ class RecoveryBudgetLedger:
                     ),
                     reserve_event=event,
                 )
+                records[physical] = reservation
+                logical_reservations.setdefault(logical, []).append(reservation)
             elif event_type == _EVENT_SETTLE:
-                reservation = records.get(physical)
-                if reservation is None:
+                settlement_reservation = records.get(physical)
+                if settlement_reservation is None:
                     raise RecoveryAccountingError(
                         f"ledger settles unknown physical call {physical!r}"
                     )
-                if reservation.settle_event is not None:
+                if settlement_reservation.settle_event is not None:
                     raise RecoveryAccountingError(
                         f"ledger settles physical call {physical!r} more than once"
                     )
-                if reservation.unknown_billing_event is not None:
+                if settlement_reservation.unknown_billing_event is not None:
                     raise RecoveryAccountingError(
                         f"ledger settles unknown-billing physical call {physical!r}"
                     )
-                self._validate_settlement(event, reservation)
+                self._validate_settlement(event, settlement_reservation)
                 records[physical] = _Reservation(
                     **{
-                        **reservation.__dict__,
+                        **settlement_reservation.__dict__,
                         "settle_event": event,
                     }
                 )
             elif event_type == _EVENT_UNKNOWN_BILLING:
-                reservation = records.get(physical)
-                if reservation is None:
+                unknown_billing_reservation = records.get(physical)
+                if unknown_billing_reservation is None:
                     raise RecoveryAccountingError(
                         f"ledger marks unknown billing for physical call {physical!r}"
                     )
-                if reservation.settle_event is not None:
+                if unknown_billing_reservation.settle_event is not None:
                     raise RecoveryAccountingError(
                         f"ledger marks settled physical call {physical!r} "
                         "as unknown billing"
                     )
-                if reservation.unknown_billing_event is not None:
+                if unknown_billing_reservation.unknown_billing_event is not None:
                     raise RecoveryAccountingError(
                         f"ledger marks physical call {physical!r} as unknown "
                         "billing more than once"
                     )
-                self._validate_unknown_billing(event, reservation)
+                self._validate_unknown_billing(event, unknown_billing_reservation)
                 records[physical] = _Reservation(
                     **{
-                        **reservation.__dict__,
+                        **unknown_billing_reservation.__dict__,
                         "unknown_billing_event": event,
                     }
                 )
@@ -394,8 +460,15 @@ class RecoveryBudgetLedger:
             raise RecoveryAccountingError(
                 "logical_call_id, stage, and model must be non-empty"
             )
-        if retry < 0:
+        if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
             raise RecoveryAccountingError("retry must be >= 0")
+        self._validate_logical_reservation(
+            self._logical_reservations,
+            logical_call_id=logical,
+            stage=stage_name,
+            model=model_name,
+            retry=retry,
+        )
         reserved = (
             self.worst_case_cost_usd
             if worst_case_cost_usd is None
@@ -429,6 +502,9 @@ class RecoveryBudgetLedger:
             retry=retry,
             reserved_cost=reserved,
             reserve_event=event,
+        )
+        self._logical_reservations.setdefault(logical, []).append(
+            self._records[physical]
         )
         return physical
 
@@ -579,6 +655,7 @@ class RecoveryBudgetLedger:
 
 def _iter_physical_calls(evidence: Iterable[object]) -> list[dict[str, object]]:
     physical: list[dict[str, object]] = []
+    logical_attestations: set[str] = set()
     for index, item in enumerate(evidence):
         if not isinstance(item, dict):
             raise RecoveryAccountingError(f"recovery evidence {index} is malformed")
@@ -588,12 +665,28 @@ def _iter_physical_calls(evidence: Iterable[object]) -> list[dict[str, object]]:
             raise RecoveryAccountingError(
                 f"recovery evidence {index} has no logical call or physical calls"
             )
+        if logical in logical_attestations:
+            raise RecoveryAccountingError(
+                f"recovery evidence has duplicate logical attestation {logical!r}"
+            )
+        logical_attestations.add(logical)
+        retries: list[int] = []
         for call in calls:
             if not isinstance(call, dict):
                 raise RecoveryAccountingError(
                     f"recovery evidence {index} has a malformed physical call"
                 )
+            retry = call.get("retry")
+            if not isinstance(retry, int) or isinstance(retry, bool) or retry < 0:
+                raise RecoveryAccountingError(
+                    f"recovery evidence {index} has a malformed retry"
+                )
+            retries.append(retry)
             physical.append({**call, "logical_call_id": logical})
+        if retries != list(range(len(retries))):
+            raise RecoveryAccountingError(
+                f"recovery evidence {index} has non-contiguous or out-of-order retries"
+            )
     return physical
 
 

@@ -328,7 +328,7 @@ async def test_recovery_unknown_billing_keeps_reservation_and_forbids_retry(
             logical_call_id="blocked-retry",
             stage="oracle.differential",
             model="anthropic/test-model",
-            retry=1,
+            retry=0,
         )
     with pytest.raises(RecoveryAccountingError, match="unknown-billing"):
         reconcile_recovery_call_evidence(reloaded, [])
@@ -708,7 +708,10 @@ def test_recovery_report_rejects_duplicate_or_unexpected_oracle_call_linkage(
     duplicate["call_kind"] = "strengthen"
     calls.append(duplicate)
 
-    with pytest.raises(RecoveryAccountingError, match="duplicate physical call"):
+    with pytest.raises(
+        RecoveryAccountingError,
+        match="duplicate (logical attestation|physical call)",
+    ):
         reconcile_recovery_reports(ledger, oracle_report)
 
     calls.pop()
@@ -720,3 +723,276 @@ def test_recovery_report_rejects_duplicate_or_unexpected_oracle_call_linkage(
 
     with pytest.raises(RecoveryAccountingError, match="unexpected evidence"):
         reconcile_recovery_reports(ledger, oracle_report)
+
+
+def test_recovery_logical_call_owns_contiguous_retries_across_ledger_reload(
+    tmp_path,
+) -> None:
+    """One attestation may own retries 0..n before and after durable reload."""
+    ledger = RecoveryBudgetLedger(
+        tmp_path / "recovery-budget.jsonl",
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+    for retry in range(3):
+        physical = ledger.reserve(
+            logical_call_id="differential-proposal",
+            stage="oracle.differential",
+            model="anthropic/test-model",
+            retry=retry,
+        )
+        ledger.settle(
+            physical,
+            request_id=f"provider-{retry}",
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            cost="0.01",
+            status="success",
+            finish_reason="stop",
+        )
+
+    evidence = [
+        {
+            "logical_call_id": "differential-proposal",
+            "physical_calls": ledger.settled_calls(),
+        }
+    ]
+    assert [call["retry"] for call in ledger.settled_calls()] == [0, 1, 2]
+    reconcile_recovery_call_evidence(ledger, evidence)
+
+    reloaded = RecoveryBudgetLedger(
+        ledger.path,
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+    assert [call["retry"] for call in reloaded.settled_calls()] == [0, 1, 2]
+    reconciliation = reconcile_recovery_call_evidence(reloaded, evidence)
+    assert reconciliation["status"] == "reconciled"
+
+
+def test_recovery_ledger_rejects_duplicate_logical_retry_before_append(
+    tmp_path,
+) -> None:
+    """A physical call cannot reserve an already-owned logical retry."""
+    ledger = RecoveryBudgetLedger(
+        tmp_path / "recovery-budget.jsonl",
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+    ledger.reserve(
+        logical_call_id="differential-proposal",
+        stage="oracle.differential",
+        model="anthropic/test-model",
+        retry=0,
+    )
+    before = ledger.events()
+
+    with pytest.raises(RecoveryAccountingError, match="duplicate logical retry"):
+        ledger.reserve(
+            logical_call_id="differential-proposal",
+            stage="oracle.differential",
+            model="anthropic/test-model",
+            retry=0,
+        )
+
+    assert ledger.events() == before
+
+
+@pytest.mark.parametrize(
+    ("stage", "model", "retry", "message"),
+    [
+        ("oracle.alt_correct", "anthropic/test-model", 1, "already owned by stage"),
+        (
+            "calibration.validation",
+            "anthropic/test-model",
+            1,
+            "already owned by stage",
+        ),
+        (
+            "calibration.rollout",
+            "anthropic/test-model",
+            1,
+            "already owned by stage",
+        ),
+        (
+            "oracle.differential",
+            "anthropic/other-model",
+            1,
+            "already owned by model",
+        ),
+        (
+            "oracle.differential",
+            "anthropic/test-model",
+            2,
+            "contiguous retry 1",
+        ),
+    ],
+)
+def test_recovery_ledger_rejects_logical_call_ownership_violations_live(
+    tmp_path,
+    stage: str,
+    model: str,
+    retry: int,
+    message: str,
+) -> None:
+    """Logical IDs cannot transfer gates/models or skip their retry sequence."""
+    ledger = RecoveryBudgetLedger(
+        tmp_path / "recovery-budget.jsonl",
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+    first = ledger.reserve(
+        logical_call_id="shared-logical-id",
+        stage="oracle.differential",
+        model="anthropic/test-model",
+        retry=0,
+    )
+    ledger.settle(
+        first,
+        request_id="provider-first",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        cost="0.01",
+        status="success",
+        finish_reason="stop",
+    )
+    before = ledger.events()
+
+    with pytest.raises(RecoveryAccountingError, match=message):
+        ledger.reserve(
+            logical_call_id="shared-logical-id",
+            stage=stage,
+            model=model,
+            retry=retry,
+        )
+
+    assert ledger.events() == before
+
+
+def test_recovery_ledger_requires_retry_zero_for_new_logical_owner(tmp_path) -> None:
+    """A new logical owner cannot begin at a non-contiguous retry."""
+    ledger = RecoveryBudgetLedger(
+        tmp_path / "recovery-budget.jsonl",
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+
+    with pytest.raises(RecoveryAccountingError, match="must start at retry 0"):
+        ledger.reserve(
+            logical_call_id="new-logical-id",
+            stage="oracle.differential",
+            model="anthropic/test-model",
+            retry=1,
+        )
+
+    assert ledger.events() == []
+
+
+@pytest.mark.parametrize(
+    ("stage", "model", "retry", "message"),
+    [
+        (
+            "oracle.differential",
+            "anthropic/test-model",
+            0,
+            "duplicate logical retry",
+        ),
+        (
+            "calibration.rollout",
+            "anthropic/test-model",
+            1,
+            "already owned by stage",
+        ),
+        (
+            "oracle.differential",
+            "anthropic/test-model",
+            2,
+            "contiguous retry 1",
+        ),
+    ],
+)
+def test_recovery_ledger_reload_rejects_invalid_logical_ownership(
+    tmp_path,
+    stage: str,
+    model: str,
+    retry: int,
+    message: str,
+) -> None:
+    """Reload fails before reconciliation on forged logical ownership events."""
+    ledger = RecoveryBudgetLedger(
+        tmp_path / "recovery-budget.jsonl",
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+    ledger.reserve(
+        logical_call_id="shared-logical-id",
+        stage="oracle.differential",
+        model="anthropic/test-model",
+        retry=0,
+    )
+    forged = dict(ledger.events()[0])
+    forged.update(
+        {
+            "physical_call_id": f"forged-{stage.replace('.', '-')}-{retry}",
+            "stage": stage,
+            "model": model,
+            "retry": retry,
+        }
+    )
+    with ledger.path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(forged) + "\n")
+
+    with pytest.raises(RecoveryAccountingError, match=message):
+        RecoveryBudgetLedger(
+            ledger.path,
+            run_id="recovery-run",
+            cap_usd=1.0,
+            worst_case_cost_usd=0.20,
+        )
+
+
+def test_recovery_reconciliation_rejects_duplicate_logical_attestations(
+    tmp_path,
+) -> None:
+    """One logical owner cannot be split into separate attestations at publish."""
+    ledger = RecoveryBudgetLedger(
+        tmp_path / "recovery-budget.jsonl",
+        run_id="recovery-run",
+        cap_usd=1.0,
+        worst_case_cost_usd=0.20,
+    )
+    for retry, status in enumerate(("error", "success")):
+        physical = ledger.reserve(
+            logical_call_id="single-attestation",
+            stage="oracle.differential",
+            model="anthropic/test-model",
+            retry=retry,
+        )
+        ledger.settle(
+            physical,
+            request_id=f"provider-{retry}",
+            usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+            cost="0.01",
+            status=status,  # type: ignore[arg-type]
+            finish_reason="stop" if status == "success" else None,
+            error_type="RuntimeError" if status == "error" else "",
+        )
+
+    calls = ledger.settled_calls()
+    split_attestations = [
+        {
+            "logical_call_id": "single-attestation",
+            "physical_calls": [calls[0]],
+        },
+        {
+            "logical_call_id": "single-attestation",
+            "physical_calls": [calls[1]],
+        },
+    ]
+
+    with pytest.raises(RecoveryAccountingError, match="duplicate logical attestation"):
+        reconcile_recovery_call_evidence(ledger, split_attestations)
