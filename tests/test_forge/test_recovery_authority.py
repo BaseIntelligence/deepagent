@@ -23,6 +23,170 @@ def test_default_authority_root_is_host_global() -> None:
     assert default_authority_root() == Path("/var/lib/swe_forge/recovery-authority")
 
 
+def test_new_nested_root_fsyncs_created_directories_bottom_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fresh authority roots durably record every created ancestor before use."""
+    first_existing_parent = tmp_path / "machine-state"
+    first_existing_parent.mkdir()
+    root = first_existing_parent / "nested" / "authority" / "records"
+    fsync_paths: list[Path] = []
+    original_fsync = os.fsync
+
+    def tracked_fsync(descriptor: int) -> None:
+        fsync_paths.append(Path(os.readlink(f"/proc/self/fd/{descriptor}")))
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", tracked_fsync)
+
+    RecoveryAttemptAuthority(root, _IDENTITY)
+
+    assert fsync_paths == [
+        first_existing_parent,
+        root,
+        root.parent,
+        root.parent.parent,
+        first_existing_parent,
+        first_existing_parent,
+    ]
+
+
+def test_parent_fsync_failure_aborts_before_claim_or_lock_creation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An undurable root never becomes an authority that can write a claim."""
+    first_existing_parent = tmp_path / "machine-state"
+    first_existing_parent.mkdir()
+    root = first_existing_parent / "nested" / "authority"
+    observed_paths: list[Path] = []
+    parent_fsyncs = 0
+    original_fsync = os.fsync
+
+    def fail_first_parent_fsync(descriptor: int) -> None:
+        nonlocal parent_fsyncs
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        observed_paths.append(path)
+        if path == first_existing_parent:
+            parent_fsyncs += 1
+            if parent_fsyncs == 2:
+                raise OSError("injected parent fsync failure")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", fail_first_parent_fsync)
+
+    with pytest.raises(OSError, match="injected parent fsync failure"):
+        RecoveryAttemptAuthority(root, _IDENTITY)
+
+    assert observed_paths == [
+        first_existing_parent,
+        root,
+        root.parent,
+        first_existing_parent,
+    ]
+    assert not (root / f"{_IDENTITY}.json").exists()
+    assert not (root / f"{_IDENTITY}.lock").exists()
+    with pytest.raises(
+        RecoveryAuthorityError, match="incomplete durable initialization"
+    ):
+        RecoveryAttemptAuthority(root, _IDENTITY)
+
+
+def test_authority_root_rejects_symlinked_ancestor_without_escape(
+    tmp_path: Path,
+) -> None:
+    """Creation cannot be redirected through an intermediate symlink."""
+    containing = tmp_path / "containing"
+    containing.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    alias = containing / "alias"
+    alias.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RecoveryAuthorityError, match="contains a symlink"):
+        RecoveryAttemptAuthority(alias / "nested" / "authority", _IDENTITY)
+
+    assert not (outside / "nested").exists()
+
+
+def test_authority_root_rejects_final_symlink_without_escape(tmp_path: Path) -> None:
+    """A symlinked final authority root cannot host authority files."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    alias = tmp_path / "authority"
+    alias.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RecoveryAuthorityError, match="contains a symlink"):
+        RecoveryAttemptAuthority(alias, _IDENTITY)
+
+    assert not (outside / f"{_IDENTITY}.json").exists()
+    assert not (outside / f"{_IDENTITY}.lock").exists()
+
+
+def test_authority_root_swap_to_symlink_aborts_claim_without_escape(
+    tmp_path: Path,
+) -> None:
+    """Every authority operation re-pins the root before writing state."""
+    root = tmp_path / "authority"
+    authority = RecoveryAttemptAuthority(root, _IDENTITY)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root.rename(tmp_path / "relocated-authority")
+    root.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RecoveryAuthorityError, match="contains a symlink"):
+        authority.claim(
+            run_id="swapped-root",
+            expected_current_generation_id="",
+            ledger_path=tmp_path / "work" / "recovery-ledger.jsonl",
+        )
+
+    assert not (outside / f"{_IDENTITY}.json").exists()
+    assert not (outside / f"{_IDENTITY}.lock").exists()
+
+
+def test_authority_root_rejects_lexical_alias_before_creation(tmp_path: Path) -> None:
+    """A dot-dot root spelling cannot create a second path to authority state."""
+    alias = tmp_path / "containing" / ".." / "authority"
+
+    with pytest.raises(RecoveryAuthorityError, match="path alias"):
+        RecoveryAttemptAuthority(alias, _IDENTITY)
+
+    assert not (tmp_path / "authority").exists()
+
+
+def test_existing_root_is_reused_without_creation_fsync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Existing roots retain the normal lock and claim behavior."""
+    root = tmp_path / "machine-state"
+    root.mkdir()
+    before = root.stat()
+    fsync_calls: list[int] = []
+    original_fsync = os.fsync
+
+    def tracked_fsync(descriptor: int) -> None:
+        fsync_calls.append(descriptor)
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", tracked_fsync)
+    authority = RecoveryAttemptAuthority(root, _IDENTITY)
+
+    assert root.stat().st_ino == before.st_ino
+    assert fsync_calls == []
+
+    authority.claim(
+        run_id="existing-root",
+        expected_current_generation_id="",
+        ledger_path=tmp_path / "work" / "recovery-ledger.jsonl",
+    )
+    with pytest.raises(RecoveryAuthorityError, match="already consumed"):
+        RecoveryAttemptAuthority(root, _IDENTITY).claim(
+            run_id="existing-root-replay",
+            expected_current_generation_id="",
+            ledger_path=tmp_path / "replay" / "recovery-ledger.jsonl",
+        )
+
+
 def test_claim_is_exclusive_durable_and_survives_a_restart(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
