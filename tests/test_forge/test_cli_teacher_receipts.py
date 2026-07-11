@@ -11,7 +11,8 @@ import typer
 
 from swe_forge.forge.cli import _load_oracle_report, _write_oracle_report
 from swe_forge.forge.models import OracleReport
-from swe_forge.forge.teacher import Usage
+from swe_forge.forge.oracle import teacher_evidence
+from swe_forge.forge.teacher import Usage, verify_transport_receipt
 from tests.test_forge.receipt_helpers import signed_transport_receipt
 
 
@@ -97,6 +98,38 @@ def test_cli_rejects_altered_signed_receipt_sidecar(tmp_path: Path) -> None:
     receipt_payload = json.loads(sidecar.read_text(encoding="utf-8"))
     receipt_payload[0]["signature"] = "0" * 64
     sidecar.write_text(json.dumps(receipt_payload), encoding="utf-8")
+
+    with pytest.raises(typer.Exit):
+        _load_oracle_report(str(tmp_path / "oracle_report.json"))
+
+
+def test_fresh_cli_rejects_a_valid_test_domain_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI must not inherit the test fixture verifier override."""
+    report = _forged_teacher_report()
+    calls = report.details["teacher_gates"]["differential"]["calls"]  # type: ignore[index]
+    assert isinstance(calls, list) and isinstance(calls[0], dict)
+    call = calls[0]
+    call["response_kind"] = "content"
+    call["recovery_accounting"] = None
+    receipt = signed_transport_receipt(
+        call_id="c" * 32,
+        candidate_fingerprint="a" * 64,
+        gate="differential",
+        call_kind="proposal",
+        model="anthropic/test",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        cost=0.01,
+    )
+    call["call_id"] = receipt.call_id
+    call["receipt_commitment"] = receipt.commitment
+    report.protected_teacher_transport_receipts = [receipt.to_private_dict()]
+    _write_oracle_report(str(tmp_path), report)
+    monkeypatch.setattr(
+        teacher_evidence, "verify_transport_receipt", verify_transport_receipt
+    )
 
     with pytest.raises(typer.Exit):
         _load_oracle_report(str(tmp_path / "oracle_report.json"))

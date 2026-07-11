@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -398,28 +399,110 @@ def test_direct_service_cli_and_imported_loop_cannot_bootstrap_production_root(
 ) -> None:
     """A caller-supplied CLI token or direct loop call cannot create a prod root."""
     root = tmp_path / "would-be-production-root"
-    direct = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "swe_forge.forge.receipt_authority_service",
-            "--root",
-            str(root),
-            "--domain",
-            "production",
-            "--bootstrap=caller-supplied-token-that-is-long-enough",
-        ],
-        cwd="/projects/Agent-SWE",
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    bootstrap_read, bootstrap_write = os.pipe()
+    try:
+        os.set_inheritable(bootstrap_read, True)
+        os.write(bootstrap_write, b"c" * 32)
+        direct = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "swe_forge.forge.receipt_authority_service",
+                "--root",
+                str(root),
+                "--domain",
+                "production",
+                "--bootstrap-fd",
+                str(bootstrap_read),
+            ],
+            cwd="/projects/Agent-SWE",
+            check=False,
+            capture_output=True,
+            text=True,
+            pass_fds=(bootstrap_read,),
+        )
+    finally:
+        os.close(bootstrap_read)
+        os.close(bootstrap_write)
     assert direct.returncode != 0
     assert not root.exists()
     assert not hasattr(receipt_authority_service, "_EXECUTABLE_BOOTSTRAP")
 
     assert not hasattr(receipt_authority_service, "_run_authority")
     assert not root.exists()
+
+
+def test_imported_key_pinning_helper_cannot_initialize_an_absent_root(
+    tmp_path: Path,
+) -> None:
+    """Only the executable child may first-write a production trust root."""
+    root = tmp_path / "absent-production-root"
+
+    assert not hasattr(receipt_authority_service, "_require_pinned_key")
+
+    assert not root.exists()
+
+
+def test_cross_domain_client_startup_rejects_a_relabeled_test_root(
+    isolated_test_authority: Path,
+) -> None:
+    """A client cannot treat test material as a production authority root."""
+    source = receipt_authority.ReceiptAuthorityClient(root=isolated_test_authority)
+    source.complete(
+        {
+            "type": "complete",
+            "routing": {
+                "model": "anthropic/test-model",
+                "api_base": "https://test.invalid",
+                "api_key": "test-only",
+                "num_retries": 0,
+                "timeout": 1.0,
+            },
+            "messages": [],
+            "max_tokens": 1,
+            "tools": None,
+            "tool_choice": None,
+            "response_format": None,
+            "context": None,
+            "recovery": None,
+            "test_provider_response": _test_response(),
+        }
+    )
+    source.close()
+
+    relabeled = isolated_test_authority.parent / "relabeled-production-root"
+    relabeled.mkdir()
+    for name in ("authority-v1.json", "test-authority-v1.json"):
+        (relabeled / name).write_bytes((isolated_test_authority / name).read_bytes())
+    (relabeled / "test-authority-v1.json").rename(
+        relabeled / "production-authority-v1.json"
+    )
+    authority = receipt_authority.ReceiptAuthorityClient(root=relabeled)
+
+    with pytest.raises(receipt_authority.ReceiptAuthorityError):
+        authority.complete(
+            {
+                "type": "complete",
+                "routing": {
+                    "model": "anthropic/test-model",
+                    "api_base": "https://test.invalid",
+                    "api_key": "test-only",
+                    "num_retries": 0,
+                    "timeout": 1.0,
+                },
+                "messages": [],
+                "max_tokens": 1,
+                "tools": None,
+                "tool_choice": None,
+                "response_format": None,
+                "context": None,
+                "recovery": None,
+                "test_provider_response": _test_response(),
+            }
+        )
+
+    assert not authority.is_alive
+    assert not authority.is_usable
 
 
 def test_test_root_initializer_cannot_relabel_the_canonical_production_root() -> None:

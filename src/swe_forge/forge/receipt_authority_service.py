@@ -38,6 +38,7 @@ ROOT_NAME = "authority-v1.json"
 TEST_MARKER_NAME = "test-authority-v1.json"
 PRODUCTION_MARKER_NAME = "production-authority-v1.json"
 TRUST_DOMAINS = frozenset(("production", "test"))
+_CANONICAL_PRODUCTION_ROOT = Path("/var/lib/swe_forge/teacher-receipt-authority")
 _SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SAFE_FINISH_REASONS = frozenset(
     ("stop", "length", "tool_calls", "function_call", "content_filter")
@@ -168,6 +169,10 @@ def _write_json_exclusive(root_fd: int, name: str, payload: dict[str, object]) -
 
 def initialize_test_root(root: Path) -> None:
     """Create a non-production root marker used only by hermetic tests."""
+    if root.absolute() == _CANONICAL_PRODUCTION_ROOT:
+        raise AuthorityServiceError(
+            "the canonical production root cannot be initialized as a test root"
+        )
     root_fd = _open_root(root, create=True)
     try:
         if _safe_file(root_fd, ROOT_NAME):
@@ -275,12 +280,23 @@ def _public_metadata(
 
 
 def _require_pinned_key(
-    root: Path, private_key: Ed25519PrivateKey
+    root: Path,
+    private_key: Ed25519PrivateKey,
+    *,
+    allow_production_bootstrap: bool = False,
 ) -> tuple[str, str, str]:
-    """Pin this child key once, then reject any replacement or restart."""
-    root_fd = _open_root(root, create=True)
+    """Pin an authority key, allowing first-write production only in main()."""
+    root_was_present = root.exists()
+    root_fd = _open_root(
+        root,
+        create=allow_production_bootstrap and not root_was_present,
+    )
     try:
-        environment = _root_environment(root_fd, create_production=True)
+        initializing_production = allow_production_bootstrap and not root_was_present
+        environment = _root_environment(
+            root_fd,
+            create_production=initializing_production,
+        )
         _require_public_root_contents(root_fd, environment)
         root_id = _root_identity(root, environment)
         public_key = _public_key_bytes(private_key)
@@ -291,6 +307,8 @@ def _require_pinned_key(
         )
         metadata_exists = _safe_file(root_fd, ROOT_NAME)
         if not metadata_exists:
+            if environment == "production" and not initializing_production:
+                raise AuthorityServiceError("authority root is incomplete")
             try:
                 _write_json_exclusive(root_fd, ROOT_NAME, expected)
             except FileExistsError:
@@ -687,12 +705,21 @@ def _send(connection: Connection, payload: dict[str, object]) -> None:
     connection.send_bytes(encoded)
 
 
-def _run_authority(connection: Connection, root_text: str) -> None:
+def _run_authority(
+    connection: Connection,
+    root_text: str,
+    *,
+    allow_production_bootstrap: bool = False,
+) -> None:
     """Run the child-only provider transport and Ed25519 receipt authority."""
     try:
         root = Path(root_text)
         private_key = Ed25519PrivateKey.generate()
-        key_id, environment, root_id = _require_pinned_key(root, private_key)
+        key_id, environment, root_id = _require_pinned_key(
+            root,
+            private_key,
+            allow_production_bootstrap=allow_production_bootstrap,
+        )
         _send(
             connection,
             {
@@ -820,10 +847,12 @@ def _consume_bootstrap_fd(descriptor: int) -> None:
     return None
 
 
-# The service loop exists only in the executable module instance. Importing this
-# module cannot recover a callable loop or bootstrap production authority state.
+# The service loop and production-root writer exist only in the executable
+# module instance. Imports retain the explicit test-root initializer but cannot
+# reach a production bootstrap helper or signer loop.
 if __name__ != "__main__":
     del _run_authority
+    del _require_pinned_key
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -841,9 +870,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         root = Path(args.root).absolute()
-        if args.domain == "production" and root != Path(
-            "/var/lib/swe_forge/teacher-receipt-authority"
-        ):
+        if args.domain == "production" and root != _CANONICAL_PRODUCTION_ROOT:
             return 3
         if args.domain == "test":
             root_fd = _open_root(root, create=False)
@@ -854,7 +881,11 @@ def main(argv: list[str] | None = None) -> int:
                 os.close(root_fd)
         _consume_bootstrap_fd(args.bootstrap_fd)
         read_write, _ = _stdio_connection()
-        _run_authority(read_write, str(root))
+        _run_authority(
+            read_write,
+            str(root),
+            allow_production_bootstrap=args.domain == "production",
+        )
         return 0
     except Exception:
         return 1
