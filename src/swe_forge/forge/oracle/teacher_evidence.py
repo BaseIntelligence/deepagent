@@ -9,6 +9,8 @@ responses, source text, endpoint URLs, or credentials.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import hashlib
+import json
 from typing import Iterable, Literal
 
 from swe_forge.forge.teacher import (
@@ -509,6 +511,38 @@ def _receipt_issue_for_call(
         or float(receipt.cost) != float(cost)
     ):
         return "teacher transport receipt cost mismatches"
+    recovery_accounting = call.get("recovery_accounting")
+    if recovery_accounting is None:
+        expected_ledger_linkages = {"not_applicable"}
+    elif isinstance(recovery_accounting, dict):
+        logical_call_id = recovery_accounting.get("logical_call_id")
+        physical_calls = recovery_accounting.get("physical_calls")
+        expected_ledger_linkages = set()
+        if isinstance(logical_call_id, str) and isinstance(physical_calls, list):
+            for physical_call in physical_calls:
+                if not isinstance(physical_call, dict):
+                    continue
+                linkage = {
+                    "logical_call_id": logical_call_id,
+                    "physical_call_id": physical_call.get("physical_call_id"),
+                    "stage": physical_call.get("stage"),
+                    "model": physical_call.get("model"),
+                    "retry": physical_call.get("retry"),
+                }
+                expected_ledger_linkages.add(
+                    hashlib.sha256(
+                        json.dumps(
+                            linkage,
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ).encode("utf-8")
+                    ).hexdigest()
+                )
+    else:  # pragma: no cover - _safe_record rejects it before receipt validation
+        return "teacher transport receipt ledger linkage is malformed"
+    if receipt.ledger_linkage not in expected_ledger_linkages:
+        return "teacher transport receipt ledger linkage mismatches"
     if candidate is not None:
         try:
             if receipt.candidate_fingerprint != _candidate_fingerprint(candidate):

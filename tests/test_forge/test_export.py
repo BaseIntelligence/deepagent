@@ -329,6 +329,7 @@ def _calibration(*, keep: bool = True) -> CalibrationReport:
 
 
 def _request(**overrides: object) -> ExportRequest:
+    include_teacher_evidence = bool(overrides.pop("include_teacher_evidence", True))
     fields: dict[str, object] = {
         "candidate": _candidate(),
         "spec": _spec(),
@@ -338,10 +339,16 @@ def _request(**overrides: object) -> ExportRequest:
         "repo_url": "https://github.com/acme/demo.git",
     }
     fields.update(overrides)
-    _attach_transport_receipts(
-        fields["oracle_report"],  # type: ignore[arg-type]
-        fields["candidate"],  # type: ignore[arg-type]
-    )
+    report = fields["oracle_report"]
+    if include_teacher_evidence:
+        _attach_transport_receipts(
+            report,  # type: ignore[arg-type]
+            fields["candidate"],  # type: ignore[arg-type]
+        )
+    else:
+        assert isinstance(report, OracleReport)
+        report.details.pop("teacher_gates", None)
+        report.protected_teacher_transport_receipts = []
     return ExportRequest(**fields)  # type: ignore[arg-type]
 
 
@@ -1137,13 +1144,15 @@ import sys
 from pathlib import Path
 
 from tests.test_forge.test_export import _task
+from swe_forge.forge import receipt_authority
 from swe_forge.forge import export as export_mod
 from swe_forge.forge.export import export_forge_task
 
+receipt_authority.default_authority_root = lambda: Path(
+    os.environ["SWE_FORGE_TEST_RECEIPT_AUTHORITY_ROOT"]
+)
 tasks_root = Path(sys.argv[1])
 boundary = sys.argv[2]
-successor = _task()
-successor.spec.problem_statement = "A distinct replacement workspace."
 original_replace = export_mod.os.replace
 
 def replace(source, destination):
@@ -1160,6 +1169,13 @@ def replace(source, destination):
     return result
 
 export_mod.os.replace = replace
+# This subprocess deliberately has no private authority after exec.  Bypass
+# receipt validation only in this transaction-boundary probe; authority
+# validity is exercised independently in this process and must fail closed
+# after a real authority restart.
+export_mod.ensure_oracle_exportable = lambda *_args, **_kwargs: None
+successor = _task(include_teacher_evidence=False)
+successor.spec.problem_statement = "A distinct replacement workspace."
 export_forge_task(successor, tasks_root, overwrite=True)
 """
     child = subprocess.run(
@@ -1184,7 +1200,10 @@ export_forge_task(successor, tasks_root, overwrite=True)
     # A new process ignores abandoned stage directories and reads the selected
     # complete workspace rather than any incomplete staging bytes.
     resumed = export_forge_task(predecessor, tasks_root, overwrite=False)
-    assert resumed.status == "skipped"
+    # The transaction-only child deliberately bypassed authority validation.
+    # If it selected that un-attested successor, a fresh verifier must reject
+    # it rather than treating a prior receipt as reusable.
+    assert resumed.status == ("failed" if expects_successor else "skipped")
     assert _workspace_snapshot(visible) == current_snapshot
 
 

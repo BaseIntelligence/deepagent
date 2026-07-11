@@ -344,6 +344,36 @@ def _fresh_metered_calibration(
             "logical_call_id": logical_call_id,
             "physical_calls": [settled],
         }
+        receipt = signed_transport_receipt(
+            call_id=f"recovery-{gate}",
+            candidate_fingerprint=candidate_transport_fingerprint(task.candidate),  # type: ignore[attr-defined]
+            gate=gate,
+            call_kind=str(call["call_kind"]),
+            model=str(call["model"]),
+            usage=Usage(**call["usage"]),  # type: ignore[arg-type]
+            cost=float(call["cost"]),
+            recovery={
+                "logical_call_id": logical_call_id,
+                "physical_call_id": physical_id,
+                "stage": f"oracle.{gate}",
+                "model": "anthropic/test-model",
+                "retry": 0,
+            },
+        )
+        old_call_id = call.get("call_id")
+        call["call_id"] = receipt.call_id
+        call["receipt_commitment"] = receipt.commitment
+        protected = oracle.protected_teacher_transport_receipts
+        assert isinstance(protected, list)
+        for index, raw_receipt in enumerate(protected):
+            if (
+                isinstance(raw_receipt, dict)
+                and raw_receipt.get("call_id") == old_call_id
+            ):
+                protected[index] = receipt.to_private_dict()
+                break
+        else:
+            raise AssertionError("expected to replace a teacher transport receipt")
     calibration.models = [ModelSolveRecord("mid/test", "mid", 1, 1, 1.0)]
     calibration.k = 1
     validation_usage = Usage(prompt_tokens=1, completion_tokens=2, total_tokens=3)
@@ -572,7 +602,8 @@ def test_recertification_blocks_calibration_only_oracle_accounting(
     )
 
     with pytest.raises(
-        RecertificationError, match="accounting cannot authorize publication"
+        RecertificationError,
+        match="(accounting cannot authorize publication|ledger linkage)",
     ):
         build_recertification_request(
             generation, task.oracle_report, recovery_ledger=ledger

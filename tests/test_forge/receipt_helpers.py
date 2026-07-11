@@ -1,14 +1,33 @@
-"""Private helpers for building signed fixture receipts without live transport."""
+"""Test-only fixtures issued through an isolated child authority."""
 
 from __future__ import annotations
 
 import hashlib
-import json
+import tempfile
+from pathlib import Path
 
 from swe_forge.forge import receipt_authority
 from swe_forge.forge.models import OracleTestFile
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
 from swe_forge.forge.teacher import TransportReceipt, Usage
+
+_authority: receipt_authority.ReceiptAuthorityClient | None = None
+_fallback_root: Path | None = None
+
+
+def configure_test_authority() -> None:
+    """Start a test-root authority session for this test's fixture receipts."""
+    global _authority
+    close_test_authority()
+    _authority = receipt_authority.ReceiptAuthorityClient()
+
+
+def close_test_authority() -> None:
+    """Reap the test authority, if a test configured one."""
+    global _authority
+    if _authority is not None:
+        _authority.close()
+    _authority = None
 
 
 def signed_transport_receipt(
@@ -20,35 +39,56 @@ def signed_transport_receipt(
     model: str,
     usage: Usage,
     cost: float,
+    recovery: dict[str, object] | None = None,
 ) -> TransportReceipt:
-    """Build a valid source-free sidecar fixture using the isolated host issuer."""
-    key_id = receipt_authority.issuer_key_id()
-    claims = {
-        "version": 2,
-        "call_id": call_id,
-        "candidate_fingerprint": candidate_fingerprint,
-        "gate": gate,
-        "call_kind": call_kind,
-        "model": model,
-        "usage": usage.to_dict(),
-        "cost": cost,
-        "issuer_key_id": key_id,
-    }
-    signed_key_id, signature = receipt_authority._sign_claims(
-        json.dumps(claims, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    """Ask the isolated test authority to transport, derive, and sign a receipt."""
+    if _authority is None:
+        # Crash-consistency tests run fixture builders in a fresh Python
+        # process, outside pytest's fixture lifecycle.  Their fallback remains
+        # a process-local test root, never the production root.
+        global _fallback_root
+        _fallback_root = Path(tempfile.mkdtemp(prefix="forge-test-authority-"))
+        receipt_authority.initialize_test_authority_root(_fallback_root)
+        receipt_authority.default_authority_root = lambda: _fallback_root  # type: ignore[assignment]
+        configure_test_authority()
+    assert _authority is not None
+    response = _authority.complete(
+        {
+            "type": "complete",
+            "routing": {
+                "model": model,
+                "api_base": "https://test.invalid",
+                "api_key": "test-only",
+                "num_retries": 0,
+                "timeout": 1.0,
+            },
+            "messages": [],
+            "max_tokens": 1,
+            "tools": None,
+            "tool_choice": None,
+            "response_format": None,
+            "context": {
+                "candidate_fingerprint": candidate_fingerprint,
+                "gate": gate,
+                "call_kind": call_kind,
+            },
+            "recovery": recovery,
+            "test_provider_response": {
+                "text": "test authority fixture",
+                "finish_reason": "stop",
+                "usage": usage.to_dict(),
+                "cost": cost,
+                "request_id": f"fixture-{call_id}",
+            },
+        },
+        timeout=1.0,
     )
-    assert signed_key_id == key_id
-    return TransportReceipt(
-        call_id=call_id,
-        candidate_fingerprint=candidate_fingerprint,
-        gate=gate,
-        call_kind=call_kind,
-        model=model,
-        usage=usage,
-        cost=cost,
-        issuer_key_id=key_id,
-        signature=signature,
-    )
+    raw_receipt = response.get("receipt")
+    receipt = TransportReceipt.from_private_dict(raw_receipt)
+    # The authority controls identifiers. Callers may use their requested value
+    # only as a deterministic provider fixture label, never as a signed claim.
+    assert receipt.candidate_fingerprint == candidate_fingerprint
+    return receipt
 
 
 def protected_alt_correct_audit(

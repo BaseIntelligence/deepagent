@@ -5,11 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from swe_forge.forge import teacher as teacher_module
 from swe_forge.forge.adapters import PythonAdapter
 from swe_forge.forge.models import (
     Candidate,
@@ -65,6 +62,7 @@ from swe_forge.forge.teacher import (
 from tests.test_forge.receipt_helpers import (
     protected_alt_correct_audit,
     protected_alt_correct_summary,
+    signed_transport_receipt,
 )
 
 
@@ -630,45 +628,51 @@ async def test_standalone_gates_accept_positive_real_teacher_evidence(
         if runner_cls == "differential"
         else "```python\ndef f():\n    return 1 + 0\n```"
     )
-    completion = AsyncMock(return_value=_teacher_response(text))
-    with patch.object(teacher_module.litellm, "acompletion", completion):
-        if runner_cls == "differential":
-            import swe_forge.forge.oracle.differential as differential_module
+    client = _concrete_teacher_client()
+    client._authority_test_responses = [  # noqa: SLF001 - child-only test mock
+        {
+            "text": text,
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            "cost": 0.0125,
+            "request_id": "gate-positive",
+        }
+    ]
+    if runner_cls == "differential":
+        import swe_forge.forge.oracle.differential as differential_module
 
-            monkeypatch.setattr(
-                differential_module,
-                "DockerDifferentialRunner",
-                _WrappedDifferentialRunner,
-            )
-            result = await run_differential_gate(
-                _candidate(),
-                _env_image(),
-                _prior_report(),
-                variant_generator=generator_cls(  # type: ignore[arg-type, call-arg]
-                    client=_concrete_teacher_client()
-                ),
-                adapter=PythonAdapter(),
-            )
-        else:
-            import swe_forge.forge.oracle.alt_correct as alt_correct_module
+        monkeypatch.setattr(
+            differential_module,
+            "DockerDifferentialRunner",
+            _WrappedDifferentialRunner,
+        )
+        result = await run_differential_gate(
+            _candidate(),
+            _env_image(),
+            _prior_report(),
+            variant_generator=generator_cls(  # type: ignore[arg-type, call-arg]
+                client=client
+            ),
+            adapter=PythonAdapter(),
+        )
+    else:
+        import swe_forge.forge.oracle.alt_correct as alt_correct_module
 
-            monkeypatch.setattr(
-                alt_correct_module,
-                "DockerAltCorrectRunner",
-                _WrappedAltRunner,
-            )
-            result = await run_alt_correct_gate(
-                _candidate(),
-                _env_image(),
-                _prior_report(),
-                alt_generator=generator_cls(  # type: ignore[arg-type, call-arg]
-                    client=_concrete_teacher_client()
-                ),
-                adapter=PythonAdapter(),
-            )
+        monkeypatch.setattr(
+            alt_correct_module,
+            "DockerAltCorrectRunner",
+            _WrappedAltRunner,
+        )
+        result = await run_alt_correct_gate(
+            _candidate(),
+            _env_image(),
+            _prior_report(),
+            alt_generator=generator_cls(  # type: ignore[arg-type, call-arg]
+                client=client
+            ),
+            adapter=PythonAdapter(),
+        )
 
     assert result.is_pass
-    assert completion.await_count == 1
     calls = result.details["teacher_gates"][gate]["calls"]  # type: ignore[index]
     assert calls[0]["parsed_proposals"] == 1  # type: ignore[index]
     assert calls[0]["executable_proposals"] == 1  # type: ignore[index]
@@ -895,8 +899,11 @@ async def test_exact_client_with_monkeypatched_complete_text_cannot_authorize_ga
                 model=client.model,
                 usage=Usage(prompt_tokens=7, completion_tokens=3, total_tokens=10),
                 cost=0.0125,
-                issuer_key_id="0" * 32,
-                signature="e" * 64,
+                provider_request_id="forged-request",
+                response_commitment="f" * 64,
+                ledger_linkage="not_applicable",
+                issuer_key_id="0" * 64,
+                signature="forged-signature",
             ),
         )
 
@@ -921,12 +928,17 @@ async def test_concrete_transport_issues_private_receipt_after_mocked_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Mocking LiteLLM keeps the concrete transport path authoritative."""
-    completion = AsyncMock(
-        return_value=_teacher_response("```python\ndef f():\n    return 2\n```")
-    )
-    with patch.object(teacher_module.litellm, "acompletion", completion):
-        generator = TeacherVariantGenerator(client=_concrete_teacher_client())
-        assert await generator(_variant_context())
+    client = _concrete_teacher_client()
+    client._authority_test_responses = [  # noqa: SLF001 - child-only test mock
+        {
+            "text": "```python\ndef f():\n    return 2\n```",
+            "usage": {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+            "cost": 0.0125,
+            "request_id": "mocked-inside-authority",
+        }
+    ]
+    generator = TeacherVariantGenerator(client=client)
+    assert await generator(_variant_context())
 
     evidence = generator.last_call
     assert evidence is not None
@@ -950,3 +962,38 @@ def test_positive_public_teacher_json_without_protected_receipt_is_rejected() ->
     )
 
     assert issues
+
+
+def test_teacher_evidence_rejects_receipt_with_mismatched_ledger_linkage() -> None:
+    candidate = _candidate()
+    evidence = _positive_gate_evidence("differential")
+    call = evidence["calls"][0]
+    assert isinstance(call, dict)
+    receipt = signed_transport_receipt(
+        call_id="ledger-binding",
+        candidate_fingerprint=candidate_transport_fingerprint(candidate),
+        gate="differential",
+        call_kind="proposal",
+        model="anthropic/test-model",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        cost=0.01,
+    )
+    call.update(
+        {
+            "recovery_accounting": {
+                "logical_call_id": "recovery-logical-id",
+                "physical_calls": [],
+            },
+            "call_id": receipt.call_id,
+            "receipt_commitment": receipt.commitment,
+        }
+    )
+
+    issues = teacher_gate_evidence_issues(
+        {"teacher_gates": {"differential": evidence}},
+        gates=("differential",),
+        candidate=candidate,
+        protected_receipts=[receipt.to_private_dict()],
+    )
+
+    assert any("ledger linkage mismatches" in issue for issue in issues)

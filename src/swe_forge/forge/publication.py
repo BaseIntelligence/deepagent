@@ -127,7 +127,7 @@ def _canonical_task_payload(task: ForgeTask) -> str:
             return {
                 key: _without_timestamps(item)
                 for key, item in value.items()
-                if key != "created_at"
+                if key not in {"created_at", "call_id", "receipt_commitment"}
             }
         if isinstance(value, list):
             return [_without_timestamps(item) for item in value]

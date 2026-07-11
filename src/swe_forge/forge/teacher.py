@@ -1,9 +1,10 @@
 """LiteLLM-based async teacher client for the forge pipeline.
 
 The teacher is the single LLM surface used to author bugs, specs, and tests. It
-talks to an OpenAI- or Anthropic-compatible endpoint exclusively through
-``litellm.acompletion``; it never imports the repository's bespoke LLM clients
-or response cache, and no provider hostname/brand string is hardcoded here.
+proxies every provider request through an isolated receipt-authority child,
+which alone invokes ``litellm.acompletion``. It never imports the repository's
+bespoke LLM clients or response cache, and no provider hostname/brand string is
+hardcoded here.
 
 Routing is driven by the provider-prefixed model id:
 
@@ -11,11 +12,10 @@ Routing is driven by the provider-prefixed model id:
   ``/v1``); LiteLLM appends ``/v1/messages`` itself.
 * ``openai/<id>`` -> ``api_base`` is ``<base>/v1`` (exactly one ``/v1``).
 
-Endpoint credentials and a per-call no-cache directive are passed as arguments to
-every call; no mutable ``litellm.*`` global is ever written (apart from the
-required ``litellm.drop_params`` flag). Every call passes ``max_tokens`` and is
-bounded by retries + a timeout. Missing credentials fail fast with a message that
-names the absent environment variable and never echoes the key.
+Endpoint credentials and a per-call no-cache directive traverse only bounded
+local IPC to the child. Every call passes ``max_tokens`` and is bounded by
+retries + a timeout. Missing credentials fail fast with a message that names the
+absent environment variable and never echoes the key.
 """
 
 from __future__ import annotations
@@ -26,31 +26,18 @@ import hashlib
 import json
 import math
 from decimal import Decimal, InvalidOperation
-import os
 import uuid
-import weakref
+from types import SimpleNamespace
 from collections.abc import Awaitable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Union
 
-# LiteLLM auto-loads a local .env on import while in its default "DEV" mode. That
-# would repopulate credentials from .env even after an explicit `env -u`, which
-# defeats fail-fast on missing credentials. Credentials must come from the
-# process environment only, so disable the implicit .env load before importing.
-os.environ.setdefault("LITELLM_MODE", "PRODUCTION")
-
-import litellm  # noqa: E402  (must follow the LITELLM_MODE guard above)
-
 from swe_forge.forge.config import ForgeSettings  # noqa: E402
-from swe_forge.forge import receipt_authority  # noqa: E402
+from swe_forge.forge import receipt_authority
 
 if TYPE_CHECKING:
     from swe_forge.forge.recovery_accounting import RecoveryBudgetLedger
-
-# Drop provider-incompatible params instead of erroring (e.g. an unsupported
-# sampling field on one of the two protocols). Required by the LLM contract.
-litellm.drop_params = True
 
 # Environment variable names surfaced in fail-fast messages (no values logged).
 TEACHER_BASE_URL_VAR = "TEACHER_LLM_BASE_URL"
@@ -84,6 +71,15 @@ class ModelRoutingError(TeacherError):
 
 class UnknownBillingError(TeacherError):
     """Raised when a possibly-sent request has no exact provider metering."""
+
+
+class _AuthorityProviderError(TeacherError):
+    """Child-reported provider error retaining only an exact safe response."""
+
+    def __init__(self, error_type: str, response: object) -> None:
+        self.response = response
+        self.error_type = error_type
+        super().__init__(error_type)
 
 
 @dataclass
@@ -195,13 +191,7 @@ ToolExecutor = Callable[[NormalizedToolCall], Union[str, Awaitable[str]]]
 
 @dataclass(frozen=True)
 class TransportReceipt:
-    """Private proof that the concrete teacher transport completed one call.
-
-    Receipts deliberately contain only source-free binding claims, the host
-    issuer key id, and an issuer signature. They never retain endpoint details,
-    prompts, responses, credentials, provider payloads, or signing key material.
-    The public record carries only :attr:`commitment`.
-    """
+    """Source-free proof returned only by the isolated transport authority."""
 
     call_id: str
     candidate_fingerprint: str
@@ -210,22 +200,40 @@ class TransportReceipt:
     model: str
     usage: Usage
     cost: float
+    provider_request_id: str
+    response_commitment: str
+    ledger_linkage: str
     issuer_key_id: str
     signature: str
-    version: int = 2
+    version: int = 3
 
     def __post_init__(self) -> None:
-        if self.version != 2:
+        if self.version != 3:
             raise TeacherError("transport receipt version is unsupported")
-        if len(self.call_id) != 32 or any(
-            ch not in "0123456789abcdef" for ch in self.call_id
+        for field_name, length in (
+            ("call_id", 32),
+            ("candidate_fingerprint", 64),
+            ("response_commitment", 64),
+            ("issuer_key_id", 64),
         ):
-            raise TeacherError("transport receipt call id is malformed")
-        if len(self.candidate_fingerprint) != 64 or any(
-            ch not in "0123456789abcdef" for ch in self.candidate_fingerprint
+            value = getattr(self, field_name)
+            if (
+                not isinstance(value, str)
+                or len(value) != length
+                or any(ch not in "0123456789abcdef" for ch in value)
+            ):
+                raise TeacherError(f"transport receipt {field_name} is malformed")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                self.gate,
+                self.call_kind,
+                self.model,
+                self.provider_request_id,
+                self.ledger_linkage,
+                self.signature,
+            )
         ):
-            raise TeacherError("transport receipt candidate fingerprint is malformed")
-        if not self.gate or not self.call_kind or not self.model:
             raise TeacherError("transport receipt binding is incomplete")
         if (
             not isinstance(self.cost, (int, float))
@@ -234,14 +242,6 @@ class TransportReceipt:
             or float(self.cost) < 0.0
         ):
             raise TeacherError("transport receipt cost is malformed")
-        if len(self.issuer_key_id) != 32 or any(
-            ch not in "0123456789abcdef" for ch in self.issuer_key_id
-        ):
-            raise TeacherError("transport receipt issuer key id is malformed")
-        if len(self.signature) != 64 or any(
-            ch not in "0123456789abcdef" for ch in self.signature
-        ):
-            raise TeacherError("transport receipt signature is malformed")
 
     def _signed_claims_payload(self) -> dict[str, object]:
         return {
@@ -253,33 +253,29 @@ class TransportReceipt:
             "model": self.model,
             "usage": self.usage.to_dict(),
             "cost": float(self.cost),
+            "provider_request_id": self.provider_request_id,
+            "response_commitment": self.response_commitment,
+            "ledger_linkage": self.ledger_linkage,
             "issuer_key_id": self.issuer_key_id,
         }
 
     def _canonical_claims(self) -> bytes:
         return json.dumps(
-            self._signed_claims_payload(),
-            sort_keys=True,
-            separators=(",", ":"),
+            self._signed_claims_payload(), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
 
     @property
     def commitment(self) -> str:
-        """Return the safe public commitment binding this private receipt."""
         encoded = json.dumps(
-            self.to_private_dict(),
-            sort_keys=True,
-            separators=(",", ":"),
+            self.to_private_dict(), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
     def to_private_dict(self) -> dict[str, object]:
-        """Serialize the protected, source-free sidecar representation."""
         return {**self._signed_claims_payload(), "signature": self.signature}
 
     @classmethod
     def from_private_dict(cls, data: object) -> "TransportReceipt":
-        """Parse one exact, source-free private receipt schema."""
         if not isinstance(data, dict):
             raise TeacherError("transport receipt is not an object")
         expected = {
@@ -291,6 +287,9 @@ class TransportReceipt:
             "model",
             "usage",
             "cost",
+            "provider_request_id",
+            "response_commitment",
+            "ledger_linkage",
             "issuer_key_id",
             "signature",
         }
@@ -309,25 +308,16 @@ class TransportReceipt:
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise TeacherError("transport receipt usage is malformed")
             values[field_name] = value
-        version = data["version"]
-        if not isinstance(version, int) or isinstance(version, bool):
+        if not isinstance(data["version"], int) or isinstance(data["version"], bool):
             raise TeacherError("transport receipt version is malformed")
-        for field_name in (
-            "call_id",
-            "candidate_fingerprint",
-            "gate",
-            "call_kind",
-            "model",
-            "issuer_key_id",
-            "signature",
-        ):
+        for field_name in expected - {"version", "usage", "cost"}:
             if not isinstance(data[field_name], str):
                 raise TeacherError("transport receipt binding is malformed")
         cost = data["cost"]
         if not isinstance(cost, (int, float)) or isinstance(cost, bool):
             raise TeacherError("transport receipt cost is malformed")
         return cls(
-            version=version,
+            version=data["version"],
             call_id=data["call_id"],
             candidate_fingerprint=data["candidate_fingerprint"],
             gate=data["gate"],
@@ -335,6 +325,9 @@ class TransportReceipt:
             model=data["model"],
             usage=Usage(**values),
             cost=float(cost),
+            provider_request_id=data["provider_request_id"],
+            response_commitment=data["response_commitment"],
+            ledger_linkage=data["ledger_linkage"],
             issuer_key_id=data["issuer_key_id"],
             signature=data["signature"],
         )
@@ -351,7 +344,7 @@ def verify_transport_receipt(receipt: TransportReceipt | None) -> bool:
 
 @dataclass(frozen=True)
 class _TransportReceiptContext:
-    """Request-local authority binding supplied by a concrete gate generator."""
+    """Request binding supplied to the child after a gate selects a candidate."""
 
     candidate_fingerprint: str
     gate: str
@@ -361,22 +354,11 @@ class _TransportReceiptContext:
 _TRANSPORT_RECEIPT_CONTEXT: contextvars.ContextVar[_TransportReceiptContext | None] = (
     contextvars.ContextVar("forge_teacher_transport_receipt_context", default=None)
 )
-_CONCRETE_PROVIDER_RETURN: contextvars.ContextVar[object | None] = (
-    contextvars.ContextVar("forge_teacher_concrete_provider_return", default=None)
-)
-_PROVIDER_RETURN_CAPABILITY = object()
-_ISSUED_TRANSPORT_RECEIPTS: weakref.WeakValueDictionary[int, TransportReceipt] = (
-    weakref.WeakValueDictionary()
-)
 
 
 def is_authoritative_transport_receipt(receipt: TransportReceipt | None) -> bool:
-    """Return whether this exact receipt was minted by concrete transport."""
-    return (
-        receipt is not None
-        and _ISSUED_TRANSPORT_RECEIPTS.get(id(receipt)) is receipt
-        and verify_transport_receipt(receipt)
-    )
+    """A signature rooted in the durable public key is the sole authority test."""
+    return receipt is not None and verify_transport_receipt(receipt)
 
 
 def candidate_transport_fingerprint(candidate: object) -> str:
@@ -388,10 +370,7 @@ def candidate_transport_fingerprint(candidate: object) -> str:
         )
     try:
         encoded = json.dumps(
-            to_dict(),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
+            to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise TeacherError(
@@ -402,18 +381,9 @@ def candidate_transport_fingerprint(candidate: object) -> str:
 
 @contextmanager
 def transport_receipt_context(
-    candidate: object,
-    *,
-    gate: str,
-    call_kind: str,
+    candidate: object, *, gate: str, call_kind: str
 ) -> Iterator[None]:
-    """Authorize receipt issuance for exactly one concrete transport call.
-
-    Gate generators set this request-local context immediately around their
-    class-owned ``TeacherClient.complete_text`` call. A fake or monkeypatched
-    outer helper cannot manufacture a receipt because issuance occurs only in
-    :meth:`TeacherClient._acompletion` after LiteLLM returns.
-    """
+    """Bind a request to a candidate, gate, and call kind for child attestation."""
     if not isinstance(gate, str) or not gate.strip():
         raise TeacherError("teacher transport receipt requires a non-empty gate")
     if not isinstance(call_kind, str) or not call_kind.strip():
@@ -496,10 +466,7 @@ def _cost_from_response(resp: Any) -> float:
     hidden = getattr(resp, "_hidden_params", None) or {}
     cost = hidden.get("response_cost") if isinstance(hidden, dict) else None
     if cost is None:
-        try:
-            cost = litellm.completion_cost(completion_response=resp)
-        except Exception:
-            cost = 0.0
+        cost = 0.0
     try:
         return float(cost or 0.0)
     except (TypeError, ValueError):
@@ -597,6 +564,7 @@ class TeacherClient:
         recovery_ledger: RecoveryBudgetLedger | None = None,
         recovery_stage: str = "",
         recovery_logical_call_id: str = "",
+        authority_test_responses: Sequence[dict[str, object]] | None = None,
     ) -> None:
         self.base_url = (base_url or "").strip()
         self.api_key = api_key or ""
@@ -613,6 +581,10 @@ class TeacherClient:
         self.last_agentic_recovery_accounting: list[dict[str, object]] = []
         self._recovery_history: list[dict[str, object]] = []
         self._recovery_invocations = 0
+        self._authority = receipt_authority.acquire_shared_authority(
+            request_timeout=timeout
+        )
+        self._authority_test_responses = list(authority_test_responses or ())
         if self._recovery_ledger is not None and not self._recovery_stage:
             raise TeacherError(
                 "recovery_stage is required when a recovery budget ledger is active"
@@ -684,43 +656,40 @@ class TeacherClient:
         response_format: dict[str, Any] | None = None,
         max_tokens: int | None = None,
     ) -> Any:
-        """The single LiteLLM call surface; credentials/no-cache passed per call."""
+        """Proxy one completion to the isolated authority over bounded IPC."""
         self._require_credentials()
         routing = self.routing
-        kwargs: dict[str, Any] = {
-            "model": routing.model,
-            "api_base": routing.api_base,
-            "api_key": self.api_key,
-            "messages": messages,
-            "max_tokens": max_tokens or self.max_tokens,
-            "cache": {"no-cache": True, "no-store": True},
-            "num_retries": self.num_retries,
-            "timeout": self.timeout,
-        }
-        if tools is not None:
-            kwargs["tools"] = tools
-            if tool_choice is not None:
-                kwargs["tool_choice"] = tool_choice
-        if response_format is not None:
-            kwargs["response_format"] = response_format
+        context = _TRANSPORT_RECEIPT_CONTEXT.get()
+        request_context = (
+            {
+                "candidate_fingerprint": context.candidate_fingerprint,
+                "gate": context.gate,
+                "call_kind": context.call_kind,
+            }
+            if context is not None
+            else None
+        )
         if self._recovery_ledger is None:
-            response = await litellm.acompletion(**kwargs)
-            token = _CONCRETE_PROVIDER_RETURN.set(_PROVIDER_RETURN_CAPABILITY)
-            try:
-                _issue_transport_receipt_after_provider_return(
-                    response,
-                    context=_TRANSPORT_RECEIPT_CONTEXT.get(),
-                    model=routing.model,
-                    client_type=type(self),
+            payload = await self._authority_complete(
+                self._authority_request(
+                    routing=routing,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    response_format=response_format,
+                    max_tokens=max_tokens or self.max_tokens,
+                    context=request_context,
+                    recovery=None,
+                ),
+                timeout=self.timeout,
+            )
+            if payload.get("type") == "provider_error":
+                raise _AuthorityProviderError(
+                    str(payload.get("error_type", "ProviderError")),
+                    _authority_response(payload),
                 )
-            finally:
-                _CONCRETE_PROVIDER_RETURN.reset(token)
-            return response
+            return _authority_response(payload)
 
-        # LiteLLM's internal retry loop cannot expose each physical provider
-        # attempt. Own recovery retries here so every attempt is pre-reserved
-        # and fsync-settled before a further attempt can occur.
-        kwargs["num_retries"] = 0
         if self._recovery_logical_call_id:
             suffix = self._recovery_invocations
             logical_call_id = (
@@ -739,8 +708,36 @@ class TeacherClient:
                 model=routing.model,
                 retry=retry,
             )
+            recovery = {
+                "logical_call_id": logical_call_id,
+                "physical_call_id": physical_call_id,
+                "stage": self._recovery_stage,
+                "model": routing.model,
+                "retry": retry,
+            }
             try:
-                response = await litellm.acompletion(**kwargs)
+                payload = await self._authority_complete(
+                    self._authority_request(
+                        routing=routing,
+                        messages=messages,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        response_format=response_format,
+                        max_tokens=max_tokens or self.max_tokens,
+                        context=request_context,
+                        recovery=recovery,
+                    ),
+                    timeout=self.timeout,
+                )
+                if (
+                    payload.get("type") == "provider_error"
+                    and payload.get("error_type") != "UnsafeRequestId"
+                ):
+                    raise _AuthorityProviderError(
+                        str(payload.get("error_type", "ProviderError")),
+                        _authority_response(payload),
+                    )
+                response: Any = _authority_response(payload)
                 raw_request_id = _response_request_id(response)
                 from swe_forge.forge.recovery_accounting import sanitize_request_id
 
@@ -748,8 +745,7 @@ class TeacherClient:
                 metering = _exact_response_metering(response)
                 if metering is None:
                     self._recovery_ledger.mark_unknown_billing(
-                        physical_call_id,
-                        error_type="MissingExactProviderMetering",
+                        physical_call_id, error_type="MissingExactProviderMetering"
                     )
                     raise UnknownBillingError(
                         "recovery request has unknown provider billing"
@@ -762,9 +758,7 @@ class TeacherClient:
                         cost=cost,
                         status="error",
                         error_type=(
-                            "MissingRequestId"
-                            if not raw_request_id
-                            else "UnsafeRequestId"
+                            "UnsafeRequestId" if raw_request_id else "MissingRequestId"
                         ),
                     )
                     raise TeacherError(
@@ -784,28 +778,14 @@ class TeacherClient:
                 self.last_recovery_accounting = accounting
                 self._recovery_history.append(accounting)
                 _set_recovery_accounting(response, accounting)
-                token = _CONCRETE_PROVIDER_RETURN.set(_PROVIDER_RETURN_CAPABILITY)
-                try:
-                    _issue_transport_receipt_after_provider_return(
-                        response,
-                        context=_TRANSPORT_RECEIPT_CONTEXT.get(),
-                        model=routing.model,
-                        client_type=type(self),
-                    )
-                finally:
-                    _CONCRETE_PROVIDER_RETURN.reset(token)
                 return response
             except asyncio.CancelledError:
                 self._recovery_ledger.mark_unknown_billing(
-                    physical_call_id,
-                    error_type="CancelledError",
+                    physical_call_id, error_type="CancelledError"
                 )
                 raise
             except Exception as exc:
-                from swe_forge.forge.recovery_accounting import (
-                    RecoveryAccountingError,
-                    sanitize_request_id,
-                )
+                from swe_forge.forge.recovery_accounting import RecoveryAccountingError
 
                 settled = {
                     record["physical_call_id"]
@@ -813,38 +793,35 @@ class TeacherClient:
                 }
                 if isinstance(exc, UnknownBillingError):
                     raise
-                try:
-                    if physical_call_id not in settled:
-                        response = _response_from_exception(exc)
-                        metering = (
-                            _exact_response_metering(response)
-                            if response is not None
-                            else None
+                if physical_call_id not in settled:
+                    response = _response_from_exception(exc)
+                    metering = (
+                        _exact_response_metering(response)
+                        if response is not None
+                        else None
+                    )
+                    if metering is None:
+                        self._recovery_ledger.mark_unknown_billing(
+                            physical_call_id, error_type=type(exc).__name__
                         )
-                        if metering is None:
-                            self._recovery_ledger.mark_unknown_billing(
-                                physical_call_id,
-                                error_type=type(exc).__name__,
-                            )
-                            raise UnknownBillingError(
-                                "recovery request has unknown provider billing"
-                            ) from None
-                        usage, cost = metering
-                        self._recovery_ledger.settle(
-                            physical_call_id,
-                            request_id=sanitize_request_id(
-                                _response_request_id(response)
-                            ),
-                            usage=usage,
-                            cost=cost,
-                            status="error",
-                            error_type=type(exc).__name__,
-                        )
-                except Exception:
-                    # Do not hide a failed settlement behind a retry. The
-                    # original error is no longer safely attributable.
-                    raise
+                        raise UnknownBillingError(
+                            "recovery request has unknown provider billing"
+                        ) from None
+                    usage, cost = metering
+                    from swe_forge.forge.recovery_accounting import sanitize_request_id
 
+                    self._recovery_ledger.settle(
+                        physical_call_id,
+                        request_id=sanitize_request_id(_response_request_id(response)),
+                        usage=usage,
+                        cost=cost,
+                        status="error",
+                        error_type=(
+                            exc.error_type
+                            if isinstance(exc, _AuthorityProviderError)
+                            else type(exc).__name__
+                        ),
+                    )
                 if isinstance(exc, RecoveryAccountingError):
                     self.last_recovery_accounting = _recovery_call_record(
                         self._recovery_ledger, physical_call_id, logical_call_id
@@ -858,6 +835,55 @@ class TeacherClient:
                     self._recovery_history.append(self.last_recovery_accounting)
                     raise
         raise AssertionError("unreachable recovery retry loop")
+
+    async def _authority_complete(
+        self, request: dict[str, object], *, timeout: float
+    ) -> dict[str, object]:
+        """Use the child-only transport without blocking unrelated coroutines."""
+        try:
+            return await asyncio.to_thread(
+                self._authority.complete, request, timeout=timeout
+            )
+        except receipt_authority.ReceiptAuthorityError as exc:
+            raise TeacherError(str(exc)) from exc
+
+    def _authority_request(
+        self,
+        *,
+        routing: Routing,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None,
+        tool_choice: str | None,
+        response_format: dict[str, Any] | None,
+        max_tokens: int,
+        context: dict[str, str] | None,
+        recovery: dict[str, object] | None,
+    ) -> dict[str, object]:
+        test_response: dict[str, object] | None = None
+        if self._authority_test_responses:
+            test_response = self._authority_test_responses.pop(0)
+        return {
+            "type": "complete",
+            "routing": {
+                "model": routing.model,
+                "api_base": routing.api_base,
+                "api_key": self.api_key,
+                "num_retries": self.num_retries,
+                "timeout": self.timeout,
+            },
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "tools": tools,
+            "tool_choice": tool_choice,
+            "response_format": response_format,
+            "context": context,
+            "recovery": recovery,
+            "test_provider_response": test_response,
+        }
+
+    async def aclose(self) -> None:
+        """Reap the authority child owned by this client."""
+        receipt_authority.release_shared_authority(self._authority)
 
     @staticmethod
     def _result(resp: Any) -> LLMResult:
@@ -1042,56 +1068,73 @@ def is_concrete_teacher_client(client: object) -> bool:
     return type(client) is TeacherClient
 
 
-def _issue_transport_receipt_after_provider_return(
-    response: Any,
-    *,
-    context: _TransportReceiptContext | None,
-    model: str,
-    client_type: type[object],
-) -> None:
-    """Issue only while the exact concrete LiteLLM call has just returned."""
+def _authority_response(payload: dict[str, object]) -> SimpleNamespace:
+    """Convert a child-normalized result without retaining provider response data."""
+    normalized = payload.get("normalized")
+    if not isinstance(normalized, dict):
+        raise TeacherError("teacher receipt authority response is malformed")
+    usage = normalized.get("usage")
+    tool_calls = normalized.get("tool_calls")
     if (
-        _CONCRETE_PROVIDER_RETURN.get() is not _PROVIDER_RETURN_CAPABILITY
-        or context is None
-        or client_type is not TeacherClient
+        not isinstance(usage, dict)
+        or not isinstance(tool_calls, list)
+        or not isinstance(normalized.get("text"), str)
+        or not isinstance(normalized.get("cost"), (int, float))
+        or isinstance(normalized.get("cost"), bool)
+        or not isinstance(normalized.get("provider_request_id"), str)
     ):
-        return
-    issuer_key_id = receipt_authority.issuer_key_id()
-    usage = _usage_from_response(response)
-    cost = _cost_from_response(response)
-    call_id = uuid.uuid4().hex
-    claims = {
-        "version": 2,
-        "call_id": call_id,
-        "candidate_fingerprint": context.candidate_fingerprint,
-        "gate": context.gate,
-        "call_kind": context.call_kind,
-        "model": model,
-        "usage": usage.to_dict(),
-        "cost": cost,
-        "issuer_key_id": issuer_key_id,
-    }
-    encoded = json.dumps(
-        claims,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    key_id, signature = receipt_authority._sign_claims(encoded)
-    if key_id != issuer_key_id:
-        raise TeacherError("teacher receipt issuer key changed during signing")
-    receipt = TransportReceipt(
-        call_id=call_id,
-        candidate_fingerprint=context.candidate_fingerprint,
-        gate=context.gate,
-        call_kind=context.call_kind,
-        model=model,
-        usage=usage,
-        cost=cost,
-        issuer_key_id=key_id,
-        signature=signature,
+        raise TeacherError("teacher receipt authority response is malformed")
+    raw_calls = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            raise TeacherError("teacher receipt authority response is malformed")
+        raw_calls.append(
+            SimpleNamespace(
+                id=call.get("id", ""),
+                function=SimpleNamespace(
+                    name=call.get("name", ""),
+                    arguments=call.get("raw_arguments", ""),
+                ),
+            )
+        )
+    response = SimpleNamespace(
+        id=normalized["provider_request_id"],
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=normalized["text"], tool_calls=raw_calls
+                ),
+                finish_reason=normalized.get("finish_reason"),
+            )
+        ],
+        usage=SimpleNamespace(**usage),
+        _hidden_params={"response_cost": normalized["cost"]},
     )
-    _ISSUED_TRANSPORT_RECEIPTS[id(receipt)] = receipt
-    _set_transport_receipt(response, receipt)
+    receipt_payload = payload.get("receipt")
+    if receipt_payload is not None:
+        receipt = TransportReceipt.from_private_dict(receipt_payload)
+        signed_commitment = normalized.get("response_commitment")
+        normalized_without_commitment = {
+            key: value
+            for key, value in normalized.items()
+            if key != "response_commitment"
+        }
+        computed_commitment = hashlib.sha256(
+            json.dumps(
+                normalized_without_commitment,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        if (
+            not isinstance(signed_commitment, str)
+            or signed_commitment != computed_commitment
+            or receipt.response_commitment != computed_commitment
+        ):
+            raise TeacherError("teacher receipt response commitment mismatches")
+        setattr(response, "_forge_transport_receipt", receipt)
+    return response
 
 
 def _response_request_id(resp: Any) -> str:
@@ -1166,28 +1209,7 @@ def _get_recovery_accounting(resp: Any) -> dict[str, object] | None:
     return None
 
 
-def _set_transport_receipt(resp: Any, receipt: TransportReceipt) -> None:
-    """Attach a private receipt without putting it in public result metadata."""
-    try:
-        setattr(resp, "_forge_transport_receipt", receipt)
-        return
-    except (AttributeError, TypeError):
-        pass
-    hidden = getattr(resp, "_hidden_params", None)
-    if isinstance(hidden, dict):
-        hidden["_forge_transport_receipt"] = receipt
-        return
-    raise TeacherError("cannot retain required transport receipt on LLM response")
-
-
 def _get_transport_receipt(resp: Any) -> TransportReceipt | None:
-    """Read the in-memory receipt only from supported trusted response shapes."""
-    direct = getattr(resp, "_forge_transport_receipt", None)
-    if isinstance(direct, TransportReceipt):
-        return direct
-    hidden = getattr(resp, "_hidden_params", None)
-    if isinstance(hidden, dict):
-        value = hidden.get("_forge_transport_receipt")
-        if isinstance(value, TransportReceipt):
-            return value
-    return None
+    """Read the source-free receipt returned by the isolated authority."""
+    receipt = getattr(resp, "_forge_transport_receipt", None)
+    return receipt if isinstance(receipt, TransportReceipt) else None

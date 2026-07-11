@@ -2630,12 +2630,25 @@ def test_sigterm_drains_accepted_keep_before_run_root_cleanup(
     ],
 )
 def test_sigkill_publication_boundaries_recover_complete_generation(
-    tmp_path: Path, boundary: str, expected_count: int
+    tmp_path: Path,
+    boundary: str,
+    expected_count: int,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A hard kill exposes only the old or complete new publication generation."""
     from tests.test_forge.test_export import _request as export_request
+    from swe_forge.forge import export as export_mod
+    from swe_forge.forge import publication as publication_mod
 
-    first = export_batch([export_request()], tmp_path, overwrite=True)
+    monkeypatch.setattr(
+        export_mod, "ensure_oracle_exportable", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        publication_mod, "ensure_oracle_exportable", lambda *_args, **_kwargs: None
+    )
+    first = export_batch(
+        [export_request(include_teacher_evidence=False)], tmp_path, overwrite=True
+    )
     original_ids = {task.id for task in import_jsonl(first.jsonl_path)}
     # The child reconstructs a valid request from the test fixture and kills
     # itself at a real os.replace publication boundary. It never touches Docker.
@@ -2644,9 +2657,14 @@ import os
 import sys
 from pathlib import Path
 from tests.test_forge.test_export import _request, _candidate
+from swe_forge.forge import receipt_authority
 from swe_forge.forge import publication
+from swe_forge.forge import export as export_mod
 from swe_forge.forge.export import export_batch
 
+receipt_authority.default_authority_root = lambda: Path(
+    os.environ["SWE_FORGE_TEST_RECEIPT_AUTHORITY_ROOT"]
+)
 out = Path(sys.argv[1])
 boundary = sys.argv[2]
 original = publication.os.replace
@@ -2665,8 +2683,17 @@ def replace(source, destination):
     return result
 
 publication.os.replace = replace
+export_mod.ensure_oracle_exportable = lambda *_args, **_kwargs: None
+publication.ensure_oracle_exportable = lambda *_args, **_kwargs: None
 export_batch(
-    [_request(), _request(candidate=_candidate(seed=313), repo_url="https://github.com/acme/second.git")],
+    [
+        _request(include_teacher_evidence=False),
+        _request(
+            candidate=_candidate(seed=313),
+            repo_url="https://github.com/acme/second.git",
+            include_teacher_evidence=False,
+        ),
+    ],
     out,
     overwrite=True,
 )

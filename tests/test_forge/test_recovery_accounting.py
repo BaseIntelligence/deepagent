@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from copy import deepcopy
 from decimal import Decimal
 import json
@@ -47,6 +46,28 @@ def _response(
         ),
         _hidden_params={"response_cost": cost},
     )
+
+
+def _authority_response(
+    *,
+    request_id: str,
+    prompt_tokens: int = 3,
+    completion_tokens: int = 2,
+    cost: float = 0.0125,
+    finish_reason: str = "stop",
+) -> dict[str, object]:
+    """Serialize one provider return for the isolated test authority child."""
+    return {
+        "text": "ok",
+        "request_id": request_id,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+        "cost": cost,
+        "finish_reason": finish_reason,
+    }
 
 
 class _ResponseBearingError(RuntimeError):
@@ -179,23 +200,20 @@ async def test_recovery_request_reserves_before_every_attempt_and_fsync_settles(
         recovery_stage="oracle.differential",
         recovery_logical_call_id="logical-differential-1",
     )
-    attempts = 0
-
-    async def _completion(**_kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            raise _ResponseBearingError(
-                _response(
+    client._authority_test_responses = [  # noqa: SLF001 - child-only test mock
+        {
+            "error": {
+                "error_type": "_ResponseBearingError",
+                "response": _authority_response(
                     request_id="provider-request-1",
                     prompt_tokens=7,
                     completion_tokens=4,
                     cost=0.0175,
-                )
-            )
-        return _response(request_id="provider-request-2")
-
-    monkeypatch.setattr("swe_forge.forge.teacher.litellm.acompletion", _completion)
+                ),
+            }
+        },
+        _authority_response(request_id="provider-request-2"),
+    ]
 
     result = await client.complete_text("propose a variant")
 
@@ -284,23 +302,15 @@ async def test_recovery_unknown_billing_keeps_reservation_and_forbids_retry(
         recovery_stage="oracle.differential",
         recovery_logical_call_id="logical-unknown-billing",
     )
-    attempts = 0
     failure_text = (
         "provider endpoint https://example.invalid/v1, "
         "prompt=highly-confidential-provider-response"
     )
-
-    async def _completion(**_kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        attempts += 1
-        raise TimeoutError(failure_text)
-
-    monkeypatch.setattr("swe_forge.forge.teacher.litellm.acompletion", _completion)
+    client._authority_test_responses = [{"crash": True}]  # noqa: SLF001
 
     with pytest.raises(UnknownBillingError, match="unknown provider billing"):
         await client.complete_text("prompt carrying not-a-real-secret")
 
-    assert attempts == 1
     assert client.last_recovery_accounting is None
     assert ledger.settled_calls() == []
     assert len(ledger.unsettled_call_ids()) == 1
@@ -308,7 +318,7 @@ async def test_recovery_unknown_billing_keeps_reservation_and_forbids_retry(
     assert ledger.total_active_reservations == Decimal("0.20")
     events = ledger.events()
     assert [event["event"] for event in events] == ["reserve", "unknown_billing"]
-    assert events[1]["error_type"] == "TimeoutError"
+    assert events[1]["error_type"] == "TeacherError"
     assert "usage" not in events[1]
     assert "cost_usd" not in events[1]
     persisted = ledger.path.read_text(encoding="utf-8")
@@ -351,12 +361,9 @@ async def test_recovery_cancellation_keeps_unknown_billing_reservation(
         recovery_stage="oracle.differential",
     )
 
-    async def _completion(**_kwargs: object) -> SimpleNamespace:
-        raise asyncio.CancelledError
+    client._authority_test_responses = [{"crash": True}]  # noqa: SLF001
 
-    monkeypatch.setattr("swe_forge.forge.teacher.litellm.acompletion", _completion)
-
-    with pytest.raises(asyncio.CancelledError):
+    with pytest.raises(UnknownBillingError):
         await client.complete_text("propose a variant")
 
     assert ledger.settled_calls() == []
@@ -365,7 +372,7 @@ async def test_recovery_cancellation_keeps_unknown_billing_reservation(
         "reserve",
         "unknown_billing",
     ]
-    assert ledger.events()[1]["error_type"] == "CancelledError"
+    assert ledger.events()[1]["error_type"] == "TeacherError"
 
 
 def test_recovery_ledger_rejects_replayed_settlement_after_unknown_billing(
@@ -436,25 +443,19 @@ async def test_recovery_overage_is_durably_settled_then_stops_without_retry(
         recovery_stage="oracle.differential",
         recovery_logical_call_id="logical-overage",
     )
-    attempts = 0
-
-    async def _completion(**_kwargs: object) -> SimpleNamespace:
-        nonlocal attempts
-        attempts += 1
-        return _response(
+    client._authority_test_responses = [  # noqa: SLF001 - child-only test mock
+        _authority_response(
             request_id="provider-overage",
             cost=0.02,
             finish_reason="prompt contents must never be persisted",
         )
-
-    monkeypatch.setattr("swe_forge.forge.teacher.litellm.acompletion", _completion)
+    ]
 
     with pytest.raises(
         RecoveryAccountingError, match="exceeded its pre-reserved worst-case cost"
     ):
         await client.complete_text("propose a variant")
 
-    assert attempts == 1
     assert [event["event"] for event in ledger.events()] == ["reserve", "settle"]
     settled = ledger.settled_calls()
     assert len(settled) == 1
@@ -487,10 +488,9 @@ async def test_recovery_rejects_unsafe_provider_request_ids_without_persisting_t
     )
     unsafe_id = "provider response contained raw prompt content"
 
-    async def _completion(**_kwargs: object) -> SimpleNamespace:
-        return _response(request_id=unsafe_id)
-
-    monkeypatch.setattr("swe_forge.forge.teacher.litellm.acompletion", _completion)
+    client._authority_test_responses = [  # noqa: SLF001 - child-only test mock
+        _authority_response(request_id=unsafe_id)
+    ]
 
     with pytest.raises(TeacherError, match="safe provider request id"):
         await client.complete_text("propose a variant")

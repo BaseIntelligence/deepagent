@@ -1055,7 +1055,11 @@ def _direct_facade_target(tasks_root: Path, task_id: str) -> str:
 
 
 def _read_selected_direct_workspace(
-    tasks_root: Path, task: ForgeTask, final_dir: Path
+    tasks_root: Path,
+    task: ForgeTask,
+    final_dir: Path,
+    *,
+    verify_protected_evidence: bool,
 ) -> Path | None:
     """Return the complete direct generation selected by ``current`` if present.
 
@@ -1132,8 +1136,13 @@ def _read_selected_direct_workspace(
     if not isinstance(workspace_data, dict) or workspace_data.get("task_id") != task_id:
         raise ExportError(f"direct export pointer selects the wrong task: {current}")
     _validate_staged_workspace(task, workspace)
-    _read_direct_protected_alt_correct_audit(task, workspace)
-    _read_direct_protected_teacher_receipts(task, workspace)
+    if verify_protected_evidence:
+        _read_direct_protected_alt_correct_audit(task, workspace)
+        _read_direct_protected_teacher_receipts(task, workspace)
+    # An overwrite intentionally supplies a successor report with fresh
+    # one-time receipts. Comparing predecessor sidecars against that successor
+    # would spuriously reject the overwrite and invite receipt reuse, so the
+    # successor is verified before its own sidecars are staged and selected.
 
     if final_exists and final_dir.resolve(strict=True) != workspace:
         raise ExportError(
@@ -1462,7 +1471,12 @@ def export_forge_task(
     generation_committed = False
 
     try:
-        selected = _read_selected_direct_workspace(tasks_path, task, final_dir)
+        selected = _read_selected_direct_workspace(
+            tasks_path,
+            task,
+            final_dir,
+            verify_protected_evidence=not overwrite,
+        )
         if final_exists and not overwrite:
             return TaskExportResult(
                 task_id=task.task_id,
