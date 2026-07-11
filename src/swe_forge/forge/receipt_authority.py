@@ -32,15 +32,27 @@ ROOT_NAME = "authority-v1.json"
 TEST_MARKER_NAME = "test-authority-v1.json"
 PRODUCTION_MARKER_NAME = "production-authority-v1.json"
 TRUST_DOMAINS = frozenset(("production", "test"))
+_CANONICAL_PRODUCTION_ROOT = Path("/var/lib/swe_forge/teacher-receipt-authority")
+
+
+def _canonical_production_root(
+    root: Path = _CANONICAL_PRODUCTION_ROOT,
+) -> Path:
+    """Return the production root captured at import, not a caller selection."""
+    return root
 
 
 def default_authority_root() -> Path:
-    """Return the fixed machine-global public trust-root directory."""
-    return Path("/var/lib/swe_forge/teacher-receipt-authority")
+    """Return the client authority root, which tests may isolate to a test root."""
+    return _canonical_production_root()
 
 
 def initialize_test_authority_root(root: Path | str) -> None:
     """Create a non-production root marker for hermetic child-authority tests."""
+    if Path(root).absolute() == _canonical_production_root():
+        raise ReceiptAuthorityError(
+            "the canonical production root cannot be initialized as a test root"
+        )
     from swe_forge.forge import receipt_authority_service
 
     receipt_authority_service.initialize_test_root(Path(root))
@@ -251,19 +263,30 @@ def _canonical_message(payload: dict[str, object]) -> bytes:
     ).encode("utf-8")
 
 
-def verify_signature(*, key_id: str, claims: bytes, signature: str) -> bool:
-    """Verify against only the Ed25519 key pinned in the durable public root."""
+def _verify_signature_at_root(
+    *,
+    root: Path,
+    required_environment: str,
+    key_id: str,
+    claims: bytes,
+    signature: str,
+    authority_domain: str,
+    authority_root_id: str,
+) -> bool:
+    """Verify a signature only when its signed domain binds the selected root."""
     if (
         not isinstance(key_id, str)
         or len(key_id) != 64
         or any(char not in "0123456789abcdef" for char in key_id)
         or not isinstance(claims, bytes)
         or not isinstance(signature, str)
+        or authority_domain != required_environment
+        or authority_root_id != _root_identity(root, required_environment)
     ):
         return False
     try:
-        pinned_id, public_key, _ = _read_pinned_public_key(default_authority_root())
-        if pinned_id != key_id:
+        pinned_id, public_key, environment = _read_pinned_public_key(root)
+        if pinned_id != key_id or environment != required_environment:
             return False
         decoded_signature = base64.b64decode(signature, validate=True)
         if len(decoded_signature) != 64:
@@ -272,6 +295,48 @@ def verify_signature(*, key_id: str, claims: bytes, signature: str) -> bool:
     except (ReceiptAuthorityError, InvalidSignature, ValueError):
         return False
     return True
+
+
+def verify_signature(
+    *,
+    key_id: str,
+    claims: bytes,
+    signature: str,
+    authority_domain: str | None = None,
+    authority_root_id: str | None = None,
+) -> bool:
+    """Verify only against the hard-pinned production trust domain and identity."""
+    return _verify_signature_at_root(
+        root=Path("/var/lib/swe_forge/teacher-receipt-authority"),
+        required_environment="production",
+        key_id=key_id,
+        claims=claims,
+        signature=signature,
+        authority_domain=authority_domain or "",
+        authority_root_id=authority_root_id or "",
+    )
+
+
+def verify_test_signature(
+    *,
+    root: Path | str,
+    key_id: str,
+    claims: bytes,
+    signature: str,
+    authority_domain: str,
+    authority_root_id: str,
+) -> bool:
+    """Explicitly verify an isolated test-domain receipt, never production data."""
+    test_root = Path(root)
+    return _verify_signature_at_root(
+        root=test_root,
+        required_environment="test",
+        key_id=key_id,
+        claims=claims,
+        signature=signature,
+        authority_domain=authority_domain,
+        authority_root_id=authority_root_id,
+    )
 
 
 class ReceiptAuthorityClient:
@@ -292,6 +357,22 @@ class ReceiptAuthorityClient:
         self._failed = False
         self._closed = False
 
+    def _environment(self) -> str:
+        """Permit only the canonical production root or an existing test root."""
+        root = self._root.absolute()
+        if root == _canonical_production_root():
+            return "production"
+        if not root.exists():
+            raise ReceiptAuthorityError(
+                "non-production authority roots must already be test roots"
+            )
+        environment = _read_root_environment(root)
+        if environment != "test":
+            raise ReceiptAuthorityError(
+                "production authority root must be the canonical root"
+            )
+        return environment
+
     @property
     def is_alive(self) -> bool:
         return self._process is not None and self._process.poll() is None
@@ -306,33 +387,43 @@ class ReceiptAuthorityClient:
             raise ReceiptAuthorityError("teacher receipt authority is unavailable")
         if self._process is not None:
             return
-        environment = "production"
-        if self._root.exists():
-            environment = _read_root_environment(self._root)
-        bootstrap = secrets.token_urlsafe(32)
+        environment = self._environment()
+        bootstrap_read, bootstrap_write = os.pipe()
+        os.set_inheritable(bootstrap_read, True)
+        bootstrap = secrets.token_bytes(32)
         child_environment = {
             "PATH": os.environ.get("PATH", ""),
             "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
             "PYTHONDONTWRITEBYTECODE": "1",
             "LITELLM_MODE": "PRODUCTION",
         }
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "swe_forge.forge.receipt_authority_service",
-                "--root",
-                str(self._root),
-                "--domain",
-                environment,
-                f"--bootstrap={bootstrap}",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            env=child_environment,
-            bufsize=0,
-        )
+        try:
+            os.write(bootstrap_write, bootstrap)
+            os.close(bootstrap_write)
+            bootstrap_write = -1
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "swe_forge.forge.receipt_authority_service",
+                    "--root",
+                    str(self._root),
+                    "--domain",
+                    environment,
+                    "--bootstrap-fd",
+                    str(bootstrap_read),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                env=child_environment,
+                pass_fds=(bootstrap_read,),
+                bufsize=0,
+            )
+        finally:
+            os.close(bootstrap_read)
+            if bootstrap_write >= 0:
+                os.close(bootstrap_write)
         self._process = process
         try:
             ready = self._receive(self._startup_timeout)
@@ -476,4 +567,5 @@ __all__ = [
     "default_authority_root",
     "initialize_test_authority_root",
     "verify_signature",
+    "verify_test_signature",
 ]

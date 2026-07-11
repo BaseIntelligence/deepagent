@@ -63,6 +63,7 @@ from swe_forge.forge.models import (
 )
 from swe_forge.forge.oracle.pipeline import ExportRefusedError
 from swe_forge.forge.oracle.mutation import final_suite_fingerprint
+from swe_forge.forge.oracle import teacher_evidence
 from swe_forge.forge.publication import (
     PublicationError,
     load_published_generation,
@@ -1321,6 +1322,43 @@ def test_direct_export_rejects_invalid_protected_teacher_receipts(
     assert "protected teacher receipts" in replay.reason
 
 
+def test_production_export_and_publication_reject_valid_test_domain_receipts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_teacher_receipt_authority: Path,
+) -> None:
+    """Copying a valid test sidecar cannot redirect production verification."""
+    task = _task()
+    from swe_forge.forge.teacher import verify_transport_receipt
+
+    monkeypatch.setattr(
+        teacher_evidence, "verify_transport_receipt", verify_transport_receipt
+    )
+
+    direct = export_forge_task(task, tmp_path / "tasks")
+    assert direct.status == "refused"
+    assert "teacher transport receipt issuer signature is invalid" in direct.reason
+
+    from swe_forge.forge.teacher import verify_test_transport_receipt
+
+    monkeypatch.setattr(
+        teacher_evidence,
+        "verify_transport_receipt",
+        lambda receipt: verify_test_transport_receipt(
+            receipt, root=isolated_teacher_receipt_authority
+        ),
+    )
+    exported = export_batch([_request()], tmp_path / "batch")
+    assert exported.kept
+    monkeypatch.setattr(
+        teacher_evidence, "verify_transport_receipt", verify_transport_receipt
+    )
+    with pytest.raises(
+        PublicationError, match="teacher transport receipt issuer signature is invalid"
+    ):
+        load_published_generation(tmp_path / "batch")
+
+
 @pytest.mark.parametrize("corruption", ["missing", "malformed", "mismatched"])
 def test_direct_export_rejects_invalid_protected_alt_audit(
     tmp_path: Path, corruption: str
@@ -1496,7 +1534,9 @@ def test_conflicting_duplicate_task_id_aborts_without_mutating_output(
 
 
 def test_failed_generation_keeps_the_prior_complete_generation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_teacher_receipt_authority: Path,
 ) -> None:
     from swe_forge.forge import publication
 
@@ -1523,6 +1563,19 @@ def test_failed_generation_keeps_the_prior_complete_generation(
         )
 
     monkeypatch.undo()
+    # Production reloads intentionally reject this hermetic test-root receipt.
+    # Use the test-only receipt verifier only while asserting transactional
+    # recovery of the already-selected generation.
+    from swe_forge.forge.oracle import teacher_evidence
+    from swe_forge.forge.teacher import verify_test_transport_receipt
+
+    monkeypatch.setattr(
+        teacher_evidence,
+        "verify_transport_receipt",
+        lambda receipt: verify_test_transport_receipt(
+            receipt, root=isolated_teacher_receipt_authority
+        ),
+    )
     after = publication.load_published_generation(tmp_path)
     assert after is not None
     assert after.generation_id == before.generation_id

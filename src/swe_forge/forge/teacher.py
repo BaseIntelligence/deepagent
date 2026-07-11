@@ -26,6 +26,7 @@ import hashlib
 import json
 import math
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 import uuid
 from types import SimpleNamespace
 from collections.abc import Awaitable, Sequence
@@ -345,11 +346,27 @@ class TransportReceipt:
 
 
 def verify_transport_receipt(receipt: TransportReceipt | None) -> bool:
-    """Verify a receipt against the durable host-held issuer authority."""
+    """Verify a receipt against the hard-pinned production issuer authority."""
     return receipt is not None and receipt_authority.verify_signature(
         key_id=receipt.issuer_key_id,
         claims=receipt._canonical_claims(),
         signature=receipt.signature,
+        authority_domain=receipt.authority_domain,
+        authority_root_id=receipt.authority_root_id,
+    )
+
+
+def verify_test_transport_receipt(
+    receipt: TransportReceipt | None, *, root: Path | str
+) -> bool:
+    """Explicit test-only verifier for a receipt bound to an isolated test root."""
+    return receipt is not None and receipt_authority.verify_test_signature(
+        root=root,
+        key_id=receipt.issuer_key_id,
+        claims=receipt._canonical_claims(),
+        signature=receipt.signature,
+        authority_domain=receipt.authority_domain,
+        authority_root_id=receipt.authority_root_id,
     )
 
 

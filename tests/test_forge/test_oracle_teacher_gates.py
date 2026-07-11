@@ -47,6 +47,7 @@ from swe_forge.forge.oracle.pipeline import (
     ensure_oracle_exportable,
     verify_pass_consistency,
 )
+from swe_forge.forge.oracle import teacher_evidence
 from swe_forge.forge.oracle.teacher_evidence import (
     aggregate_teacher_gate_usage,
     teacher_gate_evidence_issues,
@@ -58,6 +59,7 @@ from swe_forge.forge.teacher import (
     TransportReceipt,
     Usage,
     candidate_transport_fingerprint,
+    verify_transport_receipt,
 )
 from tests.test_forge.receipt_helpers import (
     protected_alt_correct_audit,
@@ -953,6 +955,43 @@ async def test_concrete_transport_issues_private_receipt_after_mocked_provider(
     assert "api_key" not in json.dumps(private)
     assert "prompt_text" not in json.dumps(private)
     assert "response_content" not in json.dumps(private)
+
+
+def test_production_gate_rejects_a_valid_test_domain_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A test-root signature is never evidence on the production gate surface."""
+    monkeypatch.setattr(
+        teacher_evidence, "verify_transport_receipt", verify_transport_receipt
+    )
+    candidate = _candidate()
+    evidence = _positive_gate_evidence("differential")
+    call = evidence["calls"][0]
+    assert isinstance(call, dict)
+    receipt = signed_transport_receipt(
+        call_id="test-domain-receipt",
+        candidate_fingerprint=candidate_transport_fingerprint(candidate),
+        gate="differential",
+        call_kind="proposal",
+        model="anthropic/test-model",
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        cost=0.01,
+    )
+    call.update(
+        {
+            "call_id": receipt.call_id,
+            "receipt_commitment": receipt.commitment,
+        }
+    )
+
+    issues = teacher_gate_evidence_issues(
+        {"teacher_gates": {"differential": evidence}},
+        gates=("differential",),
+        candidate=candidate,
+        protected_receipts=[receipt.to_private_dict()],
+    )
+
+    assert any("issuer signature is invalid" in issue for issue in issues)
 
 
 def test_positive_public_teacher_json_without_protected_receipt_is_rejected() -> None:

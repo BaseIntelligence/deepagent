@@ -18,6 +18,7 @@ from swe_forge.forge.teacher import (
     TransportReceipt,
     Usage,
     transport_receipt_context,
+    verify_test_transport_receipt,
     verify_transport_receipt,
 )
 
@@ -67,7 +68,7 @@ async def test_authority_child_owns_transport_and_in_memory_private_key(
     receipt = result.transport_receipt
     assert receipt is not None
     assert result.text == "authority response"
-    assert verify_transport_receipt(receipt)
+    assert verify_test_transport_receipt(receipt, root=isolated_test_authority)
 
     root_payload = json.loads(
         (isolated_test_authority / "authority-v1.json").read_text(encoding="utf-8")
@@ -206,10 +207,9 @@ import json
 import sys
 from pathlib import Path
 from swe_forge.forge import receipt_authority
-from swe_forge.forge.teacher import TransportReceipt, verify_transport_receipt
-receipt_authority.default_authority_root = lambda: Path(sys.argv[1])
+from swe_forge.forge.teacher import TransportReceipt, verify_test_transport_receipt
 receipt = TransportReceipt.from_private_dict(json.loads(sys.argv[2]))
-raise SystemExit(0 if verify_transport_receipt(receipt) else 1)
+raise SystemExit(0 if verify_test_transport_receipt(receipt, root=Path(sys.argv[1])) else 1)
 """
     valid = subprocess.run(
         [
@@ -354,3 +354,76 @@ def test_test_root_metadata_cannot_be_transplanted_or_relabeled(
         claims=b"{}",
         signature="not-a-signature",
     )
+
+
+async def test_production_verifier_rejects_valid_test_receipts_after_root_redirect(
+    isolated_test_authority: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Production verification must not consult the mutable client-root resolver."""
+    client = TeacherClient(
+        base_url="https://teacher.test",
+        api_key="sk-test",
+        model="anthropic/test-model",
+        authority_test_responses=[_test_response()],
+    )
+    with transport_receipt_context(
+        _Candidate(), gate="differential", call_kind="proposal"
+    ):
+        result = await client.complete_text("generate")
+    await client.aclose()
+    assert result.transport_receipt is not None
+
+    monkeypatch.setattr(
+        receipt_authority, "default_authority_root", lambda: isolated_test_authority
+    )
+
+    assert not verify_transport_receipt(result.transport_receipt)
+    assert verify_test_transport_receipt(
+        result.transport_receipt, root=isolated_test_authority
+    )
+
+    relabeled = isolated_test_authority.parent / "relabeled-test-root"
+    relabeled.mkdir()
+    for name in ("authority-v1.json", "test-authority-v1.json"):
+        (relabeled / name).write_bytes((isolated_test_authority / name).read_bytes())
+    (relabeled / "test-authority-v1.json").rename(
+        relabeled / "production-authority-v1.json"
+    )
+    assert not verify_test_transport_receipt(result.transport_receipt, root=relabeled)
+
+
+def test_direct_service_cli_and_imported_loop_cannot_bootstrap_production_root(
+    tmp_path: Path,
+) -> None:
+    """A caller-supplied CLI token or direct loop call cannot create a prod root."""
+    root = tmp_path / "would-be-production-root"
+    direct = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "swe_forge.forge.receipt_authority_service",
+            "--root",
+            str(root),
+            "--domain",
+            "production",
+            "--bootstrap=caller-supplied-token-that-is-long-enough",
+        ],
+        cwd="/projects/Agent-SWE",
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert direct.returncode != 0
+    assert not root.exists()
+    assert not hasattr(receipt_authority_service, "_EXECUTABLE_BOOTSTRAP")
+
+    assert not hasattr(receipt_authority_service, "_run_authority")
+    assert not root.exists()
+
+
+def test_test_root_initializer_cannot_relabel_the_canonical_production_root() -> None:
+    with pytest.raises(receipt_authority.ReceiptAuthorityError, match="canonical"):
+        receipt_authority.initialize_test_authority_root(
+            Path("/var/lib/swe_forge/teacher-receipt-authority")
+        )

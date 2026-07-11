@@ -14,6 +14,7 @@ from swe_forge.forge.teacher import (
     TeacherClient,
     TransportReceipt,
     transport_receipt_context,
+    verify_test_transport_receipt,
     verify_transport_receipt,
 )
 
@@ -64,7 +65,9 @@ async def test_root_contains_only_public_metadata_and_stays_stable_for_child(
     assert metadata["root_id"]
     assert stat.S_IMODE((root / "authority-v1.json").stat().st_mode) == 0o600
     assert not (root / "issuer-v1.key").exists()
-    assert verify_transport_receipt(result.transport_receipt)
+    assert verify_test_transport_receipt(
+        result.transport_receipt, root=isolated_teacher_receipt_authority
+    )
 
 
 async def test_receipt_reloads_in_fresh_verifier_process(
@@ -87,11 +90,9 @@ async def test_receipt_reloads_in_fresh_verifier_process(
 import json
 import sys
 from pathlib import Path
-from swe_forge.forge import receipt_authority
-from swe_forge.forge.teacher import TransportReceipt, verify_transport_receipt
-receipt_authority.default_authority_root = lambda: Path(sys.argv[1])
+from swe_forge.forge.teacher import TransportReceipt, verify_test_transport_receipt
 receipt = TransportReceipt.from_private_dict(json.loads(sys.argv[2]))
-raise SystemExit(0 if verify_transport_receipt(receipt) else 1)
+raise SystemExit(0 if verify_test_transport_receipt(receipt, root=Path(sys.argv[1])) else 1)
 """
     restarted = subprocess.run(
         [

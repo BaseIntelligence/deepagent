@@ -687,13 +687,8 @@ def _send(connection: Connection, payload: dict[str, object]) -> None:
     connection.send_bytes(encoded)
 
 
-_EXECUTABLE_BOOTSTRAP = False
-
-
 def _run_authority(connection: Connection, root_text: str) -> None:
     """Run the child-only provider transport and Ed25519 receipt authority."""
-    if not _EXECUTABLE_BOOTSTRAP:
-        raise AuthorityServiceError("authority requires executable bootstrap")
     try:
         root = Path(root_text)
         private_key = Ed25519PrivateKey.generate()
@@ -798,6 +793,39 @@ def _stdio_connection() -> tuple[Connection, Connection]:
     return pipe, pipe  # type: ignore[return-value]
 
 
+def _consume_bootstrap_fd(descriptor: int) -> None:
+    """Consume the one-shot private bootstrap capability from an inherited FD."""
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISFIFO(metadata.st_mode):
+            raise AuthorityServiceError("authority bootstrap is unavailable")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 32 - sum(map(len, chunks)) + 1)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if sum(map(len, chunks)) > 32:
+                raise AuthorityServiceError("authority bootstrap is malformed")
+    except OSError as exc:
+        raise AuthorityServiceError("authority bootstrap is unavailable") from exc
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    token = b"".join(chunks)
+    if len(token) != 32:
+        raise AuthorityServiceError("authority bootstrap is malformed")
+    return None
+
+
+# The service loop exists only in the executable module instance. Importing this
+# module cannot recover a callable loop or bootstrap production authority state.
+if __name__ != "__main__":
+    del _run_authority
+
+
 def main(argv: list[str] | None = None) -> int:
     """Executable-only authority bootstrap used by the parent subprocess."""
     if __name__ != "__main__":
@@ -807,21 +835,24 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
     parser.add_argument("--domain", choices=tuple(TRUST_DOMAINS), required=True)
-    parser.add_argument("--bootstrap", required=True)
+    parser.add_argument("--bootstrap-fd", type=int, required=True)
     args = parser.parse_args(argv)
-    if len(args.bootstrap) < 20:
+    if args.bootstrap_fd < 3:
         return 2
-    root = Path(args.root)
     try:
-        root_fd = _open_root(root, create=True)
-        try:
-            environment = _root_environment(root_fd, create_production=True)
-        finally:
-            os.close(root_fd)
-        if environment != args.domain:
+        root = Path(args.root).absolute()
+        if args.domain == "production" and root != Path(
+            "/var/lib/swe_forge/teacher-receipt-authority"
+        ):
             return 3
-        global _EXECUTABLE_BOOTSTRAP
-        _EXECUTABLE_BOOTSTRAP = True
+        if args.domain == "test":
+            root_fd = _open_root(root, create=False)
+            try:
+                if _root_environment(root_fd) != "test":
+                    return 3
+            finally:
+                os.close(root_fd)
+        _consume_bootstrap_fd(args.bootstrap_fd)
         read_write, _ = _stdio_connection()
         _run_authority(read_write, str(root))
         return 0
