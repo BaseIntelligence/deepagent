@@ -1112,9 +1112,9 @@ def test_test_n10_is_live_generate_dest_not_product() -> None:
     assert requires_dual_truth_honesty("datasets/test_n10", live_mine=True) is True
     assert requires_dual_truth_honesty("datasets/unit_sandbox", live_mine=False) is False
     assert requires_dual_truth_honesty("datasets/unit_sandbox", live_mine=True) is True
-    assert requires_dual_truth_honesty(
-        "datasets/test_n10", live_mine=True, offline_only=True
-    ) is False
+    assert (
+        requires_dual_truth_honesty("datasets/test_n10", live_mine=True, offline_only=True) is False
+    )
 
 
 def test_test_n10_refuses_fixture_materials_default() -> None:

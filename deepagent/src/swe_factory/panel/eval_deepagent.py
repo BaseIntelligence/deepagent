@@ -1167,7 +1167,7 @@ def run_deepagent_eval(
                 reward = inv.get("reward")
                 if isinstance(reward, bool):
                     reward = 1 if reward else 0
-                if reward is not None and not isinstance(reward, (int, float)):
+                if reward is not None and not isinstance(reward, int | float):
                     reward = None
                 solved = bool(inv.get("solved")) if "solved" in inv else _reward_solved(reward)
                 if solved:
@@ -1190,7 +1190,7 @@ def run_deepagent_eval(
                     pack_id=pack_id,
                     model=model,
                     index=i,
-                    reward=reward if isinstance(reward, (int, float)) else None,
+                    reward=reward if isinstance(reward, int | float) else None,
                     solved=solved,
                     job_dir=str(inv["job_dir"]) if inv.get("job_dir") else None,
                     reward_path=str(inv["reward_path"]) if inv.get("reward_path") else None,

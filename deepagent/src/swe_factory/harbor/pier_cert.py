@@ -261,7 +261,7 @@ def parse_reward_json(
                 errors=tuple(errors),
             )
     else:
-        if isinstance(loaded, (int, float)) and not isinstance(loaded, bool):
+        if isinstance(loaded, int | float) and not isinstance(loaded, bool):
             reward = loaded
             raw = {"reward": reward}
         elif isinstance(loaded, Mapping):
@@ -293,7 +293,7 @@ def parse_reward_json(
 def _coerce_reward(value: Any) -> int | float | None:
     if isinstance(value, bool):
         return 1 if value else 0
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return value
     if isinstance(value, str):
         cleaned = value.strip()

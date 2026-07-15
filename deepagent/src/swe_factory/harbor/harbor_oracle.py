@@ -424,7 +424,7 @@ class HarborDockerVerifier:
 def _as(value: object) -> str:
     if value is None:
         return ""
-    if isinstance(value, (bytes, bytearray)):
+    if isinstance(value, bytes | bytearray):
         return value.decode(errors="replace")
     return str(value)
 

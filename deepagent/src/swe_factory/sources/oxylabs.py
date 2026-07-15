@@ -212,7 +212,7 @@ def _content_from_results(results: list[Any]) -> tuple[int, str]:
         content_s = ""
     elif isinstance(content, str):
         content_s = content
-    elif isinstance(content, (dict, list)):
+    elif isinstance(content, dict | list):
         # parsed JSON blob — stringify for miner consumers
         import json
 

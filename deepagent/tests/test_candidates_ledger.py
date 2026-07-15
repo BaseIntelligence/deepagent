@@ -289,9 +289,9 @@ def test_offline_fixture_candidates_never_claim_live_discovery_path(tmp_path: Pa
     assert rows
     for row in rows:
         path = row.get("discovery_path")
-        assert path not in DISCOVERY_PATHS, (
-            f"offline_fixture must not claim live discovery_path; got {path!r}"
-        )
+        assert (
+            path not in DISCOVERY_PATHS
+        ), f"offline_fixture must not claim live discovery_path; got {path!r}"
         assert path == DISCOVERY_PATH_OFFLINE_FIXTURE
         # Explicit engineering label preferred
         assert row.get("product_n_evidence") is False

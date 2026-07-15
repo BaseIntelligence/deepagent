@@ -368,7 +368,7 @@ def invoke_pier_mini_swe_panel(
             raw = json.loads(reward_path.read_text(encoding="utf-8"))
             if isinstance(raw, dict) and "reward" in raw:
                 val = raw["reward"]
-                if isinstance(val, (int, float)):
+                if isinstance(val, int | float):
                     reward = val
                 else:
                     errors.append("reward.json present but reward field not numeric")

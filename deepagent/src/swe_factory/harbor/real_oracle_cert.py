@@ -414,7 +414,7 @@ def certify_real_pr_pack(
         # get a non-product hint so unit cert API still works.
         from swe_factory.harbor.harbor_oracle import HarborDockerVerifier as _HDV
 
-        if backend is None or isinstance(backend, (str, _HDV)):
+        if backend is None or isinstance(backend, str | _HDV):
             effective_dest = "datasets/deepagent_v1"
         else:
             effective_dest = "datasets/deepagent_v1_offline_unit"

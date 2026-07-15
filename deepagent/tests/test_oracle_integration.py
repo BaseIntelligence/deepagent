@@ -115,9 +115,9 @@ def test_certified_gates_tiny_offline_docker(docker_ready: DockerCLI, tmp_path: 
         # Hygiene sweep
         leftover = remove_leftover_sdf_containers(docker)
 
-        assert result.passed is True, (
-            f"certified gates failed: {result.reason_codes}\n{result.reasons}\n{result.details}"
-        )
+        assert (
+            result.passed is True
+        ), f"certified gates failed: {result.reason_codes}\n{result.reasons}\n{result.details}"
         assert C.G1_F2P_FAIL_OK in result.reason_codes
         assert C.G2_GOLD_DUAL_PASS in result.reason_codes
         assert C.G3_NULL_NOT_RESOLVE in result.reason_codes

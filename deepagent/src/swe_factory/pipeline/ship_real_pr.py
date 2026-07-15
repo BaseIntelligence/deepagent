@@ -334,9 +334,7 @@ def resolve_product_materials_root(
     - Offline/unit dests may still use ``fixtures/real_pr_ship``.
     - Empty/unset materials on product dest is refused (no silent pad).
     """
-    product = requires_dual_truth_honesty(
-        dest, live_mine=live_mine, offline_only=offline_only
-    )
+    product = requires_dual_truth_honesty(dest, live_mine=live_mine, offline_only=offline_only)
     if not product:
         # Engineering / offline: keep historical fixture default when unset.
         if materials_root is None:
@@ -408,9 +406,7 @@ def refuse_empty_live_yield(
     is attempted on product dest; under-yield without pad is recorded as
     fail-closed via ShipRealPrError reason at end of ship (caller uses ok=False).
     """
-    honesty = requires_dual_truth_honesty(
-        dest, live_mine=live_mine, offline_only=offline_only
-    )
+    honesty = requires_dual_truth_honesty(dest, live_mine=live_mine, offline_only=offline_only)
     if offline_only or not honesty:
         return
     if padded_with_fixtures or (
@@ -443,9 +439,7 @@ def require_product_suite_reporter(
     """
     # Suite-reporter hard floor applies on product + live-mine generate honesty paths.
     # Callers that need soft detect for offline unit leaves leave offline_only=True.
-    hard = not offline_only and (
-        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
-    )
+    hard = not offline_only and (is_product_deepagent_dest(dest) or is_live_generate_dest(dest))
     if not hard:
         ok, rid, cmd = suite_reporter_detectable(language)
         return (rid if ok else ""), (cmd if ok else "")
@@ -477,9 +471,7 @@ def refuse_synthetic_product_dual_run(
     produced by a real language suite reporter (no ``test_always_ok`` /
     empty inject / f2p_from_patch-only). Complements VAL-LHARD-002 suite path.
     """
-    honesty = not offline_only and (
-        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
-    )
+    honesty = not offline_only and (is_product_deepagent_dest(dest) or is_live_generate_dest(dest))
     if offline_only or not honesty:
         return
     method = (label_method or "").strip().lower()
@@ -594,9 +586,7 @@ def assert_product_clone_sha_pin(
     Mismatch, floating HEAD/default-branch clone, short SHA only, or staged
     fixture SHAs labeled as live pins fail product promote.
     """
-    honesty = not offline_only and (
-        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
-    )
+    honesty = not offline_only and (is_product_deepagent_dest(dest) or is_live_generate_dest(dest))
     if offline_only or not honesty:
         return {
             "ledger_base_commit": (ledger_base_commit or "").strip(),
@@ -698,9 +688,7 @@ def refuse_burnt_dual_run_work_root(
     not count as product dual-truth. Callers should prepare a fresh root or
     explicitly clean then re-mark readiness.
     """
-    honesty = not offline_only and (
-        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
-    )
+    honesty = not offline_only and (is_product_deepagent_dest(dest) or is_live_generate_dest(dest))
     if offline_only or not honesty:
         return
     if work_root is None:
@@ -785,9 +773,7 @@ def refuse_scripted_product_oracle(
     offline_only: bool = False,
 ) -> None:
     """Product path may only use real HarborDockerVerifier (never Scripted*/Fake*)."""
-    honesty = not offline_only and (
-        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
-    )
+    honesty = not offline_only and (is_product_deepagent_dest(dest) or is_live_generate_dest(dest))
     if offline_only or not honesty:
         return
     try:
@@ -811,9 +797,7 @@ def require_live_docker_images(
     offline_only: bool = False,
 ) -> None:
     """Shipped product evidence must show non-empty docker image refs."""
-    honesty = not offline_only and (
-        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
-    )
+    honesty = not offline_only and (is_product_deepagent_dest(dest) or is_live_generate_dest(dest))
     if offline_only or not honesty:
         return
     agent = (agent_image or "").strip()
@@ -2179,9 +2163,7 @@ def run_ship_deepagent_real_pr(
     product_dest = is_product_deepagent_dest(dest) and not offline_only
     # Dual-truth honesty for product deepagent_v1, --live-mine, and M16 test_n10.
     # product_dest still gates seed5 archive / prior-product wipe only.
-    honesty_dest = requires_dual_truth_honesty(
-        dest, live_mine=live_mine, offline_only=offline_only
-    )
+    honesty_dest = requires_dual_truth_honesty(dest, live_mine=live_mine, offline_only=offline_only)
 
     # ---- hard refuse gates ----
     refuse_fake_ship_dest(mode, out_dir=dest)
@@ -2320,9 +2302,7 @@ def run_ship_deepagent_real_pr(
     # Live mine needs headroom: soft dual-run/oracle rejects must not starve
     # the wave — load all inventory rows (or at least min*6) so serial cert
     # can continue until min_packs or honest exhaustion (used_materials >> 2).
-    materials_limit = (
-        None if honesty_dest else max(target_packs * 3, max_packs * 2, 10)
-    )
+    materials_limit = None if honesty_dest else max(target_packs * 3, max_packs * 2, 10)
     if honesty_dest:
         # Explicit large cap so a huge materials tree is still bounded,
         # but always enough to exhaust soft rejects past min_packs.
@@ -3068,9 +3048,7 @@ def run_ship_deepagent_real_pr(
                 offline_only=offline_only or not honesty_dest,
                 # Product live: require hunk floor when known; soft if unknown on legacy mats.
                 require_hunk_floor=bool(
-                    honesty_dest
-                    and mat is not None
-                    and mat.source_hunk_count is not None
+                    honesty_dest and mat is not None and mat.source_hunk_count is not None
                 ),
             )
         )

@@ -172,7 +172,7 @@ def _now_iso() -> str:
 
 
 def _as_text(value: object) -> str:
-    if isinstance(value, (bytes, bytearray)):
+    if isinstance(value, bytes | bytearray):
         return value.decode(errors="replace")
     return str(value) if value else ""
 

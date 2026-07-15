@@ -115,9 +115,9 @@ def test_harbor_oracle_solution_pass_null_fail_docker(
         # leftover sdf- from this run should be cleaned
         after = DockerCLI().list_containers(all_containers=True)
         leftover_run = [n for n in after if n.startswith("sdf-") and "horit01" in n]
-        assert leftover_run == [], (
-            f"leftover mission containers: {leftover_run} (+sweep {leftover})"
-        )
+        assert (
+            leftover_run == []
+        ), f"leftover mission containers: {leftover_run} (+sweep {leftover})"
 
         after_ol = _snapshot_off_limits()
         assert after_ol == before_ol, "off-limits containers changed"

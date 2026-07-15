@@ -97,7 +97,7 @@ class ProductGateAuditResult:
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return list(value)
     return [value]
 
@@ -374,7 +374,7 @@ def _read_json(path: Path) -> dict[str, Any] | list[Any] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return data if isinstance(data, (dict, list)) else None
+    return data if isinstance(data, dict | list) else None
 
 
 def _read_json_dict(path: Path) -> dict[str, Any]:
