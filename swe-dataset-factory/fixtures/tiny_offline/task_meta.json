@@ -1,0 +1,19 @@
+{
+  "instance_id": "fixture__tiny_offline__gate_demo",
+  "source_track": "synthetic_grounded",
+  "repo": "fixtures/tiny_offline",
+  "base_commit": "fixture00000000000000000000000000000001",
+  "language": "python",
+  "problem_statement": "The demo package returns incorrect results for add() and reverse_words(). Restore the multi-module behaviour so tests pass.",
+  "fail_to_pass": [
+    "python -m pytest tests/test_math.py tests/test_text.py -q"
+  ],
+  "pass_to_pass": [
+    "python -m pytest tests/test_ok.py -q"
+  ],
+  "environment": {
+    "image_digest": "sha256:fixture_offline_stub_v1"
+  },
+  "license": "MIT",
+  "requirements": "pytest"
+}

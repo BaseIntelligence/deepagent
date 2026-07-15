@@ -1,0 +1,292 @@
+diff --git a/src/click/testing.py b/src/click/testing.py
+index d4473ca..19fae4a 100644
+--- a/src/click/testing.py
++++ b/src/click/testing.py
+@@ -22,7 +22,10 @@ if t.TYPE_CHECKING:
+ 
+     from .core import Command
+ 
+-CaptureMode: t.TypeAlias = t.Literal["sys", "fd"]
++if sys.platform == "win32":
++    CaptureMode: t.TypeAlias = t.Literal["sys"]  # pyright: ignore[reportRedeclaration]
++else:
++    CaptureMode: t.TypeAlias = t.Literal["sys", "fd"]  # pyright: ignore[reportRedeclaration]
+ ExceptionInfo: t.TypeAlias = tuple[type[BaseException], BaseException, TracebackType]
+ 
+ 
+diff --git a/tests/test_stream_lifecycle.py b/tests/test_stream_lifecycle.py
+index 42e26ac..9f4aa20 100644
+--- a/tests/test_stream_lifecycle.py
++++ b/tests/test_stream_lifecycle.py
+@@ -484,7 +484,9 @@ def test_sys_streams_restored_after_exception():
+ # Category 6: Stress tests - high-iteration reproducers for race conditions
+ #
+ # These are marked with ``pytest.mark.stress`` so they can be included or
+-# excluded independently. The CI workflow runs them in a separate job.
++# excluded independently. The ``tox -e stress`` env collects every
++# ``pytest.mark.stress`` test across the suite (not just this file), so
++# stress regressions for other components live alongside their unit tests.
+ # ---------------------------------------------------------------------------
+ 
+ 
+diff --git a/tests/test_termui.py b/tests/test_termui.py
+index f715154..ce974f0 100644
+--- a/tests/test_termui.py
++++ b/tests/test_termui.py
+@@ -1,4 +1,5 @@
+ import contextlib
++import gc
+ import io
+ import platform
+ import shlex
+@@ -726,6 +727,44 @@ def test_echo_via_pager_real_pager_handles_ansi(monkeypatch, capfd, color, expec
+     assert out == expected
+ 
+ 
++def test_echo_via_pager_streams_each_write(monkeypatch):
++    """Each write is flushed so a slow generator streams to the pager
++    incrementally instead of buffering until the end (issues #3242, #2542).
++    """
++    calls = []
++
++    class RecordingStream(io.StringIO):
++        def __init__(self):
++            super().__init__()
++            self.color = None
++
++        def write(self, s):
++            calls.append("write")
++            return super().write(s)
++
++        def flush(self):
++            calls.append("flush")
++
++    stream = RecordingStream()
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: False)
++    monkeypatch.setattr(click._termui_impl, "_default_text_stdout", lambda: stream)
++
++    def generate():
++        yield "a\n"
++        yield "b\n"
++        yield "c\n"
++
++    click.echo_via_pager(generate())
++
++    # No two writes are adjacent: every chunk is flushed before the next one,
++    # so the pager sees output as it is produced.
++    assert not any(
++        calls[i] == "write" and calls[i + 1] == "write" for i in range(len(calls) - 1)
++    )
++    assert calls.count("write") == 4  # three chunks plus the trailing newline
++    assert stream.getvalue() == "a\nb\nc\n\n"
++
++
+ def test_get_pager_file_pager_missing_binary_falls_back(monkeypatch, tmp_path):
+     """``PAGER`` pointing to a nonexistent binary falls back to the text stdout."""
+     pager_out = tmp_path / "pager_out.txt"
+@@ -768,6 +807,61 @@ def test_get_pager_file_pager_unset_falls_back_when_no_default(monkeypatch, tmp_
+     assert pager_out.read_text(encoding="utf-8") == "hello\n"
+ 
+ 
++def test_get_pager_file_missing_pager_keeps_borrowed_stream_open(monkeypatch):
++    """A missing ``PAGER`` must not close the borrowed stdout (issue #3449).
++
++    The ``8.4.0`` regression was only fixed for the no-tty ``_nullpager`` path;
++    the ``_pipepager``/``_tempfilepager`` fallbacks (reached in a tty when
++    ``PAGER`` resolves to nothing) used to close the borrowed stream too.
++    """
++    buffer = io.BytesIO()
++    stream = io.TextIOWrapper(buffer, encoding="utf-8")
++
++    monkeypatch.setitem(
++        click._termui_impl.os.environ,
++        "PAGER",
++        "click-tests-nonexistent-pager-9b3f2",
++    )
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
++    monkeypatch.setattr(click._termui_impl, "_default_text_stdout", lambda: stream)
++
++    with click.get_pager_file() as pager:
++        pager.write("hello\n")
++
++    # Drop the wrapper reference and force finalization: the old bug closed the
++    # borrowed buffer when the TextIOWrapper built by get_pager_file was
++    # garbage-collected.
++    del pager
++    gc.collect()
++
++    assert not buffer.closed
++    assert not stream.closed
++    assert buffer.getvalue().replace(b"\r\n", b"\n") == b"hello\n"
++
++
++def test_echo_via_pager_tty_pager_missing(runner, monkeypatch):
++    """``echo_via_pager`` through the tty fallback keeps ``CliRunner`` working.
++
++    Regression for issue #3449 via the pager fallback: a tty with ``PAGER``
++    pointing at a missing binary used to close the runner's stdout, breaking
++    ``CliRunner.invoke``.
++    """
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
++    monkeypatch.setitem(
++        click._termui_impl.os.environ,
++        "PAGER",
++        "click-tests-nonexistent-pager-9b3f2",
++    )
++
++    @click.command()
++    def cli():
++        click.echo_via_pager("Hello, Click!")
++
++    result = runner.invoke(cli)
++    assert not result.exception
++    assert result.output == "Hello, Click!\n"
++
++
+ @pytest.mark.parametrize(
+     ("color", "expected"),
+     [
+diff --git a/tests/test_types.py b/tests/test_types.py
+index 55560ad..185824d 100644
+--- a/tests/test_types.py
++++ b/tests/test_types.py
+@@ -243,13 +243,22 @@ def test_path_surrogates(tmp_path, monkeypatch):
+     ],
+ )
+ def test_file_surrogates(type, tmp_path):
+-    path = tmp_path / "\udcff"
++    """Ensures that the error handling in ``click.File`` is robust.
++
++    ``EILSEQ`` shows up with rootless Podman (FUSE-backed paths) and on filesystems
++    that reject non-UTF-8 names, like ZFS with ``utf8only=on``.
+ 
+-    # - common case: �': No such file or directory
+-    # - special case: Illegal byte sequence
+-    # The special case is seen with rootless Podman. The root cause is most
+-    # likely that the path is handled by a user-space program (FUSE).
+-    match = r"(�': No such file or directory|Illegal byte sequence)"
++    See: https://github.com/pallets/click/issues/2634
++    """
++    path = tmp_path / "\udcff"
++    match = (
++        # Common case: �': No such file or directory.
++        r"(�': No such file or directory"
++        # BSD/macOS libc special case (EILSEQ).
++        r"|Illegal byte sequence"
++        # glibc special case (EILSEQ).
++        r"|Invalid or incomplete multibyte or wide character)"
++    )
+     with pytest.raises(click.BadParameter, match=match):
+         type.convert(path, None, None)
+ 
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+index 4e683ca..b7a4259 100644
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -16,7 +16,6 @@ import pytest
+ 
+ import click._termui_impl
+ import click.utils
+-from click._compat import MAC
+ from click._compat import WIN
+ from click._utils import UNSET
+ 
+@@ -286,6 +285,11 @@ def _test_gen_func():
+ 
+ 
+ def _test_gen_func_fails():
++    raise RuntimeError("This is a test.")
++    yield  # unreachable, keeps this a generator function
++
++
++def _test_gen_func_yields_then_fails():
+     yield "test"
+     raise RuntimeError("This is a test.")
+ 
+@@ -315,10 +319,6 @@ EchoViaPagerTest = namedtuple(
+ 
+ 
+ @pytest.mark.skipif(WIN, reason="Different behavior on windows.")
+-@pytest.mark.skipif(
+-    MAC and sys.version_info >= (3, 13) and not sys._is_gil_enabled(),
+-    reason="Generator exception tests are flaky in Python 3.14t on macOS.",
+-)
+ @pytest.mark.parametrize(
+     "pager_cmd", ["cat", "cat ", " cat ", "less", " less", " less "]
+ )
+@@ -456,6 +456,75 @@ def test_echo_via_pager(monkeypatch, capfd, pager_cmd, test, tmp_path):
+     )
+ 
+ 
++@pytest.mark.skipif(WIN, reason="Different behavior on windows.")
++def test_echo_via_pager_yields_before_exception(monkeypatch, tmp_path):
++    """A generator that yields then raises: click writes the partial output to
++    the pager stream before propagating the exception.
++
++    The pager file content is intentionally NOT asserted: pipe-drain timing
++    between click and the pager subprocess is outside click's control
++    (#2899, #3470). Spying on ``MaybeStripAnsi.write`` records what click sent
++    to the pager, which is deterministic regardless of scheduling.
++    """
++    monkeypatch.setitem(os.environ, "PAGER", "cat")
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda x: True)
++
++    writes: list[str] = []
++    real_write = click._termui_impl.MaybeStripAnsi.write
++
++    def spy(self, text):
++        writes.append(text)
++        return real_write(self, text)
++
++    monkeypatch.setattr(click._termui_impl.MaybeStripAnsi, "write", spy)
++
++    pager_out_tmp = tmp_path / "pager_out.txt"
++    with (
++        pager_out_tmp.open("w") as f,
++        patch.object(subprocess, "Popen", partial(subprocess.Popen, stdout=f)),
++        pytest.raises(RuntimeError, match="This is a test."),
++    ):
++        click.echo_via_pager(_test_gen_func_yields_then_fails())
++
++    assert "".join(writes) == "test", (
++        f"click should have written the yielded chunk before exception, got {writes!r}"
++    )
++
++
++@pytest.mark.stress
++@pytest.mark.skipif(WIN, reason="Different behavior on windows.")
++@pytest.mark.parametrize("_", range(1000))
++def test_stress_echo_via_pager_exception_cleanup(_, monkeypatch, tmp_path):
++    """Repeated exceptions during ``echo_via_pager`` must not leak subprocesses.
++
++    Regression coverage for the cleanup path in ``_pipepager``'s exception
++    handler (issue #2899, PR #3470). Each iteration spawns a real pager
++    subprocess, raises before any data is written and check there is no leak.
++    """
++    monkeypatch.setitem(os.environ, "PAGER", "cat")
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda x: True)
++
++    spawned: list[subprocess.Popen] = []
++    real_popen = subprocess.Popen
++
++    def tracking_popen(*args, **kwargs):
++        p = real_popen(*args, **kwargs)
++        spawned.append(p)
++        return p
++
++    pager_out_tmp = tmp_path / "pager_out.txt"
++    with (
++        pager_out_tmp.open("w") as f,
++        patch.object(subprocess, "Popen", partial(tracking_popen, stdout=f)),
++        pytest.raises(RuntimeError),
++    ):
++        click.echo_via_pager(_test_gen_func_fails())
++
++    assert spawned, "pager subprocess was never started"
++    for p in spawned:
++        assert p.returncode is not None, "pager subprocess not reaped"
++
++
+ def test_echo_color_flag(monkeypatch, capfd):
+     isatty = True
+     monkeypatch.setattr(click._compat, "isatty", lambda x: isatty)

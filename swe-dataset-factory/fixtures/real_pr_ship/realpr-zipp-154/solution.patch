@@ -1,0 +1,27 @@
+diff --git a/zipp/__init__.py b/zipp/__init__.py
+index aa6a933..99ae3ea 100644
+--- a/zipp/__init__.py
++++ b/zipp/__init__.py
+@@ -398,7 +398,7 @@ class Path:
+ 
+     def iterdir(self):
+         if not self.is_dir():
+-            raise ValueError("Can't listdir a file")
++            raise NotADirectoryError("Can't listdir a file")
+         subs = map(self._next, self.root.namelist())
+         return filter(self._is_child, subs)
+ 
+diff --git a/zipp/glob.py b/zipp/glob.py
+index 1b4ffb3..bf606d7 100644
+--- a/zipp/glob.py
++++ b/zipp/glob.py
+@@ -71,7 +71,8 @@ class Translator:
+         Perform the replacements for a match from :func:`separate`.
+         """
+         return match.group('set') or (
+-            re.escape(match.group(0))
++            re
++            .escape(match.group(0))
+             .replace('\\*\\*', r'.*')
+             .replace('\\*', rf'[^{re.escape(self.seps)}]*')
+             .replace('\\?', r'[^/]')

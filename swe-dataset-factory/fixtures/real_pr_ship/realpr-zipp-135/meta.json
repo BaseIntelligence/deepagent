@@ -1,0 +1,18 @@
+{
+  "task_id": "realpr-zipp-135",
+  "repo": "jaraco/zipp",
+  "url": "https://github.com/jaraco/zipp.git",
+  "language": "python",
+  "license": "MIT",
+  "pr": 135,
+  "base": "e7956b726b1a19d7eae225a3c71de714af354530",
+  "src": [
+    "zipp/__init__.py",
+    "zipp/_functools.py"
+  ],
+  "tests": [
+    "tests/test_path.py"
+  ],
+  "title": "zipp PR 135",
+  "materials_dir": "fixtures/real_pr_ship/realpr-zipp-135"
+}

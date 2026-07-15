@@ -92,3 +92,16 @@ tasks-*/
 *.jsonl
 test-output/
 *.log
+
+# Vendored deepswe product under swe-dataset-factory/ (keep product evidence)
+!swe-dataset-factory/
+!swe-dataset-factory/**
+!swe-dataset-factory/**/*.jsonl
+!swe-dataset-factory/**/*.json
+!swe-dataset-factory/**/*.md
+# still never commit subproject secrets or caches
+swe-dataset-factory/.env
+swe-dataset-factory/.venv/
+swe-dataset-factory/**/__pycache__/
+swe-dataset-factory/**/node_modules/
+swe-dataset-factory/fixtures/harbor_motors/.ts_deps/

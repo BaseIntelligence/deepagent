@@ -4,7 +4,7 @@
 
 **Real-code software engineering benchmarks for Platform agents**
 
-[![License](https://img.shields.io/github/license/PlatformNetwork/Agent-SWE)](https://github.com/PlatformNetwork/Agent-SWE/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/BaseIntelligence/Agent-SWE)](https://github.com/BaseIntelligence/Agent-SWE/blob/main/LICENSE)
 [![Platform SDK](https://img.shields.io/badge/Platform-SDK-black)](https://github.com/PlatformNetwork/platform)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![SWE-Forge](https://img.shields.io/badge/SWE--Forge-CortexLM-blue)](https://huggingface.co/datasets/CortexLM/swe-forge)
@@ -64,7 +64,7 @@ flowchart LR
 ## Install
 
 ```bash
-git clone https://github.com/PlatformNetwork/Agent-SWE.git
+git clone https://github.com/BaseIntelligence/Agent-SWE.git
 cd Agent-SWE
 pip install -e ".[dev]"
 ```
@@ -208,8 +208,36 @@ Agent-SWE/
 │   ├── export/
 │   ├── swe/
 │   └── synthetic/
+├── swe-dataset-factory/   # DeepSWE Real-PR product + factory (subproject)
 └── tests/
 ```
+
+## DeepSWE Real-PR factory (`swe-dataset-factory/`)
+
+Agent-SWE also vendors the **SWE Dataset Factory** under [`swe-dataset-factory/`](swe-dataset-factory/): a separate package that ships Docker-verifiable DeepSWE / Harbor packs from live-mined public PRs.
+
+| Surface | Path | Role |
+|---|---|---|
+| Product N=20 | `swe-dataset-factory/datasets/deepswe_v1/` | Certified Real-PR packs (`source_track=real_pr`) |
+| Seed archive | `swe-dataset-factory/datasets/deepswe_v1_seed5_archive/` | Historical seed5 only |
+| Soft panel | `swe-dataset-factory/datasets/panel_deepswe_5pack/` | Report JSON evidence |
+| CLI package | `swe-dataset-factory/src/swe_factory/` | `swe-factory` entrypoint |
+
+Install and use from the subproject (Python >= 3.12):
+
+```bash
+cd swe-dataset-factory
+pip install -e ".[dev]"
+cp .env.example .env   # never commit .env
+
+# DeepSWE-grade Pier + mini-swe serial eval (product root N=20)
+swe-factory eval-deepswe --product-root datasets/deepswe_v1 --help
+```
+
+Details, ship commands, and honesty boundaries live in
+[`swe-dataset-factory/README.md`](swe-dataset-factory/README.md).
+Forge mining (`swe-forge` under `src/`) remains the existing Agent-SWE path;
+the factory is a clean subproject so it does not clash with `src/swe_forge`.
 
 ## Platform Integration
 

@@ -1,0 +1,20 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "79fa6bf0dfcf3820d1ae7e52a2d268f33022c5a4",
+  "disposition": "reject",
+  "isolation": "clean",
+  "oracle_mode": "docker",
+  "phase": "null",
+  "reason_codes": [
+    "G2_GOLD_FAIL",
+    "G3_NULL_NOT_RESOLVE",
+    "G5_LEAK_CLEAN",
+    "ORACLE_REJECT",
+    "RORC_ISOLATION_CLEAN",
+    "RORC_NULL_0"
+  ],
+  "repository_url": "https://github.com/encode/httpcore.git",
+  "reward": 0,
+  "source_track": "real_pr",
+  "task_id": "realpr-httpcore-880"
+}

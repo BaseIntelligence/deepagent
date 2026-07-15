@@ -1,0 +1,20 @@
+{
+  "instance_id": "fixture__tiny_green__envbuild",
+  "source_track": "synthetic_grounded",
+  "repo": "fixtures/tiny_green",
+  "base_commit": "0000000000000000000000000000000000000001",
+  "language": "python",
+  "problem_statement": "Baseline-green fixture for envbuild dual-build proofs (no intentional faults).",
+  "fail_to_pass": [],
+  "pass_to_pass": [
+    "python -m pytest -q"
+  ],
+  "environment": {
+    "image_digest": "pending"
+  },
+  "license": "MIT",
+  "requirements": "pytest",
+  "baseline_test_command": "python -m pytest -q",
+  "install_commands": ["pip install -q pytest"],
+  "base_image": "python:3.12-slim"
+}

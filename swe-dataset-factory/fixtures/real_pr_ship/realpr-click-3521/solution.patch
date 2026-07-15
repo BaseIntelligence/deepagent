@@ -1,0 +1,312 @@
+diff --git a/src/click/core.py b/src/click/core.py
+index bc04f64..b422bd4 100644
+--- a/src/click/core.py
++++ b/src/click/core.py
+@@ -1189,7 +1189,8 @@ class Command:
+             text = ""
+ 
+         if self.deprecated:
+-            text = f"{_(text)} {_format_deprecated_label(self.deprecated)}"
++            label = _format_deprecated_label(self.deprecated)
++            text = f"{_(text)} {label}" if text else label
+ 
+         if text:
+             formatter.write_paragraph()
+@@ -1622,8 +1623,15 @@ class Group(Command):
+         self.invoke_without_command = invoke_without_command
+ 
+         if subcommand_metavar is None:
++            # When the group can run without a subcommand, the leading command
++            # token is optional, so wrap it in brackets to reflect that.
+             if chain:
+-                subcommand_metavar = "COMMAND1 [ARGS]... [COMMAND2 [ARGS]...]..."
++                if invoke_without_command:
++                    subcommand_metavar = "[COMMAND1] [ARGS]... [COMMAND2 [ARGS]...]..."
++                else:
++                    subcommand_metavar = "COMMAND1 [ARGS]... [COMMAND2 [ARGS]...]..."
++            elif invoke_without_command:
++                subcommand_metavar = "[COMMAND] [ARGS]..."
+             else:
+                 subcommand_metavar = "COMMAND [ARGS]..."
+ 
+@@ -2826,7 +2834,7 @@ class Option(Parameter):
+ 
+         if deprecated:
+             label = _format_deprecated_label(deprecated)
+-            help = f"{help} {label}" if help is not None else label
++            help = f"{help} {label}" if help else label
+ 
+         self.prompt = prompt_text
+         self.confirmation_prompt = confirmation_prompt
+diff --git a/src/click/exceptions.py b/src/click/exceptions.py
+index 68c2806..6272c38 100644
+--- a/src/click/exceptions.py
++++ b/src/click/exceptions.py
+@@ -36,13 +36,16 @@ class ClickException(Exception):
+     """An exception that Click can handle and show to the user."""
+ 
+     #: The exit code for this exception.
+-    exit_code = 1
++    exit_code: t.ClassVar[int] = 1
++
++    show_color: t.Final[bool | None]
++    message: t.Final[str]
+ 
+     def __init__(self, message: str) -> None:
+         super().__init__(message)
+         # The context will be removed by the time we print the message, so cache
+         # the color settings here to be used later on (in `show`)
+-        self.show_color: bool | None = resolve_color_default()
++        self.show_color = resolve_color_default()
+         self.message = message
+ 
+     def format_message(self) -> str:
+@@ -71,12 +74,15 @@ class UsageError(ClickException):
+                 fill in the context automatically in some situations.
+     """
+ 
+-    exit_code = 2
++    exit_code: t.ClassVar[int] = 2
++
++    ctx: Context | None
++    cmd: t.Final[Command | None]
+ 
+     def __init__(self, message: str, ctx: Context | None = None) -> None:
+         super().__init__(message)
+         self.ctx = ctx
+-        self.cmd: Command | None = self.ctx.command if self.ctx else None
++        self.cmd = self.ctx.command if self.ctx else None
+ 
+     def show(self, file: t.IO[t.Any] | None = None) -> None:
+         if file is None:
+@@ -123,6 +129,9 @@ class BadParameter(UsageError):
+                        each item is quoted and separated.
+     """
+ 
++    param: Parameter | None
++    param_hint: cabc.Sequence[str] | str | None
++
+     def __init__(
+         self,
+         message: str,
+@@ -159,6 +168,8 @@ class MissingParameter(BadParameter):
+                        ``'option'`` or ``'argument'``.
+     """
+ 
++    param_type: t.Final[str | None]
++
+     def __init__(
+         self,
+         message: str | None = None,
+@@ -224,6 +235,9 @@ class NoSuchOption(UsageError):
+     .. versionadded:: 4.0
+     """
+ 
++    option_name: t.Final[str]
++    possibilities: t.Final[list[str] | None]
++
+     def __init__(
+         self,
+         option_name: str,
+@@ -236,11 +250,14 @@ class NoSuchOption(UsageError):
+ 
+         super().__init__(message, ctx)
+         self.option_name = option_name
+-        self.possibilities: list[str] | None = None
++
+         if possibilities:
+             from difflib import get_close_matches
+ 
+-            self.possibilities = get_close_matches(option_name, possibilities)
++            possibilities_ = get_close_matches(option_name, possibilities)
++        else:
++            possibilities_ = None
++        self.possibilities = possibilities_
+ 
+     def format_message(self) -> str:
+         if not self.possibilities:
+@@ -254,6 +271,9 @@ class NoSuchCommand(UsageError):
+     .. versionadded:: 8.4.0
+     """
+ 
++    command_name: t.Final[str]
++    possibilities: t.Final[list[str] | None]
++
+     def __init__(
+         self,
+         command_name: str,
+@@ -266,11 +286,14 @@ class NoSuchCommand(UsageError):
+ 
+         super().__init__(message, ctx)
+         self.command_name = command_name
+-        self.possibilities: list[str] | None = None
++
+         if possibilities:
+             from difflib import get_close_matches
+ 
+-            self.possibilities = get_close_matches(command_name, possibilities)
++            possibilities_ = get_close_matches(command_name, possibilities)
++        else:
++            possibilities_ = None
++        self.possibilities = possibilities_
+ 
+     def format_message(self) -> str:
+         if not self.possibilities:
+@@ -288,6 +311,8 @@ class BadOptionUsage(UsageError):
+     :param option_name: the name of the option being used incorrectly.
+     """
+ 
++    option_name: t.Final[str]
++
+     def __init__(
+         self, option_name: str, message: str, ctx: Context | None = None
+     ) -> None:
+@@ -305,8 +330,9 @@ class BadArgumentUsage(UsageError):
+ 
+ 
+ class NoArgsIsHelpError(UsageError):
++    ctx: Context
++
+     def __init__(self, ctx: Context) -> None:
+-        self.ctx: Context
+         super().__init__(ctx.get_help(), ctx=ctx)
+ 
+     def show(self, file: t.IO[t.Any] | None = None) -> None:
+@@ -316,12 +342,15 @@ class NoArgsIsHelpError(UsageError):
+ class FileError(ClickException):
+     """Raised if a file cannot be opened."""
+ 
++    ui_filename: t.Final[str]
++    filename: t.Final[str]
++
+     def __init__(self, filename: str, hint: str | None = None) -> None:
+         if hint is None:
+             hint = _("unknown error")
+ 
+         super().__init__(hint)
+-        self.ui_filename: str = format_filename(filename)
++        self.ui_filename = format_filename(filename)
+         self.filename = filename
+ 
+     def format_message(self) -> str:
+@@ -343,5 +372,7 @@ class Exit(RuntimeError):
+ 
+     __slots__ = ("exit_code",)
+ 
++    exit_code: t.Final[int]
++
+     def __init__(self, code: int = 0) -> None:
+-        self.exit_code: int = code
++        self.exit_code = code
+diff --git a/src/click/formatting.py b/src/click/formatting.py
+index 886a4ad..c4aa2de 100644
+--- a/src/click/formatting.py
++++ b/src/click/formatting.py
+@@ -119,6 +119,11 @@ class HelpFormatter:
+                   width clamped to a maximum of 78.
+     """
+ 
++    indent_increment: int
++    width: int
++    current_indent: int
++    buffer: list[str]
++
+     def __init__(
+         self,
+         indent_increment: int = 2,
+@@ -135,8 +140,8 @@ class HelpFormatter:
+             if width is None:
+                 width = max(min(shutil.get_terminal_size().columns, max_width) - 2, 50)
+         self.width = width
+-        self.current_indent: int = 0
+-        self.buffer: list[str] = []
++        self.current_indent = 0
++        self.buffer = []
+ 
+     def write(self, string: str) -> None:
+         """Writes a unicode string into the internal buffer."""
+@@ -223,7 +228,7 @@ class HelpFormatter:
+ 
+     def write_dl(
+         self,
+-        rows: cabc.Sequence[tuple[str, str]],
++        rows: cabc.Iterable[tuple[str, str]],
+         col_max: int = 30,
+         col_spacing: int = 2,
+     ) -> None:
+@@ -266,7 +271,7 @@ class HelpFormatter:
+                 self.write("\n")
+ 
+     @contextmanager
+-    def section(self, name: str) -> cabc.Iterator[None]:
++    def section(self, name: str) -> cabc.Generator[None]:
+         """Helpful context manager that writes a paragraph, a heading,
+         and the indents.
+ 
+@@ -281,7 +286,7 @@ class HelpFormatter:
+             self.dedent()
+ 
+     @contextmanager
+-    def indentation(self) -> cabc.Iterator[None]:
++    def indentation(self) -> cabc.Generator[None]:
+         """A context manager that increases the indentation."""
+         self.indent()
+         try:
+@@ -294,7 +299,7 @@ class HelpFormatter:
+         return "".join(self.buffer)
+ 
+ 
+-def join_options(options: cabc.Sequence[str]) -> tuple[str, bool]:
++def join_options(options: cabc.Iterable[str]) -> tuple[str, bool]:
+     """Given a list of option strings this joins them in the most appropriate
+     way and returns them in the form ``(formatted_string,
+     any_prefix_is_slash)`` where the second item in the tuple is a flag that
+diff --git a/src/click/shell_completion.py b/src/click/shell_completion.py
+index f9da4a3..8744612 100644
+--- a/src/click/shell_completion.py
++++ b/src/click/shell_completion.py
+@@ -222,6 +222,11 @@ class ShellComplete:
+     be provided by subclasses.
+     """
+ 
++    cli: Command
++    ctx_args: cabc.MutableMapping[str, t.Any]
++    prog_name: str
++    complete_var: str
++
+     def __init__(
+         self,
+         cli: Command,
+@@ -305,8 +310,8 @@ class ShellComplete:
+ class BashComplete(ShellComplete):
+     """Shell completion for Bash."""
+ 
+-    name = "bash"
+-    source_template = _SOURCE_BASH
++    name: t.ClassVar[str] = "bash"
++    source_template: t.ClassVar[str] = _SOURCE_BASH
+ 
+     @staticmethod
+     def _check_version() -> None:
+@@ -364,8 +369,8 @@ class BashComplete(ShellComplete):
+ class ZshComplete(ShellComplete):
+     """Shell completion for Zsh."""
+ 
+-    name = "zsh"
+-    source_template = _SOURCE_ZSH
++    name: t.ClassVar[str] = "zsh"
++    source_template: t.ClassVar[str] = _SOURCE_ZSH
+ 
+     def get_completion_args(self) -> tuple[list[str], str]:
+         cwords = split_arg_string(os.environ["COMP_WORDS"])
+@@ -400,8 +405,8 @@ class ZshComplete(ShellComplete):
+ class FishComplete(ShellComplete):
+     """Shell completion for Fish."""
+ 
+-    name = "fish"
+-    source_template = _SOURCE_FISH
++    name: t.ClassVar[str] = "fish"
++    source_template: t.ClassVar[str] = _SOURCE_FISH
+ 
+     def get_completion_args(self) -> tuple[list[str], str]:
+         cwords = split_arg_string(os.environ["COMP_WORDS"])

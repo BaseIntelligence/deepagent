@@ -1,0 +1,24 @@
+{
+  "funnel_hardening": "swe-factory funnel-report --target 70 --max-workers 16",
+  "keep_count": 36,
+  "language_kept": {
+    "go": 8,
+    "javascript": 7,
+    "python": 10,
+    "rust": 11,
+    "typescript": 0
+  },
+  "m9_target": 70,
+  "mine_path": "datasets/mine_allowlist_m8",
+  "mode": "git_clone_only",
+  "note": "M9 ship uses hybrid motor seeds (72) with real remote pins; git-clone allowlist inventory is informational for real_pr funnel readiness.",
+  "oxylabs_status": "not_used",
+  "ship_band": {
+    "max": 90,
+    "min": 70,
+    "target": 70
+  },
+  "under_supply": [
+    "typescript: inventory=4 but mine kept=0 after multi-file+tests+license funnel (honest yield shortfall, not silent omission)."
+  ]
+}

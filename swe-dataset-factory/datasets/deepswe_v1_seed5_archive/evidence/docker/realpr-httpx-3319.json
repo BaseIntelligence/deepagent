@@ -1,0 +1,162 @@
+{
+  "agent_isolated": true,
+  "audit": {
+    "blocks_ship": true,
+    "complete": false,
+    "fields": {
+      "backend": "docker",
+      "base_commit_hash": "3f76571d3429497c4ee4ecf5d8bc034b6f765957",
+      "isolation": "clean",
+      "null_reward": 0,
+      "repository_url": "https://github.com/encode/httpx.git",
+      "solution_reward": 0,
+      "task_id": "realpr-httpx-3319"
+    },
+    "isolation_ok": true,
+    "missing": [],
+    "null_ok": true,
+    "sol_ok": false
+  },
+  "backend": "docker",
+  "base_commit_hash": "3f76571d3429497c4ee4ecf5d8bc034b6f765957",
+  "certified": false,
+  "disposition": "reject",
+  "flake": {
+    "details": {},
+    "is_flake": false,
+    "phase": "gold",
+    "reason_codes": []
+  },
+  "isolation": {
+    "clean": true,
+    "hits": [],
+    "isolation": "clean",
+    "summary": {
+      "file_count": 1,
+      "files": [
+        "Dockerfile"
+      ],
+      "forbidden_hits": [],
+      "has_dockerfile": true,
+      "has_solution_dir": false,
+      "has_test_patch": false,
+      "isolated": true
+    }
+  },
+  "isolation_status": "clean",
+  "mode": "docker",
+  "null_reward": 0,
+  "oracle": {
+    "agent_context_summary": {
+      "file_count": 1,
+      "files": [
+        "Dockerfile"
+      ],
+      "forbidden_hits": [],
+      "has_dockerfile": true,
+      "has_solution_dir": false,
+      "has_test_patch": false,
+      "isolated": true
+    },
+    "agent_image": "harbor-sdf-agent-rpr05:oracle",
+    "agent_isolated": true,
+    "config_ok": true,
+    "details": {
+      "null_json": {
+        "f2p": 0.0,
+        "f2p_passed": 0,
+        "f2p_total": 13,
+        "p2p": 0.0,
+        "p2p_passed": 0,
+        "p2p_total": 16,
+        "partial": 0.0,
+        "reward": 0
+      },
+      "solution_json": {
+        "f2p": 0.0,
+        "f2p_passed": 0,
+        "f2p_total": 13,
+        "p2p": 0.0,
+        "p2p_passed": 0,
+        "p2p_total": 16,
+        "partial": 0.0,
+        "reward": 0
+      }
+    },
+    "mode": "docker",
+    "null_reward": 0,
+    "passed": false,
+    "reasons": [
+      "solution reward expected 1, got 0 (logs:  root 4096 Jul 15 09:37 ..\n-rw-r--r-- 1 root root    0 Jul 15 09:37 base.xml\n-rw-r--r-- 1 root root 5478 Jul 15 09:37 ctrf.json\n-rw-r--r-- 1 root root  164 Jul 15 09:37 new.log\n-rw-r--r-- 1 root root  121 Jul 15 09:37 reward.json\n-rw-r--r-- 1 root root    0 Jul 15 09:37 run.log\n{\"reward\": 0, \"f2p_total\": 13, \"f2p_passed\": 0, \"p2p_total\": 16, \"p2p_passed\": 0, \"f2p\": 0.0, \"p2p\": 0.0, \"partial\": 0.0})"
+    ],
+    "solution_reward": 0,
+    "task_id": "realpr-httpx-3319",
+    "test_patch_ok": true,
+    "tests_image": "harbor-sdf-tests-rpr05:oracle"
+  },
+  "pack_dir": "/tmp/work_ship_m14_yield15m/staging/realpr-httpx-3319",
+  "pack_meta": {
+    "base_commit_hash": "3f76571d3429497c4ee4ecf5d8bc034b6f765957",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "real_sha_ok": true,
+    "real_url_ok": true,
+    "reason_codes": [],
+    "reasons": [],
+    "repository_url": "https://github.com/encode/httpx.git",
+    "schema_version": "1.1",
+    "source_track": "real_pr",
+    "task_id": "realpr-httpx-3319"
+  },
+  "pier_ready": {
+    "load_smoke": {
+      "base_commit_hash": "3f76571d3429497c4ee4ecf5d8bc034b6f765957",
+      "cli_version_exit": 1,
+      "cli_version_out": "",
+      "environment_mode": "VerifierEnvironmentMode.SEPARATE",
+      "errors": [],
+      "harbor_version": "0.18.0",
+      "listed": [
+        "realpr-attrs-1323",
+        "realpr-attrs-1454",
+        "realpr-httpx-3022",
+        "realpr-httpx-3319"
+      ],
+      "metadata_language": "python",
+      "ok": true,
+      "paths": {
+        "environment/": true,
+        "instruction.md": true,
+        "solution/": true,
+        "task.toml": true,
+        "tests/": true
+      },
+      "paths_ok": true,
+      "schema_version": "1.1",
+      "task_config_ok": true,
+      "task_id": "realpr-httpx-3319",
+      "task_object": "Task",
+      "task_short_name": "realpr-httpx-3319",
+      "tool": "harbor"
+    },
+    "missing_relpaths": [],
+    "notes": [],
+    "pack_dir": "/tmp/work_ship_m14_yield15m/staging/realpr-httpx-3319",
+    "pier_job_prefix": "/tmp/harbor-deepswe-jobs",
+    "required_relpaths_ok": true,
+    "structural_ok": true
+  },
+  "reason_codes": [
+    "G2_GOLD_FAIL",
+    "G3_NULL_NOT_RESOLVE",
+    "G5_LEAK_CLEAN",
+    "ORACLE_REJECT"
+  ],
+  "reasons": [
+    "solution reward expected 1, got 0 (logs:  root 4096 Jul 15 09:37 ..\n-rw-r--r-- 1 root root    0 Jul 15 09:37 base.xml\n-rw-r--r-- 1 root root 5478 Jul 15 09:37 ctrf.json\n-rw-r--r-- 1 root root  164 Jul 15 09:37 new.log\n-rw-r--r-- 1 root root  121 Jul 15 09:37 reward.json\n-rw-r--r-- 1 root root    0 Jul 15 09:37 run.log\n{\"reward\": 0, \"f2p_total\": 13, \"f2p_passed\": 0, \"p2p_total\": 16, \"p2p_passed\": 0, \"f2p\": 0.0, \"p2p\": 0.0, \"partial\": 0.0})",
+    "solution reward expected 1, got 0"
+  ],
+  "repository_url": "https://github.com/encode/httpx.git",
+  "solution_reward": 0,
+  "task_id": "realpr-httpx-3319"
+}

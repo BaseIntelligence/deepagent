@@ -1,0 +1,349 @@
+{
+  "agent_isolated": true,
+  "audit": {
+    "allow_scripted_substitute": true,
+    "blocks_promote": false,
+    "full_path_ok": true,
+    "null_ok": true,
+    "pier_path_class": "scripted",
+    "resolved_pier_bin": null,
+    "sol_ok": true,
+    "structural_ok": true
+  },
+  "backend": "docker",
+  "base_commit_hash": "70551309d170d43696fff527cd5b5893421996ba",
+  "certified": true,
+  "disposition": "accept",
+  "evidence_files": {
+    "backend": "docker",
+    "combined_path": "/tmp/work_ship_m14_yield15p/product_stage/evidence/pier/realpr-werkzeug-3101.pier_evidence.json",
+    "jobs_root": "/tmp/harbor-deepswe-jobs-ship",
+    "null_path": "/tmp/work_ship_m14_yield15p/product_stage/evidence/pier/realpr-werkzeug-3101.null.reward.json",
+    "null_reward": 0,
+    "oracle_mode": "docker",
+    "pier_path_class": "scripted",
+    "sol_path": "/tmp/work_ship_m14_yield15p/product_stage/evidence/pier/realpr-werkzeug-3101.sol.reward.json",
+    "sol_reward": 1
+  },
+  "isolation": {
+    "clean": true,
+    "hits": [],
+    "isolation": "clean",
+    "summary": {
+      "file_count": 1,
+      "files": [
+        "Dockerfile"
+      ],
+      "forbidden_hits": [],
+      "has_dockerfile": true,
+      "has_solution_dir": false,
+      "has_test_patch": false,
+      "isolated": true
+    }
+  },
+  "isolation_status": "clean",
+  "jobs_root": "/tmp/harbor-deepswe-jobs-ship",
+  "null": 0,
+  "null_reward": 0,
+  "null_reward_path": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101/scripted-trial-nop/verifier/reward.json",
+  "null_run": {
+    "agent": "nop",
+    "command": [
+      "scripted-pier",
+      "run",
+      "-a",
+      "nop"
+    ],
+    "errors": [],
+    "exit_code": 0,
+    "job_dir": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101",
+    "result_json": {
+      "verifier_result": {
+        "rewards": {
+          "reward": 0
+        }
+      }
+    },
+    "reward": {
+      "agent": "nop",
+      "errors": [],
+      "parse_ok": true,
+      "path": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101/scripted-trial-nop/verifier/reward.json",
+      "raw": {
+        "f2p_passed": 0,
+        "f2p_total": 2,
+        "p2p_passed": 1,
+        "p2p_total": 1,
+        "reward": 0
+      },
+      "reward": 0
+    },
+    "stderr_tail": "",
+    "stdout_tail": "scripted pier ok",
+    "trial_dir": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101/scripted-trial-nop"
+  },
+  "oracle_mode": "docker",
+  "oracle_path_class": "scripted",
+  "oracle_run": {
+    "agent": "oracle",
+    "command": [
+      "scripted-pier",
+      "run",
+      "-a",
+      "oracle"
+    ],
+    "errors": [],
+    "exit_code": 0,
+    "job_dir": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101",
+    "result_json": {
+      "verifier_result": {
+        "rewards": {
+          "reward": 1
+        }
+      }
+    },
+    "reward": {
+      "agent": "oracle",
+      "errors": [],
+      "parse_ok": true,
+      "path": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101/scripted-trial-oracle/verifier/reward.json",
+      "raw": {
+        "f2p_passed": 2,
+        "f2p_total": 2,
+        "p2p_passed": 1,
+        "p2p_total": 1,
+        "reward": 1
+      },
+      "reward": 1
+    },
+    "stderr_tail": "",
+    "stdout_tail": "scripted pier ok",
+    "trial_dir": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101/scripted-trial-oracle"
+  },
+  "pack_dir": "/tmp/work_ship_m14_yield15p/staging/realpr-werkzeug-3101",
+  "pack_meta": {
+    "base_commit_hash": "70551309d170d43696fff527cd5b5893421996ba",
+    "language": "python",
+    "license": "MIT",
+    "real_sha_ok": true,
+    "real_url_ok": true,
+    "reason_codes": [],
+    "reasons": [],
+    "repository_url": "https://github.com/pallets/werkzeug.git",
+    "schema_version": "1.1",
+    "source_track": "real_pr",
+    "task_id": "realpr-werkzeug-3101"
+  },
+  "pier": {
+    "agent_isolated": true,
+    "backend": "docker",
+    "base_commit_hash": "70551309d170d43696fff527cd5b5893421996ba",
+    "certified": true,
+    "disposition": "accept",
+    "evidence": {
+      "meta_real_sha": true,
+      "meta_real_url": true,
+      "missing_relpaths": [],
+      "null_reward_path": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101/scripted-trial-nop/verifier/reward.json",
+      "sha40_ok": true,
+      "sol_reward_path": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101/scripted-trial-oracle/verifier/reward.json"
+    },
+    "isolation": {
+      "clean": true,
+      "hits": [],
+      "isolation": "clean",
+      "summary": {
+        "file_count": 1,
+        "files": [
+          "Dockerfile"
+        ],
+        "forbidden_hits": [],
+        "has_dockerfile": true,
+        "has_solution_dir": false,
+        "has_test_patch": false,
+        "isolated": true
+      }
+    },
+    "isolation_status": "clean",
+    "jobs_root": "/tmp/harbor-deepswe-jobs-ship",
+    "null_reward": 0,
+    "null_run": {
+      "agent": "nop",
+      "command": [
+        "scripted-pier",
+        "run",
+        "-a",
+        "nop"
+      ],
+      "errors": [],
+      "exit_code": 0,
+      "job_dir": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101",
+      "result_json": {
+        "verifier_result": {
+          "rewards": {
+            "reward": 0
+          }
+        }
+      },
+      "reward": {
+        "agent": "nop",
+        "errors": [],
+        "parse_ok": true,
+        "path": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101/scripted-trial-nop/verifier/reward.json",
+        "raw": {
+          "f2p_passed": 0,
+          "f2p_total": 2,
+          "p2p_passed": 1,
+          "p2p_total": 1,
+          "reward": 0
+        },
+        "reward": 0
+      },
+      "stderr_tail": "",
+      "stdout_tail": "scripted pier ok",
+      "trial_dir": "/tmp/harbor-deepswe-jobs-ship/nop/nop-realpr-werkzeug-3101/scripted-trial-nop"
+    },
+    "oracle_mode": "docker",
+    "oracle_run": {
+      "agent": "oracle",
+      "command": [
+        "scripted-pier",
+        "run",
+        "-a",
+        "oracle"
+      ],
+      "errors": [],
+      "exit_code": 0,
+      "job_dir": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101",
+      "result_json": {
+        "verifier_result": {
+          "rewards": {
+            "reward": 1
+          }
+        }
+      },
+      "reward": {
+        "agent": "oracle",
+        "errors": [],
+        "parse_ok": true,
+        "path": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101/scripted-trial-oracle/verifier/reward.json",
+        "raw": {
+          "f2p_passed": 2,
+          "f2p_total": 2,
+          "p2p_passed": 1,
+          "p2p_total": 1,
+          "reward": 1
+        },
+        "reward": 1
+      },
+      "stderr_tail": "",
+      "stdout_tail": "scripted pier ok",
+      "trial_dir": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101/scripted-trial-oracle"
+    },
+    "pack_dir": "/tmp/work_ship_m14_yield15p/staging/realpr-werkzeug-3101",
+    "pack_meta": {
+      "base_commit_hash": "70551309d170d43696fff527cd5b5893421996ba",
+      "language": "python",
+      "license": "MIT",
+      "real_sha_ok": true,
+      "real_url_ok": true,
+      "reason_codes": [],
+      "reasons": [],
+      "repository_url": "https://github.com/pallets/werkzeug.git",
+      "schema_version": "1.1",
+      "source_track": "real_pr",
+      "task_id": "realpr-werkzeug-3101"
+    },
+    "pier_ready": {
+      "load_smoke": {
+        "base_commit_hash": "70551309d170d43696fff527cd5b5893421996ba",
+        "cli_version_exit": 1,
+        "cli_version_out": "",
+        "environment_mode": "VerifierEnvironmentMode.SEPARATE",
+        "errors": [],
+        "harbor_version": "0.18.0",
+        "listed": [
+          "realpr-attrs-1323",
+          "realpr-attrs-1407",
+          "realpr-attrs-1454",
+          "realpr-attrs-1457",
+          "realpr-cachetools-385",
+          "realpr-charset-normalizer-715",
+          "realpr-click-3645",
+          "realpr-httpcore-882",
+          "realpr-httpx-2252",
+          "realpr-httpx-3672",
+          "realpr-itemadapter-101",
+          "realpr-more-itertools-1058",
+          "realpr-more-itertools-1136",
+          "realpr-more-itertools-943",
+          "realpr-packaging-1120",
+          "realpr-packaging-1267",
+          "realpr-packaging-1311",
+          "realpr-rich-2001",
+          "realpr-rich-3486",
+          "realpr-rich-4070",
+          "realpr-werkzeug-2979",
+          "realpr-werkzeug-2995",
+          "realpr-werkzeug-3006",
+          "realpr-werkzeug-3101"
+        ],
+        "metadata_language": "python",
+        "ok": true,
+        "paths": {
+          "environment/": true,
+          "instruction.md": true,
+          "solution/": true,
+          "task.toml": true,
+          "tests/": true
+        },
+        "paths_ok": true,
+        "schema_version": "1.1",
+        "task_config_ok": true,
+        "task_id": "realpr-werkzeug-3101",
+        "task_object": "Task",
+        "task_short_name": "realpr-werkzeug-3101",
+        "tool": "harbor"
+      },
+      "missing_relpaths": [],
+      "notes": [],
+      "pack_dir": "/tmp/work_ship_m14_yield15p/staging/realpr-werkzeug-3101",
+      "pier_job_prefix": "/tmp/harbor-deepswe-jobs-ship",
+      "required_relpaths_ok": true,
+      "structural_ok": true
+    },
+    "reason_codes": [
+      "PIER_STRUCTURAL_OK",
+      "G5_LEAK_CLEAN",
+      "PIER_ORACLE_REWARD_1",
+      "PIER_NULL_REWARD_0",
+      "PIER_CERT_PASS"
+    ],
+    "reasons": [],
+    "repository_url": "https://github.com/pallets/werkzeug.git",
+    "sol_reward": 1,
+    "structural_ok": true,
+    "task_id": "realpr-werkzeug-3101"
+  },
+  "pier_path_class": "scripted",
+  "reason_codes": [
+    "RPIER_SCRIPTED_PATH",
+    "PIER_STRUCTURAL_OK",
+    "G5_LEAK_CLEAN",
+    "PIER_ORACLE_REWARD_1",
+    "PIER_NULL_REWARD_0",
+    "PIER_CERT_PASS",
+    "RPIER_STRUCTURAL_OK",
+    "RPIER_SOL_1",
+    "RPIER_NULL_0",
+    "RPIER_PASS"
+  ],
+  "reasons": [],
+  "repository_url": "https://github.com/pallets/werkzeug.git",
+  "sol": 1,
+  "sol_reward_path": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-werkzeug-3101/scripted-trial-oracle/verifier/reward.json",
+  "solution_reward": 1,
+  "source_track": "real_pr",
+  "structural_ok": true,
+  "task_id": "realpr-werkzeug-3101"
+}

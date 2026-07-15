@@ -1,0 +1,13 @@
+diff --git a/tests/test_path.py b/tests/test_path.py
+index 5db3b50..3e9de53 100644
+--- a/tests/test_path.py
++++ b/tests/test_path.py
+@@ -117,7 +117,7 @@ class TestPath(unittest.TestCase):
+     def test_iterdir_on_file(self, alpharep):
+         root = zipfile.Path(alpharep)
+         a, n, b, g, j = root.iterdir()
+-        with self.assertRaises(ValueError):
++        with self.assertRaises(NotADirectoryError):
+             a.iterdir()
+ 
+     @pass_alpharep

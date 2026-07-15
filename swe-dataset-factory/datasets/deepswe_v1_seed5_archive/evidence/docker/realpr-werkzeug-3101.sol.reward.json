@@ -1,0 +1,21 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "70551309d170d43696fff527cd5b5893421996ba",
+  "disposition": "accept",
+  "isolation": "clean",
+  "oracle_mode": "docker",
+  "phase": "solution",
+  "reason_codes": [
+    "ORCD_SOL_1",
+    "G3_NULL_NOT_RESOLVE",
+    "G5_LEAK_CLEAN",
+    "ORACLE_PASS",
+    "RORC_ISOLATION_CLEAN",
+    "RORC_SOL_1",
+    "RORC_NULL_0"
+  ],
+  "repository_url": "https://github.com/pallets/werkzeug.git",
+  "reward": 1,
+  "source_track": "real_pr",
+  "task_id": "realpr-werkzeug-3101"
+}

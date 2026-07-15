@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swe-dataset-factory"
+version = "0.1.0"
+description = "Hard SWE benchmark dataset factory (Docker-verifiable gold tasks)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "SWE Dataset Factory" }]
+dependencies = [
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "typer>=0.12",
+  "httpx==0.28.1",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-xdist>=3.5",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "types-requests",
+]
+
+[project.scripts]
+swe-factory = "swe_factory.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "integration: marks tests that need Docker or live services",
+]
+# Disable pytest-mypy (auto-enabled via pytest-enabler when present). Official
+# typecheck is `commands.typecheck` (mypy src). pytest-mypy+xdist dual-loads
+# tests as both "test_X" and "tests.test_X" after import styles like
+# `from tests.test_envbuild import FakeDocker`, which is unrelated to product code.
+# Disable ambient entry-point plugins that break collect under modern deps:
+# - pytest-mypy: dual-loads via pytest-enabler (see comment above)
+# - pytest-httpbin: pulls httpbin which imports removed werkzeug.http.parse_authorization_header
+# - pytest-cov: ambient cov plugin can break if host coverage package is mismatched
+# Project tests do not use httpbin fixtures; coverage is not part of unit gate.
+addopts = "-p no:cacheprovider -p no:mypy -p no:httpbin -p no:cov"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["swe_factory"]
+mypy_path = "src"
+warn_unused_configs = true

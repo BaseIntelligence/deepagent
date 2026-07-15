@@ -1,0 +1,202 @@
+diff --git a/httpcore/_async/http11.py b/httpcore/_async/http11.py
+--- a/httpcore/_async/http11.py
++++ b/httpcore/_async/http11.py
+@@ -1,8 +1,10 @@
+ import enum
+ import logging
++import ssl
+ import time
+ from types import TracebackType
+ from typing import (
++    Any,
+     AsyncIterable,
+     AsyncIterator,
+     List,
+@@ -107,6 +109,7 @@ async def handle_async_request(self, request: Request) -> Response:
+                     status,
+                     reason_phrase,
+                     headers,
++                    trailing_data,
+                 ) = await self._receive_response_headers(**kwargs)
+                 trace.return_value = (
+                     http_version,
+@@ -115,14 +118,22 @@ async def handle_async_request(self, request: Request) -> Response:
+                     headers,
+                 )
+ 
++            network_stream = self._network_stream
++
++            # CONNECT or Upgrade request
++            if (status == 101) or (
++                (request.method == b"CONNECT") and (200 <= status < 300)
++            ):
++                network_stream = AsyncHTTP11UpgradeStream(network_stream, trailing_data)
++
+             return Response(
+                 status=status,
+                 headers=headers,
+                 content=HTTP11ConnectionByteStream(self, request),
+                 extensions={
+                     "http_version": http_version,
+                     "reason_phrase": reason_phrase,
+-                    "network_stream": self._network_stream,
++                    "network_stream": network_stream,
+                 },
+             )
+         except BaseException as exc:
+@@ -167,7 +178,7 @@ async def _send_event(
+ 
+     async def _receive_response_headers(
+         self, request: Request
+-    ) -> Tuple[bytes, int, bytes, List[Tuple[bytes, bytes]]]:
++    ) -> Tuple[bytes, int, bytes, List[Tuple[bytes, bytes]], bytes]:
+         timeouts = request.extensions.get("timeout", {})
+         timeout = timeouts.get("read", None)
+ 
+@@ -187,7 +198,9 @@ async def _receive_response_headers(
+         # raw header casing, rather than the enforced lowercase headers.
+         headers = event.headers.raw_items()
+ 
+-        return http_version, event.status_code, event.reason, headers
++        trailing_data, _ = self._h11_state.trailing_data
++
++        return http_version, event.status_code, event.reason, headers, trailing_data
+ 
+     async def _receive_response_body(self, request: Request) -> AsyncIterator[bytes]:
+         timeouts = request.extensions.get("timeout", {})
+@@ -340,3 +353,34 @@ async def aclose(self) -> None:
+             self._closed = True
+             async with Trace("response_closed", logger, self._request):
+                 await self._connection._response_closed()
++
++
++class AsyncHTTP11UpgradeStream(AsyncNetworkStream):
++    def __init__(self, stream: AsyncNetworkStream, leading_data: bytes) -> None:
++        self._stream = stream
++        self._leading_data = leading_data
++
++    async def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
++        if self._leading_data:
++            buffer = self._leading_data[:max_bytes]
++            self._leading_data = self._leading_data[max_bytes:]
++            return buffer
++        else:
++            return await self._stream.read(max_bytes, timeout)
++
++    async def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
++        await self._stream.write(buffer, timeout)
++
++    async def aclose(self) -> None:
++        await self._stream.aclose()
++
++    async def start_tls(
++        self,
++        ssl_context: ssl.SSLContext,
++        server_hostname: Optional[str] = None,
++        timeout: Optional[float] = None,
++    ) -> AsyncNetworkStream:
++        return await self._stream.start_tls(ssl_context, server_hostname, timeout)
++
++    def get_extra_info(self, info: str) -> Any:
++        return self._stream.get_extra_info(info)
+diff --git a/httpcore/_sync/http11.py b/httpcore/_sync/http11.py
+--- a/httpcore/_sync/http11.py
++++ b/httpcore/_sync/http11.py
+@@ -1,8 +1,10 @@
+ import enum
+ import logging
++import ssl
+ import time
+ from types import TracebackType
+ from typing import (
++    Any,
+     Iterable,
+     Iterator,
+     List,
+@@ -107,6 +109,7 @@ def handle_request(self, request: Request) -> Response:
+                     status,
+                     reason_phrase,
+                     headers,
++                    trailing_data,
+                 ) = self._receive_response_headers(**kwargs)
+                 trace.return_value = (
+                     http_version,
+@@ -115,14 +118,22 @@ def handle_request(self, request: Request) -> Response:
+                     headers,
+                 )
+ 
++            network_stream = self._network_stream
++
++            # CONNECT or Upgrade request
++            if (status == 101) or (
++                (request.method == b"CONNECT") and (200 <= status < 300)
++            ):
++                network_stream = HTTP11UpgradeStream(network_stream, trailing_data)
++
+             return Response(
+                 status=status,
+                 headers=headers,
+                 content=HTTP11ConnectionByteStream(self, request),
+                 extensions={
+                     "http_version": http_version,
+                     "reason_phrase": reason_phrase,
+-                    "network_stream": self._network_stream,
++                    "network_stream": network_stream,
+                 },
+             )
+         except BaseException as exc:
+@@ -167,7 +178,7 @@ def _send_event(
+ 
+     def _receive_response_headers(
+         self, request: Request
+-    ) -> Tuple[bytes, int, bytes, List[Tuple[bytes, bytes]]]:
++    ) -> Tuple[bytes, int, bytes, List[Tuple[bytes, bytes]], bytes]:
+         timeouts = request.extensions.get("timeout", {})
+         timeout = timeouts.get("read", None)
+ 
+@@ -187,7 +198,9 @@ def _receive_response_headers(
+         # raw header casing, rather than the enforced lowercase headers.
+         headers = event.headers.raw_items()
+ 
+-        return http_version, event.status_code, event.reason, headers
++        trailing_data, _ = self._h11_state.trailing_data
++
++        return http_version, event.status_code, event.reason, headers, trailing_data
+ 
+     def _receive_response_body(self, request: Request) -> Iterator[bytes]:
+         timeouts = request.extensions.get("timeout", {})
+@@ -340,3 +353,34 @@ def close(self) -> None:
+             self._closed = True
+             with Trace("response_closed", logger, self._request):
+                 self._connection._response_closed()
++
++
++class HTTP11UpgradeStream(NetworkStream):
++    def __init__(self, stream: NetworkStream, leading_data: bytes) -> None:
++        self._stream = stream
++        self._leading_data = leading_data
++
++    def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
++        if self._leading_data:
++            buffer = self._leading_data[:max_bytes]
++            self._leading_data = self._leading_data[max_bytes:]
++            return buffer
++        else:
++            return self._stream.read(max_bytes, timeout)
++
++    def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
++        self._stream.write(buffer, timeout)
++
++    def close(self) -> None:
++        self._stream.close()
++
++    def start_tls(
++        self,
++        ssl_context: ssl.SSLContext,
++        server_hostname: Optional[str] = None,
++        timeout: Optional[float] = None,
++    ) -> NetworkStream:
++        return self._stream.start_tls(ssl_context, server_hostname, timeout)
++
++    def get_extra_info(self, info: str) -> Any:
++        return self._stream.get_extra_info(info)

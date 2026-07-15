@@ -1,0 +1,19 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "7411396ebd495e1abc28f5682975b5c662b2ff35",
+  "disposition": "reject",
+  "isolation": "clean",
+  "oracle_mode": "docker",
+  "phase": "null",
+  "reason_codes": [
+    "G2_GOLD_FAIL",
+    "G3_NULL_EVAL_ERROR",
+    "G5_LEAK_CLEAN",
+    "ORACLE_REJECT",
+    "RORC_ISOLATION_CLEAN"
+  ],
+  "repository_url": "https://github.com/jawah/charset_normalizer.git",
+  "reward": -1,
+  "source_track": "real_pr",
+  "task_id": "realpr-charset-normalizer-715"
+}

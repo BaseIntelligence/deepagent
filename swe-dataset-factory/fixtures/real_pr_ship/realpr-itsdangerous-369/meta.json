@@ -1,0 +1,19 @@
+{
+  "task_id": "realpr-itsdangerous-369",
+  "repo": "pallets/itsdangerous",
+  "url": "https://github.com/pallets/itsdangerous.git",
+  "language": "python",
+  "license": "BSD-3-Clause",
+  "pr": 369,
+  "base": "7c6286ed2125c87662eeb102b32fb3d68611a5d6",
+  "src": [
+    "docs/conf.py",
+    "src/itsdangerous/timed.py"
+  ],
+  "tests": [
+    ".github/workflows/tests.yaml",
+    "requirements/tests.txt",
+    "tests/test_itsdangerous/test_serializer.py"
+  ],
+  "title": "update project files (#369)"
+}

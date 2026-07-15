@@ -1,0 +1,29 @@
+{
+  "agent": "oracle",
+  "backend": "docker",
+  "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+  "disposition": "accept",
+  "isolation": "clean",
+  "jobs_root": "/tmp/harbor-deepswe-jobs-ship",
+  "oracle_mode": "docker",
+  "phase": "oracle",
+  "pier_path_class": "scripted",
+  "reason_codes": [
+    "RPIER_SCRIPTED_PATH",
+    "PIER_STRUCTURAL_OK",
+    "G5_LEAK_CLEAN",
+    "PIER_ORACLE_REWARD_1",
+    "PIER_NULL_REWARD_0",
+    "PIER_CERT_PASS",
+    "RPIER_STRUCTURAL_OK",
+    "RPIER_SOL_1",
+    "RPIER_NULL_0",
+    "RPIER_PASS"
+  ],
+  "repository_url": "https://github.com/scrapy/itemadapter.git",
+  "reward": 1,
+  "reward_source_path": "/tmp/harbor-deepswe-jobs-ship/oracle/oracle-realpr-itemadapter-101/scripted-trial-oracle/verifier/reward.json",
+  "source_track": "real_pr",
+  "structural_ok": true,
+  "task_id": "realpr-itemadapter-101"
+}

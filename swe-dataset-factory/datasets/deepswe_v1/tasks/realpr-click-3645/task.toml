@@ -1,0 +1,40 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+[task]
+name = "swe-factory/realpr-click-3645"
+description = ""
+authors = []
+keywords = []
+[metadata]
+task_id = "realpr-click-3645"
+language = "python"
+repository_url = "https://github.com/pallets/click.git"
+base_commit_hash = "679a7a0eccbdded7a6e85680bdaaf08003765e01"
+source_track = "real_pr"
+license = "BSD-3-Clause"
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800.0
+
+[verifier.env]
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+allow_internet = false
+
+[agent]
+timeout_sec = 5400.0
+[environment]
+build_timeout_sec = 1800.0
+os = "linux"
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+gpus = 0
+allow_internet = false
+mcp_servers = []
+
+[environment.env]
+[solution.env]

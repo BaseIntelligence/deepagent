@@ -1,0 +1,177 @@
+{
+  "agent_isolated": true,
+  "audit": {
+    "blocks_ship": true,
+    "complete": false,
+    "fields": {
+      "backend": "docker",
+      "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+      "isolation": "clean",
+      "null_reward": -1,
+      "repository_url": "https://github.com/scrapy/itemadapter.git",
+      "solution_reward": 0,
+      "task_id": "realpr-itemadapter-101"
+    },
+    "isolation_ok": true,
+    "missing": [],
+    "null_ok": false,
+    "sol_ok": false
+  },
+  "backend": "docker",
+  "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+  "certified": false,
+  "disposition": "reject",
+  "flake": {
+    "details": {},
+    "is_flake": false,
+    "phase": "gold",
+    "reason_codes": []
+  },
+  "isolation": {
+    "clean": true,
+    "hits": [],
+    "isolation": "clean",
+    "summary": {
+      "file_count": 1,
+      "files": [
+        "Dockerfile"
+      ],
+      "forbidden_hits": [],
+      "has_dockerfile": true,
+      "has_solution_dir": false,
+      "has_test_patch": false,
+      "isolated": true
+    }
+  },
+  "isolation_status": "clean",
+  "mode": "docker",
+  "null_reward": -1,
+  "oracle": {
+    "agent_context_summary": {
+      "file_count": 1,
+      "files": [
+        "Dockerfile"
+      ],
+      "forbidden_hits": [],
+      "has_dockerfile": true,
+      "has_solution_dir": false,
+      "has_test_patch": false,
+      "isolated": true
+    },
+    "agent_image": "harbor-sdf-agent-rpr32:oracle",
+    "agent_isolated": true,
+    "config_ok": true,
+    "details": {
+      "null_json": {
+        "reward": "-1"
+      },
+      "solution_json": {
+        "apply_failed": 1,
+        "f2p": 0.0,
+        "f2p_passed": 0,
+        "f2p_total": 43,
+        "p2p": 0.0,
+        "p2p_passed": 0,
+        "p2p_total": 66,
+        "partial": 0.0,
+        "reward": 0
+      }
+    },
+    "mode": "docker",
+    "null_reward": -1,
+    "passed": false,
+    "reasons": [
+      "solution reward expected 1, got 0 (logs:  \"p2p\": 0.0, \"partial\": 0.0, \"apply_failed\": 1}\ntotal 12\ndrwxr-xr-x 2 root root 4096 Jul 15 09:40 .\ndrwxr-xr-x 4 root root 4096 Jul 15 09:40 ..\n-rw-r--r-- 1 root root  140 Jul 15 09:40 reward.json\n{\"reward\": 0, \"f2p_total\": 43, \"f2p_passed\": 0, \"p2p_total\": 66, \"p2p_passed\": 0, \"f2p\": 0.0, \"p2p\": 0.0, \"partial\": 0.0, \"apply_failed\": 1}\nerror: itemadapter/_json_schema.py: No such file or directory\n)",
+      "null reward expected 0, got -1 (logs: [verifier] no model.patch submitted \u2014 grading pristine base state\n[verifier] Resetting files touched by test.patch\n[verifier] Applying test.patch\n[verifier] ERROR: test.patch failed to apply\ntotal 12\ndrwxr-xr-x 2 root root 4096 Jul 15 09:40 .\ndrwxr-xr-x 4 root root 4096 Jul 15 09:40 ..\n-rw-r--r-- 1 root root    3 Jul 15 09:40 reward.txt\n\nerror: tests/test_json_schema.py: No such file or directory\n)"
+    ],
+    "solution_reward": 0,
+    "task_id": "realpr-itemadapter-101",
+    "test_patch_ok": true,
+    "tests_image": "harbor-sdf-tests-rpr32:oracle"
+  },
+  "pack_dir": "/tmp/work_ship_m14_yield15m/staging/realpr-itemadapter-101",
+  "pack_meta": {
+    "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "real_sha_ok": true,
+    "real_url_ok": true,
+    "reason_codes": [],
+    "reasons": [],
+    "repository_url": "https://github.com/scrapy/itemadapter.git",
+    "schema_version": "1.1",
+    "source_track": "real_pr",
+    "task_id": "realpr-itemadapter-101"
+  },
+  "pier_ready": {
+    "load_smoke": {
+      "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+      "cli_version_exit": 1,
+      "cli_version_out": "",
+      "environment_mode": "VerifierEnvironmentMode.SEPARATE",
+      "errors": [],
+      "harbor_version": "0.18.0",
+      "listed": [
+        "realpr-attrs-1175",
+        "realpr-attrs-1267",
+        "realpr-attrs-1323",
+        "realpr-attrs-1407",
+        "realpr-attrs-1454",
+        "realpr-attrs-1457",
+        "realpr-charset-normalizer-581",
+        "realpr-charset-normalizer-715",
+        "realpr-httpx-3022",
+        "realpr-httpx-3314",
+        "realpr-httpx-3319",
+        "realpr-httpx-3377",
+        "realpr-httpx-3672",
+        "realpr-idna-185",
+        "realpr-idna-186",
+        "realpr-idna-246",
+        "realpr-idna-71",
+        "realpr-itemadapter-101",
+        "realpr-markupsafe-400",
+        "realpr-packaging-1311",
+        "realpr-rich-2294",
+        "realpr-rich-3486"
+      ],
+      "metadata_language": "python",
+      "ok": true,
+      "paths": {
+        "environment/": true,
+        "instruction.md": true,
+        "solution/": true,
+        "task.toml": true,
+        "tests/": true
+      },
+      "paths_ok": true,
+      "schema_version": "1.1",
+      "task_config_ok": true,
+      "task_id": "realpr-itemadapter-101",
+      "task_object": "Task",
+      "task_short_name": "realpr-itemadapter-101",
+      "tool": "harbor"
+    },
+    "missing_relpaths": [],
+    "notes": [],
+    "pack_dir": "/tmp/work_ship_m14_yield15m/staging/realpr-itemadapter-101",
+    "pier_job_prefix": "/tmp/harbor-deepswe-jobs",
+    "required_relpaths_ok": true,
+    "structural_ok": true
+  },
+  "reason_codes": [
+    "G2_GOLD_FAIL",
+    "G3_NULL_EVAL_ERROR",
+    "G5_LEAK_CLEAN",
+    "ORACLE_REJECT"
+  ],
+  "reasons": [
+    "solution reward expected 1, got 0 (logs:  \"p2p\": 0.0, \"partial\": 0.0, \"apply_failed\": 1}\ntotal 12\ndrwxr-xr-x 2 root root 4096 Jul 15 09:40 .\ndrwxr-xr-x 4 root root 4096 Jul 15 09:40 ..\n-rw-r--r-- 1 root root  140 Jul 15 09:40 reward.json\n{\"reward\": 0, \"f2p_total\": 43, \"f2p_passed\": 0, \"p2p_total\": 66, \"p2p_passed\": 0, \"f2p\": 0.0, \"p2p\": 0.0, \"partial\": 0.0, \"apply_failed\": 1}\nerror: itemadapter/_json_schema.py: No such file or directory\n)",
+    "null reward expected 0, got -1 (logs: [verifier] no model.patch submitted \u2014 grading pristine base state\n[verifier] Resetting files touched by test.patch\n[verifier] Applying test.patch\n[verifier] ERROR: test.patch failed to apply\ntotal 12\ndrwxr-xr-x 2 root root 4096 Jul 15 09:40 .\ndrwxr-xr-x 4 root root 4096 Jul 15 09:40 ..\n-rw-r--r-- 1 root root    3 Jul 15 09:40 reward.txt\n\nerror: tests/test_json_schema.py: No such file or directory\n)",
+    "solution reward expected 1, got 0",
+    "null reward expected 0, got -1"
+  ],
+  "repository_url": "https://github.com/scrapy/itemadapter.git",
+  "solution_reward": 0,
+  "task_id": "realpr-itemadapter-101"
+}

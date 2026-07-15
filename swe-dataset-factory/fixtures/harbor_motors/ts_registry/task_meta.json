@@ -1,0 +1,18 @@
+{
+  "language": "typescript",
+  "seed_id": "harbor_ts_registry",
+  "repo": "fixtures/harbor_motors/ts_registry",
+  "base_commit": "c100000000000000000000000000000000000001",
+  "source_track": "synthetic_grounded",
+  "license": "MIT",
+  "label_method": "dual_run_broken_vs_green",
+  "f2p_node_ids": [
+    "catalog findByTag",
+    "held-out multi-module registry contract",
+    "register assigns sequential ids"
+  ],
+  "p2p_node_ids": [
+    "catalog add and get",
+    "lookup missing returns null"
+  ]
+}

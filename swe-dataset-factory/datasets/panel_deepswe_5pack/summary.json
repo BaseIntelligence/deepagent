@@ -1,0 +1,87 @@
+{
+  "fidelity": "pier_miniswe_harbor",
+  "n_packs_scored": 5,
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.6"
+  ],
+  "k": 1,
+  "n_concurrent": 1,
+  "spend_usd": "26.5308096440000008",
+  "hard_stop_usd": "300.0",
+  "wall_s": 6199.358,
+  "overall_pass_rate": 0.2,
+  "per_pack": {
+    "realpr-itemadapter-101": {
+      "x-ai/grok-4.5": {
+        "pass_at_k": 1.0,
+        "solves": 1,
+        "k": 1,
+        "reward": 1
+      },
+      "moonshotai/kimi-k2.6": {
+        "pass_at_k": 1.0,
+        "solves": 1,
+        "k": 1,
+        "reward": 1
+      }
+    },
+    "realpr-click-3645": {
+      "x-ai/grok-4.5": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      },
+      "moonshotai/kimi-k2.6": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      }
+    },
+    "realpr-attrs-1323": {
+      "x-ai/grok-4.5": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      },
+      "moonshotai/kimi-k2.6": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      }
+    },
+    "realpr-httpx-3672": {
+      "x-ai/grok-4.5": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      },
+      "moonshotai/kimi-k2.6": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      }
+    },
+    "realpr-packaging-1120": {
+      "x-ai/grok-4.5": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      },
+      "moonshotai/kimi-k2.6": {
+        "pass_at_k": 0.0,
+        "solves": 0,
+        "k": 1,
+        "reward": 0
+      }
+    }
+  },
+  "invented_rewards": false
+}

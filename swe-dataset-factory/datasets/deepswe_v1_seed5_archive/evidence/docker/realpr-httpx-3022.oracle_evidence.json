@@ -1,0 +1,29 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "5766bf58e20548f106e13e95d7064635a9b06941",
+  "extra": {
+    "disposition": "reject",
+    "reason_codes": [
+      "G2_GOLD_FAIL",
+      "G3_NULL_NOT_RESOLVE",
+      "G5_LEAK_CLEAN",
+      "ORACLE_REJECT",
+      "RORC_ISOLATION_CLEAN",
+      "RORC_NULL_0"
+    ]
+  },
+  "isolation": "clean",
+  "null": 0,
+  "null_evidence": "/tmp/work_ship_m14_yield15m/product_stage/evidence/docker/realpr-httpx-3022.null.reward.json",
+  "null_ok": true,
+  "null_reward": 0,
+  "oracle_mode": "docker",
+  "pair_ok": false,
+  "repository_url": "https://github.com/encode/httpx.git",
+  "sol": 0,
+  "sol_evidence": "/tmp/work_ship_m14_yield15m/product_stage/evidence/docker/realpr-httpx-3022.sol.reward.json",
+  "sol_ok": false,
+  "solution_reward": 0,
+  "source_track": "real_pr",
+  "task_id": "realpr-httpx-3022"
+}

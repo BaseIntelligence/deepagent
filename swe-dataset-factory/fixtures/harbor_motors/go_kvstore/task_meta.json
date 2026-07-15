@@ -1,0 +1,18 @@
+{
+  "language": "go",
+  "seed_id": "harbor_go_kvstore",
+  "repo": "fixtures/harbor_motors/go_kvstore",
+  "base_commit": "b100000000000000000000000000000000000001",
+  "source_track": "synthetic_grounded",
+  "license": "MIT",
+  "label_method": "dual_run_broken_vs_green",
+  "f2p_node_ids": [
+    "TestHeldOutStoreRouterContract",
+    "TestRouterRemoveMissing",
+    "TestRouterUpsert"
+  ],
+  "p2p_node_ids": [
+    "TestStoreDelete",
+    "TestStoreSetGet"
+  ]
+}

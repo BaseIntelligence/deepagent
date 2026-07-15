@@ -1,0 +1,20 @@
+{
+  "task_id": "realpr-inflect-199",
+  "repo": "jaraco/inflect",
+  "url": "https://github.com/jaraco/inflect.git",
+  "language": "python",
+  "license": "MIT",
+  "pr": 199,
+  "base": "8e5842cbdb9ab12c0ce524d0511f0c829b46a3a7",
+  "src": [
+    "inflect/__init__.py",
+    "inflect/compat/__init__.py",
+    "inflect/compat/pydantic.py",
+    "inflect/compat/pydantic1.py"
+  ],
+  "tests": [
+    "tests/test_pwd.py"
+  ],
+  "title": "inflect PR 199",
+  "materials_dir": "fixtures/real_pr_ship/realpr-inflect-199"
+}

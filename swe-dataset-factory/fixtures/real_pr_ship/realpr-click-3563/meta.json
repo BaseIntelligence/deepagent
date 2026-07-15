@@ -1,0 +1,26 @@
+{
+  "task_id": "realpr-click-3563",
+  "repo": "pallets/click",
+  "url": "https://github.com/pallets/click.git",
+  "language": "python",
+  "license": "BSD-3-Clause",
+  "pr": 3563,
+  "base": "4fc0e90e1c19faf82bc18f8551eb1ed78dc738ac",
+  "src": [
+    "docs/conf.py",
+    "src/click/_compat.py",
+    "src/click/_termui_impl.py",
+    "src/click/core.py",
+    "src/click/termui.py",
+    "src/click/types.py",
+    "src/click/utils.py"
+  ],
+  "tests": [
+    "src/click/testing.py",
+    "tests/test_stream_lifecycle.py",
+    "tests/test_termui.py",
+    "tests/test_types.py",
+    "tests/test_utils.py"
+  ],
+  "title": "Merge `stable` into `main` after `CHANGES` rST to Markdown conversion (#3563)"
+}

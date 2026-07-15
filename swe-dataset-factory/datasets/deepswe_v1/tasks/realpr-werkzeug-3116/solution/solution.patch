@@ -1,0 +1,1734 @@
+diff --git a/src/werkzeug/datastructures/accept.py b/src/werkzeug/datastructures/accept.py
+--- a/src/werkzeug/datastructures/accept.py
++++ b/src/werkzeug/datastructures/accept.py
+@@ -5,8 +5,16 @@
+ import re
+ import typing as t
+ 
++from ..http import dump_options_header
++from ..http import parse_list_header
++from ..http import parse_options_header
+ from .structures import ImmutableList
+ 
++if t.TYPE_CHECKING:
++    import typing_extensions as te
++
++_q_value_re = re.compile(r"-?\d+(\.\d+)?", re.ASCII)
++
+ 
+ class Accept(ImmutableList[tuple[str, float]]):
+     """An :class:`Accept` object is just a list subclass for lists of
+@@ -138,8 +146,46 @@ def values(self) -> cabc.Iterator[str]:
+         for item in self:
+             yield item[0]
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self:
++        """Parse an ``Accept`` header value and create an instance of this class.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return cls(None)
++
++        result = []
++
++        for item in parse_list_header(value):
++            item, options = parse_options_header(item)
++
++            if "q" in options:
++                # pop q, remaining options are reconstructed
++                q_str = options.pop("q").strip()
++
++                if _q_value_re.fullmatch(q_str) is None:
++                    # ignore an invalid q
++                    continue
++
++                q = float(q_str)
++
++                if q < 0 or q > 1:
++                    # ignore an invalid q
++                    continue
++            else:
++                q = 1
++
++            if options:
++                # reconstruct the media type with any options
++                item = dump_options_header(item, options)
++
++            result.append((item, q))
++
++        return cls(result)
++
+     def to_header(self) -> str:
+-        """Convert the header set into an HTTP header string."""
++        """Convert to an ``Accept`` header value."""
+         result = []
+         for value, quality in self:
+             if quality != 1:
+diff --git a/src/werkzeug/datastructures/auth.py b/src/werkzeug/datastructures/auth.py
+--- a/src/werkzeug/datastructures/auth.py
++++ b/src/werkzeug/datastructures/auth.py
+@@ -88,8 +88,8 @@ def __eq__(self, other: object) -> bool:
+ 
+     @classmethod
+     def from_header(cls, value: str | None) -> te.Self | None:
+-        """Parse an ``Authorization`` header value and return an instance, or ``None``
+-        if the value is empty.
++        """Parse an ``Authorization`` header value and create an instance of
++        this class, or ``None`` if the value is empty.
+ 
+         :param value: The header value to parse.
+ 
+@@ -118,7 +118,7 @@ def from_header(cls, value: str | None) -> te.Self | None:
+         return cls(scheme, None, rest)
+ 
+     def to_header(self) -> str:
+-        """Produce an ``Authorization`` header value representing this data.
++        """Convert to an ``Authorization`` header value.
+ 
+         .. versionadded:: 2.0
+         """
+@@ -269,8 +269,8 @@ def get(self, key: str, default: str | None = None) -> str | None:
+ 
+     @classmethod
+     def from_header(cls, value: str | None) -> te.Self | None:
+-        """Parse a ``WWW-Authenticate`` header value and return an instance, or ``None``
+-        if the value is empty.
++        """Parse a ``WWW-Authenticate`` header value and create an instance of
++        this class, or ``None`` if the value is empty.
+ 
+         :param value: The header value to parse.
+ 
+@@ -291,7 +291,7 @@ def from_header(cls, value: str | None) -> te.Self | None:
+         return cls(scheme, None, rest)
+ 
+     def to_header(self) -> str:
+-        """Produce a ``WWW-Authenticate`` header value representing this data."""
++        """Convert to a ``WWW-Authenticate`` header value."""
+         if self.token is not None:
+             return f"{self.type.title()} {self.token}"
+ 
+diff --git a/src/werkzeug/datastructures/cache_control.py b/src/werkzeug/datastructures/cache_control.py
+--- a/src/werkzeug/datastructures/cache_control.py
++++ b/src/werkzeug/datastructures/cache_control.py
+@@ -4,9 +4,14 @@
+ import typing as t
+ from inspect import cleandoc
+ 
++from ..http import dump_header
++from ..http import parse_dict_header
+ from .mixins import ImmutableDictMixin
+ from .structures import CallbackDict
+ 
++if t.TYPE_CHECKING:
++    import typing_extensions as te
++
+ 
+ def cache_control_property(
+     key: str, empty: t.Any, type: type[t.Any] | None, *, doc: str | None = None
+@@ -66,6 +71,9 @@ class _CacheControl(CallbackDict[str, str | None]):
+     to subclass it and add your own items have a look at the sourcecode for
+     that class.
+ 
++    .. versionchanged:: 3.2
++        The ``on_update`` parameter was removed.
++
+     .. versionchanged:: 3.1
+         Dict values are always ``str | None``. Setting properties will
+         convert the value to a string. Setting a non-bool property to
+@@ -89,10 +97,11 @@ class _CacheControl(CallbackDict[str, str | None]):
+ 
+     def __init__(
+         self,
+-        values: cabc.Mapping[str, t.Any] | cabc.Iterable[tuple[str, t.Any]] | None = (),
+-        on_update: cabc.Callable[[_CacheControl], None] | None = None,
++        values: cabc.Mapping[str, t.Any]
++        | cabc.Iterable[tuple[str, t.Any]]
++        | None = None,
+     ):
+-        super().__init__(values, on_update)
++        super().__init__(values)
+         self.provided = values is not None
+ 
+     def _get_cache_value(
+@@ -140,9 +149,20 @@ def _del_cache_value(self, key: str) -> None:
+         if key in self:
+             del self[key]
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self:
++        """Parse a ``Cache-Control`` header value and create an instance of this class.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return cls()
++
++        return cls(parse_dict_header(value))
++
+     def to_header(self) -> str:
+-        """Convert the stored values into a cache control header."""
+-        return http.dump_header(self)
++        """Convert to a ``Cache-Control`` header value."""
++        return dump_header(self)
+ 
+     def __str__(self) -> str:
+         return self.to_header()
+@@ -267,7 +287,3 @@ class ResponseCacheControl(_CacheControl):
+     stale_while_revalidate: int | None = cache_control_property(
+         "stale-while-revalidate", None, int
+     )
+-
+-
+-# circular dependencies
+-from .. import http  # noqa: E402
+diff --git a/src/werkzeug/datastructures/csp.py b/src/werkzeug/datastructures/csp.py
+--- a/src/werkzeug/datastructures/csp.py
++++ b/src/werkzeug/datastructures/csp.py
+@@ -5,6 +5,9 @@
+ 
+ from .structures import CallbackDict
+ 
++if t.TYPE_CHECKING:
++    import typing_extensions as te
++
+ 
+ def csp_property(key: str, deprecated: str | None = None) -> t.Any:
+     """Create a property for a CSP directive."""
+@@ -32,6 +35,9 @@ class ContentSecurityPolicy(CallbackDict[str, str]):
+         The ``prefetch_src``, ``navigate_to``, and ``plugin_types`` properties
+         are deprecated and will be removed in Werkzeug 3.3.
+ 
++    .. versionchanged:: 3.2
++        The ``on_update`` parameter was removed.
++
+     .. versionadded:: 1.0
+     """
+ 
+@@ -74,10 +80,9 @@ class ContentSecurityPolicy(CallbackDict[str, str]):
+ 
+     def __init__(
+         self,
+-        values: cabc.Mapping[str, str] | cabc.Iterable[tuple[str, str]] | None = (),
+-        on_update: cabc.Callable[[ContentSecurityPolicy], None] | None = None,
++        values: cabc.Mapping[str, str] | cabc.Iterable[tuple[str, str]] | None = None,
+     ) -> None:
+-        super().__init__(values, on_update)
++        super().__init__(values)
+         self.provided = values is not None
+ 
+     def _get_value(self, key: str, deprecated: str | None = None) -> str | None:
+@@ -128,11 +133,31 @@ def _del_value(self, key: str, deprecated: str | None = None) -> None:
+         if key in self:
+             del self[key]
+ 
+-    def to_header(self) -> str:
+-        """Convert the structured data into a header value."""
+-        from ..http import dump_csp_header
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self:
++        """Parse a ``Content-Security-Policy`` header value and create an
++        instance of this class.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return cls()
+ 
+-        return dump_csp_header(self)
++        items = []
++
++        for policy in value.split(";"):
++            policy = policy.strip()
++
++            # Ignore badly formatted policies (no space)
++            if " " in policy:
++                directive, value = policy.strip().split(" ", 1)
++                items.append((directive.strip(), value.strip()))
++
++        return cls(items)
++
++    def to_header(self) -> str:
++        """Convert to a ``Content-Security-Policy`` header value."""
++        return "; ".join(f"{key} {value}" for key, value in self.items())
+ 
+     def __str__(self) -> str:
+         return self.to_header()
+diff --git a/src/werkzeug/datastructures/etag.py b/src/werkzeug/datastructures/etag.py
+--- a/src/werkzeug/datastructures/etag.py
++++ b/src/werkzeug/datastructures/etag.py
+@@ -1,6 +1,13 @@
+ from __future__ import annotations
+ 
+ import collections.abc as cabc
++import re
++import typing as t
++
++if t.TYPE_CHECKING:
++    import typing_extensions as te
++
++_etag_re = re.compile(r'([Ww]/)?(?:"(.*?)"|(.*?))(?:\s*,\s*|$)')
+ 
+ 
+ class ETags(cabc.Collection[str]):
+@@ -61,8 +68,43 @@ def contains_raw(self, etag: str) -> bool:
+             return self.contains_weak(etag)
+         return self.contains(etag)
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self:
++        """Parse a header value and create an instance of this class.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return cls()
++
++        strong = []
++        weak = []
++        end = len(value)
++        pos = 0
++
++        while pos < end:
++            if (match := _etag_re.match(value, pos)) is None:
++                break
++
++            is_weak, quoted, raw = match.groups()
++
++            if raw == "*":
++                return cls(star_tag=True)
++
++            if quoted:
++                raw = quoted
++
++            if is_weak:
++                weak.append(raw)
++            else:
++                strong.append(raw)
++
++            pos = match.end()
++
++        return cls(strong, weak)
++
+     def to_header(self) -> str:
+-        """Convert the etags set into a HTTP header string."""
++        """Convert to a header value."""
+         if self.star_tag:
+             return "*"
+         return ", ".join(
+diff --git a/src/werkzeug/datastructures/file_storage.py b/src/werkzeug/datastructures/file_storage.py
+--- a/src/werkzeug/datastructures/file_storage.py
++++ b/src/werkzeug/datastructures/file_storage.py
+@@ -9,6 +9,7 @@
+ from os import fspath
+ 
+ from .._internal import _plain_int
++from ..http import parse_options_header
+ from .headers import Headers
+ from .structures import MultiDict
+ 
+@@ -44,7 +45,7 @@ def __init__(
+ 
+     def _parse_content_type(self) -> None:
+         if not hasattr(self, "_parsed_content_type"):
+-            self._parsed_content_type = http.parse_options_header(self.content_type)
++            self._parsed_content_type = parse_options_header(self.content_type)
+ 
+     @property
+     def content_type(self) -> str | None:
+@@ -229,7 +230,3 @@ def _guess_filename(stream: t.IO[t.Any], filename: str | None) -> str | None:
+             filename = None
+ 
+     return filename
+-
+-
+-# circular dependencies
+-from .. import http  # noqa: E402
+diff --git a/src/werkzeug/datastructures/headers.py b/src/werkzeug/datastructures/headers.py
+--- a/src/werkzeug/datastructures/headers.py
++++ b/src/werkzeug/datastructures/headers.py
+@@ -6,6 +6,7 @@
+ 
+ from .._internal import _missing
+ from ..exceptions import BadRequestKeyError
++from ..http import dump_options_header
+ from .mixins import ImmutableHeadersMixin
+ from .structures import iter_multi_items
+ from .structures import MultiDict
+@@ -584,9 +585,7 @@ def __repr__(self) -> str:
+ 
+ 
+ def _options_header_vkw(value: str, kw: dict[str, t.Any]) -> str:
+-    return http.dump_options_header(
+-        value, {k.replace("_", "-"): v for k, v in kw.items()}
+-    )
++    return dump_options_header(value, {k.replace("_", "-"): v for k, v in kw.items()})
+ 
+ 
+ _newline_re = re.compile(r"[\r\n]")
+@@ -656,7 +655,3 @@ def copy(self) -> t.NoReturn:
+ 
+     def __or__(self, other: t.Any) -> t.NoReturn:
+         raise TypeError(f"cannot create {type(self).__name__!r} copies")
+-
+-
+-# circular dependencies
+-from .. import http  # noqa: E402
+diff --git a/src/werkzeug/datastructures/range.py b/src/werkzeug/datastructures/range.py
+--- a/src/werkzeug/datastructures/range.py
++++ b/src/werkzeug/datastructures/range.py
+@@ -4,6 +4,13 @@
+ import typing as t
+ from datetime import datetime
+ 
++from .._internal import _plain_int
++from ..http import http_date
++from ..http import is_byte_range_valid
++from ..http import parse_date
++from ..http import quote_etag
++from ..http import unquote_etag
++
+ if t.TYPE_CHECKING:
+     import typing_extensions as te
+ 
+@@ -25,12 +32,27 @@ def __init__(self, etag: str | None = None, date: datetime | None = None):
+         #: The date in parsed format or `None`.
+         self.date = date
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self:
++        """Parse an ``If-Range`` header value and create an instance of this class.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return cls()
++
++        if (date := parse_date(value)) is not None:
++            return cls(date=date)
++
++        # drop weakness information
++        return cls(unquote_etag(value)[0])
++
+     def to_header(self) -> str:
+-        """Converts the object back into an HTTP header."""
++        """Convert to an ``If-Range`` header value."""
+         if self.date is not None:
+-            return http.http_date(self.date)
++            return http_date(self.date)
+         if self.etag is not None:
+-            return http.quote_etag(self.etag)
++            return quote_etag(self.etag)
+         return ""
+ 
+     def __str__(self) -> str:
+@@ -78,7 +100,7 @@ def range_for_length(self, length: int | None) -> tuple[int, int] | None:
+             end = length
+             if start < 0:
+                 start += length
+-        if http.is_byte_range_valid(start, end, length):
++        if is_byte_range_valid(start, end, length):
+             return start, min(end, length)
+         return None
+ 
+@@ -91,8 +113,71 @@ def make_content_range(self, length: int | None) -> ContentRange | None:
+             return ContentRange(self.units, rng[0], rng[1], length)
+         return None
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self | None:
++        """Parse a ``Range`` header value and create an instance of this class,
++        or ``None`` if the value is empty.
++
++        .. versionadded:: 3.2
++        """
++        if not value or "=" not in value:
++            return None
++
++        ranges = []
++        last_end = 0
++        units, _, ranges_str = value.partition("=")
++        units = units.strip().lower()
++
++        for item in ranges_str.split(","):
++            item = item.strip()
++
++            if "-" not in item:
++                return None
++
++            if item.startswith("-"):
++                if last_end < 0:
++                    return None
++
++                try:
++                    begin = _plain_int(item)
++                except ValueError:
++                    return None
++
++                end = None
++                last_end = -1
++
++            else:
++                begin_str, _, end_str = item.partition("-")
++                begin_str = begin_str.strip()
++                end_str = end_str.strip()
++
++                try:
++                    begin = _plain_int(begin_str)
++                except ValueError:
++                    return None
++
++                if begin < last_end or last_end < 0:
++                    return None
++
++                if end_str:
++                    try:
++                        end = _plain_int(end_str) + 1
++                    except ValueError:
++                        return None
++
++                    if begin >= end:
++                        return None
++                else:
++                    end = None
++
++                last_end = end if end is not None else -1
++
++            ranges.append((begin, end))
++
++        return cls(units, ranges)
++
+     def to_header(self) -> str:
+-        """Converts the object back into an HTTP header."""
++        """Convert to a ``Range`` header value."""
+         ranges = []
+         for begin, end in self.ranges:
+             if end is None:
+@@ -136,13 +221,16 @@ def __get__(
+     def __set__(self, instance: ContentRange, value: T) -> None:
+         instance.__dict__[self.attr] = value
+ 
+-        if instance.on_update is not None:
+-            instance.on_update(instance)
++        if instance._on_update is not None:
++            instance._on_update(instance)
+ 
+ 
+ class ContentRange:
+     """Represents the content range header.
+ 
++    .. versionchanged:: 3.2
++        The ``on_update`` parameter was removed.
++
+     .. versionadded:: 0.7
+     """
+ 
+@@ -152,9 +240,8 @@ def __init__(
+         start: int | None,
+         stop: int | None,
+         length: int | None = None,
+-        on_update: cabc.Callable[[ContentRange], None] | None = None,
+     ) -> None:
+-        self.on_update = on_update
++        self._on_update: cabc.Callable[[ContentRange], None] | None = None
+         self.set(start, stop, length, units)
+ 
+     #: The units to use, usually "bytes"
+@@ -175,21 +262,68 @@ def set(
+         units: str | None = "bytes",
+     ) -> None:
+         """Simple method to update the ranges."""
+-        assert http.is_byte_range_valid(start, stop, length), "Bad range provided"
++        assert is_byte_range_valid(start, stop, length), "Bad range provided"
+         self._units: str | None = units
+         self._start: int | None = start
+         self._stop: int | None = stop
+         self._length: int | None = length
+-        if self.on_update is not None:
+-            self.on_update(self)
++        if self._on_update is not None:
++            self._on_update(self)
+ 
+     def unset(self) -> None:
+         """Sets the units to `None` which indicates that the header should
+         no longer be used.
+         """
+         self.set(None, None, units=None)
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self | None:
++        """Parse a ``Content-Range`` header value and create an instance of this class,
++        or ``None`` if the value is empty.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return None
++
++        units, _, range_str = value.strip().partition(" ")
++        rng, sep, length_str = range_str.partition("/")
++
++        if not sep:
++            return None
++
++        if length_str == "*":
++            length = None
++        else:
++            try:
++                length = _plain_int(length_str)
++            except ValueError:
++                return None
++
++        if rng == "*":
++            if not is_byte_range_valid(None, None, length):
++                return None
++
++            return cls(units, None, None, length)
++
++        start_str, sep, stop_str = rng.partition("-")
++
++        if not sep:
++            return None
++
++        try:
++            start = _plain_int(start_str)
++            stop = _plain_int(stop_str) + 1
++        except ValueError:
++            return None
++
++        if is_byte_range_valid(start, stop, length):
++            return cls(units, start, stop, length)
++
++        return None
++
+     def to_header(self) -> str:
++        """Convert to a ``Content-Range`` header value."""
+         if self._units is None:
+             return ""
+         if self._length is None:
+@@ -208,7 +342,3 @@ def __str__(self) -> str:
+ 
+     def __repr__(self) -> str:
+         return f"<{type(self).__name__} {str(self)!r}>"
+-
+-
+-# circular dependencies
+-from .. import http  # noqa: E402
+diff --git a/src/werkzeug/datastructures/structures.py b/src/werkzeug/datastructures/structures.py
+--- a/src/werkzeug/datastructures/structures.py
++++ b/src/werkzeug/datastructures/structures.py
+@@ -6,6 +6,8 @@
+ 
+ from .. import exceptions
+ from .._internal import _missing
++from ..http import dump_header
++from ..http import parse_list_header
+ from .mixins import ImmutableDictMixin
+ from .mixins import ImmutableListMixin
+ from .mixins import ImmutableMultiDictMixin
+@@ -760,16 +762,15 @@ class HeaderSet(cabc.MutableSet[str]):
+     >>> hs = HeaderSet(['foo', 'bar', 'baz'])
+     >>> hs
+     HeaderSet(['foo', 'bar', 'baz'])
++
++    .. versionchanged:: 3.2
++        The ``on_update`` parameter was removed.
+     """
+ 
+-    def __init__(
+-        self,
+-        headers: cabc.Iterable[str] | None = None,
+-        on_update: cabc.Callable[[te.Self], None] | None = None,
+-    ) -> None:
++    def __init__(self, headers: cabc.Iterable[str] | None = None) -> None:
+         self._headers = list(headers or ())
+         self._set = {x.lower() for x in self._headers}
+-        self.on_update = on_update
++        self._on_update: cabc.Callable[[HeaderSet], None] | None = None
+ 
+     def add(self, header: str) -> None:
+         """Add a new header to the set."""
+@@ -793,8 +794,8 @@ def remove(self: te.Self, header: str) -> None:
+             if key.lower() == header:
+                 del self._headers[idx]
+                 break
+-        if self.on_update is not None:
+-            self.on_update(self)
++        if self._on_update is not None:
++            self._on_update(self)
+ 
+     def update(self: te.Self, iterable: cabc.Iterable[str]) -> None:
+         """Add all the headers from the iterable to the set.
+@@ -808,8 +809,8 @@ def update(self: te.Self, iterable: cabc.Iterable[str]) -> None:
+                 self._headers.append(header)
+                 self._set.add(key)
+                 inserted_any = True
+-        if inserted_any and self.on_update is not None:
+-            self.on_update(self)
++        if inserted_any and self._on_update is not None:
++            self._on_update(self)
+ 
+     def discard(self, header: str) -> None:
+         """Like :meth:`remove` but ignores errors.
+@@ -848,8 +849,8 @@ def clear(self: te.Self) -> None:
+         self._set.clear()
+         self._headers.clear()
+ 
+-        if self.on_update is not None:
+-            self.on_update(self)
++        if self._on_update is not None:
++            self._on_update(self)
+ 
+     def as_set(self, preserve_casing: bool = False) -> set[str]:
+         """Return the set as real python set type.  When calling this, all
+@@ -864,26 +865,37 @@ def as_set(self, preserve_casing: bool = False) -> set[str]:
+             return set(self._headers)
+         return set(self._set)
+ 
++    @classmethod
++    def from_header(cls, value: str | None) -> te.Self:
++        """Parse a header value and create an instance of this class.
++
++        .. versionadded:: 3.2
++        """
++        if not value:
++            return cls()
++
++        return cls(parse_list_header(value))
++
+     def to_header(self) -> str:
+-        """Convert the header set into an HTTP header string."""
+-        return ", ".join(map(http.quote_header_value, self._headers))
++        """Convert to a header value."""
++        return dump_header(self._headers)
+ 
+     def __getitem__(self, idx: t.SupportsIndex) -> str:
+         return self._headers[idx]
+ 
+     def __delitem__(self: te.Self, idx: t.SupportsIndex) -> None:
+         rv = self._headers.pop(idx)
+         self._set.remove(rv.lower())
+-        if self.on_update is not None:
+-            self.on_update(self)
++        if self._on_update is not None:
++            self._on_update(self)
+ 
+     def __setitem__(self: te.Self, idx: t.SupportsIndex, value: str) -> None:
+         old = self._headers[idx]
+         self._set.remove(old.lower())
+         self._headers[idx] = value
+         self._set.add(value.lower())
+-        if self.on_update is not None:
+-            self.on_update(self)
++        if self._on_update is not None:
++            self._on_update(self)
+ 
+     def __contains__(self, header: str) -> bool:  # type: ignore[override]
+         return header.lower() in self._set
+@@ -902,7 +914,3 @@ def __str__(self) -> str:
+ 
+     def __repr__(self) -> str:
+         return f"{type(self).__name__}({self._headers!r})"
+-
+-
+-# circular dependencies
+-from .. import http  # noqa: E402
+diff --git a/src/werkzeug/http.py b/src/werkzeug/http.py
+--- a/src/werkzeug/http.py
++++ b/src/werkzeug/http.py
+@@ -17,15 +17,13 @@
+ from urllib.parse import unquote
+ 
+ from ._internal import _dt_as_utc
+-from ._internal import _plain_int
+ 
+ if t.TYPE_CHECKING:
+     from _typeshed.wsgi import WSGIEnvironment
+ 
+ _token_chars = frozenset(
+     "!#$%&'*+-.0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ^_`abcdefghijklmnopqrstuvwxyz|~"
+ )
+-_etag_re = re.compile(r'([Ww]/)?(?:"(.*?)"|(.*?))(?:\s*,\s*|$)')
+ _entity_headers = frozenset(
+     [
+         "allow",
+@@ -372,17 +370,29 @@ def dump_header(iterable: dict[str, t.Any] | t.Iterable[t.Any]) -> str:
+     return ", ".join(items)
+ 
+ 
+-def dump_csp_header(header: ds.ContentSecurityPolicy) -> str:
++def _dump_csp_header(header: ds.ContentSecurityPolicy) -> str:
+     """Dump a Content Security Policy header.
+ 
+     These are structured into policies such as "default-src 'self';
+     script-src 'self'".
+ 
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the
++        ``ContentSecurityPolicy.to_header`` method instead.
++
+     .. versionadded:: 1.0.0
+        Support for Content Security Policy headers was added.
+ 
+     """
+-    return "; ".join(f"{key} {value}" for key, value in header.items())
++    import warnings
++
++    warnings.warn(
++        "The 'dump_csp_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'ContentSecurityPolicy.to_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++    return header.to_header()
+ 
+ 
+ def parse_list_header(value: str) -> list[str]:
+@@ -692,19 +702,18 @@ def parse_options_header(value: str | None) -> tuple[str, dict[str, str]]:
+     return value, options
+ 
+ 
+-_q_value_re = re.compile(r"-?\d+(\.\d+)?", re.ASCII)
+ _TAnyAccept = t.TypeVar("_TAnyAccept", bound="ds.Accept")
+ 
+ 
+ @t.overload
+-def parse_accept_header(value: str | None) -> ds.Accept: ...
++def _parse_accept_header(value: str | None) -> ds.Accept: ...
+ 
+ 
+ @t.overload
+-def parse_accept_header(value: str | None, cls: type[_TAnyAccept]) -> _TAnyAccept: ...
++def _parse_accept_header(value: str | None, cls: type[_TAnyAccept]) -> _TAnyAccept: ...
+ 
+ 
+-def parse_accept_header(
++def _parse_accept_header(
+     value: str | None, cls: type[_TAnyAccept] | None = None
+ ) -> _TAnyAccept:
+     """Parse an ``Accept`` header according to
+@@ -718,64 +727,47 @@ def parse_accept_header(
+     :param cls: The :class:`.Accept` class to wrap the result in.
+     :return: An instance of ``cls``.
+ 
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the ``Accept.from_header`` method
++        instead.
++
+     .. versionchanged:: 2.3
+         Parse according to RFC 9110. Items with invalid ``q`` values are skipped.
+     """
+-    if cls is None:
+-        cls = t.cast(type[_TAnyAccept], ds.Accept)
+-
+-    if not value:
+-        return cls(None)
++    import warnings
+ 
+-    result = []
+-
+-    for item in parse_list_header(value):
+-        item, options = parse_options_header(item)
+-
+-        if "q" in options:
+-            # pop q, remaining options are reconstructed
+-            q_str = options.pop("q").strip()
+-
+-            if _q_value_re.fullmatch(q_str) is None:
+-                # ignore an invalid q
+-                continue
+-
+-            q = float(q_str)
+-
+-            if q < 0 or q > 1:
+-                # ignore an invalid q
+-                continue
+-        else:
+-            q = 1
+-
+-        if options:
+-            # reconstruct the media type with any options
+-            item = dump_options_header(item, options)
++    warnings.warn(
++        "The 'parse_accept_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'Accept.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+ 
+-        result.append((item, q))
++    if cls is None:
++        cls = t.cast(type[_TAnyAccept], ds.Accept)
+ 
+-    return cls(result)
++    return cls.from_header(value)
+ 
+ 
+ _TAnyCC = t.TypeVar("_TAnyCC", bound="ds.cache_control._CacheControl")
+ 
+ 
+ @t.overload
+-def parse_cache_control_header(
++def _parse_cache_control_header(
+     value: str | None,
+     on_update: t.Callable[[ds.cache_control._CacheControl], None] | None = None,
+ ) -> ds.RequestCacheControl: ...
+ 
+ 
+ @t.overload
+-def parse_cache_control_header(
++def _parse_cache_control_header(
+     value: str | None,
+     on_update: t.Callable[[ds.cache_control._CacheControl], None] | None = None,
+     cls: type[_TAnyCC] = ...,
+ ) -> _TAnyCC: ...
+ 
+ 
+-def parse_cache_control_header(
++def _parse_cache_control_header(
+     value: str | None,
+     on_update: t.Callable[[ds.cache_control._CacheControl], None] | None = None,
+     cls: type[_TAnyCC] | None = None,
+@@ -784,6 +776,10 @@ def parse_cache_control_header(
+     request cache control, this method does not.  It's your responsibility
+     to not use the wrong control statements.
+ 
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the ``CacheControl.from_header``
++        method instead.
++
+     .. versionadded:: 0.5
+        The `cls` was added.  If not specified an immutable
+        :class:`~werkzeug.datastructures.RequestCacheControl` is returned.
+@@ -796,41 +792,54 @@ def parse_cache_control_header(
+                 :class:`~werkzeug.datastructures.RequestCacheControl` is used.
+     :return: a `cls` object.
+     """
+-    if cls is None:
+-        cls = t.cast("type[_TAnyCC]", ds.RequestCacheControl)
++    import warnings
++
++    warnings.warn(
++        "The 'parse_cache_control_header' function is deprecated and will be"
++        " removed in Werkzeug 3.3. Use the 'RequestCacheControl.from_header'"
++        " method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+ 
+-    if not value:
+-        return cls((), on_update)
++    if cls is None:
++        cls = t.cast(type[_TAnyCC], ds.RequestCacheControl)
+ 
+-    return cls(parse_dict_header(value), on_update)
++    obj = cls.from_header(value)
++    obj.on_update = on_update
++    return obj
+ 
+ 
+ _TAnyCSP = t.TypeVar("_TAnyCSP", bound="ds.ContentSecurityPolicy")
+ 
+ 
+ @t.overload
+-def parse_csp_header(
++def _parse_csp_header(
+     value: str | None,
+     on_update: t.Callable[[ds.ContentSecurityPolicy], None] | None = None,
+ ) -> ds.ContentSecurityPolicy: ...
+ 
+ 
+ @t.overload
+-def parse_csp_header(
++def _parse_csp_header(
+     value: str | None,
+     on_update: t.Callable[[ds.ContentSecurityPolicy], None] | None = None,
+     cls: type[_TAnyCSP] = ...,
+ ) -> _TAnyCSP: ...
+ 
+ 
+-def parse_csp_header(
++def _parse_csp_header(
+     value: str | None,
+     on_update: t.Callable[[ds.ContentSecurityPolicy], None] | None = None,
+     cls: type[_TAnyCSP] | None = None,
+ ) -> _TAnyCSP:
+     """Parse a Content Security Policy header.
+ 
+-    .. versionadded:: 1.0.0
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the
++        ``ContentSecurityPolicy.from_header`` method instead.
++
++    .. versionadded:: 1.0
+        Support for Content Security Policy headers was added.
+ 
+     :param value: a csp header to be parsed.
+@@ -840,26 +849,25 @@ def parse_csp_header(
+                 :class:`~werkzeug.datastructures.ContentSecurityPolicy` is used.
+     :return: a `cls` object.
+     """
+-    if cls is None:
+-        cls = t.cast("type[_TAnyCSP]", ds.ContentSecurityPolicy)
+-
+-    if value is None:
+-        return cls((), on_update)
+-
+-    items = []
+-
+-    for policy in value.split(";"):
+-        policy = policy.strip()
++    import warnings
++
++    warnings.warn(
++        "The 'parse_csp_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'Response.content_security_policy' property or"
++        " the 'ContentSecurityPolicy.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+ 
+-        # Ignore badly formatted policies (no space)
+-        if " " in policy:
+-            directive, value = policy.strip().split(" ", 1)
+-            items.append((directive.strip(), value.strip()))
++    if cls is None:
++        cls = t.cast(type[_TAnyCSP], ds.ContentSecurityPolicy)
+ 
+-    return cls(items, on_update)
++    obj = cls.from_header(value)
++    obj.on_update = on_update
++    return obj
+ 
+ 
+-def parse_set_header(
++def _parse_set_header(
+     value: str | None,
+     on_update: t.Callable[[ds.HeaderSet], None] | None = None,
+ ) -> ds.HeaderSet:
+@@ -885,142 +893,106 @@ def parse_set_header(
+     :param on_update: an optional callable that is called every time a
+                       value on the :class:`~werkzeug.datastructures.HeaderSet`
+                       object is changed.
+-    :return: a :class:`~werkzeug.datastructures.HeaderSet`
++
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the ``HeaderSet.from_header``
++        method instead.
+     """
+-    if not value:
+-        return ds.HeaderSet(None, on_update)
+-    return ds.HeaderSet(parse_list_header(value), on_update)
++    import warnings
++
++    warnings.warn(
++        "The 'parse_set_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'HeaderSet.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++    obj = ds.HeaderSet.from_header(value)
++    obj._on_update = on_update
++    return obj
+ 
+ 
+-def parse_if_range_header(value: str | None) -> ds.IfRange:
++def _parse_if_range_header(value: str | None) -> ds.IfRange:
+     """Parses an if-range header which can be an etag or a date.  Returns
+     a :class:`~werkzeug.datastructures.IfRange` object.
+ 
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the ``IfRange.from_header``
++        method instead.
++
+     .. versionchanged:: 2.0
+         If the value represents a datetime, it is timezone-aware.
+ 
+     .. versionadded:: 0.7
+     """
+-    if not value:
+-        return ds.IfRange()
+-    date = parse_date(value)
+-    if date is not None:
+-        return ds.IfRange(date=date)
+-    # drop weakness information
+-    return ds.IfRange(unquote_etag(value)[0])
++    import warnings
++
++    warnings.warn(
++        "The 'parse_if_range_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'IfRange.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++    return ds.IfRange.from_header(value)
+ 
+ 
+-def parse_range_header(
++def _parse_range_header(
+     value: str | None, make_inclusive: bool = True
+ ) -> ds.Range | None:
+     """Parses a range header into a :class:`~werkzeug.datastructures.Range`
+     object.  If the header is missing or malformed `None` is returned.
+     `ranges` is a list of ``(start, stop)`` tuples where the ranges are
+     non-inclusive.
+ 
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the ``Range.from_header``
++        method instead.
++
+     .. versionadded:: 0.7
+     """
+-    if not value or "=" not in value:
+-        return None
++    import warnings
+ 
+-    ranges = []
+-    last_end = 0
+-    units, rng = value.split("=", 1)
+-    units = units.strip().lower()
+-
+-    for item in rng.split(","):
+-        item = item.strip()
+-        if "-" not in item:
+-            return None
+-        if item.startswith("-"):
+-            if last_end < 0:
+-                return None
+-            try:
+-                begin = _plain_int(item)
+-            except ValueError:
+-                return None
+-            end = None
+-            last_end = -1
+-        elif "-" in item:
+-            begin_str, end_str = item.split("-", 1)
+-            begin_str = begin_str.strip()
+-            end_str = end_str.strip()
+-
+-            try:
+-                begin = _plain_int(begin_str)
+-            except ValueError:
+-                return None
+-
+-            if begin < last_end or last_end < 0:
+-                return None
+-            if end_str:
+-                try:
+-                    end = _plain_int(end_str) + 1
+-                except ValueError:
+-                    return None
+-
+-                if begin >= end:
+-                    return None
+-            else:
+-                end = None
+-            last_end = end if end is not None else -1
+-        ranges.append((begin, end))
+-
+-    return ds.Range(units, ranges)
++    warnings.warn(
++        "The 'parse_range_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'Range.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++    return ds.Range.from_header(value)
+ 
+ 
+-def parse_content_range_header(
++def _parse_content_range_header(
+     value: str | None,
+     on_update: t.Callable[[ds.ContentRange], None] | None = None,
+ ) -> ds.ContentRange | None:
+     """Parses a range header into a
+     :class:`~werkzeug.datastructures.ContentRange` object or `None` if
+     parsing is not possible.
+ 
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the ``ContentRange.from_header``
++        method instead.
++
+     .. versionadded:: 0.7
+ 
+     :param value: a content range header to be parsed.
+     :param on_update: an optional callable that is called every time a value
+                       on the :class:`~werkzeug.datastructures.ContentRange`
+                       object is changed.
+     """
+-    if value is None:
+-        return None
+-    try:
+-        units, rangedef = (value or "").strip().split(None, 1)
+-    except ValueError:
+-        return None
+-
+-    if "/" not in rangedef:
+-        return None
+-    rng, length_str = rangedef.split("/", 1)
+-    if length_str == "*":
+-        length = None
+-    else:
+-        try:
+-            length = _plain_int(length_str)
+-        except ValueError:
+-            return None
++    import warnings
+ 
+-    if rng == "*":
+-        if not is_byte_range_valid(None, None, length):
+-            return None
+-
+-        return ds.ContentRange(units, None, None, length, on_update=on_update)
+-    elif "-" not in rng:
+-        return None
++    warnings.warn(
++        "The 'parse_range_header' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'Range.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+ 
+-    start_str, stop_str = rng.split("-", 1)
+-    try:
+-        start = _plain_int(start_str)
+-        stop = _plain_int(stop_str) + 1
+-    except ValueError:
++    if (obj := ds.ContentRange.from_header(value)) is None:
+         return None
+ 
+-    if is_byte_range_valid(start, stop, length):
+-        return ds.ContentRange(units, start, stop, length, on_update=on_update)
+-
+-    return None
++    obj._on_update = on_update
++    return obj
+ 
+ 
+ def quote_etag(etag: str, weak: bool = False) -> str:
+@@ -1066,33 +1038,24 @@ def unquote_etag(
+     return etag, weak
+ 
+ 
+-def parse_etags(value: str | None) -> ds.ETags:
++def _parse_etags(value: str | None) -> ds.ETags:
+     """Parse an etag header.
+ 
+     :param value: the tag header to parse
+     :return: an :class:`~werkzeug.datastructures.ETags` object.
++
++    .. deprecated:: 3.2
++        Will be removed in Werkzeug 3.3. Use the 'ETags.from_header' method instead.
+     """
+-    if not value:
+-        return ds.ETags()
+-    strong = []
+-    weak = []
+-    end = len(value)
+-    pos = 0
+-    while pos < end:
+-        match = _etag_re.match(value, pos)
+-        if match is None:
+-            break
+-        is_weak, quoted, raw = match.groups()
+-        if raw == "*":
+-            return ds.ETags(star_tag=True)
+-        elif quoted:
+-            raw = quoted
+-        if is_weak:
+-            weak.append(raw)
+-        else:
+-            strong.append(raw)
+-        pos = match.end()
+-    return ds.ETags(strong, weak)
++    import warnings
++
++    warnings.warn(
++        "The 'parse_etags' function is deprecated and will be removed in"
++        " Werkzeug 3.3. Use the 'ETags.from_header' method instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++    return ds.ETags.from_header(value)
+ 
+ 
+ def generate_etag(data: bytes) -> str:
+@@ -1527,17 +1490,41 @@ def is_byte_range_valid(
+ from . import datastructures as ds  # noqa: E402
+ from .sansio import http as _sansio_http  # noqa: E402
+ 
+-
+-def __getattr__(name: str) -> t.Any:
+-    if name == "HTTP_STATUS_CODES":
+-        import warnings
+-
+-        warnings.warn(
+-            "The 'HTTP_STATUS_CODES' data is deprecated and will be removed in"
+-            " Werkzeug 3.3. Use Python's built-in 'http.HTTPStatus' instead.",
+-            DeprecationWarning,
+-            stacklevel=2,
+-        )
+-        return _HTTP_STATUS_CODES
+-
+-    raise AttributeError(name)
++if not t.TYPE_CHECKING:
++
++    def __getattr__(name: str) -> t.Any:
++        if name == "HTTP_STATUS_CODES":
++            import warnings
++
++            warnings.warn(
++                "The 'HTTP_STATUS_CODES' data is deprecated and will be removed in"
++                " Werkzeug 3.3. Use Python's built-in 'http.HTTPStatus' instead.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            return _HTTP_STATUS_CODES
++
++        alts = {
++            "dump_csp_header": "ContentSecurityPolicy.to_header",
++            "parse_accept_header": "Accept.from_header",
++            "parse_cache_control_header": "CacheControl.from_header",
++            "parse_content_range_header": "ContentRange.from_header",
++            "parse_csp_header": "ContentSecurityPolicy.from_header",
++            "parse_etags": "ETags.from_header",
++            "parse_if_range_header": "IfRange.from_header",
++            "parse_range_header": "Range.from_header",
++            "parse_set_header": "HeaderSet.from_header",
++        }
++
++        if name in alts:
++            import warnings
++
++            warnings.warn(
++                f"The '{name}' function is deprecated and will be removed in"
++                f" Werkzeug 3.3. Use the '{alts[name]}' method instead.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            return globals()[f"_{name}"]
++
++        raise AttributeError(name)
+diff --git a/src/werkzeug/sansio/http.py b/src/werkzeug/sansio/http.py
+--- a/src/werkzeug/sansio/http.py
++++ b/src/werkzeug/sansio/http.py
+@@ -7,8 +7,6 @@
+ from .._internal import _dt_as_utc
+ from ..http import generate_etag
+ from ..http import parse_date
+-from ..http import parse_etags
+-from ..http import parse_if_range_header
+ from ..http import unquote_etag
+ 
+ _etag_re = re.compile(r'([Ww]/)?(?:"(.*?)"|(.*?))(?:\s*,\s*|$)')
+@@ -60,7 +58,7 @@ def is_resource_modified(
+         # https://tools.ietf.org/html/rfc7233#section-3.2
+         # A server MUST ignore an If-Range header field received in a request
+         # that does not contain a Range header field.
+-        if_range = parse_if_range_header(http_if_range)
++        if_range = ds.IfRange.from_header(http_if_range)
+ 
+     if if_range is not None and if_range.date is not None:
+         modified_since: datetime | None = if_range.date
+@@ -74,20 +72,18 @@ def is_resource_modified(
+         etag, _ = unquote_etag(etag)
+ 
+         if if_range is not None and if_range.etag is not None:
+-            unmodified = parse_etags(if_range.etag).contains(etag)
++            unmodified = ds.ETags.from_header(if_range.etag).contains(etag)
+         else:
+-            if_none_match = parse_etags(http_if_none_match)
+-            if if_none_match:
+-                # https://tools.ietf.org/html/rfc7232#section-3.2
+-                # "A recipient MUST use the weak comparison function when comparing
+-                # entity-tags for If-None-Match"
++            # https://tools.ietf.org/html/rfc7232#section-3.2
++            # "A recipient MUST use the weak comparison function when comparing
++            # entity-tags for If-None-Match"
++            if if_none_match := ds.ETags.from_header(http_if_none_match):
+                 unmodified = if_none_match.contains_weak(etag)
+ 
+             # https://tools.ietf.org/html/rfc7232#section-3.1
+             # "Origin server MUST use the strong comparison function when
+             # comparing entity-tags for If-Match"
+-            if_match = parse_etags(http_if_match)
+-            if if_match:
++            if if_match := ds.ETags.from_header(http_if_match):
+                 unmodified = not if_match.is_strong(etag)
+ 
+     return not unmodified
+@@ -140,7 +136,7 @@ def parse_cookie(
+     .. versionadded:: 2.2
+     """
+     if cls is None:
+-        cls = t.cast("type[ds.MultiDict[str, str]]", ds.MultiDict)
++        cls = ds.MultiDict
+ 
+     if not cookie:
+         return cls()
+diff --git a/src/werkzeug/sansio/request.py b/src/werkzeug/sansio/request.py
+--- a/src/werkzeug/sansio/request.py
++++ b/src/werkzeug/sansio/request.py
+@@ -17,15 +17,9 @@
+ from ..datastructures import MultiDict
+ from ..datastructures import Range
+ from ..datastructures import RequestCacheControl
+-from ..http import parse_accept_header
+-from ..http import parse_cache_control_header
+ from ..http import parse_date
+-from ..http import parse_etags
+-from ..http import parse_if_range_header
+ from ..http import parse_list_header
+ from ..http import parse_options_header
+-from ..http import parse_range_header
+-from ..http import parse_set_header
+ from ..http import SecFetchDest
+ from ..http import SecFetchMode
+ from ..http import SecFetchSite
+@@ -376,21 +370,21 @@ def pragma(self) -> HeaderSet:
+             DeprecationWarning,
+             stacklevel=2,
+         )
+-        return parse_set_header(self.headers.get("Pragma"))
++        return HeaderSet.from_header(self.headers.get("Pragma"))
+ 
+     # Accept
+ 
+     @cached_property
+     def accept_mimetypes(self) -> MIMEAccept:
+-        """List of mimetypes this client supports as
+-        :class:`~werkzeug.datastructures.MIMEAccept` object.
++        """List of content types (MIME types) the client supports, from the
++        ``Accept`` header.
+         """
+-        return parse_accept_header(self.headers.get("Accept"), MIMEAccept)
++        return MIMEAccept.from_header(self.headers.get("Accept"))
+ 
+     @cached_property
+     def accept_charsets(self) -> Accept:
+-        """List of charsets this client supports as
+-        :class:`~werkzeug.datastructures.CharsetAccept` object.
++        """Text encodings (charsets) the client accepts, from the
++        ``Accept-Charset`` header.
+ 
+         .. deprecated:: 3.2
+             The header has not been used for a long time. Clients do not send
+@@ -407,26 +401,23 @@ def accept_charsets(self) -> Accept:
+             DeprecationWarning,
+             stacklevel=2,
+         )
+-        return parse_accept_header(self.headers.get("Accept-Charset"), _CharsetAccept)
++        return _CharsetAccept.from_header(self.headers.get("Accept-Charset"))
+ 
+     @cached_property
+     def accept_encodings(self) -> Accept:
+-        """List of encodings this client accepts.  Encodings in a HTTP term
+-        are compression encodings such as gzip.  For charsets have a look at
+-        :attr:`accept_charset`.
++        """Content encodings (compression) the client accepts, from the
++        ``Accept-Encoding`` header.
+         """
+-        return parse_accept_header(self.headers.get("Accept-Encoding"))
++        return Accept.from_header(self.headers.get("Accept-Encoding"))
+ 
+     @cached_property
+     def accept_languages(self) -> LanguageAccept:
+-        """List of languages this client accepts as
+-        :class:`~werkzeug.datastructures.LanguageAccept` object.
++        """Languages the client accepts, from the ``Accept-Language`` header.
+ 
+         .. versionchanged 0.5
+-           In previous versions this was a regular
+-           :class:`~werkzeug.datastructures.Accept` object.
++            Returns ``LanguageAccept`` instead of ``Accept``.
+         """
+-        return parse_accept_header(self.headers.get("Accept-Language"), LanguageAccept)
++        return LanguageAccept.from_header(self.headers.get("Accept-Language"))
+ 
+     # ETag
+ 
+@@ -435,24 +426,17 @@ def cache_control(self) -> RequestCacheControl:
+         """A :class:`~werkzeug.datastructures.RequestCacheControl` object
+         for the incoming cache control headers.
+         """
+-        cache_control = self.headers.get("Cache-Control")
+-        return parse_cache_control_header(cache_control, None, RequestCacheControl)
++        return RequestCacheControl.from_header(self.headers.get("Cache-Control"))
+ 
+     @cached_property
+     def if_match(self) -> ETags:
+-        """An object containing all the etags in the `If-Match` header.
+-
+-        :rtype: :class:`~werkzeug.datastructures.ETags`
+-        """
+-        return parse_etags(self.headers.get("If-Match"))
++        """ETags parsed from the ``If-Match`` header."""
++        return ETags.from_header(self.headers.get("If-Match"))
+ 
+     @cached_property
+     def if_none_match(self) -> ETags:
+-        """An object containing all the etags in the `If-None-Match` header.
+-
+-        :rtype: :class:`~werkzeug.datastructures.ETags`
+-        """
+-        return parse_etags(self.headers.get("If-None-Match"))
++        """ETags parsed from the ``If-None-Match`` header."""
++        return ETags.from_header(self.headers.get("If-None-Match"))
+ 
+     @cached_property
+     def if_modified_since(self) -> datetime | None:
+@@ -481,17 +465,15 @@ def if_range(self) -> IfRange:
+ 
+         .. versionadded:: 0.7
+         """
+-        return parse_if_range_header(self.headers.get("If-Range"))
++        return IfRange.from_header(self.headers.get("If-Range"))
+ 
+     @cached_property
+     def range(self) -> Range | None:
+         """The parsed `Range` header.
+ 
+         .. versionadded:: 0.7
+-
+-        :rtype: :class:`~werkzeug.datastructures.Range`
+         """
+-        return parse_range_header(self.headers.get("Range"))
++        return Range.from_header(self.headers.get("Range"))
+ 
+     # User Agent
+ 
+@@ -533,9 +515,9 @@ def authorization(self) -> Authorization | None:
+         read_only=True,
+     )
+ 
+-    access_control_request_headers = header_property(
++    access_control_request_headers = header_property[HeaderSet](
+         "Access-Control-Request-Headers",
+-        load_func=parse_set_header,
++        load_func=HeaderSet.from_header,
+         doc=(
+             "Sent with a preflight request to indicate which headers"
+             " will be sent with the cross origin request. Set"
+diff --git a/src/werkzeug/sansio/response.py b/src/werkzeug/sansio/response.py
+--- a/src/werkzeug/sansio/response.py
++++ b/src/werkzeug/sansio/response.py
+@@ -13,6 +13,7 @@
+ from ..datastructures import HeaderSet
+ from ..datastructures import ResponseCacheControl
+ from ..datastructures import WWWAuthenticate
++from ..datastructures.cache_control import _CacheControl
+ from ..http import COEP
+ from ..http import COOP
+ from ..http import CORP
+@@ -22,20 +23,13 @@
+ from ..http import dump_options_header
+ from ..http import http_date
+ from ..http import parse_age
+-from ..http import parse_cache_control_header
+-from ..http import parse_content_range_header
+-from ..http import parse_csp_header
+ from ..http import parse_date
+ from ..http import parse_options_header
+-from ..http import parse_set_header
+ from ..http import quote_etag
+ from ..http import unquote_etag
+ from ..utils import get_content_type
+ from ..utils import header_property
+ 
+-if t.TYPE_CHECKING:
+-    from ..datastructures.cache_control import _CacheControl
+-
+ 
+ def _set_property(name: str, doc: str | None = None) -> property:
+     def fget(self: Response) -> HeaderSet:
+@@ -45,7 +39,9 @@ def on_update(header_set: HeaderSet) -> None:
+             elif header_set:
+                 self.headers[name] = header_set.to_header()
+ 
+-        return parse_set_header(self.headers.get(name), on_update)
++        obj = HeaderSet.from_header(self.headers.get(name))
++        obj._on_update = on_update
++        return obj
+ 
+     def fset(
+         self: Response,
+@@ -536,9 +532,9 @@ def on_update(cache_control: _CacheControl) -> None:
+             elif cache_control:
+                 self.headers["Cache-Control"] = cache_control.to_header()
+ 
+-        return parse_cache_control_header(
+-            self.headers.get("Cache-Control"), on_update, ResponseCacheControl
+-        )
++        obj = ResponseCacheControl.from_header(self.headers.get("Cache-Control"))
++        obj.on_update = on_update
++        return obj
+ 
+     def set_etag(self, etag: str, weak: bool = False) -> None:
+         """Set the etag, and override the old one if there was one."""
+@@ -576,13 +572,15 @@ def on_update(rng: ContentRange) -> None:
+             else:
+                 self.headers["Content-Range"] = rng.to_header()
+ 
+-        rv = parse_content_range_header(self.headers.get("Content-Range"), on_update)
++        obj = ContentRange.from_header(self.headers.get("Content-Range"))
+         # always provide a content range object to make the descriptor
+         # more user friendly.  It provides an unset() method that can be
+         # used to remove the header quickly.
+-        if rv is None:
+-            rv = ContentRange(None, None, None, on_update=on_update)
+-        return rv
++        if obj is None:
++            obj = ContentRange(None, None, None)
++
++        obj._on_update = on_update
++        return obj
+ 
+     @content_range.setter
+     def content_range(self, value: ContentRange | str | None) -> None:
+@@ -680,10 +678,11 @@ def on_update(csp: ContentSecurityPolicy) -> None:
+             else:
+                 self.headers["Content-Security-Policy"] = csp.to_header()
+ 
+-        rv = parse_csp_header(self.headers.get("Content-Security-Policy"), on_update)
+-        if rv is None:
+-            rv = ContentSecurityPolicy(None, on_update=on_update)
+-        return rv
++        obj = ContentSecurityPolicy.from_header(
++            self.headers.get("Content-Security-Policy")
++        )
++        obj.on_update = on_update
++        return obj
+ 
+     @content_security_policy.setter
+     def content_security_policy(
+@@ -713,12 +712,11 @@ def on_update(csp: ContentSecurityPolicy) -> None:
+             else:
+                 self.headers["Content-Security-Policy-Report-Only"] = csp.to_header()
+ 
+-        rv = parse_csp_header(
+-            self.headers.get("Content-Security-Policy-Report-Only"), on_update
++        obj = ContentSecurityPolicy.from_header(
++            self.headers.get("Content-Security-Policy-Report-Only")
+         )
+-        if rv is None:
+-            rv = ContentSecurityPolicy(None, on_update=on_update)
+-        return rv
++        obj.on_update = on_update
++        return obj
+ 
+     @content_security_policy_report_only.setter
+     def content_security_policy_report_only(
+@@ -748,16 +746,16 @@ def access_control_allow_credentials(self, value: bool | None) -> None:
+         else:
+             self.headers.pop("Access-Control-Allow-Credentials", None)
+ 
+-    access_control_allow_headers = header_property(
++    access_control_allow_headers = header_property[HeaderSet](
+         "Access-Control-Allow-Headers",
+-        load_func=parse_set_header,
++        load_func=HeaderSet.from_header,
+         dump_func=dump_header,
+         doc="Which headers can be sent with the cross origin request.",
+     )
+ 
+-    access_control_allow_methods = header_property(
++    access_control_allow_methods = header_property[HeaderSet](
+         "Access-Control-Allow-Methods",
+-        load_func=parse_set_header,
++        load_func=HeaderSet.from_header,
+         dump_func=dump_header,
+         doc="Which methods can be used for the cross origin request.",
+     )
+@@ -767,9 +765,9 @@ def access_control_allow_credentials(self, value: bool | None) -> None:
+         doc="The origin or '*' for any origin that may make cross origin requests.",
+     )
+ 
+-    access_control_expose_headers = header_property(
++    access_control_expose_headers = header_property[HeaderSet](
+         "Access-Control-Expose-Headers",
+-        load_func=parse_set_header,
++        load_func=HeaderSet.from_header,
+         dump_func=dump_header,
+         doc="Which headers can be shared by the browser to JavaScript code.",
+     )
+diff --git a/src/werkzeug/sansio/utils.py b/src/werkzeug/sansio/utils.py
+--- a/src/werkzeug/sansio/utils.py
++++ b/src/werkzeug/sansio/utils.py
+@@ -5,8 +5,8 @@
+ from urllib.parse import quote
+ 
+ from .._internal import _plain_int
++from ..datastructures import HeaderSet
+ from ..exceptions import SecurityError
+-from ..http import parse_set_header
+ from ..urls import uri_to_iri
+ 
+ _host_re = re.compile(
+@@ -214,7 +214,7 @@ def get_content_length(
+     """
+     if (
+         http_transfer_encoding is not None
+-        and "chunked" in parse_set_header(http_transfer_encoding)
++        and "chunked" in HeaderSet.from_header(http_transfer_encoding)
+     ) or http_content_length is None:
+         return None
+ 
+diff --git a/src/werkzeug/serving.py b/src/werkzeug/serving.py
+--- a/src/werkzeug/serving.py
++++ b/src/werkzeug/serving.py
+@@ -32,8 +32,8 @@
+ 
+ from ._internal import _log
+ from ._internal import _wsgi_encoding_dance
++from .datastructures import HeaderSet
+ from .exceptions import InternalServerError
+-from .http import parse_set_header
+ from .urls import uri_to_iri
+ 
+ try:
+@@ -221,7 +221,7 @@ def make_environ(self) -> WSGIEnvironment:
+                     value = f"{environ[key]},{value}"
+             environ[key] = value
+ 
+-        if "chunked" in parse_set_header(environ.get("HTTP_TRANSFER_ENCODING")):
++        if "chunked" in HeaderSet.from_header(environ.get("HTTP_TRANSFER_ENCODING")):
+             environ["wsgi.input_terminated"] = True
+             environ["wsgi.input"] = DechunkedInput(environ["wsgi.input"])
+ 
+diff --git a/src/werkzeug/wrappers/response.py b/src/werkzeug/wrappers/response.py
+--- a/src/werkzeug/wrappers/response.py
++++ b/src/werkzeug/wrappers/response.py
+@@ -6,12 +6,12 @@
+ from urllib.parse import urljoin
+ 
+ from .._internal import _get_environ
++from ..datastructures import ETags
+ from ..datastructures import Headers
++from ..datastructures import Range
+ from ..http import generate_etag
+ from ..http import http_date
+ from ..http import is_resource_modified
+-from ..http import parse_etags
+-from ..http import parse_range_header
+ from ..http import remove_entity_headers
+ from ..sansio.response import Response as _SansIOResponse
+ from ..urls import iri_to_uri
+@@ -687,7 +687,7 @@ def _process_range_request(
+         if not (complete_length and self._is_range_request_processable(environ)):
+             return False
+ 
+-        parsed_range = parse_range_header(environ.get("HTTP_RANGE"))
++        parsed_range = Range.from_header(environ.get("HTTP_RANGE"))
+ 
+         if parsed_range is None:
+             raise RequestedRangeNotSatisfiable(complete_length)
+@@ -769,7 +769,7 @@ def make_conditional(
+                 None,
+                 self.headers.get("Last-Modified"),
+             ):
+-                if parse_etags(environ.get("HTTP_IF_MATCH")):
++                if ETags.from_header(environ.get("HTTP_IF_MATCH")):
+                     self.status_code = 412
+                 else:
+                     self.status_code = 304

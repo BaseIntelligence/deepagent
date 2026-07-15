@@ -1,0 +1,19 @@
+{
+  "task_id": "realpr-markupsafe-496",
+  "repo": "pallets/markupsafe",
+  "url": "https://github.com/pallets/markupsafe.git",
+  "language": "python",
+  "license": "BSD-3-Clause",
+  "pr": 496,
+  "base": "5f2980738834f138f4684d6b86cb32fd64bac631",
+  "src": [
+    "setup.py",
+    "src/markupsafe/__init__.py"
+  ],
+  "tests": [
+    ".github/workflows/tests.yaml",
+    "requirements/tests.in",
+    "requirements/tests.txt"
+  ],
+  "title": "use uv (#496)"
+}

@@ -1,0 +1,221 @@
+[
+  {
+    "task_id": "realpr-click-3581",
+    "repo": "pallets/click",
+    "url": "https://github.com/pallets/click.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 3581,
+    "base": "16fc00e2f4a2717a521084f193709a6058afc693",
+    "src": [
+      "src/click/__init__.py",
+      "src/click/decorators.py"
+    ],
+    "tests": [
+      "tests/test_basic.py"
+    ],
+    "title": "Add `@custom_version_option`, freeze `@version_option` (#3581)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-click-3581"
+  },
+  {
+    "task_id": "realpr-click-3533",
+    "repo": "pallets/click",
+    "url": "https://github.com/pallets/click.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 3533,
+    "base": "cd9bdd96a9dcc8e4ecabd45b5c244dbc70034484",
+    "src": [
+      "src/click/_termui_impl.py",
+      "src/click/utils.py"
+    ],
+    "tests": [
+      "tests/test_termui.py"
+    ],
+    "title": "Do not let the GC close a borrowed `stdout` (#3533)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-click-3533"
+  },
+  {
+    "task_id": "realpr-inflect-199",
+    "repo": "jaraco/inflect",
+    "url": "https://github.com/jaraco/inflect.git",
+    "language": "python",
+    "license": "MIT",
+    "pr": 199,
+    "base": "8e5842cbdb9ab12c0ce524d0511f0c829b46a3a7",
+    "src": [
+      "inflect/__init__.py",
+      "inflect/compat/__init__.py",
+      "inflect/compat/pydantic.py",
+      "inflect/compat/pydantic1.py"
+    ],
+    "tests": [
+      "tests/test_pwd.py"
+    ],
+    "title": "inflect PR 199",
+    "materials_dir": "fixtures/real_pr_ship/realpr-inflect-199"
+  },
+  {
+    "task_id": "realpr-click-3563",
+    "repo": "pallets/click",
+    "url": "https://github.com/pallets/click.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 3563,
+    "base": "4fc0e90e1c19faf82bc18f8551eb1ed78dc738ac",
+    "src": [
+      "docs/conf.py",
+      "src/click/_compat.py",
+      "src/click/_termui_impl.py",
+      "src/click/core.py",
+      "src/click/termui.py",
+      "src/click/types.py",
+      "src/click/utils.py"
+    ],
+    "tests": [
+      "src/click/testing.py",
+      "tests/test_stream_lifecycle.py",
+      "tests/test_termui.py",
+      "tests/test_types.py",
+      "tests/test_utils.py"
+    ],
+    "title": "Merge `stable` into `main` after `CHANGES` rST to Markdown conversion (#3563)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-click-3563"
+  },
+  {
+    "task_id": "realpr-zipp-154",
+    "repo": "jaraco/zipp",
+    "url": "https://github.com/jaraco/zipp.git",
+    "language": "python",
+    "license": "MIT",
+    "pr": 154,
+    "base": "d14b72023b442e0eab42d59a6d849e31c2ab243e",
+    "src": [
+      "zipp/__init__.py",
+      "zipp/glob.py"
+    ],
+    "tests": [
+      "tests/test_path.py"
+    ],
+    "title": "Raise NotADirectoryError from Path.iterdir",
+    "materials_dir": "fixtures/real_pr_ship/realpr-zipp-154"
+  },
+  {
+    "task_id": "realpr-zipp-135",
+    "repo": "jaraco/zipp",
+    "url": "https://github.com/jaraco/zipp.git",
+    "language": "python",
+    "license": "MIT",
+    "pr": 135,
+    "base": "e7956b726b1a19d7eae225a3c71de714af354530",
+    "src": [
+      "zipp/__init__.py",
+      "zipp/_functools.py"
+    ],
+    "tests": [
+      "tests/test_path.py"
+    ],
+    "title": "zipp PR 135",
+    "materials_dir": "fixtures/real_pr_ship/realpr-zipp-135"
+  },
+  {
+    "task_id": "realpr-zipp-122",
+    "repo": "jaraco/zipp",
+    "url": "https://github.com/jaraco/zipp.git",
+    "language": "python",
+    "license": "MIT",
+    "pr": 122,
+    "base": "21c6bfd6ed451640ec3a69e1239fab053e1d7d6f",
+    "src": [
+      "zipp/__init__.py",
+      "zipp/glob.py"
+    ],
+    "tests": [
+      "tests/test_path.py"
+    ],
+    "title": "zipp PR 122",
+    "materials_dir": "fixtures/real_pr_ship/realpr-zipp-122"
+  },
+  {
+    "task_id": "realpr-click-3505",
+    "repo": "pallets/click",
+    "url": "https://github.com/pallets/click.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 3505,
+    "base": "3a40e43e8f61761cb7bd4f3e27ae3060690a84eb",
+    "src": [
+      "src/click/_compat.py",
+      "src/click/termui.py",
+      "src/click/utils.py"
+    ],
+    "tests": [
+      "tests/test_utils.py"
+    ],
+    "title": "remove colorama (#3505)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-click-3505"
+  },
+  {
+    "task_id": "realpr-click-3521",
+    "repo": "pallets/click",
+    "url": "https://github.com/pallets/click.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 3521,
+    "base": "6a141c3681027e8124ce5a3c70e608dbbebffafb",
+    "src": [
+      "src/click/core.py",
+      "src/click/exceptions.py",
+      "src/click/formatting.py",
+      "src/click/shell_completion.py"
+    ],
+    "tests": [
+      "src/click/testing.py",
+      "tests/test_arguments.py",
+      "tests/test_commands.py",
+      "tests/test_options.py"
+    ],
+    "title": "Merge stable into main (#3521)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-click-3521"
+  },
+  {
+    "task_id": "realpr-itsdangerous-369",
+    "repo": "pallets/itsdangerous",
+    "url": "https://github.com/pallets/itsdangerous.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 369,
+    "base": "7c6286ed2125c87662eeb102b32fb3d68611a5d6",
+    "src": [
+      "docs/conf.py",
+      "src/itsdangerous/timed.py"
+    ],
+    "tests": [
+      ".github/workflows/tests.yaml",
+      "requirements/tests.txt",
+      "tests/test_itsdangerous/test_serializer.py"
+    ],
+    "title": "update project files (#369)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-itsdangerous-369"
+  },
+  {
+    "task_id": "realpr-markupsafe-496",
+    "repo": "pallets/markupsafe",
+    "url": "https://github.com/pallets/markupsafe.git",
+    "language": "python",
+    "license": "BSD-3-Clause",
+    "pr": 496,
+    "base": "5f2980738834f138f4684d6b86cb32fd64bac631",
+    "src": [
+      "setup.py",
+      "src/markupsafe/__init__.py"
+    ],
+    "tests": [
+      ".github/workflows/tests.yaml",
+      "requirements/tests.in",
+      "requirements/tests.txt"
+    ],
+    "title": "use uv (#496)",
+    "materials_dir": "fixtures/real_pr_ship/realpr-markupsafe-496"
+  }
+]

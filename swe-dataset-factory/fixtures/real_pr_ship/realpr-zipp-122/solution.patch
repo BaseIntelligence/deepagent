@@ -1,0 +1,42 @@
+diff --git a/zipp/__init__.py b/zipp/__init__.py
+index d65297b..52ee74c 100644
+--- a/zipp/__init__.py
++++ b/zipp/__init__.py
+@@ -470,8 +470,7 @@ class Path:
+         prefix = re.escape(self.at)
+         tr = Translator(seps='/')
+         matches = re.compile(prefix + tr.translate(pattern)).fullmatch
+-        names = (data.filename for data in self.root.filelist)
+-        return map(self._next, filter(matches, names))
++        return map(self._next, filter(matches, self.root.namelist()))
+ 
+     def rglob(self, pattern):
+         return self.glob(f'**/{pattern}')
+diff --git a/zipp/glob.py b/zipp/glob.py
+index 69c41d7..4320f1c 100644
+--- a/zipp/glob.py
++++ b/zipp/glob.py
+@@ -28,7 +28,7 @@ class Translator:
+         """
+         Given a glob pattern, produce a regex that matches it.
+         """
+-        return self.extend(self.translate_core(pattern))
++        return self.extend(self.match_dirs(self.translate_core(pattern)))
+ 
+     def extend(self, pattern):
+         r"""
+@@ -41,6 +41,14 @@ class Translator:
+         """
+         return rf'(?s:{pattern})\Z'
+ 
++    def match_dirs(self, pattern):
++        """
++        Ensure that zipfile.Path directory names are matched.
++
++        zipfile.Path directory names always end in a slash.
++        """
++        return rf'{pattern}[/]?'
++
+     def translate_core(self, pattern):
+         r"""
+         Given a glob pattern, produce a regex that matches it.

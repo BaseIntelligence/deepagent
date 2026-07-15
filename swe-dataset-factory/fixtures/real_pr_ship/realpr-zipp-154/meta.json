@@ -1,0 +1,17 @@
+{
+  "task_id": "realpr-zipp-154",
+  "repo": "jaraco/zipp",
+  "url": "https://github.com/jaraco/zipp.git",
+  "language": "python",
+  "license": "MIT",
+  "pr": 154,
+  "base": "d14b72023b442e0eab42d59a6d849e31c2ab243e",
+  "src": [
+    "zipp/__init__.py",
+    "zipp/glob.py"
+  ],
+  "tests": [
+    "tests/test_path.py"
+  ],
+  "title": "Raise NotADirectoryError from Path.iterdir"
+}

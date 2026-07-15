@@ -1,0 +1,30 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "d0de442c08df8793c5ff36d9ad322ca5c47fc38c",
+  "extra": {
+    "disposition": "accept",
+    "reason_codes": [
+      "ORCD_SOL_1",
+      "G3_NULL_NOT_RESOLVE",
+      "G5_LEAK_CLEAN",
+      "ORACLE_PASS",
+      "RORC_ISOLATION_CLEAN",
+      "RORC_SOL_1",
+      "RORC_NULL_0"
+    ]
+  },
+  "isolation": "clean",
+  "null": 0,
+  "null_evidence": "/tmp/work_ship_m14_yield15p/product_stage/evidence/docker/realpr-rich-3486.null.reward.json",
+  "null_ok": true,
+  "null_reward": 0,
+  "oracle_mode": "docker",
+  "pair_ok": true,
+  "repository_url": "https://github.com/Textualize/rich.git",
+  "sol": 1,
+  "sol_evidence": "/tmp/work_ship_m14_yield15p/product_stage/evidence/docker/realpr-rich-3486.sol.reward.json",
+  "sol_ok": true,
+  "solution_reward": 1,
+  "source_track": "real_pr",
+  "task_id": "realpr-rich-3486"
+}

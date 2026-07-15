@@ -1,0 +1,45 @@
+{
+ "base_commit": "c46802478cdd8a82ee8cb333420080fab1aed00b",
+ "f2p_node_ids": [
+  "tests._sync.test_http11.test_http11_upgrade_with_trailing_data"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [
+  "tests._sync.test_http11.test_http11_connection",
+  "tests._sync.test_http11.test_http11_connection_attempt_close",
+  "tests._sync.test_http11.test_http11_connection_handles_one_active_request",
+  "tests._sync.test_http11.test_http11_connection_unread_response",
+  "tests._sync.test_http11.test_http11_connection_with_incomplete_response",
+  "tests._sync.test_http11.test_http11_connection_with_local_protocol_error",
+  "tests._sync.test_http11.test_http11_connection_with_remote_protocol_error",
+  "tests._sync.test_http11.test_http11_early_hints",
+  "tests._sync.test_http11.test_http11_expect_continue",
+  "tests._sync.test_http11.test_http11_header_sub_100kb",
+  "tests._sync.test_http11.test_http11_request_to_incorrect_origin",
+  "tests._sync.test_http11.test_http11_upgrade_connection"
+ ],
+ "pytest_paths": [
+  "tests/_sync/test_http11.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/_sync/test_http11.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}

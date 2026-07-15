@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+*.egg
+
+# Secrets and local env
+.env
+.env.local
+*.pem
+
+# Local documentation / validation evidence (never publish)
+.docs-evidence/
+
+# Generated work caches and bulk non-product datasets (not vendored here)
+datasets/_clone_cache/
+datasets/_work*/
+datasets/sdf-ship-*/
+datasets/mine_allowlist*/
+datasets/real_pr_pool_live_*/
+datasets/_div_probe/
+datasets/_ship_work*/
+datasets/live_materials/
+datasets/micro_keep_*/
+datasets/ut_*/
+
+# Harbor motor dual-run jest node_modules cache (local only)
+fixtures/harbor_motors/.ts_deps/
+**/node_modules/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Docker / runtime
+*.log
+tmp/
+.cache/

@@ -1,0 +1,93 @@
+diff --git a/tests/test_datastructures.py b/tests/test_datastructures.py
+--- a/tests/test_datastructures.py
++++ b/tests/test_datastructures.py
+@@ -258,6 +258,17 @@ def test_basic_interface(self):
+         md.setlist("foo", [1, 2])
+         assert md.getlist("foo") == [1, 2]
+ 
++    def test_or(self) -> None:
++        a = self.storage_class({"x": 1})
++        b = a | {"y": 2}
++        assert isinstance(b, self.storage_class)
++        assert "x" in b and "y" in b
++
++    def test_ior(self) -> None:
++        a = self.storage_class({"x": 1})
++        a |= {"y": 2}
++        assert "x" in a and "y" in a
++
+ 
+ class _ImmutableDictTests:
+     storage_class: type[dict]
+@@ -305,6 +316,17 @@ def test_dict_is_hashable(self):
+         assert immutable in x
+         assert immutable2 in x
+ 
++    def test_or(self) -> None:
++        a = self.storage_class({"x": 1})
++        b = a | {"y": 2}
++        assert "x" in b and "y" in b
++
++    def test_ior(self) -> None:
++        a = self.storage_class({"x": 1})
++
++        with pytest.raises(TypeError):
++            a |= {"y": 2}
++
+ 
+ class TestImmutableTypeConversionDict(_ImmutableDictTests):
+     storage_class = ds.ImmutableTypeConversionDict
+@@ -799,6 +821,17 @@ def test_equality(self):
+ 
+         assert h1 == h2
+ 
++    def test_or(self) -> None:
++        a = ds.Headers({"x": 1})
++        b = a | {"y": 2}
++        assert isinstance(b, ds.Headers)
++        assert "x" in b and "y" in b
++
++    def test_ior(self) -> None:
++        a = ds.Headers({"x": 1})
++        a |= {"y": 2}
++        assert "x" in a and "y" in a
++
+ 
+ class TestEnvironHeaders:
+     storage_class = ds.EnvironHeaders
+@@ -840,6 +873,18 @@ def test_return_type_is_str(self):
+         assert headers["Foo"] == "\xe2\x9c\x93"
+         assert next(iter(headers)) == ("Foo", "\xe2\x9c\x93")
+ 
++    def test_or(self) -> None:
++        headers = ds.EnvironHeaders({"x": "1"})
++
++        with pytest.raises(TypeError):
++            headers | {"y": "2"}
++
++    def test_ior(self) -> None:
++        headers = ds.EnvironHeaders({})
++
++        with pytest.raises(TypeError):
++            headers |= {"y": "2"}
++
+ 
+ class TestHeaderSet:
+     storage_class = ds.HeaderSet
+@@ -927,7 +972,7 @@ def test_callback_dict_writes(self):
+         assert_calls, func = make_call_asserter()
+         initial = {"a": "foo", "b": "bar"}
+         dct = self.storage_class(initial=initial, on_update=func)
+-        with assert_calls(8, "callback not triggered by write method"):
++        with assert_calls(9, "callback not triggered by write method"):
+             # always-write methods
+             dct["z"] = 123
+             dct["z"] = 123  # must trigger again
+@@ -937,6 +982,7 @@ def test_callback_dict_writes(self):
+             dct.popitem()
+             dct.update([])
+             dct.clear()
++            dct |= {}
+         with assert_calls(0, "callback triggered by failed del"):
+             pytest.raises(KeyError, lambda: dct.__delitem__("x"))
+         with assert_calls(0, "callback triggered by failed pop"):

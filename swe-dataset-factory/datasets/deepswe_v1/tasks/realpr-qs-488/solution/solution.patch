@@ -1,0 +1,161 @@
+diff --git a/lib/parse.js b/lib/parse.js
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -14,6 +14,7 @@ var defaults = {
+     charset: 'utf-8',
+     charsetSentinel: false,
+     comma: false,
++    decodeDotInKeys: true,
+     decoder: utils.decode,
+     delimiter: '&',
+     depth: 5,
+@@ -128,20 +129,21 @@ var parseObject = function (chain, val, options, valuesParsed) {
+         } else {
+             obj = options.plainObjects ? Object.create(null) : {};
+             var cleanRoot = root.charAt(0) === '[' && root.charAt(root.length - 1) === ']' ? root.slice(1, -1) : root;
+-            var index = parseInt(cleanRoot, 10);
+-            if (!options.parseArrays && cleanRoot === '') {
++            var decodedRoot = options.decodeDotInKeys ? cleanRoot.replace(/%2E/g, '.') : cleanRoot;
++            var index = parseInt(decodedRoot, 10);
++            if (!options.parseArrays && decodedRoot === '') {
+                 obj = { 0: leaf };
+             } else if (
+                 !isNaN(index)
+-                && root !== cleanRoot
+-                && String(index) === cleanRoot
++                && root !== decodedRoot
++                && String(index) === decodedRoot
+                 && index >= 0
+                 && (options.parseArrays && index <= options.arrayLimit)
+             ) {
+                 obj = [];
+                 obj[index] = leaf;
+-            } else if (cleanRoot !== '__proto__') {
+-                obj[cleanRoot] = leaf;
++            } else if (decodedRoot !== '__proto__') {
++                obj[decodedRoot] = leaf;
+             }
+         }
+ 
+@@ -214,6 +216,10 @@ var normalizeParseOptions = function normalizeParseOptions(opts) {
+         throw new TypeError('`allowEmptyArrays` option can only be `true` or `false`, when provided');
+     }
+ 
++    if (typeof opts.decodeDotInKeys !== 'undefined' && typeof opts.decodeDotInKeys !== 'boolean') {
++        throw new TypeError('`decodeDotInKeys` option can only be `true` or `false`, when provided');
++    }
++
+     if (opts.decoder !== null && typeof opts.decoder !== 'undefined' && typeof opts.decoder !== 'function') {
+         throw new TypeError('Decoder has to be a function.');
+     }
+@@ -229,15 +235,18 @@ var normalizeParseOptions = function normalizeParseOptions(opts) {
+         throw new TypeError('The duplicates option must be either combine, first, or last');
+     }
+ 
++    var allowDots = typeof opts.allowDots === 'undefined' ? opts.decodeDotInKeys === true ? true : defaults.allowDots : !!opts.allowDots;
++
+     return {
+-        allowDots: typeof opts.allowDots === 'undefined' ? defaults.allowDots : !!opts.allowDots,
++        allowDots: allowDots,
+         allowEmptyArrays: typeof opts.allowEmptyArrays === 'boolean' ? !!opts.allowEmptyArrays : defaults.allowEmptyArrays,
+         allowPrototypes: typeof opts.allowPrototypes === 'boolean' ? opts.allowPrototypes : defaults.allowPrototypes,
+         allowSparse: typeof opts.allowSparse === 'boolean' ? opts.allowSparse : defaults.allowSparse,
+         arrayLimit: typeof opts.arrayLimit === 'number' ? opts.arrayLimit : defaults.arrayLimit,
+         charset: charset,
+         charsetSentinel: typeof opts.charsetSentinel === 'boolean' ? opts.charsetSentinel : defaults.charsetSentinel,
+         comma: typeof opts.comma === 'boolean' ? opts.comma : defaults.comma,
++        decodeDotInKeys: typeof opts.decodeDotInKeys === 'boolean' ? opts.decodeDotInKeys : defaults.decodeDotInKeys,
+         decoder: typeof opts.decoder === 'function' ? opts.decoder : defaults.decoder,
+         delimiter: typeof opts.delimiter === 'string' || utils.isRegExp(opts.delimiter) ? opts.delimiter : defaults.delimiter,
+         // eslint-disable-next-line no-implicit-coercion, no-extra-parens
+diff --git a/lib/stringify.js b/lib/stringify.js
+--- a/lib/stringify.js
++++ b/lib/stringify.js
+@@ -36,6 +36,7 @@ var defaults = {
+     charsetSentinel: false,
+     delimiter: '&',
+     encode: true,
++    encodeDotInKeys: false,
+     encoder: utils.encode,
+     encodeValuesOnly: false,
+     format: defaultFormat,
+@@ -67,6 +68,7 @@ var stringify = function stringify(
+     allowEmptyArrays,
+     strictNullHandling,
+     skipNulls,
++    encodeDotInKeys,
+     encoder,
+     filter,
+     sort,
+@@ -148,7 +150,9 @@ var stringify = function stringify(
+         objKeys = sort ? keys.sort(sort) : keys;
+     }
+ 
+-    var adjustedPrefix = commaRoundTrip && isArray(obj) && obj.length === 1 ? prefix + '[]' : prefix;
++    var encodedPrefix = encodeDotInKeys ? prefix.replace(/\./g, '%2E') : prefix;
++
++    var adjustedPrefix = commaRoundTrip && isArray(obj) && obj.length === 1 ? encodedPrefix + '[]' : encodedPrefix;
+ 
+     if (allowEmptyArrays && isArray(obj) && obj.length === 0) {
+         return adjustedPrefix + '[]';
+@@ -162,9 +166,10 @@ var stringify = function stringify(
+             continue;
+         }
+ 
++        var encodedKey = allowDots && encodeDotInKeys ? key.replace(/\./g, '%2E') : key;
+         var keyPrefix = isArray(obj)
+-            ? typeof generateArrayPrefix === 'function' ? generateArrayPrefix(adjustedPrefix, key) : adjustedPrefix
+-            : adjustedPrefix + (allowDots ? '.' + key : '[' + key + ']');
++            ? typeof generateArrayPrefix === 'function' ? generateArrayPrefix(adjustedPrefix, encodedKey) : adjustedPrefix
++            : adjustedPrefix + (allowDots ? '.' + encodedKey : '[' + encodedKey + ']');
+ 
+         sideChannel.set(object, step);
+         var valueSideChannel = getSideChannel();
+@@ -177,6 +182,7 @@ var stringify = function stringify(
+             allowEmptyArrays,
+             strictNullHandling,
+             skipNulls,
++            encodeDotInKeys,
+             generateArrayPrefix === 'comma' && encodeValuesOnly && isArray(obj) ? null : encoder,
+             filter,
+             sort,
+@@ -202,6 +208,10 @@ var normalizeStringifyOptions = function normalizeStringifyOptions(opts) {
+         throw new TypeError('`allowEmptyArrays` option can only be `true` or `false`, when provided');
+     }
+ 
++    if (typeof opts.encodeDotInKeys !== 'undefined' && typeof opts.encodeDotInKeys !== 'boolean') {
++        throw new TypeError('`encodeDotInKeys` option can only be `true` or `false`, when provided');
++    }
++
+     if (opts.encoder !== null && typeof opts.encoder !== 'undefined' && typeof opts.encoder !== 'function') {
+         throw new TypeError('Encoder has to be a function.');
+     }
+@@ -238,16 +248,19 @@ var normalizeStringifyOptions = function normalizeStringifyOptions(opts) {
+         throw new TypeError('`commaRoundTrip` must be a boolean, or absent');
+     }
+ 
++    var allowDots = typeof opts.allowDots === 'undefined' ? opts.encodeDotInKeys === true ? true : defaults.allowDots : !!opts.allowDots;
++
+     return {
+         addQueryPrefix: typeof opts.addQueryPrefix === 'boolean' ? opts.addQueryPrefix : defaults.addQueryPrefix,
+-        allowDots: typeof opts.allowDots === 'undefined' ? defaults.allowDots : !!opts.allowDots,
++        allowDots: allowDots,
+         allowEmptyArrays: typeof opts.allowEmptyArrays === 'boolean' ? !!opts.allowEmptyArrays : defaults.allowEmptyArrays,
+         arrayFormat: arrayFormat,
+         charset: charset,
+         charsetSentinel: typeof opts.charsetSentinel === 'boolean' ? opts.charsetSentinel : defaults.charsetSentinel,
+         commaRoundTrip: opts.commaRoundTrip,
+         delimiter: typeof opts.delimiter === 'undefined' ? defaults.delimiter : opts.delimiter,
+         encode: typeof opts.encode === 'boolean' ? opts.encode : defaults.encode,
++        encodeDotInKeys: typeof opts.encodeDotInKeys === 'boolean' ? opts.encodeDotInKeys : defaults.encodeDotInKeys,
+         encoder: typeof opts.encoder === 'function' ? opts.encoder : defaults.encoder,
+         encodeValuesOnly: typeof opts.encodeValuesOnly === 'boolean' ? opts.encodeValuesOnly : defaults.encodeValuesOnly,
+         filter: filter,
+@@ -307,6 +320,7 @@ module.exports = function (object, opts) {
+             options.allowEmptyArrays,
+             options.strictNullHandling,
+             options.skipNulls,
++            options.encodeDotInKeys,
+             options.encode ? options.encoder : null,
+             options.filter,
+             options.sort,

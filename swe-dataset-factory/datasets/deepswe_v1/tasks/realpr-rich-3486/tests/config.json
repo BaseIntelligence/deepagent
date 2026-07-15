@@ -1,0 +1,52 @@
+{
+ "base_commit": "d0de442c08df8793c5ff36d9ad322ca5c47fc38c",
+ "f2p_node_ids": [
+  "test_traceback.test_traceback_finely_grained"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [
+  "test_traceback.test_broken_str",
+  "test_traceback.test_capture",
+  "test_traceback.test_caused_exception",
+  "test_traceback.test_filename_not_a_file",
+  "test_traceback.test_filename_with_bracket",
+  "test_traceback.test_guess_lexer",
+  "test_traceback.test_guess_lexer_yaml_j2",
+  "test_traceback.test_handler",
+  "test_traceback.test_nested_exception",
+  "test_traceback.test_no_exception",
+  "test_traceback.test_print_exception",
+  "test_traceback.test_print_exception_locals",
+  "test_traceback.test_print_exception_no_msg",
+  "test_traceback.test_recursive",
+  "test_traceback.test_rich_traceback_omit_optional_local_flag[False-4-expected_frame_names1]",
+  "test_traceback.test_rich_traceback_omit_optional_local_flag[True-3-expected_frame_names0]",
+  "test_traceback.test_suppress",
+  "test_traceback.test_syntax_error",
+  "test_traceback.test_traceback_console_theme_applies"
+ ],
+ "pytest_paths": [
+  "test_traceback.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "test_traceback.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}

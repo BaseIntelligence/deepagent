@@ -1,0 +1,557 @@
+{
+  "agent": "mini-swe-agent",
+  "budget_stop": false,
+  "cost_harvest": {
+    "hard_stop_usd": "300.0",
+    "method": "mini-swe trajectory final_metrics.total_cost_usd",
+    "note": "CLI settled 0 during live wave (invoker cost_usd stub); post-harvest for honest spend \u2264 hard_stop",
+    "spend_usd": "26.5308096440000008",
+    "under_hard_stop": true
+  },
+  "dual_truth_preflight": {
+    "all_ok": true,
+    "mode": "deepswe-oracle docker (not pier oracle/nop)",
+    "null_reward": 0,
+    "packs": [
+      "realpr-itemadapter-101",
+      "realpr-click-3645",
+      "realpr-attrs-1323",
+      "realpr-httpx-3672",
+      "realpr-packaging-1120"
+    ],
+    "skip_pier_preflight_reason": "known pier oracle apply_failed path; factory docker dual-truth is gate",
+    "solution_reward": 1
+  },
+  "fidelity": "pier_miniswe_harbor",
+  "finished_at": "2026-07-15T16:21:38.752226+00:00",
+  "hard_stop_usd": "300.0",
+  "host_mem_after": {
+    "available": 215.63,
+    "total": 377.26,
+    "used": 161.62
+  },
+  "host_mem_before": {
+    "available": 255.91,
+    "total": 377.26,
+    "used": 121.35
+  },
+  "host_mem_note": "Host Mem used stayed ~120-173 GiB during wave due to multi-tenant baseline (other docker services). Our eval was n_concurrent=1; aspirational \u226464 GiB for our fleet only.",
+  "invented_rewards": false,
+  "jobs_dir": "/tmp/harbor-deepswe-jobs-eval",
+  "k": 1,
+  "ledger_path": "datasets/panel_deepswe_5pack/ledger.jsonl",
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.6"
+  ],
+  "n_concurrent": 1,
+  "n_packs_preflight_ok": 0,
+  "n_packs_requested": 5,
+  "n_packs_scored": 5,
+  "never_solve_panel": false,
+  "offline": false,
+  "out_dir": "/projects/swe-dataset-factory/datasets/panel_deepswe_5pack",
+  "pack_results": [
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 1.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 1.0,
+          "x-ai/grok-4.5": 1.0
+        },
+        "reason": "solve-all (too easy): every panel rollout solved the task (2/2)",
+        "rule": "solve-all",
+        "total_solves": 2,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "0.595412",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-itemadapter-101-x-ai_grok-4.5-k0-1784126299-e3423bff",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "8660f81b3b1d4337ac444a69e7d37790",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-itemadapter-101-x-ai_grok-4.5-k0-1784126299-e3423bff/realpr-itemadapter-101__tMbmFW7/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.6",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "1.8808098400000002",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-itemadapter-101-moonshotai_kimi-k2.6-k0-1784126472-9cb864c7",
+              "model": "moonshotai/kimi-k2.6",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.6",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "6ac484a2e9d94acf81eb7d9ce9e7bed0",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-itemadapter-101-moonshotai_kimi-k2.6-k0-1784126472-9cb864c7/realpr-itemadapter-101__HMKzLm6/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-itemadapter-101",
+      "pack_path": "/projects/swe-dataset-factory/datasets/deepswe_v1/tasks/realpr-itemadapter-101",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "2.4762218400000002"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-click-3645",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "1.3747760000000002",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-click-3645-x-ai_grok-4.5-k0-1784126881-302c3027",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-click-3645",
+              "physical_call_id": "825a9ad5e70347019b52b43150f04229",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-click-3645-x-ai_grok-4.5-k0-1784126881-302c3027/realpr-click-3645__EdjkgAt/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.6",
+          "pack_id": "realpr-click-3645",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "5.480603690000002",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-click-3645-moonshotai_kimi-k2.6-k0-1784127151-4ff5bbe3",
+              "model": "moonshotai/kimi-k2.6",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.6",
+              "pack_id": "realpr-click-3645",
+              "physical_call_id": "e5c5abfb25b345e68fa5ea3adc637042",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-click-3645-moonshotai_kimi-k2.6-k0-1784127151-4ff5bbe3/realpr-click-3645__pW9cXae/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-click-3645",
+      "pack_path": "/projects/swe-dataset-factory/datasets/deepswe_v1/tasks/realpr-click-3645",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "6.8553796900000022"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-attrs-1323",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "2.5036199999999997",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-attrs-1323-x-ai_grok-4.5-k0-1784127966-ea944659",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-attrs-1323",
+              "physical_call_id": "cb937d9b47de4b1eb21bb96a448a097f",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-attrs-1323-x-ai_grok-4.5-k0-1784127966-ea944659/realpr-attrs-1323__fkPzSh3/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.6",
+          "pack_id": "realpr-attrs-1323",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "1.5030192639999997",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-attrs-1323-moonshotai_kimi-k2.6-k0-1784128335-56434c06",
+              "model": "moonshotai/kimi-k2.6",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.6",
+              "pack_id": "realpr-attrs-1323",
+              "physical_call_id": "9e456cf85e9d4da6a78912267b803f99",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-attrs-1323-moonshotai_kimi-k2.6-k0-1784128335-56434c06/realpr-attrs-1323__G3hgurq/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-attrs-1323",
+      "pack_path": "/projects/swe-dataset-factory/datasets/deepswe_v1/tasks/realpr-attrs-1323",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "4.0066392639999994"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-httpx-3672",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "4.107451999999999",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-httpx-3672-x-ai_grok-4.5-k0-1784128929-630a00e3",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-httpx-3672",
+              "physical_call_id": "900f5d13fb864f64b74d916893ad40f8",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-httpx-3672-x-ai_grok-4.5-k0-1784128929-630a00e3/realpr-httpx-3672__Ab3zHjy/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.6",
+          "pack_id": "realpr-httpx-3672",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "3.1829559099999996",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-httpx-3672-moonshotai_kimi-k2.6-k0-1784129820-59a1c258",
+              "model": "moonshotai/kimi-k2.6",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.6",
+              "pack_id": "realpr-httpx-3672",
+              "physical_call_id": "e0ca26789275423d836d450598ea2658",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-httpx-3672-moonshotai_kimi-k2.6-k0-1784129820-59a1c258/realpr-httpx-3672__vaUD9jw/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-httpx-3672",
+      "pack_path": "/projects/swe-dataset-factory/datasets/deepswe_v1/tasks/realpr-httpx-3672",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "7.2904079099999986"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-packaging-1120",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "2.5036060000000004",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-packaging-1120-x-ai_grok-4.5-k0-1784130957-42ddd269",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-packaging-1120",
+              "physical_call_id": "92b62dce1a0d46f29f1f9ca738cae237",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-packaging-1120-x-ai_grok-4.5-k0-1784130957-42ddd269/realpr-packaging-1120__v6rrQ4W/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.6",
+          "pack_id": "realpr-packaging-1120",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_source": "trajectory_final_metrics.total_cost_usd",
+              "cost_usd": "3.39855494",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-packaging-1120-moonshotai_kimi-k2.6-k0-1784131451-25fdd75c",
+              "model": "moonshotai/kimi-k2.6",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.6",
+              "pack_id": "realpr-packaging-1120",
+              "physical_call_id": "0fd2c42f2c15416daaa278519c6ab4fb",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepswe-jobs-eval/eval-realpr-packaging-1120-moonshotai_kimi-k2.6-k0-1784131451-25fdd75c/realpr-packaging-1120__VT7579k/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-packaging-1120",
+      "pack_path": "/projects/swe-dataset-factory/datasets/deepswe_v1/tasks/realpr-packaging-1120",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "5.9021609400000004"
+    }
+  ],
+  "pass_at_k_present": true,
+  "pier_bin": "/tmp/pier-venv/bin/pier",
+  "preferred_pack_ids": [
+    "realpr-itemadapter-101",
+    "realpr-click-3645",
+    "realpr-attrs-1323",
+    "realpr-httpx-3672",
+    "realpr-packaging-1120"
+  ],
+  "preflight_enabled": false,
+  "product_root": "/projects/swe-dataset-factory/datasets/deepswe_v1",
+  "remaining_usd": "273.4691903559999992",
+  "runtime": "pier",
+  "scaffold": "pier/mini-swe-agent",
+  "soft_l2_panel": false,
+  "spend_usd": "26.5308096440000008",
+  "started_at": "2026-07-15T14:38:19.394610+00:00",
+  "stop_reason": null,
+  "summary": {
+    "fidelity": "pier_miniswe_harbor",
+    "n_packs_scored": 5,
+    "overall_pass_rate": 0.2,
+    "per_pack": {
+      "realpr-attrs-1323": {
+        "moonshotai/kimi-k2.6": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        },
+        "x-ai/grok-4.5": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        }
+      },
+      "realpr-click-3645": {
+        "moonshotai/kimi-k2.6": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        },
+        "x-ai/grok-4.5": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        }
+      },
+      "realpr-httpx-3672": {
+        "moonshotai/kimi-k2.6": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        },
+        "x-ai/grok-4.5": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        }
+      },
+      "realpr-itemadapter-101": {
+        "moonshotai/kimi-k2.6": {
+          "k": 1,
+          "pass_at_k": 1.0,
+          "reward": 1,
+          "solves": 1
+        },
+        "x-ai/grok-4.5": {
+          "k": 1,
+          "pass_at_k": 1.0,
+          "reward": 1,
+          "solves": 1
+        }
+      },
+      "realpr-packaging-1120": {
+        "moonshotai/kimi-k2.6": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        },
+        "x-ai/grok-4.5": {
+          "k": 1,
+          "pass_at_k": 0.0,
+          "reward": 0,
+          "solves": 0
+        }
+      }
+    },
+    "spend_usd": "26.5308096440000008",
+    "total_solves": 2,
+    "total_trials": 10,
+    "wall_s": 6199.358
+  },
+  "total_spend_usd": "26.5308096440000008",
+  "wall_s": 6199.358
+}

@@ -1,0 +1,138 @@
+diff --git a/src/click/_compat.py b/src/click/_compat.py
+index 36c0e53..5bf6bfa 100644
+--- a/src/click/_compat.py
++++ b/src/click/_compat.py
+@@ -13,7 +13,6 @@ from weakref import WeakKeyDictionary
+ CYGWIN = sys.platform.startswith("cygwin")
+ WIN = sys.platform.startswith("win")
+ MAC = sys.platform == "darwin"
+-auto_wrap_for_ansi: t.Callable[[t.TextIO], t.TextIO] | None = None
+ _ansi_re = re.compile(r"\033\[[;?0-9]*[a-zA-Z]")
+ 
+ 
+@@ -511,9 +510,7 @@ def should_strip_ansi(
+     return not color
+ 
+ 
+-# On Windows, wrap the output streams with colorama to support ANSI
+-# color codes.
+-# NOTE: double check is needed so mypy does not analyze this on Linux
++# double check is needed so mypy does not analyze this on Linux
+ if sys.platform.startswith("win") and WIN:
+     from ._winconsole import _get_windows_console_stream
+ 
+@@ -522,43 +519,6 @@ if sys.platform.startswith("win") and WIN:
+ 
+         return locale.getpreferredencoding()
+ 
+-    _ansi_stream_wrappers: cabc.MutableMapping[t.TextIO, t.TextIO] = WeakKeyDictionary()
+-
+-    def auto_wrap_for_ansi(stream: t.TextIO, color: bool | None = None) -> t.TextIO:
+-        """Support ANSI color and style codes on Windows by wrapping a
+-        stream with colorama.
+-        """
+-        try:
+-            cached = _ansi_stream_wrappers.get(stream)
+-        except Exception:
+-            cached = None
+-
+-        if cached is not None:
+-            return cached
+-
+-        import colorama
+-
+-        strip = should_strip_ansi(stream, color)
+-        ansi_wrapper = colorama.AnsiToWin32(stream, strip=strip)
+-        rv = t.cast(t.TextIO, ansi_wrapper.stream)
+-        _write = rv.write
+-
+-        def _safe_write(s: str) -> int:
+-            try:
+-                return _write(s)
+-            except BaseException:
+-                ansi_wrapper.reset_all()
+-                raise
+-
+-        rv.write = _safe_write  # type: ignore[method-assign]
+-
+-        try:
+-            _ansi_stream_wrappers[stream] = rv
+-        except Exception:
+-            pass
+-
+-        return rv
+-
+ else:
+ 
+     def _get_argv_encoding() -> str:
+diff --git a/src/click/termui.py b/src/click/termui.py
+index 91ef6e1..de89858 100644
+--- a/src/click/termui.py
++++ b/src/click/termui.py
+@@ -13,7 +13,6 @@ from gettext import gettext as _
+ 
+ from ._compat import isatty
+ from ._compat import strip_ansi
+-from ._compat import WIN
+ from .exceptions import Abort
+ from .exceptions import UsageError
+ from .globals import resolve_color_default
+@@ -84,17 +83,7 @@ def hidden_prompt_func(prompt: str) -> str:
+ def _readline_prompt(func: t.Callable[[str], str], text: str, err: bool) -> str:
+     """Call a prompt function, passing the full prompt on non-Windows so
+     readline can handle line editing and cursor positioning correctly.
+-
+-    On Windows the prompt is written separately via :func:`echo` for
+-    colorama support, with only the last character passed to *func*.
+     """
+-    if WIN:
+-        # Write the prompt separately so that we get nice coloring
+-        # through colorama on Windows.
+-        echo(text[:-1], nl=False, err=err)
+-        # Echo the last character to stdout to work around an issue
+-        # where readline causes backspace to clear the whole line.
+-        return func(text[-1:])
+     if err:
+         with redirect_stdout(sys.stderr):
+             return func(text)
+diff --git a/src/click/utils.py b/src/click/utils.py
+index 67922b8..2ff0986 100644
+--- a/src/click/utils.py
++++ b/src/click/utils.py
+@@ -13,7 +13,6 @@ from types import TracebackType
+ from ._compat import _default_text_stderr
+ from ._compat import _default_text_stdout
+ from ._compat import _find_binary_writer
+-from ._compat import auto_wrap_for_ansi
+ from ._compat import binary_streams
+ from ._compat import open_stream
+ from ._compat import should_strip_ansi
+@@ -262,6 +261,9 @@ def echo(
+         default Click will remove color if the output does not look like
+         an interactive terminal.
+ 
++    .. versionchanged:: 8.5
++        Colorama is no longer used for color on Windows.
++
+     .. versionchanged:: 6.0
+         Support Unicode output on the Windows console. Click does not
+         modify ``sys.stdout``, so ``sys.stdout.write()`` and ``print()``
+@@ -319,16 +321,8 @@ def echo(
+ 
+     # ANSI style code support. For no message or bytes, nothing happens.
+     # When outputting to a file instead of a terminal, strip codes.
+-    else:
+-        color = resolve_color_default(color)
+-
+-        if should_strip_ansi(file, color):
+-            out = strip_ansi(out)
+-        elif WIN:
+-            if auto_wrap_for_ansi is not None:
+-                file = auto_wrap_for_ansi(file, color)  # type: ignore
+-            elif not color:
+-                out = strip_ansi(out)
++    elif should_strip_ansi(file, resolve_color_default(color)):
++        out = strip_ansi(out)
+ 
+     file.write(out)  # type: ignore
+     file.flush()

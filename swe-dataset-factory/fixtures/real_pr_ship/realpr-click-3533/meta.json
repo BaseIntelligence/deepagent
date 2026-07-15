@@ -1,0 +1,17 @@
+{
+  "task_id": "realpr-click-3533",
+  "repo": "pallets/click",
+  "url": "https://github.com/pallets/click.git",
+  "language": "python",
+  "license": "BSD-3-Clause",
+  "pr": 3533,
+  "base": "cd9bdd96a9dcc8e4ecabd45b5c244dbc70034484",
+  "src": [
+    "src/click/_termui_impl.py",
+    "src/click/utils.py"
+  ],
+  "tests": [
+    "tests/test_termui.py"
+  ],
+  "title": "Do not let the GC close a borrowed `stdout` (#3533)"
+}

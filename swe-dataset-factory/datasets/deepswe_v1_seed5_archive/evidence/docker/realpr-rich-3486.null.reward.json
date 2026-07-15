@@ -1,0 +1,21 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "d0de442c08df8793c5ff36d9ad322ca5c47fc38c",
+  "disposition": "accept",
+  "isolation": "clean",
+  "oracle_mode": "docker",
+  "phase": "null",
+  "reason_codes": [
+    "ORCD_SOL_1",
+    "G3_NULL_NOT_RESOLVE",
+    "G5_LEAK_CLEAN",
+    "ORACLE_PASS",
+    "RORC_ISOLATION_CLEAN",
+    "RORC_SOL_1",
+    "RORC_NULL_0"
+  ],
+  "repository_url": "https://github.com/Textualize/rich.git",
+  "reward": 0,
+  "source_track": "real_pr",
+  "task_id": "realpr-rich-3486"
+}

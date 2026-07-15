@@ -1,0 +1,20 @@
+{
+  "language": "python",
+  "seed_id": "harbor_python_orders",
+  "repo": "fixtures/harbor_motors/python_orders",
+  "base_commit": "a100000000000000000000000000000000000001",
+  "source_track": "synthetic_grounded",
+  "license": "MIT",
+  "label_method": "dual_run_broken_vs_green",
+  "f2p_node_ids": [
+    "tests.test_checkout.test_place_order_success",
+    "tests.test_held_out.test_multi_module_checkout_contract",
+    "tests.test_inventory.test_reserve_rejects_partial",
+    "tests.test_pricing.test_discount_threshold"
+  ],
+  "p2p_node_ids": [
+    "tests.test_checkout.test_place_order_insufficient_stock",
+    "tests.test_inventory.test_reserve_atomic",
+    "tests.test_pricing.test_line_total_basic"
+  ]
+}

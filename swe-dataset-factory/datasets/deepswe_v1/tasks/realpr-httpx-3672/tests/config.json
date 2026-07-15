@@ -1,0 +1,56 @@
+{
+ "base_commit": "4acf5c2c37714cc63b5cf71b3e284fca83c90311",
+ "f2p_node_ids": [
+  "tests.test_parsers.test_client_connection_close",
+  "tests.test_parsers.test_parser",
+  "tests.test_parsers.test_parser_repr",
+  "tests.test_parsers.test_parser_server",
+  "tests.test_parsers.test_server_connection_close"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [
+  "tests.test_parsers.test_1xx_status_code",
+  "tests.test_parsers.test_invalid_status_code",
+  "tests.test_parsers.test_parser_invalid_status_line",
+  "tests.test_parsers.test_parser_invalid_transitions",
+  "tests.test_parsers.test_parser_large_body",
+  "tests.test_parsers.test_parser_missing_host_header",
+  "tests.test_parsers.test_parser_not_enough_data_received",
+  "tests.test_parsers.test_parser_not_enough_data_sent",
+  "tests.test_parsers.test_parser_recv_unsupported_protocol",
+  "tests.test_parsers.test_parser_sent_unsupported_protocol",
+  "tests.test_parsers.test_parser_stream_large_body",
+  "tests.test_parsers.test_parser_too_much_data_sent",
+  "tests.test_parsers.test_parser_transfer_encoding_chunked",
+  "tests.test_parsers.test_parser_transfer_encoding_chunked_trickle",
+  "tests.test_parsers.test_parser_trickle",
+  "tests.test_parsers.test_received_invalid_characters_in_chunk_size",
+  "tests.test_parsers.test_received_invalid_content_length",
+  "tests.test_parsers.test_received_oversized_chunk",
+  "tests.test_parsers.test_sent_invalid_content_length"
+ ],
+ "pytest_paths": [
+  "tests/test_parsers.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/test_parsers.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}

@@ -1,0 +1,194 @@
+diff --git a/rich/default_styles.py b/rich/default_styles.py
+--- a/rich/default_styles.py
++++ b/rich/default_styles.py
+@@ -120,6 +120,7 @@
+     "traceback.exc_type": Style(color="bright_red", bold=True),
+     "traceback.exc_value": Style.null(),
+     "traceback.offset": Style(color="bright_red", bold=True),
++    "traceback.error_range": Style(underline=True, bold=True, dim=False),
+     "bar.back": Style(color="grey23"),
+     "bar.complete": Style(color="rgb(249,38,114)"),
+     "bar.finished": Style(color="rgb(114,156,31)"),
+diff --git a/rich/syntax.py b/rich/syntax.py
+--- a/rich/syntax.py
++++ b/rich/syntax.py
+@@ -221,6 +221,7 @@ class _SyntaxHighlightRange(NamedTuple):
+     style: StyleType
+     start: SyntaxPosition
+     end: SyntaxPosition
++    style_before: bool = False
+ 
+ 
+ class Syntax(JupyterMixin):
+@@ -534,7 +535,11 @@ def tokens_to_spans() -> Iterable[Tuple[str, Optional[Style]]]:
+         return text
+ 
+     def stylize_range(
+-        self, style: StyleType, start: SyntaxPosition, end: SyntaxPosition
++        self,
++        style: StyleType,
++        start: SyntaxPosition,
++        end: SyntaxPosition,
++        style_before: bool = False,
+     ) -> None:
+         """
+         Adds a custom style on a part of the code, that will be applied to the syntax display when it's rendered.
+@@ -544,8 +549,11 @@ def stylize_range(
+             style (StyleType): The style to apply.
+             start (Tuple[int, int]): The start of the range, in the form `[line number, column index]`.
+             end (Tuple[int, int]): The end of the range, in the form `[line number, column index]`.
++            style_before (bool): Apply the style before any existing styles.
+         """
+-        self._stylized_ranges.append(_SyntaxHighlightRange(style, start, end))
++        self._stylized_ranges.append(
++            _SyntaxHighlightRange(style, start, end, style_before)
++        )
+ 
+     def _get_line_numbers_color(self, blend: float = 0.3) -> Color:
+         background_style = self._theme.get_background_style() + self.background_style
+@@ -785,7 +793,10 @@ def _apply_stylized_ranges(self, text: Text) -> None:
+                 newlines_offsets, stylized_range.end
+             )
+             if start is not None and end is not None:
+-                text.stylize(stylized_range.style, start, end)
++                if stylized_range.style_before:
++                    text.stylize_before(stylized_range.style, start, end)
++                else:
++                    text.stylize(stylized_range.style, start, end)
+ 
+     def _process_code(self, code: str) -> Tuple[bool, str]:
+         """
+diff --git a/rich/traceback.py b/rich/traceback.py
+--- a/rich/traceback.py
++++ b/rich/traceback.py
+@@ -1,7 +1,9 @@
++import inspect
+ import linecache
+ import os
+ import sys
+ from dataclasses import dataclass, field
++from itertools import islice
+ from traceback import walk_tb
+ from types import ModuleType, TracebackType
+ from typing import (
+@@ -179,6 +181,7 @@ class Frame:
+     name: str
+     line: str = ""
+     locals: Optional[Dict[str, pretty.Node]] = None
++    last_instruction: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
+ 
+ 
+ @dataclass
+@@ -442,6 +445,35 @@ def get_locals(
+ 
+             for frame_summary, line_no in walk_tb(traceback):
+                 filename = frame_summary.f_code.co_filename
++
++                last_instruction: Optional[Tuple[Tuple[int, int], Tuple[int, int]]]
++                last_instruction = None
++                if sys.version_info >= (3, 11):
++                    instruction_index = frame_summary.f_lasti // 2
++                    instruction_position = next(
++                        islice(
++                            frame_summary.f_code.co_positions(),
++                            instruction_index,
++                            instruction_index + 1,
++                        )
++                    )
++                    (
++                        start_line,
++                        end_line,
++                        start_column,
++                        end_column,
++                    ) = instruction_position
++                    if (
++                        start_line is not None
++                        and end_line is not None
++                        and start_column is not None
++                        and end_column is not None
++                    ):
++                        last_instruction = (
++                            (start_line, start_column),
++                            (end_line, end_column),
++                        )
++
+                 if filename and not filename.startswith("<"):
+                     if not os.path.isabs(filename):
+                         filename = os.path.join(_IMPORT_CWD, filename)
+@@ -452,16 +484,20 @@ def get_locals(
+                     filename=filename or "?",
+                     lineno=line_no,
+                     name=frame_summary.f_code.co_name,
+-                    locals={
+-                        key: pretty.traverse(
+-                            value,
+-                            max_length=locals_max_length,
+-                            max_string=locals_max_string,
+-                        )
+-                        for key, value in get_locals(frame_summary.f_locals.items())
+-                    }
+-                    if show_locals
+-                    else None,
++                    locals=(
++                        {
++                            key: pretty.traverse(
++                                value,
++                                max_length=locals_max_length,
++                                max_string=locals_max_string,
++                            )
++                            for key, value in get_locals(frame_summary.f_locals.items())
++                            if not (inspect.isfunction(value) or inspect.isclass(value))
++                        }
++                        if show_locals
++                        else None
++                    ),
++                    last_instruction=last_instruction,
+                 )
+                 append(frame)
+                 if frame_summary.f_locals.get("_rich_traceback_guard", False):
+@@ -711,6 +747,14 @@ def render_locals(frame: Frame) -> Iterable[ConsoleRenderable]:
+                         (f"\n{error}", "traceback.error"),
+                     )
+                 else:
++                    if frame.last_instruction is not None:
++                        start, end = frame.last_instruction
++                        syntax.stylize_range(
++                            style="traceback.error_range",
++                            start=start,
++                            end=end,
++                            style_before=True,
++                        )
+                     yield (
+                         Columns(
+                             [
+@@ -725,12 +769,12 @@ def render_locals(frame: Frame) -> Iterable[ConsoleRenderable]:
+ 
+ 
+ if __name__ == "__main__":  # pragma: no cover
+-    from .console import Console
+-
+-    console = Console()
++    install(show_locals=True)
+     import sys
+ 
+-    def bar(a: Any) -> None:  # 这是对亚洲语言支持的测试。面对模棱两可的想法，拒绝猜测的诱惑
++    def bar(
++        a: Any,
++    ) -> None:  # 这是对亚洲语言支持的测试。面对模棱两可的想法，拒绝猜测的诱惑
+         one = 1
+         print(one / a)
+ 
+@@ -748,12 +792,6 @@ def foo(a: Any) -> None:
+         bar(a)
+ 
+     def error() -> None:
+-        try:
+-            try:
+-                foo(0)
+-            except:
+-                slfkjsldkfj  # type: ignore[name-defined]
+-        except:
+-            console.print_exception(show_locals=True)
++        foo(0)
+ 
+     error()

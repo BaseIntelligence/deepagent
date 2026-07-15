@@ -1,0 +1,154 @@
+diff --git a/tests/test_base_detection.py b/tests/test_base_detection.py
+--- a/tests/test_base_detection.py
++++ b/tests/test_base_detection.py
+@@ -165,7 +165,7 @@ def test_alphabets_property():
+     best_guess = from_bytes("😀 Hello World! How affairs are going? 😀".encode()).best()
+ 
+     assert "Basic Latin" in best_guess.alphabets
+-    assert "Emoticons range(Emoji)" in best_guess.alphabets
++    assert "Emoticons" in best_guess.alphabets
+     assert best_guess.alphabets.count("Basic Latin") == 1
+ 
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -95,6 +95,79 @@ def test_with_minimal_and_alt(self):
+             ),
+         )
+ 
++    def test_multiple_file_normalize(self):
++        """Ensure --normalize with multiple files writes each output to the
++        correct path and sets unicode_path on the corresponding result entry
++        (not always on the first entry). Regression test for GH-702."""
++        arabic_path = DIR_PATH + "/data/sample-arabic-1.txt"
++        turkish_path = DIR_PATH + "/data/sample-turkish.txt"
++
++        self.assertEqual(0, cli_detect([arabic_path, turkish_path, "--normalize"]))
++
++        arabic_out = DIR_PATH + "/data/sample-arabic-1.cp1256.txt"
++        turkish_out = DIR_PATH + "/data/sample-turkish.cp1254.txt"
++
++        try:
++            self.assertTrue(
++                exists(arabic_out),
++                "Normalized output for first file should exist",
++            )
++            self.assertTrue(
++                exists(turkish_out),
++                "Normalized output for second file should exist",
++            )
++
++            # Verify each file contains distinct, non-empty content that
++            # matches what from_fp would produce for that specific input.
++            with open(arabic_out, "rb") as fp:
++                arabic_content = fp.read()
++            with open(turkish_out, "rb") as fp:
++                turkish_content = fp.read()
++
++            self.assertGreater(len(arabic_content), 0)
++            self.assertGreater(len(turkish_content), 0)
++            self.assertNotEqual(
++                arabic_content,
++                turkish_content,
++                "Each file must receive its own normalized content",
++            )
++        finally:
++            for p in (arabic_out, turkish_out):
++                try:
++                    remove(p)
++                except OSError:
++                    pass
++
++    def test_multiple_file_normalize_with_alternatives(self):
++        """Same as above but with --with-alternative, ensuring that
++        alternative entries appended between files do not confuse the
++        unicode_path assignment."""
++        arabic_path = DIR_PATH + "/data/sample-arabic-1.txt"
++        turkish_path = DIR_PATH + "/data/sample-turkish.txt"
++
++        self.assertEqual(
++            0, cli_detect([arabic_path, turkish_path, "--normalize", "-a"])
++        )
++
++        arabic_out = DIR_PATH + "/data/sample-arabic-1.cp1256.txt"
++        turkish_out = DIR_PATH + "/data/sample-turkish.cp1254.txt"
++
++        try:
++            self.assertTrue(
++                exists(arabic_out),
++                "Normalized output for first file should exist",
++            )
++            self.assertTrue(
++                exists(turkish_out),
++                "Normalized output for second file should exist",
++            )
++        finally:
++            for p in (arabic_out, turkish_out):
++                try:
++                    remove(p)
++                except OSError:
++                    pass
++
+     def test_non_existent_file(self):
+         with self.assertRaises(SystemExit) as cm:
+             cli_detect([DIR_PATH + "/data/not_found_data.txt"])
+diff --git a/tests/test_thread_safety.py b/tests/test_thread_safety.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_thread_safety.py
+@@ -0,0 +1,54 @@
++from __future__ import annotations
++
++from concurrent.futures import ThreadPoolExecutor, as_completed
++from os import pardir, path
++
++from charset_normalizer.api import from_path
++
++DIR_PATH = path.join(path.dirname(path.realpath(__file__)), pardir)
++
++
++# Each tuple: (file, expected_encoding, expected_language)
++_THREAD_CASES = [
++    ("sample-arabic-1.txt", "cp1256", "Arabic"),
++    ("sample-french-1.txt", "cp1252", "French"),
++    ("sample-chinese.txt", "big5", "Chinese"),
++]
++
++
++def _detect(case: tuple[str, str, str]) -> tuple[str, str, str, str | None, str | None]:
++    file_name, expected_enc, expected_lang = case
++    result = from_path(path.join(DIR_PATH, "data", file_name))
++    best = result.best() if result else None
++    return (
++        file_name,
++        expected_enc,
++        expected_lang,
++        best.encoding if best else None,
++        best.language if best else None,
++    )
++
++
++class TestThreadSafety:
++    def test_concurrent_detection(self) -> None:
++        """Three files detected concurrently must each return the correct
++        encoding and language, proving no shared mutable state corruption."""
++        with ThreadPoolExecutor(max_workers=3) as pool:
++            futures = {pool.submit(_detect, case): case for case in _THREAD_CASES}
++
++            for future in as_completed(futures):
++                file_name, expected_enc, expected_lang, got_enc, got_lang = (
++                    future.result()
++                )
++                assert got_enc == expected_enc, (
++                    f"{file_name}: expected encoding {expected_enc}, got {got_enc}"
++                )
++                assert got_lang == expected_lang, (
++                    f"{file_name}: expected language {expected_lang}, got {got_lang}"
++                )
++
++    def test_concurrent_detection_repeated(self) -> None:
++        """Run the same three-file detection five times to surface any
++        intermittent race conditions."""
++        for _ in range(5):
++            self.test_concurrent_detection()

@@ -1,0 +1,330 @@
+{
+  "accepted_count": 14,
+  "accepted_ids": [
+    "realpr-attrs-1323",
+    "realpr-rich-3486",
+    "realpr-attrs-1457",
+    "realpr-httpx-3672",
+    "realpr-more-itertools-1136",
+    "realpr-more-itertools-943",
+    "realpr-rich-4070",
+    "realpr-click-3645",
+    "realpr-httpcore-882",
+    "realpr-werkzeug-2995",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101",
+    "realpr-werkzeug-3116"
+  ],
+  "assertions": [
+    "VAL-LSHIP-007",
+    "VAL-LSHIP-005",
+    "VAL-LX-002"
+  ],
+  "gate": "product_dual_truth",
+  "intended_count": 14,
+  "live_mine": true,
+  "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+  "ok": true,
+  "path": "/tmp/work_ship_m14_yield15m/product_stage/gate_audit.jsonl",
+  "reason": "gate_audit dual-truth PASS accepted=14/14 (HarborDocker sol=1/null=0 + live dual-run; seed5_archived=True)",
+  "rejected_ids": [],
+  "rows": [
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr00:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 4,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 262,
+        "solution_reward": 1,
+        "source_hunk_count": 14,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr00:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-attrs-1323"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr13:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 1,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 19,
+        "solution_reward": 1,
+        "source_hunk_count": 12,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr13:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-rich-3486"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr17:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 14,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 253,
+        "solution_reward": 1,
+        "source_hunk_count": 21,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr17:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-attrs-1457"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr25:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 5,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 19,
+        "solution_reward": 1,
+        "source_hunk_count": 18,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr25:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-httpx-3672"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr38:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 4,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 8,
+        "solution_reward": 1,
+        "source_hunk_count": 15,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr38:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-more-itertools-1136"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr40:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": null,
+        "f2p_count": 1,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 10,
+        "solution_reward": 1,
+        "source_hunk_count": 16,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr40:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-more-itertools-943"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr42:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 1,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 98,
+        "solution_reward": 1,
+        "source_hunk_count": 33,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr42:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-rich-4070"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr46:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 4,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 89,
+        "solution_reward": 1,
+        "source_hunk_count": 17,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr46:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-click-3645"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr54:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": null,
+        "f2p_count": 1,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 12,
+        "solution_reward": 1,
+        "source_hunk_count": 12,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr54:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-httpcore-882"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr64:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 1,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 122,
+        "solution_reward": 1,
+        "source_hunk_count": 16,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr64:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-werkzeug-2995"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr79:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 9,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 110,
+        "solution_reward": 1,
+        "source_hunk_count": 11,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr79:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-werkzeug-2979"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr80:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 6,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 128,
+        "solution_reward": 1,
+        "source_hunk_count": 14,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr80:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-werkzeug-3006"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr82:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 4,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 56,
+        "solution_reward": 1,
+        "source_hunk_count": 29,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr82:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-werkzeug-3101"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "agent_image": "harbor-sdf-agent-rpr83:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "f2p_count": 28,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "/projects/swe-dataset-factory/datasets/live_materials",
+        "null_reward": 0,
+        "p2p_count": 203,
+        "solution_reward": 1,
+        "source_hunk_count": 74,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr83:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-werkzeug-3116"
+    }
+  ],
+  "seed5_archived": true,
+  "timestamp_utc": "2026-07-15T09:47:32.227448+00:00"
+}

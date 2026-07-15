@@ -1,0 +1,16 @@
+diff --git a/demo_pkg/math_ops.py b/demo_pkg/math_ops.py
+index 1344080..e1829c3 100644
+--- a/demo_pkg/math_ops.py
++++ b/demo_pkg/math_ops.py
+@@ -1,2 +1,2 @@
+ def add(a: int, b: int) -> int:
+-    return a - b
++    return a + b
+diff --git a/demo_pkg/text_ops.py b/demo_pkg/text_ops.py
+index 69ac74c..ab813d6 100644
+--- a/demo_pkg/text_ops.py
++++ b/demo_pkg/text_ops.py
+@@ -1,2 +1,2 @@
+ def reverse_words(text: str) -> str:
+-    return text
++    return " ".join(reversed(text.split()))

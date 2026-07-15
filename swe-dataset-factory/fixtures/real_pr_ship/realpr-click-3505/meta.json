@@ -1,0 +1,18 @@
+{
+  "task_id": "realpr-click-3505",
+  "repo": "pallets/click",
+  "url": "https://github.com/pallets/click.git",
+  "language": "python",
+  "license": "BSD-3-Clause",
+  "pr": 3505,
+  "base": "3a40e43e8f61761cb7bd4f3e27ae3060690a84eb",
+  "src": [
+    "src/click/_compat.py",
+    "src/click/termui.py",
+    "src/click/utils.py"
+  ],
+  "tests": [
+    "tests/test_utils.py"
+  ],
+  "title": "remove colorama (#3505)"
+}

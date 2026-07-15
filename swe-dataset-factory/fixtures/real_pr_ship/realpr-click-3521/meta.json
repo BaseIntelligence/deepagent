@@ -1,0 +1,22 @@
+{
+  "task_id": "realpr-click-3521",
+  "repo": "pallets/click",
+  "url": "https://github.com/pallets/click.git",
+  "language": "python",
+  "license": "BSD-3-Clause",
+  "pr": 3521,
+  "base": "6a141c3681027e8124ce5a3c70e608dbbebffafb",
+  "src": [
+    "src/click/core.py",
+    "src/click/exceptions.py",
+    "src/click/formatting.py",
+    "src/click/shell_completion.py"
+  ],
+  "tests": [
+    "src/click/testing.py",
+    "tests/test_arguments.py",
+    "tests/test_commands.py",
+    "tests/test_options.py"
+  ],
+  "title": "Merge stable into main (#3521)"
+}

@@ -1,0 +1,46 @@
+{
+ "base_commit": "e4d2a4a2a97246a73856754b2c4866d7f41d4875",
+ "f2p_node_ids": [
+  "tests.test_more.WindowedTests.test_invalid_n",
+  "tests.test_recipes.UniqueEverseenTests.test_unhashable_dicts",
+  "tests.test_recipes.UniqueEverseenTests.test_unhashable_lists",
+  "tests.test_recipes.UniqueEverseenTests.test_unhashable_sets"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [
+  "tests.test_more.WindowedTests.test_basic",
+  "tests.test_more.WindowedTests.test_empty_seq",
+  "tests.test_more.WindowedTests.test_fillvalue",
+  "tests.test_more.WindowedTests.test_fillvalue_step",
+  "tests.test_more.WindowedTests.test_invalid_step",
+  "tests.test_more.WindowedTests.test_step",
+  "tests.test_recipes.UniqueEverseenTests.test_custom_key",
+  "tests.test_recipes.UniqueEverseenTests.test_everseen"
+ ],
+ "pytest_paths": [
+  "tests/test_more/WindowedTests.py",
+  "tests/test_recipes/UniqueEverseenTests.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/test_more/WindowedTests.py",
+  "tests/test_recipes/UniqueEverseenTests.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}

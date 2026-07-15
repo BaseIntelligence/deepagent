@@ -1,0 +1,30 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "862cb193c2b13db860d886725fa4235173d0dfcd",
+  "extra": {
+    "disposition": "accept",
+    "reason_codes": [
+      "ORCD_SOL_1",
+      "G3_NULL_NOT_RESOLVE",
+      "G5_LEAK_CLEAN",
+      "ORACLE_PASS",
+      "RORC_ISOLATION_CLEAN",
+      "RORC_SOL_1",
+      "RORC_NULL_0"
+    ]
+  },
+  "isolation": "clean",
+  "null": 0,
+  "null_evidence": "/tmp/work_ship_m14_yield15p/product_stage/evidence/docker/realpr-werkzeug-2979.null.reward.json",
+  "null_ok": true,
+  "null_reward": 0,
+  "oracle_mode": "docker",
+  "pair_ok": true,
+  "repository_url": "https://github.com/pallets/werkzeug.git",
+  "sol": 1,
+  "sol_evidence": "/tmp/work_ship_m14_yield15p/product_stage/evidence/docker/realpr-werkzeug-2979.sol.reward.json",
+  "sol_ok": true,
+  "solution_reward": 1,
+  "source_track": "real_pr",
+  "task_id": "realpr-werkzeug-2979"
+}

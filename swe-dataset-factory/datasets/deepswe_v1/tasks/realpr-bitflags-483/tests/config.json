@@ -1,0 +1,27 @@
+{
+ "base_commit": "4ed9ffa949970239cd2d87c775e9fdcf9c438fb5",
+ "f2p_node_ids": [
+  "pass",
+  "tests/compile-pass/bitflags_flag_name.rs"
+ ],
+ "p2p_node_ids": [],
+ "grade": {
+  "format": "junit",
+  "node_id": "name",
+  "tool_label": "cargo-test",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ]
+ },
+ "suite_reporter": {
+  "language": "rust",
+  "tool_label": "cargo-test",
+  "node_id_form": "name",
+  "reporter_id": "rust_cargo_v1",
+  "suite_command": "cargo test -- --nocapture --test-threads=1"
+ },
+ "suite_command": "cargo test -- --nocapture --test-threads=1",
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "source_track": "real_pr"
+}

@@ -1,0 +1,28 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+  "extra": {
+    "disposition": "reject",
+    "reason_codes": [
+      "G2_GOLD_FAIL",
+      "G3_NULL_EVAL_ERROR",
+      "G5_LEAK_CLEAN",
+      "ORACLE_REJECT",
+      "RORC_ISOLATION_CLEAN"
+    ]
+  },
+  "isolation": "clean",
+  "null": -1,
+  "null_evidence": "/tmp/work_ship_m14_yield15m/product_stage/evidence/docker/realpr-itemadapter-101.null.reward.json",
+  "null_ok": false,
+  "null_reward": -1,
+  "oracle_mode": "docker",
+  "pair_ok": false,
+  "repository_url": "https://github.com/scrapy/itemadapter.git",
+  "sol": 0,
+  "sol_evidence": "/tmp/work_ship_m14_yield15m/product_stage/evidence/docker/realpr-itemadapter-101.sol.reward.json",
+  "sol_ok": false,
+  "solution_reward": 0,
+  "source_track": "real_pr",
+  "task_id": "realpr-itemadapter-101"
+}

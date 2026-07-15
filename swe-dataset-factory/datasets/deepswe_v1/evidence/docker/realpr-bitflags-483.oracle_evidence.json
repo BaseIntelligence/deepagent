@@ -1,0 +1,33 @@
+{
+  "agent_image": "harbor-sdf-agent-mlrust483b:oracle",
+  "backend": "docker",
+  "backend_class": "HarborDockerVerifier",
+  "base_commit_hash": "4ed9ffa949970239cd2d87c775e9fdcf9c438fb5",
+  "extra": {
+    "disposition": "accept",
+    "reason_codes": [
+      "ORCD_SOL_1",
+      "G3_NULL_NOT_RESOLVE",
+      "ORACLE_PASS",
+      "RORC_SOL_1",
+      "RORC_NULL_0"
+    ],
+    "refreshed_from": "rebuild_product_dual_truth_from_tasks"
+  },
+  "isolation": "clean",
+  "label_method": "real_pr_dual_run_base_vs_gold",
+  "language": "rust",
+  "null": 0,
+  "null_ok": true,
+  "null_reward": 0,
+  "oracle_mode": "docker",
+  "pair_ok": true,
+  "repository_url": "https://github.com/bitflags/bitflags.git",
+  "sol": 1,
+  "sol_ok": true,
+  "solution_reward": 1,
+  "source_hunk_count": 10,
+  "source_track": "real_pr",
+  "task_id": "realpr-bitflags-483",
+  "tests_image": "harbor-sdf-tests-mlrust483b:oracle"
+}

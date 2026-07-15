@@ -1,0 +1,739 @@
+diff --git a/tests/test_datastructures.py b/tests/test_datastructures.py
+--- a/tests/test_datastructures.py
++++ b/tests/test_datastructures.py
+@@ -15,38 +15,6 @@
+ from werkzeug.exceptions import BadRequestKeyError
+ 
+ 
+-class TestNativeItermethods:
+-    def test_basic(self):
+-        class StupidDict:
+-            def keys(self, multi=1):
+-                return iter(["a", "b", "c"] * multi)
+-
+-            def values(self, multi=1):
+-                return iter([1, 2, 3] * multi)
+-
+-            def items(self, multi=1):
+-                return iter(
+-                    zip(
+-                        iter(self.keys(multi=multi)),
+-                        iter(self.values(multi=multi)),
+-                        strict=True,
+-                    )
+-                )
+-
+-        d = StupidDict()
+-        expected_keys = ["a", "b", "c"]
+-        expected_values = [1, 2, 3]
+-        expected_items = list(zip(expected_keys, expected_values, strict=True))
+-
+-        assert list(d.keys()) == expected_keys
+-        assert list(d.values()) == expected_values
+-        assert list(d.items()) == expected_items
+-
+-        assert list(d.keys(2)) == expected_keys * 2
+-        assert list(d.values(2)) == expected_values * 2
+-        assert list(d.items(2)) == expected_items * 2
+-
+-
+ class _MutableMultiDictTests:
+     storage_class: type[ds.MultiDict]
+ 
+diff --git a/tests/test_formparser.py b/tests/test_formparser.py
+--- a/tests/test_formparser.py
++++ b/tests/test_formparser.py
+@@ -1,4 +1,3 @@
+-import csv
+ import io
+ from os.path import dirname
+ from os.path import join
+@@ -43,26 +42,23 @@ class TestFormParser:
+     def test_limiting(self):
+         data = b"foo=Hello+World&bar=baz"
+         req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="application/x-www-form-urlencoded",
+             method="POST",
+         )
+         req.max_content_length = 400
+         assert req.form["foo"] == "Hello World"
+ 
+         req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="application/x-www-form-urlencoded",
+             method="POST",
+         )
+         req.max_form_memory_size = 7
+         pytest.raises(RequestEntityTooLarge, lambda: req.form["foo"])
+ 
+         req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="application/x-www-form-urlencoded",
+             method="POST",
+         )
+@@ -86,41 +82,38 @@ def test_limiting(self):
+             b"--foo\r\nContent-Disposition: form-field; name=bar\r\n\r\n"
+             b"bar=baz\r\n--foo--"
+         )
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        )
+-        req.max_content_length = 400
+-        assert req.form["foo"] == "Hello World"
++        ) as req:
++            req.max_content_length = 400
++            assert req.form["foo"] == "Hello World"
+ 
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        )
+-        req.max_form_memory_size = 7
+-        pytest.raises(RequestEntityTooLarge, lambda: req.form["foo"])
++        ) as req:
++            req.max_form_memory_size = 7
++            pytest.raises(RequestEntityTooLarge, lambda: req.form["foo"])
+ 
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        )
+-        req.max_form_memory_size = 400
+-        assert req.form["foo"] == "Hello World"
++        ) as req:
++            req.max_form_memory_size = 400
++            assert req.form["foo"] == "Hello World"
+ 
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        )
+-        req.max_form_parts = 1
+-        pytest.raises(RequestEntityTooLarge, lambda: req.form["foo"])
++        ) as req:
++            req.max_form_parts = 1
++            pytest.raises(RequestEntityTooLarge, lambda: req.form["foo"])
+ 
+     def test_urlencoded_no_max(self) -> None:
+         r = Request.from_values(method="POST", data={"a": 1, "b": 2})
+@@ -144,13 +137,12 @@ def test_missing_multipart_boundary(self):
+             b"--foo\r\nContent-Disposition: form-field; name=bar\r\n\r\n"
+             b"bar=baz\r\n--foo--"
+         )
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data",
+             method="POST",
+-        )
+-        assert req.form == {}
++        ) as req:
++            assert req.form == {}
+ 
+     def test_chunk_split_on_line_break_before_epilogue(self):
+         data = b"".join(
+@@ -168,15 +160,15 @@ def test_chunk_split_on_line_break_before_epilogue(self):
+                 b"\r\n--thirteenbytes--",
+             )
+         )
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=thirteenbytes",
+             method="POST",
+-        )
+-        assert len(req.form["tx3065"]) == (131072 - 64 - 1)
+-        assert req.form["tx3065"][-1] == "x"
+-        assert req.form["tx3065"][65470:65473] == "y\r\n"
++        ) as req:
++            assert len(req.form["tx3065"]) == (131072 - 64 - 1)
++            assert req.form["tx3065"][-1] == "x"
++            assert req.form["tx3065"][65470:65473] == "y\r\n"
+ 
+     def test_parse_form_data_put_without_content(self):
+         # A PUT without a Content-Type header returns empty data
+@@ -208,23 +200,6 @@ def test_parse_form_post_data_trailing_CR(self):
+             ) as req:
+                 assert req.files["foo"].read() == sample
+ 
+-    @pytest.mark.parametrize(
+-        ("no_spooled", "size"), ((False, 100), (False, 3000), (True, 100), (True, 3000))
+-    )
+-    def test_default_stream_factory(self, no_spooled, size, monkeypatch):
+-        if no_spooled:
+-            monkeypatch.setattr("werkzeug.formparser.SpooledTemporaryFile", None)
+-
+-        data = b"a,b,c\n" * size
+-        with Request.from_values(
+-            data={"foo": (io.BytesIO(data), "test.txt")}, method="POST"
+-        ) as req:
+-            reader = csv.reader(io.TextIOWrapper(req.files["foo"]))
+-            # This fails if file_storage doesn't implement IOBase.
+-            # https://github.com/pallets/werkzeug/issues/1344
+-            # https://github.com/python/cpython/pull/3249
+-            assert sum(1 for _ in reader) == size
+-
+     def test_parse_bad_content_type(self):
+         parser = FormDataParser()
+         assert parser.parse("", "bad-mime-type", 0) == (
+@@ -239,8 +214,6 @@ def test_parse_from_environ(self):
+         assert stream is not None
+ 
+ 
+-# TODO Fix the ResourceErrors, somewhere in here a SpooledTemporaryFile is not
+-#   getting closed. This causes PytestUnraisableExceptionWarning.
+ class TestMultiPart:
+     def test_basic(self):
+         resources = join(dirname(__file__), "multipart")
+@@ -333,23 +306,20 @@ def test_ie7_unc_path(self):
+             lines = response.get_data().split(b"\n", 3)
+             assert lines[0] == b"'Sellersburg Town Council Meeting 02-22-2010doc.doc'"
+ 
+-    def test_end_of_file(self):
+-        # This test looks innocent but it was actually timing out in
+-        # the Werkzeug 0.5 release version (#394)
++    def test_premature_end_of_file(self):
+         data = (
+             b"--foo\r\n"
+             b'Content-Disposition: form-data; name="test"; filename="test.txt"\r\n'
+             b"Content-Type: text/plain\r\n\r\n"
+             b"file contents and no end"
+         )
+         with Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        ) as data:
+-            assert not data.files
+-            assert not data.form
++        ) as req:
++            assert not req.files
++            assert not req.form
+ 
+     def test_file_no_content_type(self):
+         data = (
+@@ -358,8 +328,7 @@ def test_file_no_content_type(self):
+             b"file contents\r\n--foo--"
+         )
+         with Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+         ) as data:
+@@ -375,14 +344,13 @@ def test_extra_newline(self):
+             b"a string\r\n"
+             b"--foo--"
+         )
+-        data = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        )
+-        assert not data.files
+-        assert data.form["foo"] == "a string"
++        ) as req:
++            assert not req.files
++            assert req.form["foo"] == "a string"
+ 
+     def test_headers(self):
+         data = (
+@@ -394,8 +362,7 @@ def test_headers(self):
+             b"--foo--"
+         )
+         with Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+         ) as req:
+@@ -421,14 +388,13 @@ def test_nonstandard_line_endings(self, ending: bytes):
+                 b"--foo--",
+             )
+         )
+-        req = Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++        with Request.from_values(
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+-        )
+-        assert req.form["foo"] == "this is just bar"
+-        assert req.form["bar"] == "blafasel"
++        ) as req:
++            assert req.form["foo"] == "this is just bar"
++            assert req.form["bar"] == "blafasel"
+ 
+     def test_failures(self):
+         def parse_multipart(stream, boundary, content_length):
+@@ -484,8 +450,7 @@ def test_file_rfc2231_filename_continuations(self):
+             b"file contents\r\n--foo--"
+         )
+         with Request.from_values(
+-            input_stream=io.BytesIO(data),
+-            content_length=len(data),
++            data=data,
+             content_type="multipart/form-data; boundary=foo",
+             method="POST",
+         ) as request:
+diff --git a/tests/test_send_file.py b/tests/test_send_file.py
+--- a/tests/test_send_file.py
++++ b/tests/test_send_file.py
+@@ -6,15 +6,14 @@
+ 
+ from werkzeug.exceptions import NotFound
+ from werkzeug.http import http_date
+-from werkzeug.test import EnvironBuilder
++from werkzeug.test import create_environ
+ from werkzeug.utils import send_file
+ from werkzeug.utils import send_from_directory
+ 
+ res_path = pathlib.Path(__file__).parent / "res"
+ html_path = res_path / "index.html"
+ txt_path = res_path / "test.txt"
+-
+-environ = EnvironBuilder().get_environ()
++environ = create_environ()
+ 
+ 
+ @pytest.mark.parametrize("path", [html_path, str(html_path)])
+@@ -125,63 +124,58 @@ def test_non_ascii_name(name, ascii, utf8):
+ 
+ 
+ def test_no_cache_conditional_default():
+-    rv = send_file(
++    with send_file(
+         txt_path,
+-        EnvironBuilder(
++        create_environ(
+             headers={"If-Modified-Since": http_date(datetime.datetime(2020, 7, 12))}
+-        ).get_environ(),
++        ),
+         last_modified=datetime.datetime(2020, 7, 11),
+-    )
+-    rv.close()
+-    assert "no-cache" in rv.headers["Cache-Control"]
+-    assert not rv.cache_control.public
+-    assert not rv.cache_control.max_age
+-    assert not rv.expires
+-    assert rv.status_code == 304
++    ) as rv:
++        assert "no-cache" in rv.headers["Cache-Control"]
++        assert not rv.cache_control.public
++        assert not rv.cache_control.max_age
++        assert not rv.expires
++        assert rv.status_code == 304
+ 
+ 
+ @pytest.mark.parametrize(("value", "public"), [(0, False), (60, True)])
+ def test_max_age(value, public):
+-    rv = send_file(txt_path, environ, max_age=value)
+-    rv.close()
+-    assert ("no-cache" in rv.headers["Cache-Control"]) != public
+-    assert rv.cache_control.public == public
+-    assert rv.cache_control.max_age == value
+-    assert rv.expires
+-    assert rv.status_code == 200
++    with send_file(txt_path, environ, max_age=value) as rv:
++        assert ("no-cache" in rv.headers["Cache-Control"]) != public
++        assert rv.cache_control.public == public
++        assert rv.cache_control.max_age == value
++        assert rv.expires
++        assert rv.status_code == 200
+ 
+ 
+ def test_etag():
+-    rv = send_file(txt_path, environ)
+-    rv.close()
+-    assert rv.headers["ETag"].count("-") == 2
+-    rv = send_file(txt_path, environ, etag=False)
+-    rv.close()
+-    assert "ETag" not in rv.headers
+-    rv = send_file(txt_path, environ, etag="unique")
+-    rv.close()
+-    assert rv.headers["ETag"] == '"unique"'
++    with send_file(txt_path, environ) as rv:
++        assert rv.headers["ETag"].count("-") == 2
++
++    with send_file(txt_path, environ, etag=False) as rv:
++        assert "ETag" not in rv.headers
++
++    with send_file(txt_path, environ, etag="unique") as rv:
++        assert rv.headers["ETag"] == '"unique"'
+ 
+ 
+ @pytest.mark.parametrize("as_attachment", (True, False))
+ def test_content_encoding(as_attachment):
+-    rv = send_file(
++    with send_file(
+         txt_path, environ, download_name="logo.svgz", as_attachment=as_attachment
+-    )
+-    rv.close()
+-    assert rv.mimetype == "image/svg+xml"
+-    assert rv.content_encoding == ("gzip" if not as_attachment else None)
++    ) as rv:
++        assert rv.mimetype == "image/svg+xml"
++        assert rv.content_encoding == ("gzip" if not as_attachment else None)
+ 
+ 
+ @pytest.mark.parametrize(
+     ("directory", "path"),
+     [(str(res_path), "test.txt"), (res_path, pathlib.Path("test.txt"))],
+ )
+ def test_from_directory(directory, path):
+-    rv = send_from_directory(directory, path, environ)
+-    rv.direct_passthrough = False
+-    assert rv.data.strip() == b"FOUND"
+-    rv.close()
++    with send_from_directory(directory, path, environ) as rv:
++        rv.direct_passthrough = False
++        assert rv.data.strip() == b"FOUND"
+ 
+ 
+ @pytest.mark.parametrize("path", ["../res/test.txt", "nothing.txt", "null\x00.txt"])
+diff --git a/tests/test_test.py b/tests/test_test.py
+--- a/tests/test_test.py
++++ b/tests/test_test.py
+@@ -139,27 +139,24 @@ def app(request: Request) -> Response:
+ 
+ 
+ def test_environ_builder_basics():
+-    b = EnvironBuilder()
+-    assert b.content_type is None
+-    b.method = "POST"
+-    assert b.content_type is None
+-    b.form["test"] = "normal value"
+-    assert b.content_type == "application/x-www-form-urlencoded"
+-    b.files.add_file("test", BytesIO(b"test contents"), "test.txt")
+-    assert b.files["test"].content_type == "text/plain"
+-    b.form["test_int"] = 1
+-    assert b.content_type == "multipart/form-data"
+-
+-    req = b.get_request()
+-    b.close()
+-
+-    assert req.url == "http://localhost/"
+-    assert req.method == "POST"
+-    assert req.form["test"] == "normal value"
+-    assert req.files["test"].content_type == "text/plain"
+-    assert req.files["test"].filename == "test.txt"
+-    assert req.files["test"].read() == b"test contents"
+-    req.close()
++    with EnvironBuilder() as b:
++        assert b.content_type is None
++        b.method = "POST"
++        assert b.content_type is None
++        b.form["test"] = "normal value"
++        assert b.content_type == "application/x-www-form-urlencoded"
++        b.files.add_file("test", BytesIO(b"test contents"), "test.txt")
++        assert b.files["test"].content_type == "text/plain"
++        b.form["test_int"] = 1
++        assert b.content_type == "multipart/form-data"
++
++        with b.get_request() as req:
++            assert req.url == "http://localhost/"
++            assert req.method == "POST"
++            assert req.form["test"] == "normal value"
++            assert req.files["test"].content_type == "text/plain"
++            assert req.files["test"].filename == "test.txt"
++            assert req.files["test"].read() == b"test contents"
+ 
+ 
+ def test_environ_builder_data():
+@@ -179,15 +176,17 @@ def check_list_content(b, length):
+         for obj in foo:
+             assert isinstance(obj, FileStorage)
+ 
+-    b = EnvironBuilder(data={"foo": BytesIO()})
+-    check_list_content(b, 1)
+-    b = EnvironBuilder(data={"foo": [BytesIO(), BytesIO()]})
+-    check_list_content(b, 2)
++    with EnvironBuilder(data={"foo": BytesIO()}) as b:
++        check_list_content(b, 1)
+ 
+-    b = EnvironBuilder(data={"foo": (BytesIO(),)})
+-    check_list_content(b, 1)
+-    b = EnvironBuilder(data={"foo": [(BytesIO(),), (BytesIO(),)]})
+-    check_list_content(b, 2)
++    with EnvironBuilder(data={"foo": [BytesIO(), BytesIO()]}) as b:
++        check_list_content(b, 2)
++
++    with EnvironBuilder(data={"foo": (BytesIO(),)}) as b:
++        check_list_content(b, 1)
++
++    with EnvironBuilder(data={"foo": [(BytesIO(),), (BytesIO(),)]}) as b:
++        check_list_content(b, 2)
+ 
+ 
+ def test_environ_builder_json():
+@@ -221,16 +220,15 @@ def test_environ_builder_headers():
+ 
+ 
+ def test_environ_builder_headers_content_type():
+-    b = EnvironBuilder(headers={"Content-Type": "text/plain"})
+-    env = b.get_environ()
++    env = create_environ(headers={"Content-Type": "text/plain"})
+     assert env["CONTENT_TYPE"] == "text/plain"
+     assert "HTTP_CONTENT_TYPE" not in env
+-    b = EnvironBuilder(content_type="text/html", headers={"Content-Type": "text/plain"})
+-    env = b.get_environ()
++    env = create_environ(
++        content_type="text/html", headers={"Content-Type": "text/plain"}
++    )
+     assert env["CONTENT_TYPE"] == "text/html"
+     assert "HTTP_CONTENT_TYPE" not in env
+-    b = EnvironBuilder()
+-    env = b.get_environ()
++    env = create_environ()
+     assert "CONTENT_TYPE" not in env
+     assert "HTTP_CONTENT_TYPE" not in env
+ 
+@@ -239,8 +237,7 @@ def test_envrion_builder_multiple_headers():
+     h = Headers()
+     h.add("FOO", "bar")
+     h.add("FOO", "baz")
+-    b = EnvironBuilder(headers=h)
+-    env = b.get_environ()
++    env = create_environ(headers=h)
+     assert env["HTTP_FOO"] == "bar, baz"
+ 
+ 
+@@ -278,41 +275,38 @@ def test_environ_builder_paths():
+ 
+ 
+ def test_environ_builder_content_type():
+-    builder = EnvironBuilder()
+-    assert builder.content_type is None
+-    builder.method = "POST"
+-    assert builder.content_type is None
+-    builder.method = "PUT"
+-    assert builder.content_type is None
+-    builder.method = "PATCH"
+-    assert builder.content_type is None
+-    builder.method = "DELETE"
+-    assert builder.content_type is None
+-    builder.method = "GET"
+-    assert builder.content_type is None
+-    builder.form["foo"] = "bar"
+-    assert builder.content_type == "application/x-www-form-urlencoded"
+-    builder.files.add_file("data", BytesIO(b"foo"), "test.txt")
+-    assert builder.content_type == "multipart/form-data"
+-    req = builder.get_request()
+-    builder.close()
+-    assert req.form["foo"] == "bar"
+-    assert req.files["data"].read() == b"foo"
+-    req.close()
++    with EnvironBuilder() as builder:
++        assert builder.content_type is None
++        builder.method = "POST"
++        assert builder.content_type is None
++        builder.method = "PUT"
++        assert builder.content_type is None
++        builder.method = "PATCH"
++        assert builder.content_type is None
++        builder.method = "DELETE"
++        assert builder.content_type is None
++        builder.method = "GET"
++        assert builder.content_type is None
++        builder.form["foo"] = "bar"
++        assert builder.content_type == "application/x-www-form-urlencoded"
++        builder.files.add_file("data", BytesIO(b"foo"), "test.txt")
++        assert builder.content_type == "multipart/form-data"
++
++        with builder.get_request() as req:
++            assert req.form["foo"] == "bar"
++            assert req.files["data"].read() == b"foo"
+ 
+ 
+ def test_basic_auth():
+-    builder = EnvironBuilder(auth=("username", "password"))
+-    request = builder.get_request()
++    request = Request.from_values(auth=("username", "password"))
+     assert request.authorization.username == "username"
+     assert request.authorization.password == "password"
+ 
+ 
+ def test_auth_object():
+-    builder = EnvironBuilder(
++    request = Request.from_values(
+         auth=Authorization("digest", {"username": "u", "password": "p"})
+     )
+-    request = builder.get_request()
+     assert request.headers["Authorization"].startswith("Digest ")
+ 
+ 
+@@ -413,13 +407,7 @@ def test_builder_from_environ():
+         data={"foo": "ㄴ"},
+         headers={"X-Foo": "ㄷ"},
+     )
+-    builder = EnvironBuilder.from_environ(environ)
+-
+-    try:
+-        new_environ = builder.get_environ()
+-    finally:
+-        builder.close()
+-
++    new_environ = EnvironBuilder.from_environ(environ).get_environ()
+     assert new_environ == environ
+ 
+ 
+@@ -433,9 +421,10 @@ def close(self):
+ 
+     create_environ(data={"foo": SpecialInput()})
+     assert len(closed) == 1
+-    builder = EnvironBuilder()
+-    builder.files.add_file("blah", SpecialInput())
+-    builder.close()
++
++    with EnvironBuilder() as builder:
++        builder.files.add_file("blah", SpecialInput())
++
+     assert len(closed) == 2
+ 
+ 
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -11,7 +11,7 @@
+ from werkzeug.http import http_date
+ from werkzeug.http import parse_date
+ from werkzeug.test import Client
+-from werkzeug.test import EnvironBuilder
++from werkzeug.test import create_environ
+ from werkzeug.wrappers import Response
+ 
+ 
+@@ -25,7 +25,7 @@
+     ],
+ )
+ def test_redirect(url: str, code: int | None, expect: str) -> None:
+-    environ = EnvironBuilder().get_environ()
++    environ = create_environ()
+ 
+     if code is None:
+         resp = utils.redirect(url)
+diff --git a/tests/test_wrappers.py b/tests/test_wrappers.py
+--- a/tests/test_wrappers.py
++++ b/tests/test_wrappers.py
+@@ -803,21 +803,17 @@ def test_shallow_mode():
+ 
+ 
+ def test_form_parsing_failed():
+-    data = b"--blah\r\n"
+-    request = wrappers.Request.from_values(
+-        input_stream=BytesIO(data),
+-        content_length=len(data),
++    with wrappers.Request.from_values(
++        data=b"--blah\r\n",
+         content_type="multipart/form-data; boundary=foo",
+         method="POST",
+-    )
+-    assert not request.files
+-    assert not request.form
++    ) as request:
++        assert not request.files
++        assert not request.form
+ 
+     # Bad Content-Type
+-    data = b"test"
+     request = wrappers.Request.from_values(
+-        input_stream=BytesIO(data),
+-        content_length=len(data),
++        data=b"test",
+         content_type=", ",
+         method="POST",
+     )
+@@ -832,18 +828,16 @@ def test_file_closing():
+         b"file contents, just the contents\r\n"
+         b"--foo--"
+     )
+-    req = wrappers.Request.from_values(
+-        input_stream=BytesIO(data),
+-        content_length=len(data),
++    with wrappers.Request.from_values(
++        data=data,
+         content_type="multipart/form-data; boundary=foo",
+         method="POST",
+-    )
+-    foo = req.files["foo"]
+-    assert foo.mimetype == "text/plain"
+-    assert foo.filename == "foo.txt"
++    ) as req:
++        foo = req.files["foo"]
++        assert foo.mimetype == "text/plain"
++        assert foo.filename == "foo.txt"
++        assert foo.closed is False
+ 
+-    assert foo.closed is False
+-    req.close()
+     assert foo.closed is True
+ 
+ 
+@@ -855,13 +849,11 @@ def test_file_closing_with():
+         b"file contents, just the contents\r\n"
+         b"--foo--"
+     )
+-    req = wrappers.Request.from_values(
+-        input_stream=BytesIO(data),
+-        content_length=len(data),
++    with wrappers.Request.from_values(
++        data=data,
+         content_type="multipart/form-data; boundary=foo",
+         method="POST",
+-    )
+-    with req:
++    ) as req:
+         foo = req.files["foo"]
+         assert foo.mimetype == "text/plain"
+         assert foo.filename == "foo.txt"
+@@ -921,10 +913,9 @@ def test_response_content_length_uses_encode():
+ def test_other_method_payload():
+     data = b"Hello World"
+     req = wrappers.Request.from_values(
+-        input_stream=BytesIO(data),
+-        content_length=len(data),
++        data=data,
+         content_type="text/plain",
+-        method="WHAT_THE_FUCK",
++        method="MADE_UP",
+     )
+     assert req.get_data() == data
+     assert isinstance(req.stream, LimitedStream)
