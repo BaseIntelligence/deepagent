@@ -16,6 +16,9 @@ dependencies = [
   "typer>=0.12",
   "httpx==0.28.1",
   "python-dotenv>=1.0",
+  # Structural pack load smoke (TaskConfig / TaskPaths) for ship_harbor / pier cert.
+  # Offline unit ships and pier-ready hooks require this; installer must match product.
+  "harbor==0.18.0",
 ]
 
 [project.optional-dependencies]
