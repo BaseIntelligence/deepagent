@@ -93,15 +93,15 @@ tasks-*/
 test-output/
 *.log
 
-# Vendored deepswe product under swe-dataset-factory/ (keep product evidence)
-!swe-dataset-factory/
-!swe-dataset-factory/**
-!swe-dataset-factory/**/*.jsonl
-!swe-dataset-factory/**/*.json
-!swe-dataset-factory/**/*.md
+# Vendored deepagent product under deepagent/ (keep product evidence)
+!deepagent/
+!deepagent/**
+!deepagent/**/*.jsonl
+!deepagent/**/*.json
+!deepagent/**/*.md
 # still never commit subproject secrets or caches
-swe-dataset-factory/.env
-swe-dataset-factory/.venv/
-swe-dataset-factory/**/__pycache__/
-swe-dataset-factory/**/node_modules/
-swe-dataset-factory/fixtures/harbor_motors/.ts_deps/
+deepagent/.env
+deepagent/.venv/
+deepagent/**/__pycache__/
+deepagent/**/node_modules/
+deepagent/fixtures/harbor_motors/.ts_deps/

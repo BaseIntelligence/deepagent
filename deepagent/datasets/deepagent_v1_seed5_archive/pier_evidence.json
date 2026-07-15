@@ -1,0 +1,742 @@
+{
+  "certified_count": 14,
+  "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
+  "product_track": "real_pr",
+  "records": [
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-attrs-1323.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-attrs-1323"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-attrs-1454"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-boltons-362"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpx-2252"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-httpx-3022.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3022"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-httpx-3319.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3319"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-httpx-3377.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3377"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-markupsafe-400"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-packaging-1120"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-packaging-1259"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-packaging-1267"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-packaging-1311.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-packaging-1311"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-rich-2294"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-rich-3486.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-rich-3486"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-attrs-1175"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-attrs-1267"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-attrs-1407"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-attrs-1457.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-attrs-1457"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-boltons-173"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-cachetools-385"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-charset-normalizer-581"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-charset-normalizer-715.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-charset-normalizer-715"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpx-3314"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpx-3394"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpx-3670"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-httpx-3672.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3672"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpx-3673"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-idna-185"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-idna-186"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-idna-246"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-idna-71"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-inflect-199"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-itemadapter-54"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-itemadapter-92"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-itemadapter-96"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-more-itertools-1058"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-more-itertools-1076"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-more-itertools-1136.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-more-itertools-1136"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-more-itertools-942"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-more-itertools-943.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-more-itertools-943"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-rich-2001"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-rich-4070.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-rich-4070"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-click-3442"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-click-3521"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-click-3563"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-click-3645.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-click-3645"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-jinja-2093"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-urllib3-3718"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-ansi-styles-84"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-qs-487"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-qs-488"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-tslib-270"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-blinker-139"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-httpcore-882.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpcore-882"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpcore-974"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-169"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-375"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-424"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-425"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-426"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-432"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-491"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-2873"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-werkzeug-2995.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-werkzeug-2995"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-3098"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-blinker-144"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-blinker-150"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-flask-5812"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-flask-5818"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-httpcore-880.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpcore-880"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-430"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-442"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-443"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-platformdirs-490"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-2813"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-2855"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-2877"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-2975"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-werkzeug-2979.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-werkzeug-2979"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-werkzeug-3006.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-werkzeug-3006"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-3041"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-werkzeug-3101.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-werkzeug-3101"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_ship_m14_yield15m/product_stage/evidence/pier/realpr-werkzeug-3116.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-werkzeug-3116"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-3162"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-3169"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-chalk-414"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-chalk-432"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-chalk-433"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-zod-5895"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-zod-5941"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-366"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-369"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-371"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-392"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-411"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-481"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-483"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-bitflags-487"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-log-577"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-log-613"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-log-664"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-log-673"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-thiserror-367"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-thiserror-373"
+    }
+  ]
+}

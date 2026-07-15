@@ -1,0 +1,37 @@
+{
+  "action": "source_missing_archive_ok",
+  "archive_dir": "/projects/deepagent/datasets/deepagent_v1_seed5_archive",
+  "archive_surface": "datasets/deepagent_v1_seed5_archive",
+  "hybrid_archive_surface": "datasets/deepagent_v1_hybrid_archive",
+  "note": "Prior real_pr product seed archived before M14 live overwrite. Not counted as live product N. Hybrid archive remains separate.",
+  "ok": true,
+  "pack_count": 14,
+  "product_cleared_by_archive_step": false,
+  "product_surface": "datasets/deepagent_v1",
+  "required_evidence": {
+    "archive_readme": true,
+    "pack_manifest": true,
+    "tasks": true
+  },
+  "seed5_claimed_as_current_product": false,
+  "source_dir": "/tmp/pytest-of-root/pytest-175/popen-gw0/test_cli_live_mine_refuse_empt0/datasets/deepagent_v1",
+  "source_track": "real_pr",
+  "status": "historical_seed5_archive",
+  "task_ids": [
+    "realpr-attrs-1323",
+    "realpr-attrs-1457",
+    "realpr-click-3645",
+    "realpr-httpcore-882",
+    "realpr-httpx-3672",
+    "realpr-more-itertools-1136",
+    "realpr-more-itertools-943",
+    "realpr-rich-3486",
+    "realpr-rich-4070",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-2995",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101",
+    "realpr-werkzeug-3116"
+  ],
+  "timestamp_utc": "2026-07-15T17:08:52.686840+00:00"
+}

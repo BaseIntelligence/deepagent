@@ -208,34 +208,34 @@ Agent-SWE/
 │   ├── export/
 │   ├── swe/
 │   └── synthetic/
-├── swe-dataset-factory/   # DeepSWE Real-PR product + factory (subproject)
+├── deepagent/   # DeepAgent Real-PR product + factory (subproject)
 └── tests/
 ```
 
-## DeepSWE Real-PR factory (`swe-dataset-factory/`)
+## DeepAgent Real-PR factory (`deepagent/`)
 
-Agent-SWE also vendors the **SWE Dataset Factory** under [`swe-dataset-factory/`](swe-dataset-factory/): a separate package that ships Docker-verifiable DeepSWE / Harbor packs from live-mined public PRs.
+Agent-SWE also vendors the **SWE Dataset Factory** under [`deepagent/`](deepagent/): a separate package that ships Docker-verifiable DeepAgent / Harbor packs from live-mined public PRs.
 
 | Surface | Path | Role |
 |---|---|---|
-| Product N=20 | `swe-dataset-factory/datasets/deepswe_v1/` | Certified Real-PR packs (`source_track=real_pr`) |
-| Seed archive | `swe-dataset-factory/datasets/deepswe_v1_seed5_archive/` | Historical seed5 only |
-| Soft panel | `swe-dataset-factory/datasets/panel_deepswe_5pack/` | Report JSON evidence |
-| CLI package | `swe-dataset-factory/src/swe_factory/` | `swe-factory` entrypoint |
+| Product N=20 | `deepagent/datasets/deepagent_v1/` | Certified Real-PR packs (`source_track=real_pr`) |
+| Seed archive | `deepagent/datasets/deepagent_v1_seed5_archive/` | Historical seed5 only |
+| Soft panel | `deepagent/datasets/panel_deepagent_5pack/` | Report JSON evidence |
+| CLI package | `deepagent/src/swe_factory/` | `swe-factory` entrypoint |
 
 Install and use from the subproject (Python >= 3.12):
 
 ```bash
-cd swe-dataset-factory
+cd deepagent
 pip install -e ".[dev]"
 cp .env.example .env   # never commit .env
 
-# DeepSWE-grade Pier + mini-swe serial eval (product root N=20)
-swe-factory eval-deepswe --product-root datasets/deepswe_v1 --help
+# DeepAgent-grade Pier + mini-swe serial eval (product root N=20)
+swe-factory eval-deepagent --product-root datasets/deepagent_v1 --help
 ```
 
 Details, ship commands, and honesty boundaries live in
-[`swe-dataset-factory/README.md`](swe-dataset-factory/README.md).
+[`deepagent/README.md`](deepagent/README.md).
 Forge mining (`swe-forge` under `src/`) remains the existing Agent-SWE path;
 the factory is a clean subproject so it does not clash with `src/swe_forge`.
 

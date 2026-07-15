@@ -1,0 +1,27 @@
+{
+  "by_model": {
+    "moonshotai/kimi-k2.6": "0",
+    "x-ai/grok-4.5": "0"
+  },
+  "by_stage": {
+    "deepagent-eval-pier-miniswe": "0"
+  },
+  "by_task": {
+    "realpr-attrs-1323": "0",
+    "realpr-click-3645": "0",
+    "realpr-httpx-3672": "0",
+    "realpr-itemadapter-101": "0",
+    "realpr-packaging-1120": "0"
+  },
+  "cap_usd": "300.0",
+  "has_unknown_billing": false,
+  "open_call_count": 0,
+  "open_reserved_usd": "0",
+  "path": "datasets/panel_deepagent_5pack/ledger.jsonl",
+  "remaining_usd": "300.0",
+  "settled_call_count": 10,
+  "settled_exact_usd": "0",
+  "total_commit_usd": "0",
+  "under_cap": true,
+  "unknown_billing_count": 0
+}
