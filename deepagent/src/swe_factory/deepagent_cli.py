@@ -209,7 +209,19 @@ def _resolve_hf_token() -> str | None:
 
 
 def _pack_schema_ok(src: Path) -> tuple[bool, list[str]]:
-    """Validate Harbor pack tree layout before any HF push (offline-safe)."""
+    """Validate Harbor pack tree layout before any HF push (offline-safe).
+
+    Prefers full product schema via ``swe_factory.export.hf_packs`` when
+    available; falls back to a minimal required-file set otherwise.
+    """
+    try:
+        from swe_factory.export.hf_packs import validate_pack_corpus
+
+        result = validate_pack_corpus(src)
+        return result.ok, list(result.reasons)
+    except ImportError:
+        pass
+
     reasons: list[str] = []
     if not src.is_dir():
         return False, [f"source root missing: {src}"]
@@ -236,6 +248,9 @@ def _pack_schema_ok(src: Path) -> tuple[bool, list[str]]:
         for rel in required_files:
             if not (pack / rel).is_file():
                 reasons.append(f"missing {rel} in {pack.name}")
+        for dname in ("environment", "tests", "solution"):
+            if not (pack / dname).is_dir():
+                reasons.append(f"missing {dname}/ in {pack.name}")
     return (not reasons), reasons
 
 
@@ -286,13 +301,69 @@ def upload_cmd(
     Auth: ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN`` from the environment / .env only.
     Prefer revision ``test`` for automated M16 writes. Never prints tokens.
     """
+    # Prefer hf_packs for the full path (schema + dry-run + live push).
+    _hf_packs: ModuleType | None
+    try:
+        _hf_packs = importlib.import_module("swe_factory.export.hf_packs")
+    except ImportError:
+        _hf_packs = None
+
+    if _hf_packs is not None and hasattr(_hf_packs, "upload_pack_tree"):
+        token = _resolve_hf_token() if not dry_run else None
+        if not dry_run and not token:
+            typer.secho(
+                "upload: HF_TOKEN / HUGGING_FACE_HUB_TOKEN missing (fail-closed; no network spam)",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        try:
+            result = _hf_packs.upload_pack_tree(
+                src=src,
+                repo_id=repo_id,
+                revision=revision,
+                token=token,
+                dry_run=dry_run,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Never echo token material; exception text is redacted by HfPacks paths.
+            typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        payload: dict[str, Any] = {
+            "ok": True,
+            "action": "upload",
+            "src": str(src),
+            "repo_id": repo_id,
+            "revision": revision,
+            "dry_run": dry_run,
+            "schema_ok": True,
+            "pushed": False,
+        }
+        if isinstance(result, dict):
+            payload.update({k: v for k, v in result.items() if k.lower() not in {"token"}})
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        elif dry_run:
+            typer.echo(
+                f"deepagent upload: dry-run schema OK src={src} "
+                f"repo_id={repo_id} revision={revision}"
+            )
+        else:
+            typer.echo(
+                f"deepagent upload: ok src={src} repo_id={repo_id} "
+                f"revision={revision} pushed={payload.get('pushed')} "
+                f"packs={payload.get('pack_count', '?')}"
+            )
+        raise typer.Exit(code=0)
+
+    # Fallback scaffolding when hf_packs is unavailable.
     ok, reasons = _pack_schema_ok(src)
     if not ok:
         msg = "upload: pack schema invalid: " + "; ".join(reasons[:12])
         typer.secho(msg, fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    payload: dict[str, Any] = {
+    payload = {
         "ok": True,
         "action": "upload",
         "src": str(src),
@@ -323,52 +394,29 @@ def upload_cmd(
         )
         raise typer.Exit(code=2)
 
-    # Prefer dedicated module when present (HF worker may land it).
-    _hf_packs: ModuleType | None
     try:
-        _hf_packs = importlib.import_module("swe_factory.export.hf_packs")
-    except ImportError:
-        _hf_packs = None
-
-    if _hf_packs is not None and hasattr(_hf_packs, "upload_pack_tree"):
-        try:
-            result = _hf_packs.upload_pack_tree(
-                src=src,
-                repo_id=repo_id,
-                revision=revision,
-                token=token,
-            )
-        except Exception as exc:  # noqa: BLE001
-            typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1) from exc
+        from huggingface_hub import HfApi
+    except ImportError as exc:
+        typer.secho(
+            "upload: huggingface_hub not installed; "
+            "pip install 'huggingface_hub>=0.23' or --dry-run for schema only",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    try:
+        api = HfApi(token=token)
+        api.upload_folder(
+            folder_path=str(src),
+            repo_id=repo_id,
+            repo_type="dataset",
+            revision=revision,
+        )
         payload["pushed"] = True
-        if isinstance(result, dict):
-            payload.update({k: v for k, v in result.items() if k not in {"token"}})
-    else:
-        # Offline-safe scaffolding until hf_packs module lands (validate only path now).
-        try:
-            from huggingface_hub import HfApi
-        except ImportError as exc:
-            typer.secho(
-                "upload: huggingface_hub not installed; "
-                "pip install 'huggingface_hub>=0.23' or --dry-run for schema only",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(code=1) from exc
-        try:
-            api = HfApi(token=token)
-            api.upload_folder(
-                folder_path=str(src),
-                repo_id=repo_id,
-                repo_type="dataset",
-                revision=revision,
-            )
-            payload["pushed"] = True
-            payload["message"] = "upload_folder complete"
-        except Exception as exc:  # noqa: BLE001
-            typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1) from exc
+        payload["message"] = "upload_folder complete"
+    except Exception as exc:  # noqa: BLE001
+        typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
 
     if json_out:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
@@ -424,7 +472,7 @@ def pull_cmd(
     Auth via env only; never prints tokens.
     """
     rev = (revision or DEFAULT_HF_REVISION).strip()
-    if rev not in {"main", "test"} and not rev:
+    if not rev:
         typer.secho(
             "pull: revision/branch required (documented choices: main | test)",
             fg=typer.colors.RED,
@@ -442,6 +490,39 @@ def pull_cmd(
         "pulled": False,
     }
 
+    _hf_packs: ModuleType | None
+    try:
+        _hf_packs = importlib.import_module("swe_factory.export.hf_packs")
+    except ImportError:
+        _hf_packs = None
+
+    if _hf_packs is not None and hasattr(_hf_packs, "pull_pack_tree"):
+        token = _resolve_hf_token() if not dry_run else None
+        try:
+            result = _hf_packs.pull_pack_tree(
+                out=out,
+                repo_id=repo_id,
+                revision=rev,
+                token=token,
+                dry_run=dry_run,
+            )
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        if isinstance(result, dict):
+            payload.update({k: v for k, v in result.items() if k.lower() not in {"token"}})
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+        elif dry_run:
+            typer.echo(f"deepagent pull: dry-run repo_id={repo_id} revision={rev} out={out}")
+        else:
+            typer.echo(
+                f"deepagent pull: ok repo_id={repo_id} revision={rev} "
+                f"out={out} pulled={payload.get('pulled')} "
+                f"packs={payload.get('pack_count', '?')}"
+            )
+        raise typer.Exit(code=0)
+
     if dry_run:
         payload["message"] = f"would download {repo_id}@{rev} → {out} (main|test selectable)"
         if json_out:
@@ -451,53 +532,30 @@ def pull_cmd(
         raise typer.Exit(code=0)
 
     token = _resolve_hf_token()
-
-    _hf_packs: ModuleType | None
     try:
-        _hf_packs = importlib.import_module("swe_factory.export.hf_packs")
-    except ImportError:
-        _hf_packs = None
-
-    if _hf_packs is not None and hasattr(_hf_packs, "pull_pack_tree"):
-        try:
-            result = _hf_packs.pull_pack_tree(
-                out=out,
-                repo_id=repo_id,
-                revision=rev,
-                token=token,
-            )
-        except Exception as exc:  # noqa: BLE001
-            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1) from exc
+        from huggingface_hub import snapshot_download
+    except ImportError as exc:
+        typer.secho(
+            "pull: huggingface_hub not installed; pip install 'huggingface_hub>=0.23' or --dry-run",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    try:
+        Path(out).mkdir(parents=True, exist_ok=True)
+        path = snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            revision=rev,
+            local_dir=str(out),
+            token=token,
+        )
         payload["pulled"] = True
-        if isinstance(result, dict):
-            payload.update({k: v for k, v in result.items() if k not in {"token"}})
-    else:
-        try:
-            from huggingface_hub import snapshot_download
-        except ImportError as exc:
-            typer.secho(
-                "pull: huggingface_hub not installed; "
-                "pip install 'huggingface_hub>=0.23' or --dry-run",
-                fg=typer.colors.RED,
-                err=True,
-            )
-            raise typer.Exit(code=1) from exc
-        try:
-            Path(out).mkdir(parents=True, exist_ok=True)
-            path = snapshot_download(
-                repo_id=repo_id,
-                repo_type="dataset",
-                revision=rev,
-                local_dir=str(out),
-                token=token,
-            )
-            payload["pulled"] = True
-            payload["path"] = str(path)
-            payload["message"] = "snapshot_download complete"
-        except Exception as exc:  # noqa: BLE001
-            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
-            raise typer.Exit(code=1) from exc
+        payload["path"] = str(path)
+        payload["message"] = "snapshot_download complete"
+    except Exception as exc:  # noqa: BLE001
+        typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
 
     if json_out:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
