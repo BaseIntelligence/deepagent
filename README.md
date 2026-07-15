@@ -4,7 +4,7 @@
 
 **Real-code software engineering benchmarks for Platform agents**
 
-[![License](https://img.shields.io/github/license/BaseIntelligence/Agent-SWE)](https://github.com/BaseIntelligence/Agent-SWE/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/BaseIntelligence/deepagent)](https://github.com/BaseIntelligence/deepagent/blob/main/LICENSE)
 [![Platform SDK](https://img.shields.io/badge/Platform-SDK-black)](https://github.com/PlatformNetwork/platform)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![SWE-Forge](https://img.shields.io/badge/SWE--Forge-CortexLM-blue)](https://huggingface.co/datasets/CortexLM/swe-forge)
@@ -64,8 +64,8 @@ flowchart LR
 ## Install
 
 ```bash
-git clone https://github.com/BaseIntelligence/Agent-SWE.git
-cd Agent-SWE
+git clone https://github.com/BaseIntelligence/deepagent.git
+cd deepagent
 pip install -e ".[dev]"
 ```
 
