@@ -1,0 +1,753 @@
+"""DeepAgent primary product CLI (M16).
+
+Primary console entry ``deepagent`` — thin Typer surface that wraps existing
+``swe_factory`` implementations without forking honesty logic:
+
+- generate → ship-deepagent / live-mine real_pr path
+- upload / pull → HF pack I/O (local validate + hub hooks)
+- eval → eval_deepagent Pier mini-swe serial (hard-stop $600)
+- oracle → HarborDockerVerifier cert path (sol=1 / null=0)
+
+Compat entry ``swe-factory`` remains on ``swe_factory.cli:app``.
+"""
+
+from __future__ import annotations
+
+import importlib
+import json
+from pathlib import Path
+from types import ModuleType
+from typing import Annotated, Any
+
+import typer
+
+from swe_factory import __version__
+
+# M16 product defaults (architecture.md / AGENTS.md).
+DEFAULT_HF_REPO_ID = "BaseIntelligence/deepagent"
+DEFAULT_HF_REVISION = "test"
+DEFAULT_GENERATE_OUT = Path("datasets/test_n10")
+DEFAULT_GENERATE_TARGET = 10
+DEFAULT_EVAL_HARD_STOP_USD = 600.0
+DEFAULT_EVAL_N_CONCURRENT = 1
+DEFAULT_PRODUCT_ROOT = Path("datasets/deepagent_v1")
+
+app = typer.Typer(
+    name="deepagent",
+    help=(
+        "DeepAgent — hard, Docker-verifiable SWE benchmark packs.\n\n"
+        "Primary product commands:\n"
+        f"  generate  — live-mine / ship-deepagent path → local pack root "
+        f"(default {DEFAULT_GENERATE_OUT}, --target {DEFAULT_GENERATE_TARGET})\n"
+        f"  upload    — push pack trees + pack_manifest to Hugging Face "
+        f"dataset {DEFAULT_HF_REPO_ID} (revision default {DEFAULT_HF_REVISION})\n"
+        f"  pull      — download pack trees from {DEFAULT_HF_REPO_ID} "
+        f"(revision main|test)\n"
+        f"  eval      — Pier + mini-swe-agent + HarborDocker serial model eval "
+        f"(n_concurrent={DEFAULT_EVAL_N_CONCURRENT}; hard-stop-usd="
+        f"{int(DEFAULT_EVAL_HARD_STOP_USD)}; fidelity=pier_miniswe_harbor)\n"
+        "  oracle    — HarborDocker dual-truth cert (sol=1 / null=0; refuse fake)\n"
+        "  version   — package version identity\n\n"
+        "Compatibility: historical factory stages remain on `swe-factory` "
+        "(ship-deepagent, real-pr-pool, ledger, eval-deepagent, …). "
+        "Secrets (HF_TOKEN / OPENROUTER / GITHUB_TOKEN) load from env / .env only "
+        "— never embedded in defaults or help examples."
+    ),
+    add_completion=False,
+    no_args_is_help=True,
+)
+
+
+@app.callback()
+def main() -> None:
+    """DeepAgent product CLI."""
+
+
+@app.command("version")
+def version_cmd() -> None:
+    """Print package version identity."""
+    typer.echo(__version__)
+
+
+@app.command("generate")
+def generate_cmd(
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            help=(
+                "Output pack root (M16 live-mine wave default datasets/test_n10; "
+                "product corpus may use datasets/deepagent_v1)"
+            ),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = DEFAULT_GENERATE_OUT,
+    target: Annotated[
+        int,
+        typer.Option(
+            "--target",
+            help="Target certified pack count for the live-mine generate wave (M16=10)",
+        ),
+    ] = DEFAULT_GENERATE_TARGET,
+    min_packs: Annotated[
+        int,
+        typer.Option(
+            "--min-packs",
+            help="Minimum certified packs for generate OK (M16 bar ≥5)",
+        ),
+    ] = 5,
+    max_packs: Annotated[
+        int,
+        typer.Option("--max-packs", help="Maximum certified packs to keep this wave"),
+    ] = 20,
+    materials: Annotated[
+        Path | None,
+        typer.Option(
+            "--materials",
+            help=(
+                "Live-mine materials root (default datasets/live_materials when "
+                "--live-mine). fixtures/real_pr_ship is engineering-only, never product N"
+            ),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = None,
+    live_mine: Annotated[
+        bool,
+        typer.Option(
+            "--live-mine/--no-live-mine",
+            help=(
+                "Live-mine product path: require live materials bridge; refuse "
+                "fixtures/real_pr_ship pad and empty live yield pad"
+            ),
+        ),
+    ] = True,
+    oracle: Annotated[
+        str,
+        typer.Option(
+            "--oracle",
+            help="Oracle backend (docker only on product path; HarborDockerVerifier)",
+        ),
+    ] = "docker",
+    panel: Annotated[
+        str,
+        typer.Option(
+            "--panel",
+            help="Panel mode: offline (scripted), live (OpenRouter), skip",
+        ),
+    ] = "offline",
+    pier: Annotated[
+        str,
+        typer.Option(
+            "--pier",
+            help="Pier cert mode: scripted (offline rewards) or live (pier binary)",
+        ),
+    ] = "scripted",
+    work: Annotated[
+        Path | None,
+        typer.Option(
+            "--work",
+            help="Scratch workspace root (default: under parent of --out)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = None,
+    source: Annotated[
+        str,
+        typer.Option(
+            "--source",
+            help="Product track: real_pr (default live mine); hybrid refused as product",
+        ),
+    ] = "real_pr",
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit ship summary as JSON"),
+    ] = False,
+) -> None:
+    """Live mine / ship-deepagent path → local Harbor pack root.
+
+    M16 wave: ``deepagent generate --target 10 --out datasets/test_n10 --live-mine``.
+    Wraps the same honesty pipeline as ``swe-factory ship-deepagent`` (real_pr,
+    HarborDocker sol=1/null=0, no fixture pad).
+    """
+    from swe_factory.cli import ship_deepagent_cmd
+
+    # Delegate to existing ship-deepagent implementation (no honesty fork).
+    ship_deepagent_cmd(
+        out=out,
+        work=work,
+        source=source,
+        target=target,
+        min_packs=min_packs,
+        max_packs=max_packs,
+        oracle=oracle,
+        panel=panel,
+        pier=pier,
+        language=None,
+        materials=materials,
+        live_mine=live_mine,
+        pier_jobs=Path("/tmp/harbor-deepagent-jobs-ship"),
+        no_archive=False,
+        hybrid_bind=False,
+        json_out=json_out,
+    )
+
+
+def _resolve_hf_token() -> str | None:
+    """Load HF token from env only (never hardcode; never print)."""
+    import os
+
+    for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            return val
+    return None
+
+
+def _pack_schema_ok(src: Path) -> tuple[bool, list[str]]:
+    """Validate Harbor pack tree layout before any HF push (offline-safe)."""
+    reasons: list[str] = []
+    if not src.is_dir():
+        return False, [f"source root missing: {src}"]
+    tasks_dir = src / "tasks"
+    if not tasks_dir.is_dir():
+        # Allow flat single-pack roots that look like tasks/<id>
+        if (src / "task.toml").is_file():
+            pack_roots = [src]
+        else:
+            return False, [f"no tasks/ under {src} and no task.toml at root"]
+    else:
+        pack_roots = [p for p in sorted(tasks_dir.iterdir()) if p.is_dir()]
+        if not pack_roots:
+            return False, [f"tasks/ under {src} is empty"]
+
+    required_files = (
+        "task.toml",
+        "instruction.md",
+        "environment/Dockerfile",
+        "tests/test.sh",
+        "solution/solution.patch",
+    )
+    for pack in pack_roots:
+        for rel in required_files:
+            if not (pack / rel).is_file():
+                reasons.append(f"missing {rel} in {pack.name}")
+    return (not reasons), reasons
+
+
+@app.command("upload")
+def upload_cmd(
+    src: Annotated[
+        Path,
+        typer.Option(
+            "--src",
+            "--source",
+            help="Local pack root to push (e.g. datasets/test_n10 or datasets/deepagent_v1)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/test_n10"),
+    repo_id: Annotated[
+        str,
+        typer.Option(
+            "--repo-id",
+            help=f"Hugging Face dataset id (default {DEFAULT_HF_REPO_ID})",
+        ),
+    ] = DEFAULT_HF_REPO_ID,
+    revision: Annotated[
+        str,
+        typer.Option(
+            "--revision",
+            "--branch",
+            help=(
+                "HF revision/branch to push (M16 live automation uses test; main is the stable pin)"
+            ),
+        ),
+    ] = DEFAULT_HF_REVISION,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Validate local pack schema only; do not contact Hugging Face",
+        ),
+    ] = False,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit upload summary as JSON"),
+    ] = False,
+) -> None:
+    """Push pack trees + pack_manifest to Hugging Face dataset BaseIntelligence/deepagent.
+
+    Auth: ``HF_TOKEN`` or ``HUGGING_FACE_HUB_TOKEN`` from the environment / .env only.
+    Prefer revision ``test`` for automated M16 writes. Never prints tokens.
+    """
+    ok, reasons = _pack_schema_ok(src)
+    if not ok:
+        msg = "upload: pack schema invalid: " + "; ".join(reasons[:12])
+        typer.secho(msg, fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "action": "upload",
+        "src": str(src),
+        "repo_id": repo_id,
+        "revision": revision,
+        "dry_run": dry_run,
+        "schema_ok": True,
+        "pushed": False,
+    }
+
+    if dry_run:
+        payload["message"] = "schema OK; dry-run (no HF push)"
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            typer.echo(
+                f"deepagent upload: dry-run schema OK src={src} "
+                f"repo_id={repo_id} revision={revision}"
+            )
+        raise typer.Exit(code=0)
+
+    token = _resolve_hf_token()
+    if not token:
+        typer.secho(
+            "upload: HF_TOKEN / HUGGING_FACE_HUB_TOKEN missing (fail-closed; no network spam)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # Prefer dedicated module when present (HF worker may land it).
+    _hf_packs: ModuleType | None
+    try:
+        _hf_packs = importlib.import_module("swe_factory.export.hf_packs")
+    except ImportError:
+        _hf_packs = None
+
+    if _hf_packs is not None and hasattr(_hf_packs, "upload_pack_tree"):
+        try:
+            result = _hf_packs.upload_pack_tree(
+                src=src,
+                repo_id=repo_id,
+                revision=revision,
+                token=token,
+            )
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        payload["pushed"] = True
+        if isinstance(result, dict):
+            payload.update({k: v for k, v in result.items() if k not in {"token"}})
+    else:
+        # Offline-safe scaffolding until hf_packs module lands (validate only path now).
+        try:
+            from huggingface_hub import HfApi
+        except ImportError as exc:
+            typer.secho(
+                "upload: huggingface_hub not installed; "
+                "pip install 'huggingface_hub>=0.23' or --dry-run for schema only",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+        try:
+            api = HfApi(token=token)
+            api.upload_folder(
+                folder_path=str(src),
+                repo_id=repo_id,
+                repo_type="dataset",
+                revision=revision,
+            )
+            payload["pushed"] = True
+            payload["message"] = "upload_folder complete"
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        typer.echo(
+            f"deepagent upload: ok src={src} repo_id={repo_id} "
+            f"revision={revision} pushed={payload.get('pushed')}"
+        )
+
+
+@app.command("pull")
+def pull_cmd(
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            help="Local directory to materialize pack trees into",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/hf_pull_test"),
+    repo_id: Annotated[
+        str,
+        typer.Option(
+            "--repo-id",
+            help=f"Hugging Face dataset id (default {DEFAULT_HF_REPO_ID})",
+        ),
+    ] = DEFAULT_HF_REPO_ID,
+    revision: Annotated[
+        str,
+        typer.Option(
+            "--revision",
+            "--branch",
+            help="HF revision/branch to download (main | test)",
+        ),
+    ] = DEFAULT_HF_REVISION,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run/--no-dry-run",
+            help="Print planned pull targets only; do not contact Hugging Face",
+        ),
+    ] = False,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit pull summary as JSON"),
+    ] = False,
+) -> None:
+    """Download pack trees from Hugging Face dataset BaseIntelligence/deepagent.
+
+    Revision/branch selectable as ``main`` (stable pin) or ``test`` (M16 wave).
+    Auth via env only; never prints tokens.
+    """
+    rev = (revision or DEFAULT_HF_REVISION).strip()
+    if rev not in {"main", "test"} and not rev:
+        typer.secho(
+            "pull: revision/branch required (documented choices: main | test)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    payload: dict[str, Any] = {
+        "ok": True,
+        "action": "pull",
+        "out": str(out),
+        "repo_id": repo_id,
+        "revision": rev,
+        "dry_run": dry_run,
+        "pulled": False,
+    }
+
+    if dry_run:
+        payload["message"] = f"would download {repo_id}@{rev} → {out} (main|test selectable)"
+        if json_out:
+            typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            typer.echo(f"deepagent pull: dry-run repo_id={repo_id} revision={rev} out={out}")
+        raise typer.Exit(code=0)
+
+    token = _resolve_hf_token()
+
+    _hf_packs: ModuleType | None
+    try:
+        _hf_packs = importlib.import_module("swe_factory.export.hf_packs")
+    except ImportError:
+        _hf_packs = None
+
+    if _hf_packs is not None and hasattr(_hf_packs, "pull_pack_tree"):
+        try:
+            result = _hf_packs.pull_pack_tree(
+                out=out,
+                repo_id=repo_id,
+                revision=rev,
+                token=token,
+            )
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        payload["pulled"] = True
+        if isinstance(result, dict):
+            payload.update({k: v for k, v in result.items() if k not in {"token"}})
+    else:
+        try:
+            from huggingface_hub import snapshot_download
+        except ImportError as exc:
+            typer.secho(
+                "pull: huggingface_hub not installed; "
+                "pip install 'huggingface_hub>=0.23' or --dry-run",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+        try:
+            Path(out).mkdir(parents=True, exist_ok=True)
+            path = snapshot_download(
+                repo_id=repo_id,
+                repo_type="dataset",
+                revision=rev,
+                local_dir=str(out),
+                token=token,
+            )
+            payload["pulled"] = True
+            payload["path"] = str(path)
+            payload["message"] = "snapshot_download complete"
+        except Exception as exc:  # noqa: BLE001
+            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        typer.echo(
+            f"deepagent pull: ok repo_id={repo_id} revision={rev} "
+            f"out={out} pulled={payload.get('pulled')}"
+        )
+
+
+@app.command("eval")
+def eval_cmd(
+    product_root: Annotated[
+        Path,
+        typer.Option(
+            "--product-root",
+            help="Product Harbor root with tasks/* (datasets/test_n10 or deepagent_v1)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = DEFAULT_PRODUCT_ROOT,
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            help="Report output directory (report.json + ledger_summary.json)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/panel_deepagent_eval"),
+    max_packs: Annotated[
+        int,
+        typer.Option("--max-packs", help="Max product packs to score"),
+    ] = 5,
+    k: Annotated[
+        int,
+        typer.Option("--k", help="Trials per model per pack (pass@k; default k=1)"),
+    ] = 1,
+    n_concurrent: Annotated[
+        int,
+        typer.Option(
+            "--n-concurrent",
+            help=(
+                "Pier/docker concurrency — MUST be 1 for DeepAgent serial fidelity "
+                "(refuse !=1; host Mem policy)"
+            ),
+        ),
+    ] = DEFAULT_EVAL_N_CONCURRENT,
+    hard_stop_usd: Annotated[
+        float,
+        typer.Option(
+            "--hard-stop-usd",
+            help="Ledger hard spend stop for this eval wave (M16 project default $600)",
+        ),
+    ] = DEFAULT_EVAL_HARD_STOP_USD,
+    reserve_usd: Annotated[
+        float,
+        typer.Option(
+            "--reserve-usd",
+            help="Worst-case USD reserved per mini-swe trial before settle",
+        ),
+    ] = 25.0,
+    jobs_dir: Annotated[
+        Path,
+        typer.Option(
+            "--jobs-dir",
+            help="Pier job workdir root under /tmp/harbor-deepagent-jobs*",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("/tmp/harbor-deepagent-jobs-eval"),
+    pier_bin: Annotated[
+        Path | None,
+        typer.Option(
+            "--pier-bin",
+            help="Path to pier binary (default /tmp/pier-venv/bin/pier or PIER_BIN)",
+            exists=False,
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=False,
+        ),
+    ] = None,
+    pack_id: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--pack-id",
+            help="Restrict to pack id(s) (repeatable)",
+        ),
+    ] = None,
+    skip_preflight: Annotated[
+        bool,
+        typer.Option(
+            "--skip-preflight",
+            help="Skip oracle/nop dual-truth preflight (not recommended for live)",
+        ),
+    ] = False,
+    offline: Annotated[
+        bool,
+        typer.Option(
+            "--offline",
+            help="Offline unit path: mock pier reward matrix (no docker/LLM)",
+        ),
+    ] = False,
+    no_reclaim: Annotated[
+        bool,
+        typer.Option(
+            "--no-reclaim",
+            help="Do not delete jobs_dir before starting",
+        ),
+    ] = False,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit eval report path + summary as JSON"),
+    ] = False,
+) -> None:
+    """Pier mini-swe + HarborDocker serial model eval (fidelity=pier_miniswe_harbor).
+
+    n_concurrent must be 1 (refuse otherwise). M16 hard-stop-usd default is 600.
+    Models: x-ai/grok-4.5 + moonshotai/kimi-k2.6. Wraps eval_deepagent core.
+    """
+    from swe_factory.cli import eval_deepagent_cmd
+
+    if int(n_concurrent) != 1:
+        typer.secho(
+            "eval: refuse n_concurrent!=1 (must be 1; serial pier/docker fidelity)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # Delegate after refuse so help shows 600 default while core handler runs.
+    eval_deepagent_cmd(
+        product_root=product_root,
+        out=out,
+        max_packs=max_packs,
+        k=k,
+        n_concurrent=n_concurrent,
+        hard_stop_usd=hard_stop_usd,
+        reserve_usd=reserve_usd,
+        jobs_dir=jobs_dir,
+        pier_bin=pier_bin,
+        pack_id=pack_id,
+        skip_preflight=skip_preflight,
+        offline=offline,
+        no_reclaim=no_reclaim,
+        json_out=json_out,
+    )
+
+
+@app.command("oracle")
+def oracle_cmd(
+    pack_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--pack-dir",
+            help="Harbor pack directory (tasks/<id>) to HarborDocker oracle-certify",
+            exists=False,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = None,
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            help="Must be docker on cert path (fake is always refused)",
+        ),
+    ] = "docker",
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            help="Evidence / audit parent dir",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/deepagent_v1"),
+    evidence_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--evidence-out",
+            help="Write oracle_evidence.json (default: <out>/oracle_evidence.json)",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=False,
+        ),
+    ] = None,
+    audit_out: Annotated[
+        Path | None,
+        typer.Option(
+            "--audit-out",
+            help="Append gate_audit.jsonl for cert funnel",
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=False,
+        ),
+    ] = None,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit oracle cert summary as JSON"),
+    ] = False,
+    no_pier_hooks: Annotated[
+        bool,
+        typer.Option(
+            "--no-pier-hooks",
+            help="Skip pier structural load smoke (still checks pack tree)",
+        ),
+    ] = False,
+    real_pr: Annotated[
+        bool,
+        typer.Option(
+            "--real-pr",
+            help=(
+                "Real-PR product cert path: require source_track=real_pr, "
+                "HarborDocker dual-truth sol=1 / null=0, refuse fake oracle_mode"
+            ),
+        ),
+    ] = False,
+    oracle_mode: Annotated[
+        str | None,
+        typer.Option(
+            "--oracle-mode",
+            help="Explicit oracle mode (docker only on product path; fake refused)",
+        ),
+    ] = None,
+) -> None:
+    """HarborDocker dual-truth oracle scoring (sol=1 / null=0).
+
+    Product cert path uses HarborDockerVerifier only; fake/stub backends are refused.
+    Wraps the same cert pipeline as ``swe-factory deepagent-oracle``.
+    """
+    from swe_factory.cli import deepagent_oracle_cmd
+
+    deepagent_oracle_cmd(
+        pack_dir=pack_dir,
+        backend=backend,
+        out=out,
+        evidence_out=evidence_out,
+        audit_out=audit_out,
+        json_out=json_out,
+        no_pier_hooks=no_pier_hooks,
+        real_pr=real_pr,
+        oracle_mode=oracle_mode,
+    )
+
+
+if __name__ == "__main__":
+    app()

@@ -28,6 +28,7 @@ dev = [
 ]
 
 [project.scripts]
+deepagent = "swe_factory.deepagent_cli:app"
 swe-factory = "swe_factory.cli:app"
 
 [tool.setuptools.packages.find]
