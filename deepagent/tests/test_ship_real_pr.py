@@ -172,6 +172,11 @@ def test_run_ship_deepagent_real_pr_offline_five(tmp_path: Path) -> None:
         "# hybrid archive (historical only)\n", encoding="utf-8"
     )
     (arch / "tasks").mkdir()
+    # has_archive_evidence requires ≥1 task pack directory under tasks/
+    (arch / "tasks" / "hybrid-demo").mkdir()
+    (arch / "tasks" / "hybrid-demo" / "task.toml").write_text(
+        'source_track = "hybrid_curated"\n', encoding="utf-8"
+    )
     backend = ScriptedDockerVerifier()
     pier = ScriptedPierRunner(oracle_reward=1, null_reward=0)
 
@@ -333,9 +338,7 @@ def test_ship_real_pr_refuses_hybrid_bind(tmp_path: Path) -> None:
 
 def test_is_product_deepagent_dest() -> None:
     assert is_product_deepagent_dest("datasets/deepagent_v1") is True
-    assert (
-        is_product_deepagent_dest(Path("/projects/deepagent/datasets/deepagent_v1")) is True
-    )
+    assert is_product_deepagent_dest(Path("/projects/deepagent/datasets/deepagent_v1")) is True
     assert is_product_deepagent_dest("datasets/deepagent_v1_offline_only") is False
     assert is_product_deepagent_dest(Path("/tmp/ut_offline/deepagent_v1_offline")) is False
 
@@ -403,7 +406,9 @@ def test_require_product_suite_reporter() -> None:
     assert rid
     assert "pytest" in cmd or "python" in rid
     with pytest.raises(ProductDualRunRejected):
-        require_product_suite_reporter("brainfuck", dest="datasets/deepagent_v1", offline_only=False)
+        require_product_suite_reporter(
+            "brainfuck", dest="datasets/deepagent_v1", offline_only=False
+        )
     # Offline dest skips hard refuse.
     require_product_suite_reporter(
         "brainfuck", dest="datasets/deepagent_v1_offline_only", offline_only=True
@@ -777,6 +782,11 @@ def test_offline_dest_still_allows_fixture_materials(tmp_path: Path) -> None:
     )
     (arch / "ARCHIVE_README.md").write_text("# hybrid archive\n", encoding="utf-8")
     (arch / "tasks").mkdir()
+    # has_archive_evidence requires ≥1 task pack directory under tasks/
+    (arch / "tasks" / "hybrid-demo").mkdir()
+    (arch / "tasks" / "hybrid-demo" / "task.toml").write_text(
+        'source_track = "hybrid_curated"\n', encoding="utf-8"
+    )
     result = run_ship_deepagent_real_pr(
         out_dir=out,
         work_root=tmp_path / "work_offline_fixture",
@@ -1010,7 +1020,9 @@ def test_cli_live_mine_refuse_empty_materials(tmp_path: Path) -> None:
     )
 
 
-def test_ship_deepagent_cli_offline_real_pr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ship_deepagent_cli_offline_real_pr(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """CLI default source real_pr wires through run_ship_deepagent_real_pr."""
     import swe_factory.pipeline.ship_real_pr as ship_mod
     from swe_factory.pipeline.ship_deepagent import ShipDeepAgentResult

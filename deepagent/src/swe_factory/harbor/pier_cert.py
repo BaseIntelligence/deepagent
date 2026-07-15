@@ -507,7 +507,9 @@ def ensure_jobs_root(jobs_root: Path | str | None = None) -> Path:
         or text.startswith(str(DEFAULT_JOBS_ROOT) + "-")
         or text.startswith("/tmp/harbor-deepagent-jobs")
     ):
-        raise PierCertError(f"pier jobs root must be under /tmp/harbor-deepagent-jobs* (got {root})")
+        raise PierCertError(
+            f"pier jobs root must be under /tmp/harbor-deepagent-jobs* (got {root})"
+        )
     root.mkdir(parents=True, exist_ok=True)
     return root.resolve()
 
@@ -691,7 +693,8 @@ def refuse_fake_oracle_mode(
     mode = (oracle_mode or "docker").strip().lower()
     text = str(pack_or_dest or "").replace("\\", "/").lower()
     is_deepagent = any(
-        token in text for token in ("deepagent_v1", "datasets/deepagent", "deepagent-v1", "deepagent")
+        token in text
+        for token in ("deepagent_v1", "datasets/deepagent", "deepagent-v1", "deepagent")
     )
     if not certified and not is_deepagent:
         return

@@ -64,3 +64,8 @@ strict = true
 packages = ["swe_factory"]
 mypy_path = "src"
 warn_unused_configs = true
+
+# Optional third-party Harbor runtime: may be absent offline; imports are guarded.
+[[tool.mypy.overrides]]
+module = ["harbor", "harbor.*"]
+ignore_missing_imports = true

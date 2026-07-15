@@ -252,7 +252,7 @@ def run_harbor_load_smoke(tasks_root: Path, *, task_id: str | None = None) -> di
         "errors": [],
     }
     try:
-        import harbor  # type: ignore[import-untyped]
+        import harbor
 
         result["harbor_version"] = getattr(harbor, "__version__", "unknown")
     except Exception as exc:  # noqa: BLE001
@@ -260,10 +260,10 @@ def run_harbor_load_smoke(tasks_root: Path, *, task_id: str | None = None) -> di
         return result
 
     try:
-        from harbor.models.task.config import TaskConfig  # type: ignore[import-untyped]
-        from harbor.models.task.paths import TaskPaths  # type: ignore[import-untyped]
-        from harbor.models.task.task import Task  # type: ignore[import-untyped]
-        from harbor.viewer.task_scanner import TaskDefinitionScanner  # type: ignore[import-untyped]
+        from harbor.models.task.config import TaskConfig
+        from harbor.models.task.paths import TaskPaths
+        from harbor.models.task.task import Task
+        from harbor.viewer.task_scanner import TaskDefinitionScanner
     except Exception as exc:  # noqa: BLE001
         result["errors"].append(f"harbor models import failed: {exc}")
         return result

@@ -487,7 +487,8 @@ def assert_product_real_pr_export(
         )
     if base_commit and not is_real_base_sha(base_commit):
         raise RealPackError(
-            f"product deepagent_v1 export requires real 40-char base_commit_hash; got {base_commit!r}"
+            "product deepagent_v1 export requires real 40-char "
+            f"base_commit_hash; got {base_commit!r}"
         )
 
 

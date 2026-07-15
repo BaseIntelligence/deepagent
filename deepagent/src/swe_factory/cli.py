@@ -41,7 +41,7 @@ app = typer.Typer(
         "  pier-cert         — Pier load + oracle=1 / null=0 (jobs /tmp; --real-pr)\n"
         "  harbor-produce    — multi-lang Harbor motors (Py/Go/TS multi-file hard packs)\n"
         "  ship-harbor       — ship 10–15 DeepAgent Harbor packs to datasets/harbor_v1\n"
-        "  ship-deepagent      — product Real-PR ship; --live-mine (not fixture pad) → deepagent_v1\n"
+        "  ship-deepagent    — product Real-PR ship; --live-mine (not fixture pad) → deepagent_v1\n"
         "  archive-hybrid-deepagent — archive hybrid deepagent_v1 → deepagent_v1_hybrid_archive\n"
         "  archive-seed5-deepagent  — archive prior real_pr seed → deepagent_v1_seed5_archive\n"
         "  gate-audit-product — rewrite dual-truth gate_audit over FULL product tasks/*\n"

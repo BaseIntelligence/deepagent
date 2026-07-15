@@ -80,7 +80,8 @@ def test_resolve_pier_agent_image_tag_prefers_explicit() -> None:
         == "harbor-sdf-agent-item:oracle"
     )
     assert (
-        resolve_pier_agent_image_tag(agent_image="  deepagent-agent:local  ") == "deepagent-agent:local"
+        resolve_pier_agent_image_tag(agent_image="  deepagent-agent:local  ")
+        == "deepagent-agent:local"
     )
     assert resolve_pier_agent_image_tag(agent_image="") == DEEPAGENT_AGENT_LOCAL_TAG
     assert resolve_pier_agent_image_tag(agent_image=None) == DEEPAGENT_AGENT_LOCAL_TAG
