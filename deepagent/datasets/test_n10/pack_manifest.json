@@ -145,6 +145,7 @@
   "languages": {
     "python": 10
   },
+  "layout": "tasks/<task_id>/{task.toml,environment/,tests/,solution/}",
   "live_generate_dest": true,
   "live_mine": true,
   "materials_is_fixture": false,
@@ -1842,6 +1843,7 @@
   "refuse_fixture_materials_default": true,
   "refuse_hybrid": true,
   "refuse_synthetic_dual_run": true,
+  "repo_id": "BaseIntelligence/deepagent",
   "require_live_docker_images": true,
   "required_relpaths": [
     "task.toml",
@@ -1856,6 +1858,8 @@
     "solution/solution.patch",
     "solution/solve.sh"
   ],
+  "revision": "test",
+  "schema": "deepagent.hf_packs.v1",
   "source_tracks": {
     "realpr-attrs-1323": "real_pr",
     "realpr-attrs-1457": "real_pr",
@@ -1869,15 +1873,15 @@
     "realpr-rich-4070": "real_pr"
   },
   "task_ids": [
-    "realpr-packaging-1120",
-    "realpr-charset-normalizer-715",
-    "realpr-itemadapter-101",
     "realpr-attrs-1323",
-    "realpr-rich-3486",
     "realpr-attrs-1457",
+    "realpr-charset-normalizer-715",
     "realpr-httpx-3672",
+    "realpr-itemadapter-101",
     "realpr-more-itertools-1136",
     "realpr-more-itertools-943",
+    "realpr-packaging-1120",
+    "realpr-rich-3486",
     "realpr-rich-4070"
   ],
   "under_supply_reasons": [
