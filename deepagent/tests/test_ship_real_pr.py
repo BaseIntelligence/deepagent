@@ -36,6 +36,7 @@ from swe_factory.pipeline.ship_real_pr import (
     build_real_pr_pack_spec,
     f2p_node_ids_from_test_patch,
     is_fixture_real_pr_materials,
+    is_live_generate_dest,
     is_product_deepagent_dest,
     load_real_pr_materials,
     lookslike_burnt_work_root,
@@ -49,6 +50,7 @@ from swe_factory.pipeline.ship_real_pr import (
     refuse_synthetic_product_dual_run,
     require_live_docker_images,
     require_product_suite_reporter,
+    requires_dual_truth_honesty,
     resolve_product_materials_root,
     run_ship_deepagent_real_pr,
 )
@@ -1099,3 +1101,56 @@ def test_ship_deepagent_cli_offline_real_pr(
         assert "error" not in res.output.lower() or res.exit_code in (0, 1, 2)
     del cli_mod
     assert hasattr(ship_mod, "run_ship_deepagent_real_pr")
+
+
+def test_test_n10_is_live_generate_dest_not_product() -> None:
+    """VAL-DGEN: datasets/test_n10 is live-generate, not deepagent_v1 product wipe."""
+    assert is_live_generate_dest("datasets/test_n10") is True
+    assert is_live_generate_dest(Path("/tmp/wave/datasets/test_n10")) is True
+    assert is_product_deepagent_dest("datasets/test_n10") is False
+    assert requires_dual_truth_honesty("datasets/test_n10", live_mine=False) is True
+    assert requires_dual_truth_honesty("datasets/test_n10", live_mine=True) is True
+    assert requires_dual_truth_honesty("datasets/unit_sandbox", live_mine=False) is False
+    assert requires_dual_truth_honesty("datasets/unit_sandbox", live_mine=True) is True
+    assert requires_dual_truth_honesty(
+        "datasets/test_n10", live_mine=True, offline_only=True
+    ) is False
+
+
+def test_test_n10_refuses_fixture_materials_default() -> None:
+    """VAL-DGEN-002: test_n10 / live-mine refuse fixtures/real_pr_ship materials."""
+    with pytest.raises(ProductFixtureMaterialsRejected, match="fixtures/real_pr_ship"):
+        resolve_product_materials_root(
+            MATERIALS,
+            dest="datasets/test_n10",
+            live_mine=True,
+        )
+    # live-mine without materials defaults to live_materials, not fixtures
+    resolved = resolve_product_materials_root(
+        None,
+        dest="datasets/test_n10",
+        live_mine=True,
+    )
+    assert resolved == Path(DEFAULT_PRODUCT_MATERIALS)
+    assert is_fixture_materials_root(resolved) is False
+
+
+def test_test_n10_refuse_empty_live_yield_no_pad() -> None:
+    """VAL-DGEN-001: empty live yield on test_n10 fails closed (no fixture pad)."""
+    with pytest.raises(ProductEmptyLiveYieldRejected, match="empty certified yield"):
+        refuse_empty_live_yield(
+            certified_count=0,
+            min_packs=5,
+            dest="datasets/test_n10",
+            live_mine=True,
+            materials_root=Path("datasets/live_materials"),
+        )
+    with pytest.raises(ProductEmptyLiveYieldRejected, match="fixture pad"):
+        refuse_empty_live_yield(
+            certified_count=0,
+            min_packs=5,
+            dest="datasets/test_n10",
+            live_mine=True,
+            materials_root=MATERIALS,
+            padded_with_fixtures=True,
+        )

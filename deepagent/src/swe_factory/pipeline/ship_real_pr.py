@@ -153,6 +153,8 @@ _TEST_DEF_RE = re.compile(r"^\+?(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILIN
 _GIT_DIFF_TEST_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path_b>.+)$", re.MULTILINE)
 _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _PRODUCT_DEST_MARKERS = ("deepagent_v1",)
+# M16 live generate dest (VAL-DGEN): dual-truth honesty, not deepagent_v1 product wipe.
+_LIVE_GENERATE_DEST_MARKERS = ("test_n10",)
 _OFFLINE_DEST_MARKERS = ("offline", "offline_only", "_ut_", "fixture", "sandbox", "unit")
 
 
@@ -279,6 +281,33 @@ def is_product_deepagent_dest(dest: Path | str) -> bool:
     return not (leaf.startswith("deepagent") and leaf != "deepagent_v1")
 
 
+def is_live_generate_dest(dest: Path | str) -> bool:
+    """True when *dest* is the M16 live-mine generate surface (``datasets/test_n10``).
+
+    Separate from product deepagent_v1 so seed5 archive / product wipe logic
+    does not fire, while dual-truth + HarborDocker honesty still apply.
+    """
+    text = str(dest).replace("\\", "/").lower().rstrip("/")
+    parts = [p for p in text.split("/") if p]
+    return any(part in _LIVE_GENERATE_DEST_MARKERS for part in parts)
+
+
+def requires_dual_truth_honesty(
+    dest: Path | str,
+    *,
+    live_mine: bool = False,
+    offline_only: bool = False,
+) -> bool:
+    """True when dual-truth / HarborDocker / no-synthetic floors are mandatory.
+
+    Fires for product deepagent_v1, live-mine flag, or ``datasets/test_n10``
+    generate dest (VAL-DGEN-00*). Offline-only unit dests never trigger.
+    """
+    if offline_only:
+        return False
+    return bool(live_mine) or is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+
+
 def is_fixture_real_pr_materials(path: Path | str | None) -> bool:
     """True when *path* is (or defaults to) the engineering fixture shortlist."""
     if path is None:
@@ -296,42 +325,44 @@ def resolve_product_materials_root(
 ) -> Path | None:
     """Resolve materials root for ship, refuse fixture default on product dest.
 
-    Rules (VAL-LMAT-002/003, VAL-LSHIP-003/004):
-    - Product dest ``datasets/deepagent_v1`` (and live-mine) must use a live
-      (non-fixture) materials root. Silent default ``fixtures/real_pr_ship``
-      is refused.
+    Rules (VAL-LMAT-002/003, VAL-LSHIP-003/004, VAL-DGEN):
+    - Product dest ``datasets/deepagent_v1``, live-mine, and generate dest
+      ``datasets/test_n10`` must use a live (non-fixture) materials root.
+      Silent default ``fixtures/real_pr_ship`` is refused.
     - ``--live-mine`` without an explicit non-fixture root defaults to
       ``datasets/live_materials``.
     - Offline/unit dests may still use ``fixtures/real_pr_ship``.
     - Empty/unset materials on product dest is refused (no silent pad).
     """
-    product = (live_mine or is_product_deepagent_dest(dest)) and not offline_only
+    product = requires_dual_truth_honesty(
+        dest, live_mine=live_mine, offline_only=offline_only
+    )
     if not product:
         # Engineering / offline: keep historical fixture default when unset.
         if materials_root is None:
             return _package_root() / DEFAULT_MATERIALS
         return Path(materials_root)
 
-    # Product dest / live-mine path.
+    # Product dest / live-mine / test_n10 generate path.
     if materials_root is None:
-        if live_mine:
+        if live_mine or is_live_generate_dest(dest):
             return Path(DEFAULT_PRODUCT_MATERIALS)
         if allow_fixture_materials:
             # Explicit opt-in only (still not recommended for product truth).
             return _package_root() / DEFAULT_MATERIALS
         raise ProductFixtureMaterialsRejected(
-            "product dest deepagent_v1 refuses silent default materials="
+            "product/live-generate dest refuses silent default materials="
             f"{DEFAULT_MATERIALS}; pass --live-mine (uses {DEFAULT_PRODUCT_MATERIALS}) "
             "and/or --materials pointing at a live materials root from the "
-            "materialize-from-pr bridge (VAL-LMAT-003 / VAL-LSHIP-003 / VAL-LSHIP-004)"
+            "materialize-from-pr bridge (VAL-LMAT-003 / VAL-LSHIP-003 / VAL-DGEN)"
         )
 
     root = Path(materials_root)
     if is_fixture_materials_root(root) and not allow_fixture_materials:
         raise ProductFixtureMaterialsRejected(
-            "product dest deepagent_v1 refuses fixtures/real_pr_ship as materials root "
+            "product/live-generate dest refuses fixtures/real_pr_ship as materials root "
             f"(got {root}); require --live-mine + live materials root from the "
-            "materialize bridge (VAL-LMAT-003 / VAL-LSHIP-003 / VAL-LSHIP-004). "
+            "materialize bridge (VAL-LMAT-003 / VAL-LSHIP-003 / VAL-DGEN). "
             "Offline unit dests elsewhere may still use fixtures."
         )
     return root
@@ -377,7 +408,10 @@ def refuse_empty_live_yield(
     is attempted on product dest; under-yield without pad is recorded as
     fail-closed via ShipRealPrError reason at end of ship (caller uses ok=False).
     """
-    if offline_only or not (live_mine or is_product_deepagent_dest(dest)):
+    honesty = requires_dual_truth_honesty(
+        dest, live_mine=live_mine, offline_only=offline_only
+    )
+    if offline_only or not honesty:
         return
     if padded_with_fixtures or (
         materials_root is not None and is_fixture_materials_root(materials_root)
@@ -386,13 +420,13 @@ def refuse_empty_live_yield(
             "product live-mine ship refuses fixture pad of certified N "
             f"(materials={materials_root!r}, certified={certified_count}); "
             "empty/insufficient live yield must fail closed "
-            "(VAL-LSHIP-006 / VAL-LMAT-003)"
+            "(VAL-LSHIP-006 / VAL-LMAT-003 / VAL-DGEN-001)"
         )
-    if live_mine and certified_count <= 0:
+    if honesty and certified_count <= 0:
         raise ProductEmptyLiveYieldRejected(
             "product live-mine empty certified yield fails closed "
             f"(certified={certified_count} < min={min_packs}); "
-            "no fixture pad allowed (VAL-LSHIP-006)"
+            "no fixture pad allowed (VAL-LSHIP-006 / VAL-DGEN-001)"
         )
 
 
@@ -407,7 +441,12 @@ def require_product_suite_reporter(
     Returns ``(reporter_id, suite_command)`` when detectable; refuses product
     promote when language cannot wire a real suite reporter.
     """
-    if offline_only or not is_product_deepagent_dest(dest):
+    # Suite-reporter hard floor applies on product + live-mine generate honesty paths.
+    # Callers that need soft detect for offline unit leaves leave offline_only=True.
+    hard = not offline_only and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
+    if not hard:
         ok, rid, cmd = suite_reporter_detectable(language)
         return (rid if ok else ""), (cmd if ok else "")
     ok, rid, cmd = suite_reporter_detectable(language)
@@ -438,7 +477,10 @@ def refuse_synthetic_product_dual_run(
     produced by a real language suite reporter (no ``test_always_ok`` /
     empty inject / f2p_from_patch-only). Complements VAL-LHARD-002 suite path.
     """
-    if offline_only or not is_product_deepagent_dest(dest):
+    honesty = not offline_only and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
+    if offline_only or not honesty:
         return
     method = (label_method or "").strip().lower()
     f2p = [str(x).strip() for x in f2p_node_ids if str(x).strip()]
@@ -446,7 +488,7 @@ def refuse_synthetic_product_dual_run(
     # Empty node lists are hard product refuse (VAL-LHARD-006).
     if not f2p:
         raise ProductDualRunRejected(
-            "product deepagent_v1 promote requires non-empty real suite-derived "
+            "product dual-truth promote requires non-empty real suite-derived "
             f"F2P node ids (got empty; label_method={label_method!r}; VAL-LHARD-006)"
         )
     if any(not n for n in f2p):
@@ -479,10 +521,10 @@ def refuse_synthetic_product_dual_run(
     }
     if synthetic_method or synth_p2p or synth_f2p:
         raise ProductDualRunRejected(
-            "product deepagent_v1 promote refuses synthetic dual-run "
+            "product dual-truth promote refuses synthetic dual-run "
             f"(label_method={label_method!r}, p2p={p2p[:3]!r}, f2p={f2p[:3]!r}); "
             "require live label_real_pr_dual_run on clone@SHA with real suite "
-            f"node ids (VAL-LHARD-006; dest={dest})"
+            f"node ids (VAL-LHARD-006 / VAL-DGEN-002; dest={dest})"
         )
     if method and method not in live_methods and "dual_run" not in method:
         raise ProductDualRunRejected(
@@ -552,7 +594,10 @@ def assert_product_clone_sha_pin(
     Mismatch, floating HEAD/default-branch clone, short SHA only, or staged
     fixture SHAs labeled as live pins fail product promote.
     """
-    if offline_only or not is_product_deepagent_dest(dest):
+    honesty = not offline_only and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
+    if offline_only or not honesty:
         return {
             "ledger_base_commit": (ledger_base_commit or "").strip(),
             "status": "skipped_non_product",
@@ -653,7 +698,10 @@ def refuse_burnt_dual_run_work_root(
     not count as product dual-truth. Callers should prepare a fresh root or
     explicitly clean then re-mark readiness.
     """
-    if offline_only or not is_product_deepagent_dest(dest):
+    honesty = not offline_only and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
+    if offline_only or not honesty:
         return
     if work_root is None:
         return
@@ -679,7 +727,9 @@ def prepare_fresh_dual_run_work_root(
     dual-run never reuses poisoned residue trees without rebuild/clean.
     """
     dual_work = Path(work) / "dual_run" / task_id
-    product = (not offline_only) and is_product_deepagent_dest(dest)
+    product = (not offline_only) and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
 
     if dual_work.exists():
         # Existing root is treated as residue: wipe always for product honesty.
@@ -735,7 +785,10 @@ def refuse_scripted_product_oracle(
     offline_only: bool = False,
 ) -> None:
     """Product path may only use real HarborDockerVerifier (never Scripted*/Fake*)."""
-    if offline_only or not is_product_deepagent_dest(dest):
+    honesty = not offline_only and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
+    if offline_only or not honesty:
         return
     try:
         refuse_fake_backend(backend, certified=True, dest=dest)
@@ -745,7 +798,7 @@ def refuse_scripted_product_oracle(
         return
     if not isinstance(backend, HarborDockerVerifier):
         raise ProductOracleBackendRejected(
-            "product deepagent_v1 oracle requires HarborDockerVerifier "
+            "product dual-truth oracle requires HarborDockerVerifier "
             f"(got {type(backend).__name__}); refuse scripted/fake docker"
         )
 
@@ -758,13 +811,16 @@ def require_live_docker_images(
     offline_only: bool = False,
 ) -> None:
     """Shipped product evidence must show non-empty docker image refs."""
-    if offline_only or not is_product_deepagent_dest(dest):
+    honesty = not offline_only and (
+        is_product_deepagent_dest(dest) or is_live_generate_dest(dest)
+    )
+    if offline_only or not honesty:
         return
     agent = (agent_image or "").strip()
     tests = (tests_image or "").strip()
     if not agent or not tests:
         raise ProductOracleBackendRejected(
-            "product deepagent_v1 oracle evidence requires non-empty agent_image "
+            "product dual-truth oracle evidence requires non-empty agent_image "
             f"and tests_image (got agent={agent!r} tests={tests!r}); "
             "live HarborDockerVerifier digests required"
         )
@@ -1099,7 +1155,9 @@ def _label_dual_run_for_material(
     config_path = pack_dir / "tests" / "config.json"
     dual_fn = dual_run_callable or label_real_pr_dual_run
 
-    if offline_only or not is_product_deepagent_dest(dest):
+    # Callers set offline_only=False for dual-truth honesty (product / live-mine /
+    # datasets/test_n10). Synthetic patch-seed labels are offline unit only.
+    if offline_only:
         f2p = f2p_node_ids_from_test_patch(material.test_patch, material.test_files)
         p2p = [SYNTHETIC_P2P_NODE]
         payload = {
@@ -1131,7 +1189,7 @@ def _label_dual_run_for_material(
             "config_path": str(config_path),
         }
 
-    # Product path: live real-suite dual-run on clone@SHA.
+    # Dual-truth path: live real-suite dual-run on clone@SHA.
     # Hard suite path required up front (VAL-LHARD-002 / VAL-LHARD-006).
     require_product_suite_reporter(material.language or "python", dest=dest, offline_only=False)
     try:
@@ -2119,6 +2177,11 @@ def run_ship_deepagent_real_pr(
             "or pass offline_only=False for live product promote"
         )
     product_dest = is_product_deepagent_dest(dest) and not offline_only
+    # Dual-truth honesty for product deepagent_v1, --live-mine, and M16 test_n10.
+    # product_dest still gates seed5 archive / prior-product wipe only.
+    honesty_dest = requires_dual_truth_honesty(
+        dest, live_mine=live_mine, offline_only=offline_only
+    )
 
     # ---- hard refuse gates ----
     refuse_fake_ship_dest(mode, out_dir=dest)
@@ -2134,7 +2197,11 @@ def run_ship_deepagent_real_pr(
         )
     refuse_hybrid_product_promote(source_track, dest=dest, hybrid_bind=hybrid_bind)
 
-    # Product: refuse fixture shortlist materials default / fixture root (M14).
+    # Product/live-mine/test_n10: refuse fixture shortlist materials (M14/M16).
+    # Pass live_mine flag as-is: product dest with materials_root=None and
+    # live_mine=False still refuses silent fixture default; --live-mine alone
+    # defaults to datasets/live_materials. is_live_generate_dest also defaults
+    # to live_materials inside resolve_product_materials_root.
     resolved_materials = refuse_product_fixture_materials(
         materials_root,
         dest=dest,
@@ -2145,8 +2212,8 @@ def run_ship_deepagent_real_pr(
     # Live-mine without materials path still points at live default root.
     materials_for_load: Path | str | None = resolved_materials
 
-    # Product: refuse scripted/fake docker injectables up front.
-    if product_dest and not allow_scripted_oracle:
+    # Dual-truth: refuse scripted/fake docker injectables up front.
+    if honesty_dest and not allow_scripted_oracle:
         refuse_scripted_product_oracle(docker_backend, dest=dest, offline_only=False)
 
     if min_packs > max_packs:
@@ -2254,9 +2321,9 @@ def run_ship_deepagent_real_pr(
     # the wave — load all inventory rows (or at least min*6) so serial cert
     # can continue until min_packs or honest exhaustion (used_materials >> 2).
     materials_limit = (
-        None if (live_mine or product_dest) else max(target_packs * 3, max_packs * 2, 10)
+        None if honesty_dest else max(target_packs * 3, max_packs * 2, 10)
     )
-    if live_mine or product_dest:
+    if honesty_dest:
         # Explicit large cap so a huge materials tree is still bounded,
         # but always enough to exhaust soft rejects past min_packs.
         materials_limit = max(target_packs * 6, max_packs * 4, min_packs * 6, 60)
@@ -2269,16 +2336,16 @@ def run_ship_deepagent_real_pr(
         # Serial cert headroom: diversify / prioritize dual-run-friendly langs
         # early so rust-heavy inventory sort does not starve python/js/ts yield
         # before min_packs is reachable. Round-robin by language family.
-        if live_mine or product_dest:
+        if honesty_dest:
             materials = _order_materials_for_live_yield(materials)
     except ShipRealPrError as exc:
-        if product_dest or live_mine:
+        if honesty_dest:
             # Re-check fixture pad first for clearer reason.
             refuse_empty_live_yield(
                 certified_count=0,
                 min_packs=min_packs,
                 dest=dest,
-                live_mine=live_mine or product_dest,
+                live_mine=True,
                 materials_root=materials_for_load,
                 offline_only=offline_only,
                 padded_with_fixtures=is_fixture_materials_root(materials_for_load)
@@ -2322,7 +2389,7 @@ def run_ship_deepagent_real_pr(
         # Host prefilter before expensive Docker: patch apply + collector dry-run
         # F2P potential. Skip empty-F2P / apply-fail early with ledger reason.
         # Falls back to legacy patch-only preflight when prefilter fails open.
-        if live_mine or product_dest:
+        if honesty_dest:
             cache_root_pf = Path(clone_cache_root) if clone_cache_root else DEFAULT_CLONE_CACHE
             pf = prefilter_real_pr_material(
                 material,
@@ -2485,7 +2552,8 @@ def run_ship_deepagent_real_pr(
             },
         )
 
-        # dual-run labels: product → live label_real_pr_dual_run; offline_only → synthetic
+        # dual-run labels: honesty(test_n10/product/live_mine) → live dual-run;
+        # plain offline unit dests may use synthetic.
         dual_detail: dict[str, Any]
         dual_ok = False
         try:
@@ -2494,7 +2562,7 @@ def run_ship_deepagent_real_pr(
                 pack_dir=pack_dir,
                 work=work,
                 dest=dest,
-                offline_only=offline_only or not product_dest,
+                offline_only=offline_only or not honesty_dest,
                 clone_cache=clone_cache,
                 seed_local_repos=seed_local_repos,
                 dual_run_callable=dual_run_callable,
@@ -2505,7 +2573,7 @@ def run_ship_deepagent_real_pr(
                 p2p_node_ids=list(dual_detail.get("p2p_node_ids") or []),
                 label_method=str(dual_detail.get("label_method") or ""),
                 dest=dest,
-                offline_only=offline_only or not product_dest,
+                offline_only=offline_only or not honesty_dest,
                 language=material.language,
                 suite_reporter=dual_detail.get("reporter"),
                 suite_command=(
@@ -2513,9 +2581,9 @@ def run_ship_deepagent_real_pr(
                     if dual_detail.get("suite_command") is not None
                     else None
                 ),
-                require_suite_path=product_dest,
+                require_suite_path=honesty_dest,
             )
-            if product_dest and dual_detail.get("workspace"):
+            if honesty_dest and dual_detail.get("workspace"):
                 assert_product_clone_sha_pin(
                     ledger_base_commit=material.base_commit,
                     workspace=str(dual_detail.get("workspace")),
@@ -2625,8 +2693,8 @@ def run_ship_deepagent_real_pr(
         else:
             backend = HarborDockerVerifier(run_id=f"rpr{len(records):02d}")
             owned_backend = True
-        # Unit offline may inject scripted only when not product dest.
-        if product_dest and not allow_scripted_oracle:
+        # Unit offline may inject scripted only when not dual-truth honesty dest.
+        if honesty_dest and not allow_scripted_oracle:
             try:
                 refuse_scripted_product_oracle(backend, dest=dest, offline_only=False)
             except ProductOracleBackendRejected:
@@ -2644,7 +2712,7 @@ def run_ship_deepagent_real_pr(
                 evidence_dir=oracle_ev_dir,
                 evidence_out=docker_ev_path,
                 audit_out=oracle_ev_dir / "gate_audit.jsonl",
-                dest_hint=dest if product_dest else Path(str(dest) + "_offline_unit"),
+                dest_hint=dest if honesty_dest else Path(str(dest) + "_offline_unit"),
                 cleanup=True,
                 run_id=f"rpr{len(records):02d}",
                 require_real_pr_track=True,
@@ -2657,7 +2725,7 @@ def run_ship_deepagent_real_pr(
                 if isinstance(oracle_blob, dict):
                     agent_image = str(oracle_blob.get("agent_image") or "")
                     tests_image = str(oracle_blob.get("tests_image") or "")
-            if product_dest and not allow_scripted_oracle:
+            if honesty_dest and not allow_scripted_oracle:
                 try:
                     require_live_docker_images(
                         agent_image=agent_image,
@@ -2681,7 +2749,7 @@ def run_ship_deepagent_real_pr(
 
         docker_ok = bool(cert and cert.certified)
         if (
-            product_dest
+            honesty_dest
             and not allow_scripted_oracle
             and docker_ok
             and not (agent_image and tests_image)
@@ -2982,12 +3050,12 @@ def run_ship_deepagent_real_pr(
             audit_keep_dual_truth(
                 task_id=r.task_id,
                 materials_root=materials_for_load,
-                live_mine=live_mine or product_dest,
+                live_mine=honesty_dest,
                 label_method=str(dual.get("label_method") or ""),
                 f2p_node_ids=list(dual.get("f2p_node_ids") or []),
                 p2p_node_ids=list(dual.get("p2p_node_ids") or []),
                 backend_class=str(img.get("backend_class") or "")
-                or ("HarborDockerVerifier" if product_dest else ""),
+                or ("HarborDockerVerifier" if honesty_dest else ""),
                 agent_image=str(img.get("agent_image") or ""),
                 tests_image=str(img.get("tests_image") or ""),
                 solution_reward=r.solution_reward,
@@ -2997,10 +3065,10 @@ def run_ship_deepagent_real_pr(
                 else REAL_PR_SOURCE_TRACK,
                 source_hunk_count=(mat.source_hunk_count if mat is not None else None),
                 discovery_path=(mat.discovery_path if mat is not None else "") or None,
-                offline_only=offline_only or not product_dest,
+                offline_only=offline_only or not honesty_dest,
                 # Product live: require hunk floor when known; soft if unknown on legacy mats.
                 require_hunk_floor=bool(
-                    (live_mine or product_dest)
+                    honesty_dest
                     and mat is not None
                     and mat.source_hunk_count is not None
                 ),
@@ -3008,20 +3076,20 @@ def run_ship_deepagent_real_pr(
         )
 
     gate_path = staging_product / "gate_audit.jsonl"
-    if intended_for_gate or product_dest or live_mine:
-        # Dual-truth gate for every intended keep (VAL-LSHIP-007). Scale min
-        # (VAL-LSHIP-002) is applied after overwrite as ship ok/fail — do not
+    if intended_for_gate or honesty_dest:
+        # Dual-truth gate for every intended keep (VAL-LSHIP-007 / VAL-DGEN).
+        # Scale min is applied after overwrite as ship ok/fail — do not
         # conflate "keep fails dual-truth" with under-yield N.
         gate_result = write_product_gate_audit(
             gate_rows,
             gate_path,
             materials_root=materials_for_load,
-            live_mine=live_mine or product_dest,
+            live_mine=honesty_dest,
             seed5_archived=seed5_archived if product_dest else True,
-            min_accepted=1 if (product_dest or live_mine) else None,
-            require_all_accepted=bool(product_dest or live_mine),
+            min_accepted=1 if honesty_dest else None,
+            require_all_accepted=bool(honesty_dest),
         )
-        if product_dest or live_mine:
+        if honesty_dest:
             # Empty yield → ProductEmptyLiveYieldRejected later; dual-truth FAIL
             # on non-empty intended set refuses overwrite now.
             if intended_for_gate:
@@ -3046,7 +3114,7 @@ def run_ship_deepagent_real_pr(
 
     # ---- NOW overwrite product dest (only after gate pass + non-empty certs) ----
     # Empty live yield must fail closed WITHOUT wiping prior product (VAL-LSHIP-006/007).
-    empty_yield = certified_count <= 0 and (product_dest or live_mine)
+    empty_yield = certified_count <= 0 and honesty_dest
 
     dest.mkdir(parents=True, exist_ok=True)
     final_tasks = dest / "tasks"
@@ -3158,13 +3226,13 @@ def run_ship_deepagent_real_pr(
             if r.certified
         )
     )
-    # Live-mine / product: empty yield fail-closed — never pad N from fixtures.
-    if (live_mine or product_dest) and certified_count <= 0:
+    # Live-mine / product / test_n10: empty yield fail-closed — never pad N.
+    if honesty_dest and certified_count <= 0:
         refuse_empty_live_yield(
             certified_count=certified_count,
             min_packs=min_packs,
             dest=dest,
-            live_mine=live_mine or product_dest,
+            live_mine=True,
             materials_root=materials_for_load,
             offline_only=offline_only,
         )
@@ -3182,17 +3250,17 @@ def run_ship_deepagent_real_pr(
         else:
             reason = f"under-yield real_pr certified={certified_count} < min={min_packs}" + (
                 f"; live-mine materials={materials_for_load} (no fixture pad)"
-                if (live_mine or product_dest)
+                if honesty_dest
                 else ""
             )
             ok = False
             # Explicit refuse for empty live yield so callers get code-2 path.
-            if (live_mine or product_dest) and certified_count <= 0:
+            if honesty_dest and certified_count <= 0:
                 raise ProductEmptyLiveYieldRejected(
                     f"product live-mine empty certified yield fails closed "
                     f"(certified={certified_count} < min={min_packs}, "
                     f"materials={materials_for_load!r}); "
-                    "no fixture pad (VAL-LSHIP-006)"
+                    "no fixture pad (VAL-LSHIP-006 / VAL-DGEN-001)"
                 )
     elif hybrid_leaks:
         reason = f"hybrid leak in product: {hybrid_leaks}"
@@ -3219,9 +3287,9 @@ def run_ship_deepagent_real_pr(
     )
 
     pack_manifest = {
-        "product_surface": "datasets/deepagent_v1",
+        "product_surface": str(dest),
         "product_track": REAL_PR_SOURCE_TRACK,
-        "live_mine": bool(live_mine),
+        "live_mine": bool(live_mine or honesty_dest),
         "materials_root": str(materials_for_load) if materials_for_load is not None else None,
         "materials_is_fixture": bool(
             materials_for_load is not None and is_fixture_materials_root(materials_for_load)
@@ -3235,6 +3303,7 @@ def run_ship_deepagent_real_pr(
         ],
         "hybrid_claimed_as_product": False,
         "count": certified_count,
+        "pack_count": certified_count,
         "task_ids": [r.task_id for r in records if r.certified],
         "languages": lang_counts,
         "multi_file": {r.task_id: r.solution_files for r in records if r.certified},
@@ -3246,6 +3315,30 @@ def run_ship_deepagent_real_pr(
             for r in records
             if r.certified
         },
+        "packs": [
+            {
+                "task_id": r.task_id,
+                "language": r.language,
+                "source_track": getattr(r.hybrid, "source_track", REAL_PR_SOURCE_TRACK)
+                if r.hybrid
+                else REAL_PR_SOURCE_TRACK,
+                "source_hunk_count": (
+                    material_by_id[r.task_id].source_hunk_count
+                    if r.task_id in material_by_id
+                    else None
+                ),
+                "solution_reward": r.solution_reward,
+                "null_reward": r.null_reward,
+                "certified": True,
+                "backend": "HarborDockerVerifier",
+                "label_method": (dual_by_task_pre.get(r.task_id) or {}).get("label_method")
+                or LABEL_METHOD_LIVE,
+                "materials_is_fixture": False,
+                "live_mine": bool(live_mine or honesty_dest),
+            }
+            for r in records
+            if r.certified
+        ],
         "oracle": {
             r.task_id: {
                 "solution_reward": r.solution_reward,
@@ -3282,10 +3375,11 @@ def run_ship_deepagent_real_pr(
         "ok": ok,
         "refuse_fake": True,
         "refuse_hybrid": True,
-        "refuse_synthetic_dual_run": product_dest,
-        "require_live_docker_images": product_dest,
+        "refuse_synthetic_dual_run": honesty_dest,
+        "require_live_docker_images": honesty_dest,
         "offline_only": offline_only,
         "product_dest": product_dest,
+        "live_generate_dest": is_live_generate_dest(dest),
         "archive_note": archive_note,
     }
     pack_manifest_path = dest / "pack_manifest.json"
@@ -3307,7 +3401,7 @@ def run_ship_deepagent_real_pr(
         "backend": "docker",
         "oracle_mode": "docker",
         "refuse_fake": True,
-        "require_harbor_docker_verifier": product_dest,
+        "require_harbor_docker_verifier": honesty_dest,
         "product_track": REAL_PR_SOURCE_TRACK,
         "certified_count": certified_count,
         "records": [
@@ -3446,7 +3540,7 @@ def run_ship_deepagent_real_pr(
                 "seed5_archive": str(DEFAULT_SEED5) if product_dest else None,
                 "gate_audit": gate_result.to_dict() if gate_result is not None else None,
                 "gate_audit_pass": bool(gate_result.ok) if gate_result is not None else None,
-                "live_mine": bool(live_mine),
+                "live_mine": bool(live_mine or honesty_dest),
                 "materials_root": str(materials_for_load)
                 if materials_for_load is not None
                 else None,
@@ -3457,6 +3551,8 @@ def run_ship_deepagent_real_pr(
                 "used_materials_count": len(materials),
                 "reject_ledger": reject_ledger,
                 "inventory_completeness": inv_stats or None,
+                "honesty_dest": honesty_dest,
+                "live_generate_dest": is_live_generate_dest(dest),
             },
             indent=2,
             sort_keys=True,
@@ -3467,20 +3563,25 @@ def run_ship_deepagent_real_pr(
     )
 
     # Product README honesty pointer (ship-local)
+    readme_title = (
+        f"# {dest} — real_pr live-mine generate wave"
+        if is_live_generate_dest(dest)
+        else "# datasets/deepagent_v1 — Real-PR product (live mine)"
+    )
     (dest / "PRODUCT_README.md").write_text(
         "\n".join(
             [
-                "# datasets/deepagent_v1 — Real-PR product (live mine)",
+                readme_title,
                 "",
                 "This directory ships **source_track=real_pr** Harbor packs only.",
                 "Hybrid motor corpus: `datasets/deepagent_v1_hybrid_archive/`.",
                 "Prior seed product: `datasets/deepagent_v1_seed5_archive/`.",
                 f"Certified N this wave: **{certified_count}** "
                 f"(target={target_packs}, min≥{min_packs}).",
-                f"Materials: {materials_for_load} (live_mine={bool(live_mine)}; "
+                f"Materials: {materials_for_load} (live_mine={bool(live_mine or honesty_dest)}; "
                 "never fixtures/real_pr_ship for product).",
                 "Docker oracle: HarborDockerVerifier sol=1 / null=0; pier mode honest;",
-                "gate_audit dual-truth pass required before overwrite (VAL-LSHIP-007).",
+                "gate_audit dual-truth pass required before overwrite (VAL-LSHIP-007 / VAL-DGEN).",
                 "",
             ]
         ),
@@ -3517,6 +3618,7 @@ __all__ = [
     "build_real_pr_pack_spec",
     "f2p_node_ids_from_test_patch",
     "is_fixture_real_pr_materials",
+    "is_live_generate_dest",
     "is_product_deepagent_dest",
     "load_real_pr_materials",
     "lookslike_burnt_work_root",
@@ -3530,6 +3632,7 @@ __all__ = [
     "refuse_synthetic_product_dual_run",
     "require_live_docker_images",
     "require_product_suite_reporter",
+    "requires_dual_truth_honesty",
     "resolve_product_materials_root",
     "run_ship_deepagent_real_pr",
 ]

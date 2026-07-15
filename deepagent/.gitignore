@@ -50,3 +50,6 @@ fixtures/harbor_motors/.ts_deps/
 *.log
 tmp/
 .cache/
+
+# Historical hybrid archive pointer/symlink (never product N)
+datasets/deepagent_v1_hybrid_archive

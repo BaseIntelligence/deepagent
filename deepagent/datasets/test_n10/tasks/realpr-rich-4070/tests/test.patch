@@ -1,0 +1,33 @@
+diff --git a/tests/test_console.py b/tests/test_console.py
+--- a/tests/test_console.py
++++ b/tests/test_console.py
+@@ -400,9 +400,9 @@ def fake_input(prompt, stream=None):
+         console.file.write(prompt)
+         return "bar"
+ 
+-    import rich.console
++    import getpass
+ 
+-    monkeypatch.setattr(rich.console, "getpass", fake_input)
++    monkeypatch.setattr(getpass, "getpass", fake_input)
+     console = Console()
+     user_input = console.input(prompt="foo:", password=True)
+     assert capsys.readouterr().out == "foo:"
+diff --git a/tests/test_syntax.py b/tests/test_syntax.py
+--- a/tests/test_syntax.py
++++ b/tests/test_syntax.py
+@@ -7,13 +7,13 @@
+ import pytest
+ from pygments.lexers import PythonLexer
+ 
++from rich.console import Console
+ from rich.measure import Measurement
+ from rich.panel import Panel
+ from rich.style import Style
+ from rich.syntax import (
+     ANSISyntaxTheme,
+     Color,
+-    Console,
+     PygmentsSyntaxTheme,
+     Syntax,
+     _SyntaxHighlightRange,

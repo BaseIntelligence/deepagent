@@ -1,0 +1,1540 @@
+diff --git a/_mypyc_hook/backend.py b/_mypyc_hook/backend.py
+--- a/_mypyc_hook/backend.py
++++ b/_mypyc_hook/backend.py
+@@ -7,7 +7,7 @@
+ from setuptools import build_meta as _orig  # type: ignore[import-untyped]
+ 
+ USE_MYPYC = os.getenv("CHARSET_NORMALIZER_USE_MYPYC", "0") == "1"
+-MYPYC_SPEC = "mypy>=1.4.1,<=1.19.1"
++MYPYC_SPEC = "mypy>=1.4.1,<=1.20"
+ 
+ # Expose all the PEP 517 hooks from setuptools
+ get_requires_for_build_sdist = _orig.get_requires_for_build_sdist
+diff --git a/noxfile.py b/noxfile.py
+--- a/noxfile.py
++++ b/noxfile.py
+@@ -58,7 +58,9 @@ def test(session: nox.Session) -> None:
+     test_impl(session)
+ 
+ 
+-@nox.session(python=["3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"])
++@nox.session(
++    python=["3.7", "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t"]
++)
+ def test_mypyc(session: nox.Session) -> None:
+     test_impl(session, True)
+ 
+diff --git a/src/charset_normalizer/api.py b/src/charset_normalizer/api.py
+--- a/src/charset_normalizer/api.py
++++ b/src/charset_normalizer/api.py
+@@ -34,6 +34,25 @@
+     logging.Formatter("%(asctime)s | %(levelname)s | %(message)s")
+ )
+ 
++# Pre-compute a reordered encoding list: multibyte first, then single-byte.
++# This allows the mb_definitive_match optimization to fire earlier, skipping
++# all single-byte encodings for genuine CJK content. Multibyte codecs
++# hard-fail (UnicodeDecodeError) on single-byte data almost instantly, so
++# testing them first costs negligible time for non-CJK files.
++_mb_supported: list[str] = []
++_sb_supported: list[str] = []
++
++for _supported_enc in IANA_SUPPORTED:
++    try:
++        if is_multi_byte_encoding(_supported_enc):
++            _mb_supported.append(_supported_enc)
++        else:
++            _sb_supported.append(_supported_enc)
++    except ImportError:
++        _sb_supported.append(_supported_enc)
++
++IANA_SUPPORTED_MB_FIRST: list[str] = _mb_supported + _sb_supported
++
+ 
+ def from_bytes(
+     sequences: bytes | bytearray,
+@@ -158,6 +177,39 @@ def from_bytes(
+     tested_but_hard_failure: list[str] = []
+     tested_but_soft_failure: list[str] = []
+     soft_failure_skip: set[str] = set()
++    success_fast_tracked: set[str] = set()
++
++    # Cache for decoded payload deduplication: hash(decoded_payload) -> (mean_mess_ratio, cd_ratios_merged, passed)
++    # When multiple encodings decode to the exact same string, we can skip the expensive
++    # mess_ratio and coherence_ratio analysis and reuse the results from the first encoding.
++    payload_result_cache: dict[int, tuple[float, list[tuple[str, float]], bool]] = {}
++
++    # When a definitive result (chaos=0.0 and good coherence) is found after testing
++    # the prioritized encodings (ascii, utf_8), we can significantly reduce the remaining
++    # work. Encodings that target completely different language families (e.g., Cyrillic
++    # when the definitive match is Latin) are skipped entirely.
++    # Additionally, for same-family encodings that pass chaos probing, we reuse the
++    # definitive match's coherence ratios instead of recomputing them — a major savings
++    # since coherence_ratio accounts for ~30% of total time on slow Latin files.
++    definitive_match_found: bool = False
++    definitive_target_languages: set[str] = set()
++    # After the definitive match fires, we cap the number of additional same-family
++    # single-byte encodings that pass chaos probing. Once we've accumulated enough
++    # good candidates (N), further same-family SB encodings are unlikely to produce
++    # a better best() result and just waste mess_ratio + coherence_ratio time.
++    # The first encoding to trigger the definitive match is NOT counted (it's already in).
++    post_definitive_sb_success_count: int = 0
++    POST_DEFINITIVE_SB_CAP: int = 7
++
++    # When a non-UTF multibyte encoding passes chaos probing with significant multibyte
++    # content (decoded length < 98% of raw length), skip all remaining single-byte encodings.
++    # Rationale: multi-byte decoders (CJK) have strict byte-sequence validation — if they
++    # decode without error AND pass chaos probing with substantial multibyte content, the
++    # data is genuinely multibyte encoded. Single-byte encodings will always decode (every
++    # byte maps to something) but waste time on mess_ratio before failing.
++    # The 98% threshold prevents false triggers on files that happen to have a few valid
++    # multibyte pairs (e.g., cp424/_ude_1.txt where big5 decodes with 99% ratio).
++    mb_definitive_match_found: bool = False
+ 
+     fallback_ascii: CharsetMatch | None = None
+     fallback_u8: CharsetMatch | None = None
+@@ -183,7 +235,7 @@ def from_bytes(
+     if "utf_8" not in prioritized_encodings:
+         prioritized_encodings.append("utf_8")
+ 
+-    for encoding_iana in prioritized_encodings + IANA_SUPPORTED:
++    for encoding_iana in prioritized_encodings + IANA_SUPPORTED_MB_FIRST:
+         if cp_isolation and encoding_iana not in cp_isolation:
+             continue
+ 
+@@ -226,16 +278,74 @@ def from_bytes(
+             )
+             continue
+ 
++        # Skip encodings that were already fast-tracked from a similar successful encoding.
++        if encoding_iana in success_fast_tracked:
++            logger.log(
++                TRACE,
++                "Skipping %s: already fast-tracked from a similar successful encoding.",
++                encoding_iana,
++            )
++            continue
++
+         try:
+             is_multi_byte_decoder: bool = is_multi_byte_encoding(encoding_iana)
+-        except (ModuleNotFoundError, ImportError):
++        except (ModuleNotFoundError, ImportError):  # Defensive:
+             logger.log(
+                 TRACE,
+                 "Encoding %s does not provide an IncrementalDecoder",
+                 encoding_iana,
+             )
+             continue
+ 
++        # When we've already found a definitive match (chaos=0.0 with good coherence)
++        # after testing the prioritized encodings, skip encodings that target
++        # completely different language families. This avoids running expensive
++        # mess_ratio + coherence_ratio on clearly unrelated candidates (e.g., Cyrillic
++        # when the definitive match is Latin-based).
++        if definitive_match_found:
++            if not is_multi_byte_decoder:
++                enc_languages = set(encoding_languages(encoding_iana))
++            else:
++                enc_languages = set(mb_encoding_languages(encoding_iana))
++            if not enc_languages.intersection(definitive_target_languages):
++                logger.log(
++                    TRACE,
++                    "Skipping %s: definitive match already found, this encoding targets different languages (%s vs %s).",
++                    encoding_iana,
++                    enc_languages,
++                    definitive_target_languages,
++                )
++                continue
++
++        # After the definitive match, cap the number of additional same-family
++        # single-byte encodings that pass chaos probing. This avoids testing the
++        # tail of rare, low-value same-family encodings (mac_iceland, cp860, etc.)
++        # that almost never change best() but each cost ~1-2ms of mess_ratio + coherence.
++        if (
++            definitive_match_found
++            and not is_multi_byte_decoder
++            and post_definitive_sb_success_count >= POST_DEFINITIVE_SB_CAP
++        ):
++            logger.log(
++                TRACE,
++                "Skipping %s: already accumulated %d same-family results after definitive match (cap=%d).",
++                encoding_iana,
++                post_definitive_sb_success_count,
++                POST_DEFINITIVE_SB_CAP,
++            )
++            continue
++
++        # When a multibyte encoding with significant multibyte content has already
++        # passed chaos probing, skip all single-byte encodings. They will either fail
++        # chaos probing (wasting mess_ratio time) or produce inferior results.
++        if mb_definitive_match_found and not is_multi_byte_decoder:
++            logger.log(
++                TRACE,
++                "Skipping single-byte %s: multi-byte definitive match already found.",
++                encoding_iana,
++            )
++            continue
++
+         try:
+             if is_too_large_sequence and is_multi_byte_decoder is False:
+                 str(
+@@ -286,6 +396,108 @@ def from_bytes(
+                 encoding_iana,
+             )
+ 
++        # Payload-hash deduplication: if another encoding already decoded to the
++        # exact same string, reuse its mess_ratio and coherence results entirely.
++        # This is strictly more general than the old IANA_SUPPORTED_SIMILAR approach
++        # because it catches ALL identical decoding, not just pre-mapped ones.
++        if decoded_payload is not None and not is_multi_byte_decoder:
++            payload_hash: int = hash(decoded_payload)
++            cached = payload_result_cache.get(payload_hash)
++            if cached is not None:
++                cached_mess, cached_cd, cached_passed = cached
++                if cached_passed:
++                    # The previous encoding with identical output passed chaos probing.
++                    fast_match = CharsetMatch(
++                        sequences,
++                        encoding_iana,
++                        cached_mess,
++                        bom_or_sig_available,
++                        cached_cd,
++                        (
++                            decoded_payload
++                            if (
++                                is_too_large_sequence is False
++                                or encoding_iana
++                                in [specified_encoding, "ascii", "utf_8"]
++                            )
++                            else None
++                        ),
++                        preemptive_declaration=specified_encoding,
++                    )
++                    results.append(fast_match)
++                    success_fast_tracked.add(encoding_iana)
++                    logger.log(
++                        TRACE,
++                        "%s fast-tracked (identical decoded payload to a prior encoding, chaos=%f %%).",
++                        encoding_iana,
++                        round(cached_mess * 100, ndigits=3),
++                    )
++
++                    if (
++                        encoding_iana in [specified_encoding, "ascii", "utf_8"]
++                        and cached_mess < 0.1
++                    ):
++                        if cached_mess == 0.0:
++                            logger.debug(
++                                "Encoding detection: %s is most likely the one.",
++                                fast_match.encoding,
++                            )
++                            if explain:
++                                logger.removeHandler(explain_handler)
++                                logger.setLevel(previous_logger_level)
++                            return CharsetMatches([fast_match])
++                        early_stop_results.append(fast_match)
++
++                    if (
++                        len(early_stop_results)
++                        and (specified_encoding is None or specified_encoding in tested)
++                        and "ascii" in tested
++                        and "utf_8" in tested
++                    ):
++                        probable_result: CharsetMatch = early_stop_results.best()  # type: ignore[assignment]
++                        logger.debug(
++                            "Encoding detection: %s is most likely the one.",
++                            probable_result.encoding,
++                        )
++                        if explain:
++                            logger.removeHandler(explain_handler)
++                            logger.setLevel(previous_logger_level)
++                        return CharsetMatches([probable_result])
++
++                    continue
++                else:
++                    # The previous encoding with identical output failed chaos probing.
++                    tested_but_soft_failure.append(encoding_iana)
++                    logger.log(
++                        TRACE,
++                        "%s fast-skipped (identical decoded payload to a prior encoding that failed chaos probing).",
++                        encoding_iana,
++                    )
++                    # Prepare fallbacks for special encodings even when skipped.
++                    if enable_fallback and encoding_iana in [
++                        "ascii",
++                        "utf_8",
++                        specified_encoding,
++                        "utf_16",
++                        "utf_32",
++                    ]:
++                        fallback_entry = CharsetMatch(
++                            sequences,
++                            encoding_iana,
++                            threshold,
++                            bom_or_sig_available,
++                            [],
++                            decoded_payload,
++                            preemptive_declaration=specified_encoding,
++                        )
++                        if encoding_iana == specified_encoding:
++                            fallback_specified = fallback_entry
++                        elif encoding_iana == "ascii":
++                            fallback_ascii = fallback_entry
++                        else:
++                            fallback_u8 = fallback_entry
++                    continue
++
+         max_chunk_gave_up: int = int(len(r_) / 4)
+ 
+         max_chunk_gave_up = max(max_chunk_gave_up, 2)
+@@ -360,6 +572,12 @@ def from_bytes(
+             tested_but_soft_failure.append(encoding_iana)
+             if encoding_iana in IANA_SUPPORTED_SIMILAR:
+                 soft_failure_skip.update(IANA_SUPPORTED_SIMILAR[encoding_iana])
++            # Cache this soft-failure so identical decoding from other encodings
++            # can be skipped immediately.
++            if decoded_payload is not None and not is_multi_byte_decoder:
++                payload_result_cache.setdefault(
++                    hash(decoded_payload), (mean_mess_ratio, [], False)
++                )
+             logger.log(
+                 TRACE,
+                 "%s was excluded because of initial chaos probing. Gave up %i time(s). "
+@@ -414,9 +632,14 @@ def from_bytes(
+ 
+         cd_ratios = []
+ 
+-        # We shall skip the CD when its about ASCII
+-        # Most of the time its not relevant to run "language-detection" on it.
++        # Run coherence detection on all chunks. We previously tried limiting to
++        # 1-2 chunks for post-definitive encodings to save time, but this caused
++        # coverage regressions by producing unrepresentative coherence scores.
++        # The SB cap and language-family skip optimizations provide sufficient
++        # speedup without sacrificing coherence accuracy.
+         if encoding_iana != "ascii":
++            # We shall skip the CD when its about ASCII
++            # Most of the time its not relevant to run "language-detection" on it.
+             for chunk in md_chunks:
+                 chunk_languages = coherence_ratio(
+                     chunk,
+@@ -425,8 +648,9 @@ def from_bytes(
+                 )
+ 
+                 cd_ratios.append(chunk_languages)
+-
+-        cd_ratios_merged = merge_coherence_ratios(cd_ratios)
++            cd_ratios_merged = merge_coherence_ratios(cd_ratios)
++        else:
++            cd_ratios_merged = merge_coherence_ratios(cd_ratios)
+ 
+         if cd_ratios_merged:
+             logger.log(
+@@ -455,6 +679,25 @@ def from_bytes(
+ 
+         results.append(current_match)
+ 
++        # Cache the successful result for payload-hash deduplication.
++        if decoded_payload is not None and not is_multi_byte_decoder:
++            payload_result_cache.setdefault(
++                hash(decoded_payload),
++                (mean_mess_ratio, cd_ratios_merged, True),
++            )
++
++        # Count post-definitive same-family SB successes for the early termination cap.
++        # Only count low-mess encodings (< 2%) toward the cap. High-mess encodings are
++        # marginal results that shouldn't prevent better-quality candidates from being
++        # tested. For example, iso8859_4 (mess=0%) should not be skipped just because
++        # 7 high-mess Latin encodings (cp1252 at 8%, etc.) were tried first.
++        if (
++            definitive_match_found
++            and not is_multi_byte_decoder
++            and mean_mess_ratio < 0.02
++        ):
++            post_definitive_sb_success_count += 1
++
+         if (
+             encoding_iana in [specified_encoding, "ascii", "utf_8"]
+             and mean_mess_ratio < 0.1
+@@ -478,17 +721,77 @@ def from_bytes(
+             and "ascii" in tested
+             and "utf_8" in tested
+         ):
+-            probable_result: CharsetMatch = early_stop_results.best()  # type: ignore[assignment]
++            probable_result = early_stop_results.best()  # type: ignore[assignment]
+             logger.debug(
+                 "Encoding detection: %s is most likely the one.",
+-                probable_result.encoding,
++                probable_result.encoding,  # type: ignore[union-attr]
+             )
+             if explain:  # Defensive: ensure exit path clean handler
+                 logger.removeHandler(explain_handler)
+                 logger.setLevel(previous_logger_level)
+ 
+             return CharsetMatches([probable_result])
+ 
++        # Once we find a result with good coherence (>= 0.5) after testing the
++        # prioritized encodings (ascii, utf_8), activate "definitive mode": skip
++        # encodings that target completely different language families. This avoids
++        # running expensive mess_ratio + coherence_ratio on clearly unrelated
++        # candidates (e.g., Cyrillic encodings when the match is Latin-based).
++        # We require coherence >= 0.5 to avoid false positives (e.g., cp1251 decoding
++        # Hebrew text with 0.0 chaos but wrong language detection at coherence 0.33).
++        if not definitive_match_found and not is_multi_byte_decoder:
++            best_coherence = (
++                max((v for _, v in cd_ratios_merged), default=0.0)
++                if cd_ratios_merged
++                else 0.0
++            )
++            if best_coherence >= 0.5 and "ascii" in tested and "utf_8" in tested:
++                definitive_match_found = True
++                definitive_target_languages.update(target_languages)
++                logger.log(
++                    TRACE,
++                    "Definitive match found: %s (chaos=%.3f, coherence=%.2f). Encodings targeting different language families will be skipped.",
++                    encoding_iana,
++                    mean_mess_ratio,
++                    best_coherence,
++                )
++
++        # When a non-UTF multibyte encoding passes chaos probing with significant
++        # multibyte content (decoded < 98% of raw), activate mb_definitive_match.
++        # This skips all remaining single-byte encodings which would either soft-fail
++        # (running expensive mess_ratio for nothing) or produce inferior results.
++        if (
++            not mb_definitive_match_found
++            and is_multi_byte_decoder
++            and multi_byte_bonus
++            and decoded_payload is not None
++            and len(decoded_payload) < length * 0.98
++            and encoding_iana
++            not in {
++                "utf_8",
++                "utf_8_sig",
++                "utf_16",
++                "utf_16_be",
++                "utf_16_le",
++                "utf_32",
++                "utf_32_be",
++                "utf_32_le",
++                "utf_7",
++            }
++            and "ascii" in tested
++            and "utf_8" in tested
++        ):
++            mb_definitive_match_found = True
++            logger.log(
++                TRACE,
++                "Multi-byte definitive match: %s (chaos=%.3f, decoded=%d/%d=%.1f%%). Single-byte encodings will be skipped.",
++                encoding_iana,
++                mean_mess_ratio,
++                len(decoded_payload),
++                length,
++                len(decoded_payload) / length * 100,
++            )
++
+         if encoding_iana == sig_encoding:
+             logger.debug(
+                 "Encoding detection: %s is most likely the one as we detected a BOM or SIG within "
+diff --git a/src/charset_normalizer/cd.py b/src/charset_normalizer/cd.py
+--- a/src/charset_normalizer/cd.py
++++ b/src/charset_normalizer/cd.py
+@@ -31,7 +31,9 @@ def encoding_unicode_range(iana_name: str) -> list[str]:
+     Return associated unicode ranges in a single byte code page.
+     """
+     if is_multi_byte_encoding(iana_name):
+-        raise OSError("Function not supported on multi-byte code page")
++        raise OSError(  # Defensive:
++            "Function not supported on multi-byte code page"
++        )
+ 
+     decoder = importlib.import_module(f"encodings.{iana_name}").IncrementalDecoder
+ 
+@@ -179,7 +181,7 @@ def characters_popularity_compare(
+     Beware that is function is not strict on the match in order to ease the detection. (Meaning close match is 1.)
+     """
+     if language not in FREQUENCIES:
+-        raise ValueError(f"{language} not available")
++        raise ValueError(f"{language} not available")  # Defensive:
+ 
+     character_approved_count: int = 0
+     frequencies_language_set: frozenset[str] = _FREQUENCIES_SET[language]
+@@ -205,6 +207,13 @@ def characters_popularity_compare(
+         (lr, ordered_rank[c]) for c, lr in lang_rank.items() if c in ordered_rank
+     ]
+ 
++    # Pre-extract lr and orr arrays for faster iteration in the inner loop.
++    # Plain integer loops with local arrays are much faster under mypyc than
++    # generator expression sums over a list of tuples.
++    common_count: int = len(common_chars)
++    common_lr: list[int] = [p[0] for p in common_chars]
++    common_orr: list[int] = [p[1] for p in common_chars]
++
+     for character, character_rank in zip(
+         ordered_characters, range(0, ordered_characters_count)
+     ):
+@@ -230,18 +239,21 @@ def characters_popularity_compare(
+ 
+         # Count how many characters appear "before" in both orderings,
+         # and how many appear "at or after" in both orderings.
+-        before_match_count: int = sum(
+-            1
+-            for lr, orr in common_chars
+-            if lr < character_rank_in_language and orr < character_rank
+-        )
++        # Single pass over pre-extracted arrays — much faster under mypyc
++        # than two generator expression sums.
++        before_match_count: int = 0
++        after_match_count: int = 0
++        for i in range(common_count):
++            lr_i: int = common_lr[i]
++            orr_i: int = common_orr[i]
++            if lr_i < character_rank_in_language:
++                if orr_i < character_rank:
++                    before_match_count += 1
++            else:
++                if orr_i >= character_rank:
++                    after_match_count += 1
+ 
+         after_len: int = target_language_characters_count - character_rank_in_language
+-        after_match_count: int = sum(
+-            1
+-            for lr, orr in common_chars
+-            if lr >= character_rank_in_language and orr >= character_rank
+-        )
+ 
+         if character_rank_in_language == 0 and before_match_count <= 4:
+             character_approved_count += 1
+@@ -273,15 +285,32 @@ def alpha_unicode_split(decoded_sequence: str) -> list[str]:
+     single_layer_key: str | None = None
+     multi_layer: bool = False
+ 
++    # Cache the last character_range and its resolved layer to avoid repeated
++    # is_suspiciously_successive_range calls for consecutive same-range chars.
++    prev_character_range: str | None = None
++    prev_layer_target: str | None = None
++
+     for character in decoded_sequence:
+         if character.isalpha() is False:
+             continue
+ 
+-        character_range: str | None = unicode_range(character)
++        # ASCII fast-path: a-z and A-Z are always "Basic Latin".
++        # Avoids unicode_range() function call overhead for the most common case.
++        character_ord: int = ord(character)
++        if character_ord < 128:
++            character_range: str | None = "Basic Latin"
++        else:
++            character_range = unicode_range(character)
+ 
+         if character_range is None:
+             continue
+ 
++        # Fast path: same range as previous character → reuse cached layer target.
++        if character_range == prev_character_range:
++            if prev_layer_target is not None:
++                layers[prev_layer_target].append(character)
++            continue
++
+         layer_target_range: str | None = None
+ 
+         if multi_layer:
+@@ -311,6 +340,10 @@ def alpha_unicode_split(decoded_sequence: str) -> list[str]:
+ 
+         layers[layer_target_range].append(character)
+ 
++        # Cache for next iteration
++        prev_character_range = character_range
++        prev_layer_target = layer_target_range
++
+     return ["".join(chars).lower() for chars in layers.values()]
+ 
+ 
+diff --git a/src/charset_normalizer/cli/__main__.py b/src/charset_normalizer/cli/__main__.py
+--- a/src/charset_normalizer/cli/__main__.py
++++ b/src/charset_normalizer/cli/__main__.py
+@@ -14,7 +14,7 @@
+ from charset_normalizer.version import __version__
+ 
+ 
+-def query_yes_no(question: str, default: str = "yes") -> bool:
++def query_yes_no(question: str, default: str = "yes") -> bool:  # Defensive:
+     """Ask a yes/no question via input() and return the answer as a bool."""
+     prompt = " [Y/n] " if default == "yes" else " [y/N] "
+ 
+@@ -244,25 +244,24 @@ def cli_detect(argv: list[str] | None = None) -> int:
+                 )
+             )
+         else:
+-            x_.append(
+-                CliDetectionResult(
+-                    abspath(my_file.name),
+-                    best_guess.encoding,
+-                    best_guess.encoding_aliases,
+-                    [
+-                        cp
+-                        for cp in best_guess.could_be_from_charset
+-                        if cp != best_guess.encoding
+-                    ],
+-                    best_guess.language,
+-                    best_guess.alphabets,
+-                    best_guess.bom,
+-                    best_guess.percent_chaos,
+-                    best_guess.percent_coherence,
+-                    None,
+-                    True,
+-                )
++            cli_result = CliDetectionResult(
++                abspath(my_file.name),
++                best_guess.encoding,
++                best_guess.encoding_aliases,
++                [
++                    cp
++                    for cp in best_guess.could_be_from_charset
++                    if cp != best_guess.encoding
++                ],
++                best_guess.language,
++                best_guess.alphabets,
++                best_guess.bom,
++                best_guess.percent_chaos,
++                best_guess.percent_coherence,
++                None,
++                True,
+             )
++            x_.append(cli_result)
+ 
+             if len(matches) > 1 and args.alternatives:
+                 for el in matches:
+@@ -323,11 +322,11 @@ def cli_detect(argv: list[str] | None = None) -> int:
+                     continue
+ 
+                 try:
+-                    x_[0].unicode_path = join(dir_path, ".".join(o_))
++                    cli_result.unicode_path = join(dir_path, ".".join(o_))
+ 
+-                    with open(x_[0].unicode_path, "wb") as fp:
++                    with open(cli_result.unicode_path, "wb") as fp:
+                         fp.write(best_guess.output())
+-                except OSError as e:
++                except OSError as e:  # Defensive:
+                     print(str(e), file=sys.stderr)
+                     if my_file.closed is False:
+                         my_file.close()
+@@ -359,5 +358,5 @@ def cli_detect(argv: list[str] | None = None) -> int:
+     return 0
+ 
+ 
+-if __name__ == "__main__":
++if __name__ == "__main__":  # Defensive:
+     cli_detect()
+diff --git a/src/charset_normalizer/constant.py b/src/charset_normalizer/constant.py
+--- a/src/charset_normalizer/constant.py
++++ b/src/charset_normalizer/constant.py
+@@ -25,7 +25,7 @@
+ 
+ UTF8_MAXIMAL_ALLOCATION: int = 1_112_064
+ 
+-# Up-to-date Unicode ucd/15.0.0
++# Up-to-date Unicode ucd/17.0.0
+ UNICODE_RANGES_COMBINED: dict[str, range] = {
+     "Control character": range(32),
+     "Basic Latin": range(32, 128),
+@@ -213,6 +213,7 @@
+     "Elbasan": range(66816, 66864),
+     "Caucasian Albanian": range(66864, 66928),
+     "Vithkuqi": range(66928, 67008),
++    "Todhri": range(67008, 67072),
+     "Linear A": range(67072, 67456),
+     "Latin Extended-F": range(67456, 67520),
+     "Cypriot Syllabary": range(67584, 67648),
+@@ -222,6 +223,7 @@
+     "Hatran": range(67808, 67840),
+     "Phoenician": range(67840, 67872),
+     "Lydian": range(67872, 67904),
++    "Sidetic": range(67904, 67936),
+     "Meroitic Hieroglyphs": range(67968, 68000),
+     "Meroitic Cursive": range(68000, 68096),
+     "Kharoshthi": range(68096, 68192),
+@@ -235,6 +237,7 @@
+     "Old Turkic": range(68608, 68688),
+     "Old Hungarian": range(68736, 68864),
+     "Hanifi Rohingya": range(68864, 68928),
++    "Garay": range(68928, 69008),
+     "Rumi Numeral Symbols": range(69216, 69248),
+     "Yezidi": range(69248, 69312),
+     "Arabic Extended-C": range(69312, 69376),
+@@ -254,12 +257,14 @@
+     "Multani": range(70272, 70320),
+     "Khudawadi": range(70320, 70400),
+     "Grantha": range(70400, 70528),
++    "Tulu-Tigalari": range(70528, 70656),
+     "Newa": range(70656, 70784),
+     "Tirhuta": range(70784, 70880),
+     "Siddham": range(71040, 71168),
+     "Modi": range(71168, 71264),
+     "Mongolian Supplement": range(71264, 71296),
+     "Takri": range(71296, 71376),
++    "Myanmar Extended-C": range(71376, 71424),
+     "Ahom": range(71424, 71504),
+     "Dogra": range(71680, 71760),
+     "Warang Citi": range(71840, 71936),
+@@ -270,10 +275,13 @@
+     "Unified Canadian Aboriginal Syllabics Extended-A": range(72368, 72384),
+     "Pau Cin Hau": range(72384, 72448),
+     "Devanagari Extended-A": range(72448, 72544),
++    "Sharada Supplement": range(72544, 72576),
++    "Sunuwar": range(72640, 72704),
+     "Bhaiksuki": range(72704, 72816),
+     "Marchen": range(72816, 72896),
+     "Masaram Gondi": range(72960, 73056),
+     "Gunjala Gondi": range(73056, 73136),
++    "Tolong Siki": range(73136, 73200),
+     "Makasar": range(73440, 73472),
+     "Kawi": range(73472, 73568),
+     "Lisu Supplement": range(73648, 73664),
+@@ -284,26 +292,33 @@
+     "Cypro-Minoan": range(77712, 77824),
+     "Egyptian Hieroglyphs": range(77824, 78896),
+     "Egyptian Hieroglyph Format Controls": range(78896, 78944),
++    "Egyptian Hieroglyphs Extended-A": range(78944, 82944),
+     "Anatolian Hieroglyphs": range(82944, 83584),
++    "Gurung Khema": range(90368, 90432),
+     "Bamum Supplement": range(92160, 92736),
+     "Mro": range(92736, 92784),
+     "Tangsa": range(92784, 92880),
+     "Bassa Vah": range(92880, 92928),
+     "Pahawh Hmong": range(92928, 93072),
++    "Kirat Rai": range(93504, 93568),
+     "Medefaidrin": range(93760, 93856),
++    "Beria Erfe": range(93856, 93920),
+     "Miao": range(93952, 94112),
+     "Ideographic Symbols and Punctuation": range(94176, 94208),
+     "Tangut": range(94208, 100352),
+     "Tangut Components": range(100352, 101120),
+     "Khitan Small Script": range(101120, 101632),
+     "Tangut Supplement": range(101632, 101760),
++    "Tangut Components Supplement": range(101760, 101888),
+     "Kana Extended-B": range(110576, 110592),
+     "Kana Supplement": range(110592, 110848),
+     "Kana Extended-A": range(110848, 110896),
+     "Small Kana Extension": range(110896, 110960),
+     "Nushu": range(110960, 111360),
+     "Duployan": range(113664, 113824),
+     "Shorthand Format Controls": range(113824, 113840),
++    "Symbols for Legacy Computing Supplement": range(117760, 118464),
++    "Miscellaneous Symbols Supplement": range(118464, 118528),
+     "Znamenny Musical Notation": range(118528, 118736),
+     "Byzantine Musical Symbols": range(118784, 119040),
+     "Musical Symbols": range(119040, 119296),
+@@ -321,6 +336,8 @@
+     "Toto": range(123536, 123584),
+     "Wancho": range(123584, 123648),
+     "Nag Mundari": range(124112, 124160),
++    "Ol Onal": range(124368, 124416),
++    "Tai Yo": range(124608, 124672),
+     "Ethiopic Extended-B": range(124896, 124928),
+     "Mende Kikakui": range(124928, 125152),
+     "Adlam": range(125184, 125280),
+@@ -333,7 +350,7 @@
+     "Enclosed Alphanumeric Supplement": range(127232, 127488),
+     "Enclosed Ideographic Supplement": range(127488, 127744),
+     "Miscellaneous Symbols and Pictographs": range(127744, 128512),
+-    "Emoticons range(Emoji)": range(128512, 128592),
++    "Emoticons": range(128512, 128592),
+     "Ornamental Dingbats": range(128592, 128640),
+     "Transport and Map Symbols": range(128640, 128768),
+     "Alchemical Symbols": range(128768, 128896),
+@@ -348,9 +365,11 @@
+     "CJK Unified Ideographs Extension D": range(177984, 178208),
+     "CJK Unified Ideographs Extension E": range(178208, 183984),
+     "CJK Unified Ideographs Extension F": range(183984, 191472),
++    "CJK Unified Ideographs Extension I": range(191472, 192096),
+     "CJK Compatibility Ideographs Supplement": range(194560, 195104),
+     "CJK Unified Ideographs Extension G": range(196608, 201552),
+     "CJK Unified Ideographs Extension H": range(201552, 205744),
++    "CJK Unified Ideographs Extension J": range(205744, 210048),
+     "Tags": range(917504, 917632),
+     "Variation Selectors Supplement": range(917760, 918000),
+     "Supplementary Private Use Area-A": range(983040, 1048576),
+diff --git a/src/charset_normalizer/legacy.py b/src/charset_normalizer/legacy.py
+--- a/src/charset_normalizer/legacy.py
++++ b/src/charset_normalizer/legacy.py
+@@ -6,9 +6,8 @@
+ from .api import from_bytes
+ from .constant import CHARDET_CORRESPONDENCE, TOO_SMALL_SEQUENCE
+ 
+-# TODO: remove this check when dropping Python 3.7 support
+ if TYPE_CHECKING:
+-    from typing_extensions import TypedDict
++    from typing import TypedDict
+ 
+     class ResultDict(TypedDict):
+         encoding: str | None
+diff --git a/src/charset_normalizer/md.py b/src/charset_normalizer/md.py
+--- a/src/charset_normalizer/md.py
++++ b/src/charset_normalizer/md.py
+@@ -16,10 +16,13 @@ def final(cls):  # type: ignore[misc,no-untyped-def]
+ 
+ 
+ from .constant import (
++    COMMON_CJK_CHARACTERS,
+     COMMON_SAFE_ASCII_CHARACTERS,
+     TRACE,
+     UNICODE_SECONDARY_RANGE_KEYWORD,
+     _ACCENTUATED,
++    _ARABIC,
++    _ARABIC_ISOLATED_FORM,
+     _CJK,
+     _HANGUL,
+     _HIRAGANA,
+@@ -29,26 +32,177 @@ def final(cls):  # type: ignore[misc,no-untyped-def]
+ )
+ from .utils import (
+     _character_flags,
+-    is_accentuated,
+-    is_arabic,
+-    is_arabic_isolated_form,
+-    is_case_variable,
+-    is_cjk,
+     is_emoticon,
+-    is_latin,
+     is_punctuation,
+     is_separator,
+     is_symbol,
+-    is_unprintable,
+     remove_accent,
+     unicode_range,
+-    is_cjk_uncommon,
+ )
+ 
+ # Combined bitmask for CJK/Hangul/Katakana/Hiragana/Thai glyph detection.
+ _GLYPH_MASK: int = _CJK | _HANGUL | _KATAKANA | _HIRAGANA | _THAI
+ 
+ 
++@final
++class CharInfo:
++    """Pre-computed character properties shared across all detectors.
++
++    Instantiated once and reused via :meth:`update` on every character
++    in the hot loop so that redundant calls to str methods
++    (``isalpha``, ``isupper``, …) and cached utility functions
++    (``_character_flags``, ``is_punctuation``, …) are avoided when
++    several plugins need the same information.
++    """
++
++    __slots__ = (
++        "character",
++        "printable",
++        "alpha",
++        "upper",
++        "lower",
++        "space",
++        "digit",
++        "is_ascii",
++        "case_variable",
++        "flags",
++        "accentuated",
++        "latin",
++        "is_cjk",
++        "is_arabic",
++        "is_glyph",
++        "punct",
++        "sym",
++    )
++
++    def __init__(self) -> None:
++        self.character: str = ""
++        self.printable: bool = False
++        self.alpha: bool = False
++        self.upper: bool = False
++        self.lower: bool = False
++        self.space: bool = False
++        self.digit: bool = False
++        self.is_ascii: bool = False
++        self.case_variable: bool = False
++        self.flags: int = 0
++        self.accentuated: bool = False
++        self.latin: bool = False
++        self.is_cjk: bool = False
++        self.is_arabic: bool = False
++        self.is_glyph: bool = False
++        self.punct: bool = False
++        self.sym: bool = False
++
++    def update(self, character: str) -> None:
++        """Update all properties for *character* (called once per character)."""
++        self.character = character
++
++        # ASCII fast-path: for characters with ord < 128, we can skip
++        # _character_flags() entirely and derive most properties from ord.
++        o: int = ord(character)
++        if o < 128:
++            self.is_ascii = True
++            self.accentuated = False
++            self.is_cjk = False
++            self.is_arabic = False
++            self.is_glyph = False
++            # ASCII alpha: a-z (97-122) or A-Z (65-90)
++            if 65 <= o <= 90:
++                # Uppercase ASCII letter
++                self.alpha = True
++                self.upper = True
++                self.lower = False
++                self.space = False
++                self.digit = False
++                self.printable = True
++                self.case_variable = True
++                self.flags = _LATIN
++                self.latin = True
++                self.punct = False
++                self.sym = False
++            elif 97 <= o <= 122:
++                # Lowercase ASCII letter
++                self.alpha = True
++                self.upper = False
++                self.lower = True
++                self.space = False
++                self.digit = False
++                self.printable = True
++                self.case_variable = True
++                self.flags = _LATIN
++                self.latin = True
++                self.punct = False
++                self.sym = False
++            elif 48 <= o <= 57:
++                # ASCII digit 0-9
++                self.alpha = False
++                self.upper = False
++                self.lower = False
++                self.space = False
++                self.digit = True
++                self.printable = True
++                self.case_variable = False
++                self.flags = 0
++                self.latin = False
++                self.punct = False
++                self.sym = False
++            elif o == 32 or (9 <= o <= 13):
++                # Space, tab, newline, etc.
++                self.alpha = False
++                self.upper = False
++                self.lower = False
++                self.space = True
++                self.digit = False
++                self.printable = o == 32
++                self.case_variable = False
++                self.flags = 0
++                self.latin = False
++                self.punct = False
++                self.sym = False
++            else:
++                # Other ASCII (punctuation, symbols, control chars)
++                self.printable = character.isprintable()
++                self.alpha = False
++                self.upper = False
++                self.lower = False
++                self.space = False
++                self.digit = False
++                self.case_variable = False
++                self.flags = 0
++                self.latin = False
++                self.punct = is_punctuation(character) if self.printable else False
++                self.sym = is_symbol(character) if self.printable else False
++        else:
++            # Non-ASCII path
++            self.is_ascii = False
++            self.printable = character.isprintable()
++            self.alpha = character.isalpha()
++            self.upper = character.isupper()
++            self.lower = character.islower()
++            self.space = character.isspace()
++            self.digit = character.isdigit()
++            self.case_variable = self.lower != self.upper
++
++            # Flag-based classification (single unicodedata.name() call, lru-cached)
++            flags: int
++            if self.alpha:
++                flags = _character_flags(character)
++            else:
++                flags = 0
++            self.flags = flags
++            self.accentuated = bool(flags & _ACCENTUATED)
++            self.latin = bool(flags & _LATIN)
++            self.is_cjk = bool(flags & _CJK)
++            self.is_arabic = bool(flags & _ARABIC)
++            self.is_glyph = bool(flags & _GLYPH_MASK)
++
++            # Eagerly compute punct and sym (avoids property dispatch overhead
++            # on 300K+ accesses in the hot loop).
++            self.punct = is_punctuation(character) if self.printable else False
++            self.sym = is_symbol(character) if self.printable else False
++
++
+ class MessDetectorPlugin:
+     """
+     Base abstract class used for mess detection plugins.
+@@ -57,20 +211,14 @@ class MessDetectorPlugin:
+ 
+     __slots__ = ()
+ 
+-    def eligible(self, character: str) -> bool:
+-        """
+-        Determine if given character should be fed in.
+-        """
+-        raise NotImplementedError  # pragma: nocover
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
+         """
+         The main routine to be executed upon character.
+         Insert the logic in witch the text would be considered chaotic.
+         """
+-        raise NotImplementedError  # pragma: nocover
++        raise NotImplementedError  # Defensive:
+ 
+-    def reset(self) -> None:  # pragma: no cover
++    def reset(self) -> None:  # Defensive:
+         """
+         Permit to reset the plugin to the initial state.
+         """
+@@ -82,7 +230,7 @@ def ratio(self) -> float:
+         Compute the chaos ratio based on what your feed() has seen.
+         Must NOT be lower than 0.; No restriction gt 0.
+         """
+-        raise NotImplementedError  # pragma: nocover
++        raise NotImplementedError  # Defensive:
+ 
+ 
+ @final
+@@ -103,23 +251,17 @@ def __init__(self) -> None:
+         self._last_printable_char: str | None = None
+         self._frenzy_symbol_in_word: bool = False
+ 
+-    def eligible(self, character: str) -> bool:
+-        return character.isprintable()
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
+         self._character_count += 1
+ 
+         if (
+             character != self._last_printable_char
+             and character not in COMMON_SAFE_ASCII_CHARACTERS
+         ):
+-            if is_punctuation(character):
++            if info.punct:
+                 self._punctuation_count += 1
+-            elif (
+-                not character.isdigit()
+-                and is_symbol(character)
+-                and not is_emoticon(character)
+-            ):
++            elif not info.digit and info.sym and not is_emoticon(character):
+                 self._symbol_count += 2
+ 
+         self._last_printable_char = character
+@@ -149,13 +291,11 @@ def __init__(self) -> None:
+         self._character_count: int = 0
+         self._accentuated_count: int = 0
+ 
+-    def eligible(self, character: str) -> bool:
+-        return character.isalpha()
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
+         self._character_count += 1
+ 
+-        if is_accentuated(character):
++        if info.accentuated:
+             self._accentuated_count += 1
+ 
+     def reset(self) -> None:  # Abstract
+@@ -179,11 +319,14 @@ def __init__(self) -> None:
+         self._unprintable_count: int = 0
+         self._character_count: int = 0
+ 
+-    def eligible(self, character: str) -> bool:
+-        return True
+-
+-    def feed(self, character: str) -> None:
+-        if is_unprintable(character):
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
++        if (
++            not info.space
++            and not info.printable
++            and character != "\x1a"
++            and character != "\ufeff"
++        ):
+             self._unprintable_count += 1
+         self._character_count += 1
+ 
+@@ -192,7 +335,7 @@ def reset(self) -> None:  # Abstract
+ 
+     @property
+     def ratio(self) -> float:
+-        if self._character_count == 0:
++        if self._character_count == 0:  # Defensive:
+             return 0.0
+ 
+         return (self._unprintable_count * 8) / self._character_count
+@@ -214,24 +357,20 @@ def __init__(self) -> None:
+         self._last_latin_character: str | None = None
+         self._last_was_accentuated: bool = False
+ 
+-    def eligible(self, character: str) -> bool:
+-        return character.isalpha() and is_latin(character)
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
+         self._character_count += 1
+-        current_accentuated: bool = is_accentuated(character)
+         if (
+             self._last_latin_character is not None
+-            and current_accentuated
++            and info.accentuated
+             and self._last_was_accentuated
+         ):
+-            if character.isupper() and self._last_latin_character.isupper():
++            if info.upper and self._last_latin_character.isupper():
+                 self._successive_count += 1
+-            # Worse if its the same char duplicated with different accent.
+             if remove_accent(character) == remove_accent(self._last_latin_character):
+                 self._successive_count += 1
+         self._last_latin_character = character
+-        self._last_was_accentuated = current_accentuated
++        self._last_was_accentuated = info.accentuated
+ 
+     def reset(self) -> None:  # Abstract
+         self._successive_count = 0
+@@ -262,17 +401,11 @@ def __init__(self) -> None:
+         self._last_printable_seen: str | None = None
+         self._last_printable_range: str | None = None
+ 
+-    def eligible(self, character: str) -> bool:
+-        return character.isprintable()
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
+         self._character_count += 1
+ 
+-        if (
+-            character.isspace()
+-            or is_punctuation(character)
+-            or character in COMMON_SAFE_ASCII_CHARACTERS
+-        ):
++        if info.space or info.punct or character in COMMON_SAFE_ASCII_CHARACTERS:
+             self._last_printable_seen = None
+             self._last_printable_range = None
+             return
+@@ -345,37 +478,31 @@ def __init__(self) -> None:
+         self._buffer_glyph_count: int = 0
+         self._buffer_upper_count: int = 0
+ 
+-    def eligible(self, character: str) -> bool:
+-        return True
+-
+-    def feed(self, character: str) -> None:
+-        if character.isalpha():
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
++        if info.alpha:
+             self._buffer_length += 1
+             self._buffer_last_char = character
+ 
+-            if character.isupper():
++            if info.upper:
+                 self._buffer_upper_count += 1
+ 
+-            flags: int = _character_flags(character)
+-            char_accentuated: bool = bool(flags & _ACCENTUATED)
+-            self._buffer_last_char_accentuated = char_accentuated
++            self._buffer_last_char_accentuated = info.accentuated
+ 
+-            if char_accentuated:
++            if info.accentuated:
+                 self._buffer_accent_count += 1
+             if (
+                 not self._foreign_long_watch
+-                and (not (flags & _LATIN) or char_accentuated)
+-                and not (flags & _GLYPH_MASK)
++                and (not info.latin or info.accentuated)
++                and not info.is_glyph
+             ):
+                 self._foreign_long_watch = True
+-            if flags & _GLYPH_MASK:
++            if info.is_glyph:
+                 self._buffer_glyph_count += 1
+             return
+         if not self._buffer_length:
+             return
+-        if (
+-            character.isspace() or is_punctuation(character) or is_separator(character)
+-        ) and self._buffer_length:
++        if info.space or info.punct or is_separator(character):
+             self._word_count += 1
+             buffer_length: int = self._buffer_length
+ 
+@@ -384,8 +511,6 @@ def feed(self, character: str) -> None:
+             if buffer_length >= 4:
+                 if self._buffer_accent_count / buffer_length >= 0.5:
+                     self._is_current_word_bad = True
+-                # Word/Buffer ending with an upper case accentuated letter are so rare,
+-                # that we will consider them all as suspicious. Same weight as foreign_long suspicious.
+                 elif (
+                     self._buffer_last_char_accentuated
+                     and self._buffer_last_char.isupper()  # type: ignore[union-attr]
+@@ -420,8 +545,8 @@ def feed(self, character: str) -> None:
+             self._buffer_upper_count = 0
+         elif (
+             character not in {"<", ">", "-", "=", "~", "|", "_"}
+-            and not character.isdigit()
+-            and is_symbol(character)
++            and not info.digit
++            and info.sym
+         ):
+             self._is_current_word_bad = True
+             self._buffer_length += 1
+@@ -463,15 +588,12 @@ def __init__(self) -> None:
+         self._character_count: int = 0
+         self._uncommon_count: int = 0
+ 
+-    def eligible(self, character: str) -> bool:
+-        return is_cjk(character)
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
+         self._character_count += 1
+ 
+-        if is_cjk_uncommon(character):
++        if character not in COMMON_CJK_CHARACTERS:
+             self._uncommon_count += 1
+-            return
+ 
+     def reset(self) -> None:  # Abstract
+         self._character_count = 0
+@@ -498,6 +620,8 @@ class ArchaicUpperLowerPlugin(MessDetectorPlugin):
+         "_successive_upper_lower_count_final",
+         "_character_count",
+         "_last_alpha_seen",
++        "_last_alpha_seen_upper",
++        "_last_alpha_seen_lower",
+         "_current_ascii_only",
+     )
+ 
+@@ -512,19 +636,19 @@ def __init__(self) -> None:
+         self._character_count: int = 0
+ 
+         self._last_alpha_seen: str | None = None
++        self._last_alpha_seen_upper: bool = False
++        self._last_alpha_seen_lower: bool = False
+         self._current_ascii_only: bool = True
+ 
+-    def eligible(self, character: str) -> bool:
+-        return True
+-
+-    def feed(self, character: str) -> None:
+-        is_concerned: bool = character.isalpha() and is_case_variable(character)
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
++        is_concerned: bool = info.alpha and info.case_variable
+         chunk_sep: bool = not is_concerned
+ 
+         if chunk_sep and self._character_count_since_last_sep > 0:
+             if (
+                 self._character_count_since_last_sep <= 64
+-                and not character.isdigit()
++                and not info.digit
+                 and not self._current_ascii_only
+             ):
+                 self._successive_upper_lower_count_final += (
+@@ -540,12 +664,12 @@ def feed(self, character: str) -> None:
+ 
+             return
+ 
+-        if self._current_ascii_only and not character.isascii():
++        if self._current_ascii_only and not info.is_ascii:
+             self._current_ascii_only = False
+ 
+         if self._last_alpha_seen is not None:
+-            if (character.isupper() and self._last_alpha_seen.islower()) or (
+-                character.islower() and self._last_alpha_seen.isupper()
++            if (info.upper and self._last_alpha_seen_lower) or (
++                info.lower and self._last_alpha_seen_upper
+             ):
+                 if self._buf:
+                     self._successive_upper_lower_count += 2
+@@ -558,19 +682,23 @@ def feed(self, character: str) -> None:
+         self._character_count += 1
+         self._character_count_since_last_sep += 1
+         self._last_alpha_seen = character
++        self._last_alpha_seen_upper = info.upper
++        self._last_alpha_seen_lower = info.lower
+ 
+     def reset(self) -> None:  # Abstract
+         self._character_count = 0
+         self._character_count_since_last_sep = 0
+         self._successive_upper_lower_count = 0
+         self._successive_upper_lower_count_final = 0
+         self._last_alpha_seen = None
++        self._last_alpha_seen_upper = False
++        self._last_alpha_seen_lower = False
+         self._buf = False
+         self._current_ascii_only = True
+ 
+     @property
+     def ratio(self) -> float:
+-        if self._character_count == 0:
++        if self._character_count == 0:  # Defensive:
+             return 0.0
+ 
+         return self._successive_upper_lower_count_final / self._character_count
+@@ -588,13 +716,11 @@ def reset(self) -> None:  # Abstract
+         self._character_count = 0
+         self._isolated_form_count = 0
+ 
+-    def eligible(self, character: str) -> bool:
+-        return is_arabic(character)
+-
+-    def feed(self, character: str) -> None:
++    def feed_info(self, character: str, info: CharInfo) -> None:
++        """Optimized feed using pre-computed character info."""
+         self._character_count += 1
+ 
+-        if is_arabic_isolated_form(character):
++        if info.flags & _ARABIC_ISOLATED_FORM:
+             self._isolated_form_count += 1
+ 
+     @property
+@@ -681,12 +807,6 @@ def is_suspiciously_successive_range(
+     return True
+ 
+ 
+-# import time messdetector plugins detection(...)
+-_DETECTOR_CLASSES: tuple[type[MessDetectorPlugin], ...] = tuple(
+-    md_class for md_class in MessDetectorPlugin.__subclasses__()
+-)
+-
+-
+ @lru_cache(maxsize=2048)
+ def mess_ratio(
+     decoded_sequence: str, maximum_threshold: float = 0.2, debug: bool = False
+@@ -695,9 +815,6 @@ def mess_ratio(
+     Compute a mess ratio given a decoded bytes sequence. The maximum threshold does stop the computation earlier.
+     """
+ 
+-    detectors: list[MessDetectorPlugin] = [md_class() for md_class in _DETECTOR_CLASSES]
+-
+-    mean_mess_ratio: float
+     seq_len: int = len(decoded_sequence)
+ 
+     if seq_len < 511:
+@@ -707,24 +824,99 @@ def mess_ratio(
+     else:
+         step = 128
+ 
++    # Create each detector as a named local variable (unrolled from the generic loop).
++    # This eliminates per-character iteration over the detector list and
++    # per-character eligible() virtual dispatch, while keeping every plugin class
++    # intact and fully readable.
++    d_sp: TooManySymbolOrPunctuationPlugin = TooManySymbolOrPunctuationPlugin()
++    d_ta: TooManyAccentuatedPlugin = TooManyAccentuatedPlugin()
++    d_up: UnprintablePlugin = UnprintablePlugin()
++    d_sda: SuspiciousDuplicateAccentPlugin = SuspiciousDuplicateAccentPlugin()
++    d_sr: SuspiciousRange = SuspiciousRange()
++    d_sw: SuperWeirdWordPlugin = SuperWeirdWordPlugin()
++    d_cu: CjkUncommonPlugin = CjkUncommonPlugin()
++    d_au: ArchaicUpperLowerPlugin = ArchaicUpperLowerPlugin()
++    d_ai: ArabicIsolatedFormPlugin = ArabicIsolatedFormPlugin()
++
++    # Local references for feed_info methods called in the hot loop.
++    d_sp_feed = d_sp.feed_info
++    d_ta_feed = d_ta.feed_info
++    d_up_feed = d_up.feed_info
++    d_sda_feed = d_sda.feed_info
++    d_sr_feed = d_sr.feed_info
++    d_sw_feed = d_sw.feed_info
++    d_cu_feed = d_cu.feed_info
++    d_au_feed = d_au.feed_info
++    d_ai_feed = d_ai.feed_info
++
++    # Single reusable CharInfo object (avoids per-character allocation).
++    info: CharInfo = CharInfo()
++    info_update = info.update
++
++    mean_mess_ratio: float
++
+     for block_start in range(0, seq_len, step):
+         for character in decoded_sequence[block_start : block_start + step]:
+-            for detector in detectors:
+-                if detector.eligible(character):
+-                    detector.feed(character)
+-
+-        mean_mess_ratio = sum(dt.ratio for dt in detectors)
++            # Pre-compute all character properties once (shared across all plugins).
++            info_update(character)
++
++            # Detectors with eligible() == always True
++            d_up_feed(character, info)
++            d_sw_feed(character, info)
++            d_au_feed(character, info)
++
++            # Detectors with eligible() == isprintable
++            if info.printable:
++                d_sp_feed(character, info)
++                d_sr_feed(character, info)
++
++            # Detectors with eligible() == isalpha
++            if info.alpha:
++                d_ta_feed(character, info)
++                # SuspiciousDuplicateAccent: isalpha() and is_latin()
++                if info.latin:
++                    d_sda_feed(character, info)
++                # CjkUncommon: is_cjk()
++                if info.is_cjk:
++                    d_cu_feed(character, info)
++                # ArabicIsolatedForm: is_arabic()
++                if info.is_arabic:
++                    d_ai_feed(character, info)
++
++        mean_mess_ratio = (
++            d_sp.ratio
++            + d_ta.ratio
++            + d_up.ratio
++            + d_sda.ratio
++            + d_sr.ratio
++            + d_sw.ratio
++            + d_cu.ratio
++            + d_au.ratio
++            + d_ai.ratio
++        )
+ 
+         if mean_mess_ratio >= maximum_threshold:
+             break
+     else:
+         # Flush last word buffer in SuperWeirdWordPlugin via trailing newline.
+-        for detector in detectors:
+-            if detector.eligible("\n"):
+-                detector.feed("\n")
+-        mean_mess_ratio = sum(dt.ratio for dt in detectors)
++        info_update("\n")
++        d_sw_feed("\n", info)
++        d_au_feed("\n", info)
++        d_up_feed("\n", info)
++
++        mean_mess_ratio = (
++            d_sp.ratio
++            + d_ta.ratio
++            + d_up.ratio
++            + d_sda.ratio
++            + d_sr.ratio
++            + d_sw.ratio
++            + d_cu.ratio
++            + d_au.ratio
++            + d_ai.ratio
++        )
+ 
+-    if debug:
++    if debug:  # Defensive:
+         logger = getLogger("charset_normalizer")
+ 
+         logger.log(
+@@ -738,7 +930,7 @@ def mess_ratio(
+             logger.log(TRACE, f"Starting with: {decoded_sequence[:16]}")
+             logger.log(TRACE, f"Ending with: {decoded_sequence[-16::]}")
+ 
+-        for dt in detectors:
++        for dt in [d_sp, d_ta, d_up, d_sda, d_sr, d_sw, d_cu, d_au, d_ai]:
+             logger.log(TRACE, f"{dt.__class__}: {dt.ratio}")
+ 
+     return round(mean_mess_ratio, 3)
+diff --git a/src/charset_normalizer/models.py b/src/charset_normalizer/models.py
+--- a/src/charset_normalizer/models.py
++++ b/src/charset_normalizer/models.py
+@@ -12,15 +12,15 @@
+ class CharsetMatch:
+     def __init__(
+         self,
+-        payload: bytes,
++        payload: bytes | bytearray,
+         guessed_encoding: str,
+         mean_mess_ratio: float,
+         has_sig_or_bom: bool,
+         languages: CoherenceMatches,
+         decoded_payload: str | None = None,
+         preemptive_declaration: str | None = None,
+     ):
+-        self._payload: bytes = payload
++        self._payload: bytes | bytearray = payload
+ 
+         self._encoding: str = guessed_encoding
+         self._mean_mess_ratio: float = mean_mess_ratio
+@@ -55,10 +55,10 @@ def __lt__(self, other: object) -> bool:
+         chaos_difference: float = abs(self.chaos - other.chaos)
+         coherence_difference: float = abs(self.coherence - other.coherence)
+ 
+-        # Below 1% difference --> Use Coherence
+-        if chaos_difference < 0.01 and coherence_difference > 0.02:
++        # Below 0.5% difference --> Use Coherence
++        if chaos_difference < 0.005 and coherence_difference > 0.02:
+             return self.coherence > other.coherence
+-        elif chaos_difference < 0.01 and coherence_difference <= 0.02:
++        elif chaos_difference < 0.005 and coherence_difference <= 0.02:
+             # When having a difficult decision, use the result that decoded as many multi-byte as possible.
+             # preserve RAM usage!
+             if len(self._payload) >= TOO_BIG_SEQUENCE:
+@@ -171,7 +171,7 @@ def percent_coherence(self) -> float:
+         return round(self.coherence * 100, ndigits=3)
+ 
+     @property
+-    def raw(self) -> bytes:
++    def raw(self) -> bytes | bytearray:
+         """
+         Original untouched bytes.
+         """
+diff --git a/src/charset_normalizer/utils.py b/src/charset_normalizer/utils.py
+--- a/src/charset_normalizer/utils.py
++++ b/src/charset_normalizer/utils.py
+@@ -228,7 +228,9 @@ def is_unprintable(character: str) -> bool:
+     )
+ 
+ 
+-def any_specified_encoding(sequence: bytes, search_zone: int = 8192) -> str | None:
++def any_specified_encoding(
++    sequence: bytes | bytearray, search_zone: int = 8192
++) -> str | None:
+     """
+     Extract using ASCII-only decoder any specified encoding in the first n-bytes.
+     """
+@@ -281,7 +283,7 @@ def is_multi_byte_encoding(name: str) -> bool:
+     )
+ 
+ 
+-def identify_sig_or_bom(sequence: bytes) -> tuple[str | None, bytes]:
++def identify_sig_or_bom(sequence: bytes | bytearray) -> tuple[str | None, bytes]:
+     """
+     Identify and extract SIG/BOM in given sequence.
+     """
+@@ -365,7 +367,7 @@ def set_logging_handler(
+ 
+ 
+ def cut_sequence_chunks(
+-    sequences: bytes,
++    sequences: bytes | bytearray,
+     encoding_iana: str,
+     offsets: range,
+     chunk_size: int,
+diff --git a/src/charset_normalizer/version.py b/src/charset_normalizer/version.py
+--- a/src/charset_normalizer/version.py
++++ b/src/charset_normalizer/version.py
+@@ -4,5 +4,5 @@
+ 
+ from __future__ import annotations
+ 
+-__version__ = "3.4.5"
++__version__ = "3.4.6"
+ VERSION = __version__.split(".")

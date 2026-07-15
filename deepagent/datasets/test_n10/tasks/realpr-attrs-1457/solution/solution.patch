@@ -1,0 +1,223 @@
+diff --git a/src/attr/_make.py b/src/attr/_make.py
+--- a/src/attr/_make.py
++++ b/src/attr/_make.py
+@@ -114,7 +114,7 @@ def attrib(
+     type=None,
+     converter=None,
+     factory=None,
+-    kw_only=False,
++    kw_only=None,
+     eq=None,
+     order=None,
+     on_setattr=None,
+@@ -157,6 +157,9 @@ def attrib(
+        *eq*, *order*, and *cmp* also accept a custom callable
+     .. versionchanged:: 21.1.0 *cmp* undeprecated
+     .. versionadded:: 22.2.0 *alias*
++    .. versionchanged:: 25.4.0
++       *kw_only* can now be None, and its default is also changed from False to
++       None.
+     """
+     eq, eq_key, order, order_key = _determine_attrib_eq_order(
+         cmp, eq, order, True
+@@ -374,7 +377,13 @@ def _collect_base_attrs_broken(cls, taken_attr_names):
+ 
+ 
+ def _transform_attrs(
+-    cls, these, auto_attribs, kw_only, collect_by_mro, field_transformer
++    cls,
++    these,
++    auto_attribs,
++    kw_only,
++    force_kw_only,
++    collect_by_mro,
++    field_transformer,
+ ) -> _Attributes:
+     """
+     Transform all `_CountingAttr`s on a class into `Attribute`s.
+@@ -430,7 +439,8 @@ def _transform_attrs(
+ 
+     fca = Attribute.from_counting_attr
+     own_attrs = [
+-        fca(attr_name, ca, anns.get(attr_name)) for attr_name, ca in ca_list
++        fca(attr_name, ca, kw_only, anns.get(attr_name))
++        for attr_name, ca in ca_list
+     ]
+ 
+     if collect_by_mro:
+@@ -442,7 +452,7 @@ def _transform_attrs(
+             cls, {a.name for a in own_attrs}
+         )
+ 
+-    if kw_only:
++    if kw_only and force_kw_only:
+         own_attrs = [a.evolve(kw_only=True) for a in own_attrs]
+         base_attrs = [a.evolve(kw_only=True) for a in base_attrs]
+ 
+@@ -669,6 +679,7 @@ def __init__(
+         getstate_setstate,
+         auto_attribs,
+         kw_only,
++        force_kw_only,
+         cache_hash,
+         is_exc,
+         collect_by_mro,
+@@ -681,6 +692,7 @@ def __init__(
+             these,
+             auto_attribs,
+             kw_only,
++            force_kw_only,
+             collect_by_mro,
+             field_transformer,
+         )
+@@ -1352,6 +1364,7 @@ def attrs(
+     field_transformer=None,
+     match_args=True,
+     unsafe_hash=None,
++    force_kw_only=True,
+ ):
+     r"""
+     A class decorator that adds :term:`dunder methods` according to the
+@@ -1418,6 +1431,10 @@ def attrs(
+        If a class has an *inherited* classmethod called
+        ``__attrs_init_subclass__``, it is executed after the class is created.
+     .. deprecated:: 24.1.0 *hash* is deprecated in favor of *unsafe_hash*.
++    .. versionchanged:: 25.4.0
++       *kw_only* now only applies to attributes defined in the current class,
++       and respects attribute-level ``kw_only=False`` settings.
++    .. versionadded:: 25.4.0 *force_kw_only*
+     """
+     if repr_ns is not None:
+         import warnings
+@@ -1464,6 +1481,7 @@ def wrap(cls):
+             ),
+             auto_attribs,
+             kw_only,
++            force_kw_only,
+             cache_hash,
+             is_exc,
+             collect_by_mro,
+@@ -2516,7 +2534,11 @@ def __setattr__(self, name, value):
+         raise FrozenInstanceError
+ 
+     @classmethod
+-    def from_counting_attr(cls, name: str, ca: _CountingAttr, type=None):
++    def from_counting_attr(
++        cls, name: str, ca: _CountingAttr, kw_only: bool, type=None
++    ):
++        # The 'kw_only' argument is the class-level setting, and is used if the
++        # attribute itself does not explicitly set 'kw_only'.
+         # type holds the annotated value. deal with conflicts:
+         if type is None:
+             type = ca.type
+@@ -2535,7 +2557,7 @@ def from_counting_attr(cls, name: str, ca: _CountingAttr, type=None):
+             ca.metadata,
+             type,
+             ca.converter,
+-            ca.kw_only,
++            kw_only if ca.kw_only is None else ca.kw_only,
+             ca.eq,
+             ca.eq_key,
+             ca.order,
+diff --git a/src/attr/_next_gen.py b/src/attr/_next_gen.py
+--- a/src/attr/_next_gen.py
++++ b/src/attr/_next_gen.py
+@@ -43,6 +43,7 @@ def define(
+     on_setattr=None,
+     field_transformer=None,
+     match_args=True,
++    force_kw_only=False,
+ ):
+     r"""
+     A class decorator that adds :term:`dunder methods` according to
+@@ -214,8 +215,12 @@ def define(
+                 5. Subclasses of a frozen class are frozen too.
+ 
+         kw_only (bool):
+-            Make all attributes keyword-only in the generated ``__init__`` (if
+-            *init* is False, this parameter is ignored).
++            Make attributes keyword-only in the generated ``__init__`` (if
++            *init* is False, this parameter is ignored).  Attributes that
++            explicitly set ``kw_only=False`` are not affected; base class
++            attributes are also not affected.
++
++            Also see *force_kw_only*.
+ 
+         weakref_slot (bool):
+             Make instances weak-referenceable.  This has no effect unless
+@@ -244,6 +249,15 @@ def define(
+             See also `issue #428
+             <https://github.com/python-attrs/attrs/issues/428>`_.
+ 
++        force_kw_only (bool):
++            A back-compat flag for restoring pre-25.4.0 behavior.  If True and
++            ``kw_only=True``, all attributes are made keyword-only, including
++            base class attributes, and those set to ``kw_only=False`` at the
++            attribute level.  Defaults to False.
++
++            See also `issue #980
++            <https://github.com/python-attrs/attrs/issues/980>`_.
++
+         getstate_setstate (bool | None):
+             .. note::
+ 
+@@ -319,6 +333,11 @@ def define(
+     .. versionadded:: 24.3.0
+        Unless already present, a ``__replace__`` method is automatically
+        created for `copy.replace` (Python 3.13+ only).
++    .. versionchanged:: 25.4.0
++       *kw_only* now only applies to attributes defined in the current class,
++       and respects attribute-level ``kw_only=False`` settings.
++    .. versionadded:: 25.4.0
++       Added *force_kw_only* to go back to the previous *kw_only* behavior.
+ 
+     .. note::
+ 
+@@ -337,6 +356,7 @@ def define(
+         - *auto_exc=True*
+         - *auto_detect=True*
+         - *order=False*
++        - *force_kw_only=False*
+         - Some options that were only relevant on Python 2 or were kept around
+           for backwards-compatibility have been removed.
+ 
+@@ -366,6 +386,7 @@ def do_it(cls, auto_attribs):
+             on_setattr=on_setattr,
+             field_transformer=field_transformer,
+             match_args=match_args,
++            force_kw_only=force_kw_only,
+         )
+ 
+     def wrap(cls):
+@@ -424,7 +445,7 @@ def field(
+     type=None,
+     converter=None,
+     factory=None,
+-    kw_only=False,
++    kw_only=None,
+     eq=None,
+     order=None,
+     on_setattr=None,
+@@ -550,9 +571,10 @@ def field(
+             itself. You can use it as part of your own code or for `static type
+             checking <types>`.
+ 
+-        kw_only (bool):
++        kw_only (bool | None):
+             Make this attribute keyword-only in the generated ``__init__`` (if
+-            ``init`` is False, this parameter is ignored).
++            *init* is False, this parameter is ignored).  If None (default),
++            mirror the setting from `attrs.define`.
+ 
+         on_setattr (~typing.Callable | list[~typing.Callable] | None | ~typing.Literal[attrs.setters.NO_OP]):
+             Allows to overwrite the *on_setattr* setting from `attr.s`. If left
+@@ -572,6 +594,9 @@ def field(
+     .. versionadded:: 23.1.0
+        The *type* parameter has been re-added; mostly for `attrs.make_class`.
+        Please note that type checkers ignore this metadata.
++    .. versionchanged:: 25.4.0
++       *kw_only* can now be None, and its default is also changed from False to
++       None.
+ 
+     .. seealso::
+ 

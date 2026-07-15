@@ -1,0 +1,62 @@
+{
+ "base_commit": "7411396ebd495e1abc28f5682975b5c662b2ff35",
+ "f2p_node_ids": [
+  "tests.test_base_detection.test_alphabets_property"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [
+  "tests.test_base_detection.test_bool_matches",
+  "tests.test_base_detection.test_content_with_bom_or_sig[\\x841\\x953\\xce\\xd2\\xc3\\xbb\\xd3\\xd0\\xc2\\xf1\\xd4\\xb9\\xa3\\xac\\xb4\\xe8\\xed\\xc8\\xb5\\xc4\\xd6\\xbb\\xca\\xc7\\xd2\\xbb\\xd0\\xa9\\xca\\xb1\\xbc\\xe4\\xa1\\xa3-gb18030]",
+  "tests.test_base_detection.test_content_with_bom_or_sig[\\xef\\xbb\\xbf\\xe6\\x88\\x91\\xe6\\xb2\\xa1\\xe6\\x9c\\x89\\xe5\\x9f\\x8b\\xe6\\x80\\xa8\\xef\\xbc\\x8c\\xe7\\xa3\\x8b\\xe7\\xa0\\xa3\\xe7\\x9a\\x84\\xe5\\x8f\\xaa\\xe6\\x98\\xaf\\xe4\\xb8\\x80\\xe4\\xba\\x9b\\xe6\\x97\\xb6\\xe9\\x97\\xb4\\xe3\\x80\\x82-utf_8]",
+  "tests.test_base_detection.test_content_with_bom_or_sig[\\xff\\xfe\\x00\\x00\\x11b\\x00\\x00\\xa1l\\x00\\x00\\tg\\x00\\x00\\xcbW\\x00\\x00(`\\x00\\x00\\x0c\\xff\\x00\\x00\\xcbx\\x00\\x00#x\\x00\\x00\\x84v\\x00\\x00\\xeaS\\x00\\x00/f\\x00\\x00\\x00N\\x00\\x00\\x9bN\\x00\\x00\\xf6e\\x00\\x00\\xf4\\x95\\x00\\x00\\x020\\x00\\x00-utf_32]",
+  "tests.test_base_detection.test_direct_cmp_charset_match",
+  "tests.test_base_detection.test_doc_example_short_cp1251",
+  "tests.test_base_detection.test_empty",
+  "tests.test_base_detection.test_empty_but_with_bom_or_sig[\\x841\\x953-gb18030]",
+  "tests.test_base_detection.test_empty_but_with_bom_or_sig[\\xef\\xbb\\xbf-utf_8]",
+  "tests.test_base_detection.test_empty_but_with_bom_or_sig[\\xfe\\xff-utf_16]",
+  "tests.test_base_detection.test_empty_but_with_bom_or_sig[\\xff\\xfe\\x00\\x00-utf_32]",
+  "tests.test_base_detection.test_mb_cutting_chk",
+  "tests.test_base_detection.test_md_triggered_but_with_bom_or_sig[\\xff\\xfe\\x00\\x00\\xb6%\\x00\\x00h\\x00\\x00\\x00e\\x00\\x00\\x00l\\x00\\x00\\x00l\\x00\\x00\\x00o\\x00\\x00\\x00-utf_32]",
+  "tests.test_base_detection.test_md_triggered_but_with_bom_or_sig[\\xff\\xfe\\xb6%h\\x00e\\x00l\\x00l\\x00o\\x00-utf_16]",
+  "tests.test_base_detection.test_obviously_ascii_content[81f4ab054b39cb0e12701e734077d84264308f5fc79494fc5f159fa2ebc07b73c8cc0e98e009664a20986706f90146e8eefcb929ce1f74a8eab21369fdc70198]",
+  "tests.test_base_detection.test_obviously_ascii_content[AbAdZ pOoooOlDl mmlDoDkA lldDkeEkddA mpAlkDF]",
+  "tests.test_base_detection.test_obviously_ascii_content[g4UsPJdfzNkGW2jwmKDGDilKGKYtpF2X.mx3MaTWL1tL7CNn5U7DeCcodKX7S3lwwJPKNjBT8etY]",
+  "tests.test_base_detection.test_obviously_ascii_content[{\"token\": \"g4UsPJdfzNkGW2jwmKDGDilKGKYtpF2X.mx3MaTWL1tL7CNn5U7DeCcodKX7S3lwwJPKNjBT8etY\"}]",
+  "tests.test_base_detection.test_obviously_ascii_content[{}]",
+  "tests.test_base_detection.test_obviously_utf8_content[(\\xc2\\xb0 \\xcd\\x9c\\xca\\x96 \\xc2\\xb0), creepy face, smiley \\xf0\\x9f\\x98\\x80]",
+  "tests.test_base_detection.test_obviously_utf8_content[<?xml ?><c>Financi\\xc3\\xabn</c>]",
+  "tests.test_base_detection.test_obviously_utf8_content[B\\xd1\\x81\\xd0\\xb5\\xd0\\xba\\xd0\\xb8 \\xd1\\x87\\xd0\\xbe\\xd0\\xb2\\xd0\\xb5\\xd0\\xba \\xd0\\xb8\\xd0\\xbc\\xd0\\xb0 \\xd0\\xbf\\xd1\\x80\\xd0\\xb0\\xd0\\xb2\\xd0\\xbe \\xd0\\xbd\\xd0\\xb0 \\xd0\\xbe\\xd0\\xb1\\xd1\\x80\\xd0\\xb0\\xd0\\xb7\\xd0\\xbe\\xd0\\xb2\\xd0\\xb0\\xd0\\xbd\\xd0\\xb8\\xd0\\xb5. O\\xd0\\xb1\\xd1\\x80\\xd0\\xb0\\xd0\\xb7\\xd0\\xbe\\xd0\\xb2\\xd0\\xb0\\xd0\\xbd\\xd0\\xb8\\xd0\\xb5\\xd1\\x82\\xd0\\xbe \\xd1\\x82\\xd1\\x80\\xd1\\x8f\\xd0\\xb1\\xd0\\xb2\\xd0\\xb0 \\xd0\\xb4\\xd0\\xb0 \\xd0\\xb1\\xd1\\x8a\\xd0\\xb4\\xd0\\xb5 \\xd0\\xb1\\xd0\\xb5\\xd0\\xb7\\xd0\\xbf\\xd0\\xbb\\xd0\\xb0\\xd1\\x82\\xd0\\xbd\\xd0\\xbe, \\xd0\\xbf\\xd0\\xbe\\xd0\\xbd\\xd0\\xb5 \\xd1\\x89\\xd0\\xbe \\xd1\\x81\\xd0\\xb5 \\xd0\\xbe\\xd1\\x82\\xd0\\xbd\\xd0\\xb0\\xd1\\x81\\xd1\\x8f \\xd0\\xb4\\xd0\\xbe \\xd0\\xbd\\xd0\\xb0\\xd1\\x87\\xd0\\xb0\\xd0\\xbb\\xd0\\xbd\\xd0\\xbe\\xd1\\x82\\xd0\\xbe \\xd0\\xb8 \\xd0\\xbe\\xd1\\x81\\xd0\\xbd\\xd0\\xbe\\xd0\\xb2\\xd0\\xbd\\xd0\\xbe\\xd1\\x82\\xd0\\xbe \\xd0\\xbe\\xd0\\xb1\\xd1\\x80\\xd0\\xb0\\xd0\\xb7\\xd0\\xbe\\xd0\\xb2\\xd0\\xb0\\xd0\\xbd\\xd0\\xb8\\xd0\\xb5.]",
+  "tests.test_base_detection.test_obviously_utf8_content[B\\xd1\\x81\\xd0\\xb5\\xd0\\xba\\xd0\\xb8 \\xd1\\x87\\xd0\\xbe\\xd0\\xb2\\xd0\\xb5\\xd0\\xba \\xd0\\xb8\\xd0\\xbc\\xd0\\xb0 \\xd0\\xbf\\xd1\\x80\\xd0\\xb0\\xd0\\xb2\\xd0\\xbe \\xd0\\xbd\\xd0\\xb0 \\xd0\\xbe\\xd0\\xb1\\xd1\\x80\\xd0\\xb0\\xd0\\xb7\\xd0\\xbe\\xd0\\xb2\\xd0\\xb0\\xd0\\xbd\\xd0\\xb8\\xd0\\xb5.]",
+  "tests.test_base_detection.test_obviously_utf8_content[Qu'est ce que une \\xc3\\xa9toile?]",
+  "tests.test_base_detection.test_obviously_utf8_content[[\"Financi\\xc3\\xabn\", \"La France\"]]",
+  "tests.test_base_detection.test_obviously_utf8_content[\\xc8\\x8d\\x1b]",
+  "tests.test_base_detection.test_obviously_utf8_content[\\xe6\\x88\\x91\\xe6\\xb2\\xa1\\xe6\\x9c\\x89\\xe5\\x9f\\x8b\\xe6\\x80\\xa8\\xef\\xbc\\x8c\\xe7\\xa3\\x8b\\xe7\\xa0\\xa3\\xe7\\x9a\\x84\\xe5\\x8f\\xaa\\xe6\\x98\\xaf\\xe4\\xb8\\x80\\xe4\\xba\\x9b\\xe6\\x97\\xb6\\xe9\\x97\\xb4\\xe3\\x80\\x82]",
+  "tests.test_base_detection.test_obviously_utf8_content[\\xf0\\x9f\\x98\\x80]",
+  "tests.test_base_detection.test_obviously_utf8_content[h\\xc3\\xa9llo world!\\n]"
+ ],
+ "pytest_paths": [
+  "tests/test_base_detection.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/test_base_detection.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}

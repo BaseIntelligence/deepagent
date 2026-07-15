@@ -1,0 +1,40 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+[task]
+name = "swe-factory/realpr-itemadapter-101"
+description = ""
+authors = []
+keywords = []
+[metadata]
+task_id = "realpr-itemadapter-101"
+language = "python"
+repository_url = "https://github.com/scrapy/itemadapter.git"
+base_commit_hash = "f7860b6ec7c5b49f623ecd1f67e73877f08039b6"
+source_track = "real_pr"
+license = "MIT"
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800.0
+
+[verifier.env]
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+allow_internet = false
+
+[agent]
+timeout_sec = 5400.0
+[environment]
+build_timeout_sec = 1800.0
+os = "linux"
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+gpus = 0
+allow_internet = false
+mcp_servers = []
+
+[environment.env]
+[solution.env]

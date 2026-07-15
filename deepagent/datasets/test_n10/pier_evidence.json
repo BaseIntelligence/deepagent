@@ -1,0 +1,126 @@
+{
+  "certified_count": 10,
+  "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
+  "product_track": "real_pr",
+  "records": [
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-packaging-1120.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-packaging-1120"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-cachetools-385"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-charset-normalizer-715.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-charset-normalizer-715"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-attrs-1323"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-attrs-1454"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-boltons-362"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3022.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3022"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3319.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3319"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-packaging-1311.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-packaging-1311"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-rich-3486.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-rich-3486"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-attrs-1407"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1457.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-attrs-1457"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3672"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-more-itertools-1136.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-more-itertools-1136"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-more-itertools-943.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-more-itertools-943"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-rich-4070.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-rich-4070"
+    }
+  ]
+}

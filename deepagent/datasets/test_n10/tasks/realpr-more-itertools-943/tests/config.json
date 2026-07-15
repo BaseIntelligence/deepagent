@@ -1,0 +1,43 @@
+{
+ "base_commit": "f36c88fe03688fa442154ef14f429bcfa4c38525",
+ "f2p_node_ids": [
+  "tests.test_more.SampleTests.test_error_cases"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [
+  "tests.test_more.SampleTests.test_counts",
+  "tests.test_more.SampleTests.test_counts_all",
+  "tests.test_more.SampleTests.test_invariance_under_permutations_unweighted",
+  "tests.test_more.SampleTests.test_invariance_under_permutations_weighted",
+  "tests.test_more.SampleTests.test_length",
+  "tests.test_more.SampleTests.test_negative",
+  "tests.test_more.SampleTests.test_sampling_entire_iterable",
+  "tests.test_more.SampleTests.test_scale_invariance_of_weights",
+  "tests.test_more.SampleTests.test_strict",
+  "tests.test_more.SampleTests.test_unit_case"
+ ],
+ "pytest_paths": [
+  "tests/test_more/SampleTests.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/test_more/SampleTests.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}
