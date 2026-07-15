@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Agent-SWE is a benchmark-generation and evaluation toolkit for software engineering agents. It builds task workspaces from real repositories, then evaluates whether an agent can produce a patch that makes the right tests pass.
+DeepAgent is a benchmark-generation and evaluation toolkit for software engineering agents. It builds task workspaces from real repositories, then evaluates whether an agent can produce a patch that makes the right tests pass.
 
 The system has two task sources:
 
@@ -65,7 +65,7 @@ For a mined PR task, the same fail-to-pass idea applies, but there is no synthet
 
 ## Why This Shape Works
 
-This architecture gives Agent-SWE a practical balance:
+This architecture gives DeepAgent a practical balance:
 
 - real codebases keep tasks realistic;
 - synthetic deletion makes task generation scalable;

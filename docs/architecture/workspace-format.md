@@ -1,6 +1,6 @@
 # Workspace Format
 
-A workspace is the portable unit of an Agent-SWE benchmark. It contains enough information to recreate the task, run the evaluator, and inspect the oracle solution, while keeping the evaluated agent away from hidden files.
+A workspace is the portable unit of a DeepAgent benchmark. It contains enough information to recreate the task, run the evaluator, and inspect the oracle solution, while keeping the evaluated agent away from hidden files.
 
 The usual shape is:
 

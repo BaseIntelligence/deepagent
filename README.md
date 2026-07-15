@@ -1,6 +1,6 @@
 <div align="center">
 
-# αgεηt SWE
+# DeepAgent
 
 **Real-code software engineering benchmarks for Platform agents**
 
@@ -9,21 +9,21 @@
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![SWE-Forge](https://img.shields.io/badge/SWE--Forge-CortexLM-blue)](https://huggingface.co/datasets/CortexLM/swe-forge)
 
-![Agent SWE Banner](assets/banner.png)
+![DeepAgent Banner](assets/banner.png)
 
 </div>
 
-Agent-SWE turns real repositories into benchmark tasks for autonomous software engineering agents. It keeps the parts that make coding work hard in practice: existing project structure, real tests, install commands, patches, Docker evaluation, and a clear fail-to-pass scoring contract.
+DeepAgent turns real repositories into benchmark tasks for autonomous software engineering agents. It keeps the parts that make coding work hard in practice: existing project structure, real tests, install commands, patches, Docker evaluation, and a clear fail-to-pass scoring contract.
 
-The synthetic task pipeline is inspired by Cursor's public writing on Composer, Composer 2, and Composer 2.5. Cursor described training coding agents on tasks grounded in real codebases, including a feature-deletion style setup: remove a testable behavior, ask the agent to restore it, and use tests as the reward signal. Agent-SWE adapts that idea into an open benchmark-generation workflow for Platform agents.
+The synthetic task pipeline is inspired by Cursor's public writing on Composer, Composer 2, and Composer 2.5. Cursor described training coding agents on tasks grounded in real codebases, including a feature-deletion style setup: remove a testable behavior, ask the agent to restore it, and use tests as the reward signal. DeepAgent adapts that idea into an open benchmark-generation workflow for Platform agents.
 
 This project is not affiliated with Cursor. It is an implementation inspired by the public methodology described in their posts and reports.
 
-## Why Agent-SWE Exists
+## Why DeepAgent Exists
 
-Most coding benchmarks are either real but scarce, or synthetic but too detached from real development. Agent-SWE aims for the middle ground: tasks are synthetic enough to scale, but grounded enough that agents still need to inspect a real repository, understand context, edit code, and run tests.
+Most coding benchmarks are either real but scarce, or synthetic but too detached from real development. DeepAgent aims for the middle ground: tasks are synthetic enough to scale, but grounded enough that agents still need to inspect a real repository, understand context, edit code, and run tests.
 
-A good Agent-SWE task should answer three questions:
+A good DeepAgent task should answer three questions:
 
 1. Can the agent understand the existing codebase?
 2. Can it restore the intended behavior without seeing the oracle patch?
@@ -31,7 +31,7 @@ A good Agent-SWE task should answer three questions:
 
 ## Inspired by Cursor Composer
 
-Cursor's Composer work is the main public inspiration for the synthetic path in Agent-SWE:
+Cursor's Composer work is the main public inspiration for the synthetic path in DeepAgent:
 
 - [Composer: Building a fast frontier model with RL](https://cursor.com/blog/composer)
 - [Introducing Composer 2](https://cursor.com/blog/composer-2)
@@ -41,11 +41,11 @@ Cursor's Composer work is the main public inspiration for the synthetic path in 
 
 The important idea is simple: instead of only collecting issues and pull requests, generate new tasks from real repositories. In the feature-deletion variant, a known behavior is removed from the codebase, the inverse patch becomes the oracle solution, and tests define whether the agent recovered the behavior.
 
-Agent-SWE currently implements this idea for Python functions and methods. It keeps the public signature, replaces the body with a synthetic failure, writes that mutation to `deletion_patch.diff`, and stores the inverse repair as `patch.diff`.
+DeepAgent currently implements this idea for Python functions and methods. It keeps the public signature, replaces the body with a synthetic failure, writes that mutation to `deletion_patch.diff`, and stores the inverse repair as `patch.diff`.
 
-## What Agent-SWE Does
+## What DeepAgent Does
 
-Agent-SWE supports two sources of benchmark tasks:
+DeepAgent supports two sources of benchmark tasks:
 
 1. **Real pull requests** mined from GitHub and converted into SWE-style workspaces.
 2. **Synthetic feature-deletion tasks** generated from real repositories, inspired by the public Composer 2.5 training method.
@@ -196,7 +196,7 @@ pytest tests/ -v
 ## Repository Layout
 
 ```text
-Agent-SWE/
+deepagent/
 ├── assets/
 ├── datasets/
 ├── docs/
@@ -208,13 +208,13 @@ Agent-SWE/
 │   ├── export/
 │   ├── swe/
 │   └── synthetic/
-├── deepagent/   # DeepAgent Real-PR product + factory (subproject)
+├── deepagent/   # Real-PR product + factory (subproject)
 └── tests/
 ```
 
-## DeepAgent Real-PR factory (`deepagent/`)
+## Real-PR factory (`deepagent/`)
 
-Agent-SWE also vendors the **SWE Dataset Factory** under [`deepagent/`](deepagent/): a separate package that ships Docker-verifiable DeepAgent / Harbor packs from live-mined public PRs.
+DeepAgent includes the **SWE Dataset Factory** under [`deepagent/`](deepagent/): a subproject that ships Docker-verifiable Real-PR packs from live-mined public PRs.
 
 | Surface | Path | Role |
 |---|---|---|
@@ -236,12 +236,13 @@ swe-factory eval-deepagent --product-root datasets/deepagent_v1 --help
 
 Details, ship commands, and honesty boundaries live in
 [`deepagent/README.md`](deepagent/README.md).
-Forge mining (`swe-forge` under `src/`) remains the existing Agent-SWE path;
-the factory is a clean subproject so it does not clash with `src/swe_forge`.
+Forge mining remains the DeepAgent forge path under `src/swe_forge`
+(`swe-forge` CLI); the Real-PR factory is a clean subproject so it does not
+clash with that package.
 
 ## Platform Integration
 
-Agent-SWE is designed to feed Platform challenge validators with deterministic repository-repair tasks. Validators can sample tasks, run agent patches in isolated workspaces, and turn task completion rates into raw challenge scores for Platform.
+DeepAgent is designed to feed Platform challenge validators with deterministic repository-repair tasks. Validators can sample tasks, run agent patches in isolated workspaces, and turn task completion rates into raw challenge scores for Platform.
 
 ## License
 

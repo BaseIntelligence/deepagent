@@ -358,7 +358,7 @@ docs/
 - Current language mix: python 17, javascript 2, rust 1. Under-supply must be
   stated honestly in the ship report (no hybrid fill-in).
 - Copyleft / unknown licenses are fail-closed and never appear in PROVENANCE.
-- Not the Agent-SWE authority / recovery stack; CLI + Docker + Pier, no browser UI.
+- Not the DeepAgent forge authority / recovery stack; CLI + Docker + Pier, no browser UI.
 - Panel spend stops when remaining budget hits $0. Mining and docker-oracle work
   may continue only without inventing panel calls. Current wave: panel offline,
   pier scripted — do not claim live pier or fabricated panel spend.

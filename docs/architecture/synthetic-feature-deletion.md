@@ -1,6 +1,6 @@
 # Synthetic Feature Deletion
 
-Synthetic feature deletion is the part of Agent-SWE that turns an existing repository into a new repair task. The idea is deliberately simple: take a behavior that already works, remove it in a controlled way, and ask an agent to recover it from the surrounding code and tests.
+Synthetic feature deletion is the part of DeepAgent that turns an existing repository into a new repair task. The idea is deliberately simple: take a behavior that already works, remove it in a controlled way, and ask an agent to recover it from the surrounding code and tests.
 
 This is inspired by Cursor's public descriptions of Composer, Composer 2, and Composer 2.5. In those posts, Cursor describes using synthetic codebase-grounded tasks as a training signal for coding agents: a model works inside a real project, produces a patch, and receives feedback from tests or another verifiable reward source.
 
@@ -12,7 +12,7 @@ Cursor references:
 - [Composer 2 Technical Report PDF](https://cursor.com/resources/Composer2.pdf)
 - [Introducing Composer 2.5](https://cursor.com/blog/composer-2-5)
 
-Agent-SWE is not affiliated with Cursor. It uses the same broad public idea, then packages it as an open benchmark workflow.
+DeepAgent is not affiliated with Cursor. It uses the same broad public idea, then packages it as an open benchmark workflow.
 
 ## What Gets Deleted
 
@@ -32,7 +32,7 @@ That matters because the task should feel like a realistic bug fix, not a broken
 
 ## Files Produced
 
-For every synthetic task, Agent-SWE creates two important patches:
+For every synthetic task, DeepAgent creates two important patches:
 
 | File | Meaning | Visible to evaluated agent |
 |---|---|---|

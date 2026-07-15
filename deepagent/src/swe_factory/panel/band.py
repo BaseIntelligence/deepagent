@@ -245,7 +245,7 @@ def apply_band_filter(
     discrimination: float | None = None,
     config: BandFilterConfig = DEFAULT_BAND_FILTER,
 ) -> BandDecision:
-    """Alias of classify_band for symmetry with Agent-SWE filter API."""
+    """Alias of classify_band for symmetry with DeepAgent filter API."""
     return classify_band(
         per_model_pass_at_k=per_model_pass_at_k,
         total_solves=total_solves,

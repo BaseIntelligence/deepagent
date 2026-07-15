@@ -1,6 +1,6 @@
 # Evaluation Flow
 
-Agent-SWE evaluation checks whether a candidate patch actually repairs a repository. The scorer does not try to judge style or intent directly. It asks a simpler question: do the right tests fail before the repair and pass after the repair?
+DeepAgent evaluation checks whether a candidate patch actually repairs a repository. The scorer does not try to judge style or intent directly. It asks a simpler question: do the right tests fail before the repair and pass after the repair?
 
 That fail-to-pass contract is what makes the benchmark useful for agents. A patch gets credit only if it changes observable behavior in the expected direction without breaking the regression set.
 
@@ -46,7 +46,7 @@ The base repository should already contain the bug or missing behavior. The cand
 
 ## Test Sets
 
-Agent-SWE separates test commands into two groups.
+DeepAgent separates test commands into two groups.
 
 ### `fail_to_pass`
 
