@@ -33,8 +33,8 @@ def _write_minimal_pack(
     (d / "tests").mkdir(parents=True)
     (d / "solution").mkdir(parents=True)
     (d / "task.toml").write_text(
-        "[metadata]\nlanguage = \"python\"\nrepository_url = \"https://github.com/example/x.git\"\n"
-        "base_commit_hash = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
+        '[metadata]\nlanguage = "python"\nrepository_url = "https://github.com/example/x.git"\n'
+        'base_commit_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n',
         encoding="utf-8",
     )
     (d / "instruction.md").write_text(instruction, encoding="utf-8")
@@ -238,9 +238,7 @@ def _build_src_corpus(tmp: Path) -> Path:
         "languages": {"python": len(pack_rows)},
         "mode": "ship_deepagent_real_pr_docker",
     }
-    (src / "pack_manifest.json").write_text(
-        json.dumps(manifest, indent=2), encoding="utf-8"
-    )
+    (src / "pack_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     (src / "oracle_evidence.json").write_text(
         json.dumps(
             {

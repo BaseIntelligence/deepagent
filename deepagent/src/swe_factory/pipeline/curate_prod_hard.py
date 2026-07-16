@@ -231,7 +231,8 @@ def _panel_lookup(
         pid = row.get("pack_id") or row.get("task_id")
         if not pid:
             continue
-        dec = row.get("decision") if isinstance(row.get("decision"), dict) else {}
+        raw_dec = row.get("decision")
+        dec: dict[str, Any] = raw_dec if isinstance(raw_dec, dict) else {}
         out[str(pid)] = {
             "verdict": dec.get("verdict"),
             "rule": dec.get("rule"),
@@ -293,7 +294,7 @@ def decide_pack(
             null_reward=null,
             panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
             panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, (int, float)) else None,
+            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
             meta={"explicit_policy_drop": True, "dual_detail": dual_detail},
         )
 
@@ -346,7 +347,7 @@ def decide_pack(
             null_reward=null,
             panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
             panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, (int, float)) else None,
+            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
             meta={"gate": "prompt_alignment"},
         )
     if not hard.ok:
@@ -364,14 +365,12 @@ def decide_pack(
             null_reward=null,
             panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
             panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, (int, float)) else None,
+            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
             meta={"gate": "hardness_floors"},
         )
 
     # Optional solve-all panel verdict even if not named explicitly.
-    if panel_rule == "solve-all" or (
-        isinstance(frontier, (int, float)) and float(frontier) >= 1.0
-    ):
+    if panel_rule == "solve-all" or (isinstance(frontier, int | float) and float(frontier) >= 1.0):
         return PackDisposition(
             task_id=task_id,
             keep=False,
@@ -389,7 +388,7 @@ def decide_pack(
             null_reward=null,
             panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
             panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, (int, float)) else None,
+            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
             meta={"gate": "anti_easy_panel"},
         )
 
@@ -425,7 +424,7 @@ def decide_pack(
         null_reward=null,
         panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
         panel_rule=str(panel_rule) if panel_rule is not None else None,
-        frontier_pass_at_k=float(frontier) if isinstance(frontier, (int, float)) else None,
+        frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
         meta={
             "nominal_keep_candidate": task_id in NOMINAL_KEEP_CANDIDATES,
             "required_paths_checked": list(REQUIRED_PACK_RELPATHS),
@@ -491,14 +490,14 @@ def _filter_manifest(
         for d in dispositions
         if not d.keep
     }
-    keep_meta = {
-        d.task_id: d.to_dict()
-        for d in dispositions
-        if d.keep
-    }
+    keep_meta = {d.task_id: d.to_dict() for d in dispositions if d.keep}
 
     new = dict(manifest)
-    packs = [p for p in (manifest.get("packs") or []) if isinstance(p, dict) and p.get("task_id") in keep_set]
+    packs = [
+        p
+        for p in (manifest.get("packs") or [])
+        if isinstance(p, dict) and p.get("task_id") in keep_set
+    ]
     packs_sorted = sorted(packs, key=lambda p: str(p.get("task_id")))
     new["packs"] = packs_sorted
     n = len(packs_sorted)
@@ -513,17 +512,25 @@ def _filter_manifest(
     new["product_surface"] = out_rel
     new["band"] = {"min": MIN_HARD_KEEP, "target": n, "max": n}
     # Identity map
-    identity = manifest.get("identity") if isinstance(manifest.get("identity"), dict) else {}
+    raw_identity = manifest.get("identity")
+    identity: dict[str, Any] = raw_identity if isinstance(raw_identity, dict) else {}
     new["identity"] = {k: v for k, v in identity.items() if k in keep_set}
     new["drop_reasons"] = drop_reasons
     new["keep_dispositions"] = keep_meta
     new["dropped_count"] = len(drop_reasons)
     new["curated_at"] = _utc_now_iso()
     new["assertions"] = list(
-        dict.fromkeys(list(manifest.get("assertions") or []) + ["VAL-DHARD-004", "VAL-DHARD-002", "VAL-DHARD-003"])
+        dict.fromkeys(
+            list(manifest.get("assertions") or [])
+            + ["VAL-DHARD-004", "VAL-DHARD-002", "VAL-DHARD-003"]
+        )
     )
     # Harbor load list
-    hls = dict(manifest.get("harbor_load_smoke") or {}) if isinstance(manifest.get("harbor_load_smoke"), dict) else {}
+    hls = (
+        dict(manifest.get("harbor_load_smoke") or {})
+        if isinstance(manifest.get("harbor_load_smoke"), dict)
+        else {}
+    )
     if hls:
         hls = dict(hls)
         hls["listed"] = sorted(keep_set)
@@ -588,7 +595,8 @@ def _filter_jsonl(path: Path, *, keep_ids: set[str]) -> list[dict[str, Any]]:
         if not isinstance(row, dict):
             continue
         tid = row.get("task_id") or row.get("pack_id") or row.get("id")
-        fields = row.get("fields") if isinstance(row.get("fields"), dict) else {}
+        raw_fields = row.get("fields")
+        fields: dict[str, Any] = raw_fields if isinstance(raw_fields, dict) else {}
         tid = tid or fields.get("task_id") or fields.get("pack_id")
         if tid is None:
             # keep non-pack summary rows (corpus-level)
@@ -667,9 +675,7 @@ def _render_provenance(
         sha = idn.get("base_commit") or ""
         track = idn.get("source_track") or "real_pr"
         seed = idn.get("seed_id") or ""
-        lines.append(
-            f"| `{tid}` | {lang} | {lic} | {url} | `{sha}` | {track} | {seed} |"
-        )
+        lines.append(f"| `{tid}` | {lang} | {lic} | {url} | `{sha}` | {track} | {seed} |")
     lines.extend(
         [
             "",
@@ -691,7 +697,10 @@ def _render_provenance(
             "- Source wave: `datasets/test_n10` live-mine dual-truth packs.",
             "- Gates: prompt–verifier alignment, MIN_F2P≥3, ≥10 hunks, multi-file, dual-truth.",
             "- Solve-all class + misalign class dropped from hardness promote.",
-            "- Legit hard solve-none kept when dual-truth+floors+align hold (model scoreout ≠ drop).",
+            (
+                "- Legit hard solve-none kept when dual-truth+floors+align hold "
+                "(model scoreout ≠ drop)."
+            ),
             "- Agent trees: public git clone@SHA; Docker oracle never `oracle_mode=fake`.",
             "- Fixtures / hybrid archives are never product N.",
             "",
@@ -844,9 +853,7 @@ def materialize_prod_hard_keep(
         shutil.copytree(s, d)
         missing = verify_pack_tree(d)
         if missing:
-            raise ProdHardCurationError(
-                f"copied pack tree invalid for {tid}: missing={missing}"
-            )
+            raise ProdHardCurationError(f"copied pack tree invalid for {tid}: missing={missing}")
 
     # Manifest
     manifest_src = src_path / "pack_manifest.json"
@@ -896,7 +903,13 @@ def materialize_prod_hard_keep(
 
     keep_set = set(keep_ids)
     # Oracle / pier evidence aggregates
-    for name in ("oracle_evidence.json", "pier_evidence.json", "ship_summary.json", "gate_audit_summary.json", "ledger_summary.json"):
+    for name in (
+        "oracle_evidence.json",
+        "pier_evidence.json",
+        "ship_summary.json",
+        "gate_audit_summary.json",
+        "ledger_summary.json",
+    ):
         p = src_path / name
         if not p.is_file():
             continue
@@ -934,7 +947,10 @@ def materialize_prod_hard_keep(
 
     _copy_evidence_dirs(src_path, out_path, keep_ids=keep_set)
 
-    identity = filtered.get("identity") if isinstance(filtered.get("identity"), dict) else {}
+    raw_filt_identity = filtered.get("identity")
+    identity: Mapping[str, Mapping[str, Any]] = (
+        raw_filt_identity if isinstance(raw_filt_identity, dict) else {}
+    )
     (out_path / "PROVENANCE.md").write_text(
         _render_provenance(
             keep_ids=keep_ids,
