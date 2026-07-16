@@ -450,20 +450,56 @@ def derive_test_commands(
     return f2p, p2p
 
 
+# Shared soft cap with product Harbor instruction builders (VAL-DPRMPT-002).
+_PR_BODY_PROMPT_MAX_CHARS = 2000
+
+
+def sanitize_problem_body(
+    body: str | None,
+    *,
+    max_chars: int = _PR_BODY_PROMPT_MAX_CHARS,
+) -> str:
+    """Normalize / bound PR body text for agent-facing prompts (no gold leaks)."""
+    text = body if isinstance(body, str) else str(body or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(
+        r"```(?:diff|patch)?\n.*?```",
+        "[diff/code block omitted from agent prompt]",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    lines: list[str] = []
+    for ln in text.splitlines():
+        stripped = ln.lstrip()
+        if stripped.startswith(("diff --git ", "@@ ", "--- a/", "+++ b/")):
+            continue
+        lines.append(ln)
+    text = "\n".join(lines).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "…"
+    return text
+
+
 def build_problem_statement(
     *,
     pr: MergedPR,
     source_files: Sequence[str] | None = None,
+    max_body_chars: int = _PR_BODY_PROMPT_MAX_CHARS,
 ) -> str:
-    """Agent-facing prompt from PR title/body (no gold leakage)."""
+    """Agent-facing prompt from PR title/body (no gold leakage).
+
+    Shared helper for mine + product full-instruction framing (VAL-DPRMPT-002).
+    Product Harbor packs use the multi-section
+    :func:`swe_factory.pipeline.ship_real_pr.build_real_pr_agent_instruction`,
+    which reuses this body's sanitization contract (≤~2000 chars, no diffs).
+    """
     sources = list(source_files) if source_files is not None else list(pr.source_files)
     files = ", ".join(sources[:12]) if sources else "(multiple modules)"
     title = (pr.title or "").strip() or f"PR #{pr.number}"
-    body = (pr.body or "").strip()
-    # Strip common secrecy markers / dump lengths
-    body_snip = re.sub(r"\n{3,}", "\n\n", body)
-    if len(body_snip) > 1200:
-        body_snip = body_snip[:1200].rstrip() + "…"
+    body_snip = sanitize_problem_body(pr.body, max_chars=max_body_chars)
     parts = [
         f"Repository `{pr.repo}` has a regression fixed by PR #{pr.number}: {title}.",
         f"Affected source modules include: {files}.",
@@ -474,6 +510,8 @@ def build_problem_statement(
         parts.append("PR description:\n" + body_snip)
     if pr.html_url:
         parts.append(f"Context: {pr.html_url}")
+    if pr.base_commit:
+        parts.append(f"Base commit (immutable): `{pr.base_commit}`.")
     prompt = "\n\n".join(parts)
     if not prompt.strip():
         raise PrMineError("problem_statement builder produced empty string")
@@ -1121,5 +1159,6 @@ __all__ = [
     "offline_fixture_pr",
     "produce_offline_fixture",
     "repair_pseudo_create_file_headers",
+    "sanitize_problem_body",
     "wrap_file_diff",
 ]

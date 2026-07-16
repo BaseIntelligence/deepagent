@@ -93,6 +93,8 @@ class MaterializedTask:
     test_files: tuple[str, ...]
     title: str
     inventory_row: dict[str, Any] = field(repr=False)
+    # PR markdown/plain description for full agent prompts (VAL-DPRMPT-001).
+    body: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +107,7 @@ class MaterializedTask:
             "language": self.language,
             "license": self.license,
             "title": self.title,
+            "body": self.body,
             "source_files": list(self.source_files),
             "test_files": list(self.test_files),
             "solution_bytes": len(self.solution_patch),
@@ -188,6 +191,7 @@ def inventory_row_for_task(
     materials_dir: str,
     source_hunk_count: int | None = None,
     discovery_path: str | None = None,
+    body: str | None = None,
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build one inventory.json row (repo/pr/sha/lang + ship loader fields)."""
@@ -208,6 +212,9 @@ def inventory_row_for_task(
         row["source_hunk_count"] = int(source_hunk_count)
     if discovery_path:
         row["discovery_path"] = discovery_path
+    # Optional PR body for DeepSWE-style full prompts (VAL-DPRMPT-001).
+    if body is not None:
+        row["body"] = str(body)
     if extra:
         for key, value in extra.items():
             if key not in row and value is not None:
@@ -299,6 +306,7 @@ def inventory_row_from_task_dir(
     language = str(meta.get("language") or "python").strip().lower() or "python"
     license_name = str(meta.get("license") or "MIT").strip() or "MIT"
     title = str(meta.get("title") or f"PR #{pr_raw or tid}").strip()
+    body = str(meta.get("body") or meta.get("pr_body") or "").strip()
     src = [str(p) for p in (meta.get("src") or meta.get("source_files") or []) if str(p).strip()]
     tests = [str(p) for p in (meta.get("tests") or meta.get("test_files") or []) if str(p).strip()]
     url = str(meta.get("url") or meta.get("repository_url") or "").strip()
@@ -370,6 +378,7 @@ def inventory_row_from_task_dir(
             materials_dir=materials_dir,
             source_hunk_count=hunk_count,
             discovery_path=str(meta.get("discovery_path") or "") or None,
+            body=body or None,
             extra=extra or None,
         )
     except MaterializeError:
@@ -582,6 +591,7 @@ def materialize_merged_pr(
         materials_dir_str = str(task_dir)
 
     hunk_count = int(pr.source_hunk_count or 0) or measure_source_hunk_count(pr.files)
+    pr_body = (pr.body or "").strip()
     meta = {
         "task_id": tid,
         "repo": pr.repo,
@@ -593,6 +603,7 @@ def materialize_merged_pr(
         "src": list(pr.source_files),
         "tests": list(pr.test_files),
         "title": pr.title or f"PR #{pr.number}",
+        "body": pr_body,
         "source_hunk_count": hunk_count,
         "merged_at": pr.merged_at,
         "html_url": pr.html_url,
@@ -619,6 +630,7 @@ def materialize_merged_pr(
         materials_dir=materials_dir_str,
         source_hunk_count=hunk_count,
         discovery_path=discovery_path,
+        body=pr_body,
     )
     _upsert_inventory_row(root, row)
 
@@ -642,6 +654,7 @@ def materialize_merged_pr(
         test_files=tuple(pr.test_files),
         title=pr.title or f"PR #{pr.number}",
         inventory_row=row,
+        body=pr_body,
     )
 
 

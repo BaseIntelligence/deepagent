@@ -208,6 +208,9 @@ class RealPrMaterial:
     materials_dir: str = ""
     discovery_path: str = ""
     source_hunk_count: int | None = None
+    # PR description body for DeepSWE-style full agent prompts (VAL-DPRMPT-001).
+    # Empty when GitHub provides none or older materials predate body persistence.
+    body: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -218,6 +221,7 @@ class RealPrMaterial:
             "license": self.license,
             "pr_number": self.pr_number,
             "title": self.title,
+            "body": self.body,
             "source_files": list(self.source_files),
             "test_files": list(self.test_files),
             "materials_dir": self.materials_dir,
@@ -1576,16 +1580,22 @@ def load_real_pr_materials(
         if len(base) != 40:
             continue
         refuse_hybrid_product_promote(REAL_PR_SOURCE_TRACK)
-        # Optional live-mine honesty fields
+        # Optional live-mine honesty fields (+ PR body for full agent prompts).
         disc = str(row.get("discovery_path") or "").strip()
-        if not disc:
-            meta_path = mat_dir / "meta.json"
-            if meta_path.is_file():
-                try:
-                    meta_blob = json.loads(meta_path.read_text(encoding="utf-8"))
-                    disc = str(meta_blob.get("discovery_path") or "").strip()
-                except (OSError, json.JSONDecodeError):
-                    pass
+        body_text = str(row.get("body") or row.get("pr_body") or "").strip()
+        meta_path = mat_dir / "meta.json"
+        meta_blob: dict[str, Any] = {}
+        if meta_path.is_file():
+            try:
+                raw_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if isinstance(raw_meta, dict):
+                    meta_blob = raw_meta
+            except (OSError, json.JSONDecodeError):
+                meta_blob = {}
+        if not disc and meta_blob:
+            disc = str(meta_blob.get("discovery_path") or "").strip()
+        if not body_text and meta_blob:
+            body_text = str(meta_blob.get("body") or meta_blob.get("pr_body") or "").strip()
         hunk_raw = row.get("source_hunk_count")
         hunk_n: int | None
         if hunk_raw is None:
@@ -1613,6 +1623,7 @@ def load_real_pr_materials(
                 materials_dir=str(mat_dir),
                 discovery_path=disc,
                 source_hunk_count=hunk_n,
+                body=body_text,
             )
         )
         if limit is not None and len(materials) >= limit:
@@ -1718,8 +1729,176 @@ def _default_install_commands(language: str) -> list[str]:
     return ["true"]
 
 
+# Soft caps for agent-facing PR description (VAL-DPRMPT-002).
+_AGENT_PR_BODY_MAX_CHARS = 2000
+_AGENT_INSTRUCTION_MIN_CHARS = 400
+
+
+def sanitize_pr_body_for_prompt(
+    body: str | None,
+    *,
+    max_chars: int = _AGENT_PR_BODY_MAX_CHARS,
+) -> str:
+    """Normalize/truncate PR body for instruction.md (never gold/test patch content)."""
+    text = body if isinstance(body, str) else str(body or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    # Collapse extreme blank runs; keep readable paragraphs.
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Strip fenced code that looks like unified diffs (answer-key risk).
+    text = re.sub(
+        r"```(?:diff|patch)?\n.*?```",
+        "[diff/code block omitted from agent prompt]",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Drop any residual unified-diff markers that caused gold-leak hits in the past.
+    lines: list[str] = []
+    for ln in text.splitlines():
+        stripped = ln.lstrip()
+        if stripped.startswith("diff --git ") or stripped.startswith("@@ "):
+            continue
+        if stripped.startswith("--- a/") or stripped.startswith("+++ b/"):
+            continue
+        lines.append(ln)
+    text = "\n".join(lines).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "…"
+    return text
+
+
+def build_real_pr_agent_instruction(
+    material: RealPrMaterial,
+    *,
+    include_f2p_names: bool = False,
+    f2p_node_ids: Sequence[str] | None = None,
+    max_body_chars: int = _AGENT_PR_BODY_MAX_CHARS,
+) -> str:
+    """DeepSWE-style multi-section product prompt (Context / PR description / …).
+
+    Replaces the short "Merged PR #N … Restore multi-file…" stub with long-horizon
+    framing aligned to :func:`swe_factory.producers.pr_miner.build_problem_statement`
+    and motor long-horizon instructions without embedding gold or held-out test bodies.
+
+    Product isolation policy: held-out fail_to_pass node ids stay in tests/config.json
+    by default; the prompt states that the verifier suite defines fail_to_pass
+    unless *include_f2p_names* is explicitly enabled with agent-safe names.
+
+    VAL-DPRMPT-002 / VAL-DPRMPT-003 / VAL-DPRMPT-006.
+    """
+    lang = (material.language or "python").strip() or "python"
+    title = (material.title or "").strip() or f"PR #{material.pr_number or '?'}"
+    pr_no = material.pr_number if material.pr_number is not None else "?"
+    repo_url = (material.repository_url or "").strip()
+    base = (material.base_commit or "").strip()
+    sources = [s for s in material.source_files if str(s).strip()]
+    source_list = ", ".join(f"`{s}`" for s in sources[:12]) if sources else "(multiple modules)"
+    more_sources = ""
+    if len(sources) > 12:
+        more_sources = f" (+{len(sources) - 12} more)"
+    body_snip = sanitize_pr_body_for_prompt(material.body, max_chars=max_body_chars)
+    if body_snip:
+        pr_desc_block = body_snip
+    else:
+        pr_desc_block = (
+            f"Title only (no PR body was provided by GitHub): **{title}**. "
+            "Infer the intended multi-file behaviour from the repository "
+            "and the held-out verifier suite."
+        )
+
+    f2p_section: str
+    if include_f2p_names and f2p_node_ids:
+        safe_ids = [str(n).strip() for n in f2p_node_ids if str(n).strip()]
+        if safe_ids:
+            listed = "\n".join(f"- `{n}`" for n in safe_ids[:24])
+            f2p_section = (
+                "Fail-to-pass nodes that must go red → green after your fix "
+                "(agent-visible subset):\n"
+                f"{listed}"
+            )
+        else:
+            f2p_section = (
+                "The held-out verifier suite defines the graded fail_to_pass set "
+                "(node ids are not listed here to preserve test isolation). "
+                "Your patch must restore every fail-to-pass behaviour without "
+                "weakening pass_to_pass coverage."
+            )
+    else:
+        f2p_section = (
+            "The held-out verifier suite defines the graded **fail_to_pass** set "
+            "(node ids live only in the hidden tests/config, not in this prompt). "
+            "Your multi-file source patch must flip every fail-to-pass case red → "
+            "green while **pass_to_pass** regressions stay green."
+        )
+
+    text = f"""\
+# {title}
+
+## Context
+You are solving a **long-horizon multi-file** software engineering task mined from
+a real merged pull request on a public repository.
+
+- **Repository URL:** `{repo_url}`
+- **Base commit (immutable):** `{base}`
+- **Language:** `{lang}`
+- **Merged PR:** `#{pr_no}` — {title}
+- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+
+Cross-module product behaviour is composed across independent source files rather
+than a single helper. A regression was fixed upstream by multi-file changes that
+touched at least two product sources. Your job is to restore that intended
+contract from the agent-visible tree alone.
+
+Affected product source modules include:
+{source_list}{more_sources}
+
+## PR description
+{pr_desc_block}
+
+## Behavioural requirements
+1. Restore the original multi-module contracts so the held-out **fail_to_pass**
+   cases pass when your solution is applied.
+2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
+   graded suite is enforced by a separate verifier image; plastic diffs that
+   weaken coverage score 0.
+3. Prefer a minimal multi-file unified-diff style change under the repository
+   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
+   paths (the harness materializes your work as `model.patch`).
+4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
+5. Hard product track requires a multi-file solution (≥2 product source files).
+   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
+6. Do not invent secrets, API keys, or vendor credentials in the tree.
+
+{f2p_section}
+
+## Deliverable
+Work on a **new branch** from the pinned base checkout. Implement the multi-file
+source fix that restores the green behavioural contract against the held-out
+verifier suite. Commit when done and leave a clean porcelain tree so the grader
+can harvest `model.patch`.
+
+IMPORTANT: Please work on this in a new branch from the base commit and commit
+everything when you are done. Do not weaken pass_to_pass coverage.
+"""
+    cleaned = text.strip() + "\n"
+    if len(cleaned) < _AGENT_INSTRUCTION_MIN_CHARS:
+        # Defensive padding for pathologically empty meta (should be rare).
+        cleaned = (
+            cleaned.rstrip() + "\n\n### Additional framing\n"
+            "Explore the repository at the immutable base commit, identify the "
+            "broken multi-module path described above, and restore compositional "
+            "product behaviour with a multi-file source patch only.\n"
+        )
+    return cleaned
+
+
 def build_real_pr_pack_spec(material: RealPrMaterial) -> HarborPackSpec:
-    """Assemble a product HarborPackSpec for one merged PR material."""
+    """Assemble a product HarborPackSpec for one merged PR material.
+
+    Default agent prompt is the full DeepSWE-style multi-section instruction
+    (VAL-DPRMPT-002 / VAL-DPRMPT-006), not the historical Merged-PR stub.
+    """
     refuse_hybrid_product_promote(REAL_PR_SOURCE_TRACK)
     f2p = f2p_node_ids_from_test_patch(material.test_patch, material.test_files)
     p2p = ["tests.test_ok::test_always_ok"]
@@ -1729,14 +1908,7 @@ def build_real_pr_pack_spec(material: RealPrMaterial) -> HarborPackSpec:
         language=material.language or "python",
         install_commands=_default_install_commands(material.language or "python"),
     )
-    instruction = (
-        f"Merged PR #{material.pr_number or '?'} on `{material.repository_url}`: "
-        f"{material.title}\n\n"
-        f"Restore multi-file product behavior against the held-out verifier suite. "
-        f"Affected sources include: {', '.join(material.source_files[:8])}.\n"
-        f"Base commit (immutable): `{material.base_commit}`.\n"
-        "Do not weaken pass_to_pass coverage. Commit on a branch; leave a clean porcelain tree."
-    )
+    instruction = build_real_pr_agent_instruction(material)
     return HarborPackSpec.model_validate(
         {
             "task_id": material.task_id,
@@ -3593,6 +3765,7 @@ __all__ = [
     "RealPrMaterial",
     "ShipRealPrError",
     "assert_product_clone_sha_pin",
+    "build_real_pr_agent_instruction",
     "build_real_pr_pack_spec",
     "f2p_node_ids_from_test_patch",
     "is_fixture_real_pr_materials",
@@ -3613,4 +3786,5 @@ __all__ = [
     "requires_dual_truth_honesty",
     "resolve_product_materials_root",
     "run_ship_deepagent_real_pr",
+    "sanitize_pr_body_for_prompt",
 ]
