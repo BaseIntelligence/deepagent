@@ -214,24 +214,34 @@ deepagent/
 
 ## Real-PR factory (`deepagent/`)
 
-DeepAgent includes the **SWE Dataset Factory** under [`deepagent/`](deepagent/): a subproject that ships Docker-verifiable Real-PR packs from live-mined public PRs.
+DeepAgent includes the **DeepAgent Real-PR factory** under [`deepagent/`](deepagent/):
+a subproject that ships Docker-verifiable Real-PR Harbor packs (live mine → HF →
+Pier mini-swe eval).
 
-| Surface | Path | Role |
+| Surface | Path / ref | Role |
 |---|---|---|
-| Product N=20 | `deepagent/datasets/deepagent_v1/` | Certified Real-PR packs (`source_track=real_pr`) |
+| Wave N=10 (M16) | `deepagent/datasets/test_n10/` | Live-mined hard Real-PR packs |
+| HF revision `test` | `BaseIntelligence/deepagent` | N=10 packs live on Hub |
+| Product archive N=20 | `deepagent/datasets/deepagent_v1/` | Certified Real-PR product archive |
 | Seed archive | `deepagent/datasets/deepagent_v1_seed5_archive/` | Historical seed5 only |
-| Soft panel | `deepagent/datasets/panel_deepagent_5pack/` | Report JSON evidence |
-| CLI package | `deepagent/src/swe_factory/` | `swe-factory` entrypoint |
+| Primary CLI | `deepagent` | generate / upload / pull / eval / oracle / version |
+| Compat CLI | `swe-factory` | Historical factory stages |
 
-Install and use from the subproject (Python >= 3.12):
+Install and use from the subproject (Python >= 3.12; needs `huggingface_hub`):
 
 ```bash
 cd deepagent
 pip install -e ".[dev]"
-cp .env.example .env   # never commit .env
+cp .env.example .env   # HF_TOKEN, OPENROUTER_API_KEY; GitHub via gh — never commit .env
 
-# DeepAgent-grade Pier + mini-swe serial eval (product root N=20)
-swe-factory eval-deepagent --product-root datasets/deepagent_v1 --help
+deepagent generate --target 10 --out datasets/test_n10 --live-mine
+deepagent upload --src datasets/test_n10 \
+  --repo-id BaseIntelligence/deepagent --revision test
+deepagent pull --repo-id BaseIntelligence/deepagent --revision test \
+  --out datasets/hf_pull_test
+deepagent eval --product-root datasets/hf_pull_test \
+  --n-concurrent 1 --hard-stop-usd 600 --max-packs 5
+deepagent oracle --pack-dir datasets/test_n10/tasks/<id>
 ```
 
 Details, ship commands, and honesty boundaries live in

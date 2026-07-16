@@ -1,16 +1,17 @@
 <div align="center">
 
-# SWE Dataset Factory
+# DeepAgent
 
 **Manufacture hard, Docker-verifiable SWE tasks as DeepAgent / Harbor pack trees.**
 
-<a href="#ship-deepagent-v1">Ship DeepAgent</a> ·
-<a href="#cli-swe-factory">CLI</a> ·
-<a href="docs/architecture.md">Architecture</a> ·
-<a href="#historical-fixtures-non-product">Fixtures</a>
+<a href="#primary-cli-deepagent">CLI</a> ·
+<a href="#huggingface-baseintelligencedeepagent">Hugging Face</a> ·
+<a href="#ship-deepagent-v1-product-archive">Product N=20</a> ·
+<a href="docs/architecture.md">Architecture</a>
 
 [![Python](https://img.shields.io/badge/python-%3E%3D3.12-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](pyproject.toml)
+[![HF](https://img.shields.io/badge/HF-BaseIntelligence%2Fdeepagent-yellow.svg)](https://huggingface.co/datasets/BaseIntelligence/deepagent)
 
 </div>
 
@@ -18,54 +19,118 @@
 
 ## Overview
 
-SWE Dataset Factory builds **agent-facing Harbor / DeepAgent pack trees** from
-multi-file hard tasks. Each certified pack carries a real public repository URL,
-an immutable base commit, multi-file gold solution, held-out verifier tests,
-Docker oracle dual-truth (solution reward = 1, null reward = 0), agent
-isolation, and optional hardness-panel evidence.
+DeepAgent builds **agent-facing Harbor pack trees** from multi-file hard
+Real-PR tasks. Each certified pack carries a real public repository URL, an
+immutable base commit, multi-file gold solution, held-out verifier tests,
+Docker oracle dual-truth (solution reward = 1, null reward = 0), and agent
+isolation.
 
-**Product surface:** `datasets/deepagent_v1` — **N=20** certified packs,
-`source_track=real_pr`, **live-mined** (not a fixture shortlist),
-`materials_is_fixture=false`. Docker oracle only via `HarborDockerVerifier`
-(solution reward = 1, null reward = 0); fake backends refused on the certified
-path. Language mix: **python 17 · javascript 2 · rust 1**.
+| Surface | Path / ref | Role |
+|---|---|---|
+| **Wave dataset (M16)** | `datasets/test_n10` | Live-mined hard Real-PR, **N=10** sealed this wave |
+| **HF revision** | `BaseIntelligence/deepagent` **`test`** | N=10 packs live (upload/pull) |
+| **Product archive** | `datasets/deepagent_v1` | Product N=20 Real-PR archive |
+| Hybrid / seed archives | `datasets/deepagent_v1_*_archive/` | Historical only (never product N) |
 
-Hard floors for product keeps: **≥10 source hunks**, real-suite dual-run labels
-(F2P/P2P), and Harbor Docker dual-truth. Pier mode on the current ship is
-**scripted** (do not claim live pier). Panel mode is offline on this wave;
-ledger spend is project OpenRouter settle only — do not invent panel spend.
+**Primary console entrypoint:** `deepagent`
+(generate / upload / pull / eval / oracle / version).
 
-**Archives (historical only, never product N):**
+**Compatibility:** `swe-factory` still exists for historical factory stages
+(`ship-deepagent`, `real-pr-pool`, `ledger`, `eval-deepagent`, archives, …).
+New product work should prefer `deepagent`.
 
-| Path | Role |
-|---|---|
-| `datasets/deepagent_v1_hybrid_archive/` | Sealed hybrid_curated motors (N≈113) |
-| `datasets/deepagent_v1_seed5_archive/` | Prior real_pr seed product (seed5) |
+## Primary CLI (`deepagent`)
 
-`fixtures/real_pr_ship` is **unit-only** (CI / offline shortlist). It is **not**
-the product mine and must never pad product N. Historical regression surfaces
-`datasets/harbor_v1` and `datasets/v1` are fixtures only.
+### Install
 
-## Architecture
-
-```mermaid
-flowchart LR
-  Allow[Permissive allowlist] --> Mine[Discover / mine]
-  Mine --> Env[Envbuild at base SHA]
-  Env --> Label[Dual-run F2P / P2P labels]
-  Label --> Oracle[Docker oracle sol=1 null=0]
-  Oracle --> Export[Harbor pack export]
-  Export --> Pier[Pier cert]
-  Pier --> Ship[datasets/deepagent_v1]
-  Ship --> Prov[PROVENANCE + report + ledger]
+```bash
+cd deepagent   # package root (this directory)
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install -e ".[dev]"
+# huggingface_hub is a declared runtime dep (HF upload/pull)
+cp .env.example .env   # set keys; never commit .env
 ```
 
-Git is the authority for commits and patches. Optional GitHub page HTTP can go
-through Oxylabs (`source=universal` only) when credentials are configured.
+Python **≥ 3.12**. Package name `deepagent` exposes:
 
-## What you get in a DeepAgent pack
+| Entry | Module | Role |
+|---|---|---|
+| `deepagent` | `swe_factory.deepagent_cli:app` | **Primary** product CLI |
+| `swe-factory` | `swe_factory.cli:app` | Compatibility factory CLI |
 
-Each pack under `datasets/deepagent_v1/tasks/<task_id>/`:
+### Environment (`.env`)
+
+| Variable | Purpose |
+|---|---|
+| `HF_TOKEN` | Hugging Face push/pull for `BaseIntelligence/deepagent` |
+| `OPENROUTER_API_KEY` | Live panel / eval model calls |
+| `OPENROUTER_BASE_URL` | Default `https://openrouter.ai/api/v1` |
+| `FACTORY_PANEL_MODELS` | Default `x-ai/grok-4.5,moonshotai/kimi-k2.6` |
+| `FACTORY_BUDGET_USD` | Hard cap (default `600`) |
+| `GITHUB_TOKEN` / `GH_TOKEN` | Live Real-PR mine. Prefer `gh auth login` so `gh auth token` can supply the token |
+
+Secrets never appear in logs, CLI output, or shipped datasets.
+
+### Commands (M16)
+
+```bash
+# Live-mine hard real_pr → datasets/test_n10 (N=10 sealed this wave)
+deepagent generate --target 10 --out datasets/test_n10 --live-mine
+
+# Push pack trees + manifest to HF revision test
+deepagent upload --src datasets/test_n10 \
+  --repo-id BaseIntelligence/deepagent --revision test
+
+# Pull packs from HF revision test
+deepagent pull --repo-id BaseIntelligence/deepagent --revision test \
+  --out datasets/hf_pull_test
+
+# Pier mini-swe + Harbor model eval (serial; hard-stop $600)
+deepagent eval --product-root datasets/hf_pull_test \
+  --n-concurrent 1 --hard-stop-usd 600 --max-packs 5
+
+# HarborDocker dual-truth on one pack (sol=1 / null=0)
+deepagent oracle --pack-dir datasets/test_n10/tasks/<id>
+
+deepagent version
+deepagent --help
+```
+
+| Command | What it does |
+|---|---|
+| `generate` | Live mine hard `real_pr` via ship-deepagent path; default out `datasets/test_n10`, target 10; Docker oracle only; refuses fixture pad |
+| `upload` | Validate local pack root, push trees + `pack_manifest` to HF (`BaseIntelligence/deepagent`, default revision **`test`**) |
+| `pull` | Download pack trees from HF revision (`main` or `test`) into local out dir |
+| `eval` | Pier + mini-swe-agent + HarborDocker serial model eval (`n_concurrent=1`, hard-stop **$600**, fidelity **`pier_miniswe_harbor`**, models **grok-4.5** + **kimi-k2.6**) |
+| `oracle` | HarborDocker dual-truth cert on one pack dir (solution reward 1, null 0; refuse fake) |
+| `version` | Package version identity |
+
+## Hugging Face (`BaseIntelligence/deepagent`)
+
+| Ref | Content |
+|---|---|
+| **`test`** (M16) | Live N=10 packs from `datasets/test_n10` |
+| `main` | Reserved for larger / product cuts when promoted |
+
+M16 operator loop: **generate** → **upload** (revision `test`) → **pull** →
+**eval** / **oracle**. Do not embed tokens in CLI flags; use `HF_TOKEN` env /
+`.env` only.
+
+## Wave dataset vs product archive
+
+| Path | N | Status |
+|---|---:|---|
+| `datasets/test_n10` | **10** | **Current wave** — live-mined hard Real-PR (M16 sealed) |
+| HF `…/deepagent` `@test` | **10** | **Live on Hub** (mirror of wave) |
+| `datasets/deepagent_v1` | **20** | **Product archive** (still product N=20 Real-PR) |
+| `datasets/deepagent_v1_hybrid_archive/` | ~113 | Historical hybrid motors only |
+| `datasets/deepagent_v1_seed5_archive/` | seed | Historical real_pr seed only |
+| `fixtures/real_pr_ship` | — | Unit / CI shortlist only — **never** product N |
+
+## What you get in a pack
+
+Each pack under `tasks/<task_id>/`:
 
 ```text
 task.toml                 # schema 1.1, repository_url, base_commit_hash
@@ -83,214 +148,129 @@ solution/
   solve.sh
 ```
 
-Corpus-level ship artifacts:
+Corpus-level artifacts at the pack root:
 
 | Artifact | Role |
 |---|---|
 | `pack_manifest.json` | Certified pack index + band metadata |
-| `PROVENANCE.md` | One row per keep: license, upstream URL, base SHA, language |
+| `PROVENANCE.md` | License, upstream URL, base SHA, language per keep |
 | `report.md` | Language mix, funnel, spend, honesty notes |
 | `ledger_summary.json` | Exact OpenRouter spend vs $600 cap |
 | `oracle_evidence.json` | Docker sol/null dual-truth index |
 | `pier_evidence.json` | Pier load / oracle evidence |
 
-## Hybrid archive (before real-PR product overwrite)
+## Architecture
 
-Archive the sealed hybrid motor corpus **before** any real-PR promote writes
-into `datasets/deepagent_v1`:
-
-```bash
-# Idempotent: copy hybrid packs → archive (does not delete product here)
-swe-factory archive-hybrid-deepagent \
-  --source datasets/deepagent_v1 \
-  --archive datasets/deepagent_v1_hybrid_archive \
-  --json
+```mermaid
+flowchart LR
+  Allow[Permissive allowlist] --> Mine[Live mine real_pr]
+  Mine --> Env[Envbuild at base SHA]
+  Env --> Label[Dual-run F2P / P2P]
+  Label --> Oracle[Docker oracle sol=1 null=0]
+  Oracle --> Export[Harbor pack export]
+  Export --> Wave[datasets/test_n10]
+  Wave --> HF[HF BaseIntelligence/deepagent @test]
+  HF --> Eval[deepagent eval Pier mini-swe Harbor]
+  Wave --> Product[datasets/deepagent_v1 product archive N=20]
 ```
 
-| Path | Role |
-|---|---|
-| `datasets/deepagent_v1_hybrid_archive/` | Sealed hybrid_curated motors (**historical only**) |
-| `datasets/deepagent_v1_seed5_archive/` | Prior real_pr seed (**historical only**) |
-| `datasets/deepagent_v1/` | **Product** — live-mined real_pr (N=20) |
-| `fixtures/real_pr_ship` | Unit shortlist only (not product mine) |
-| `datasets/harbor_v1`, `datasets/v1` | Fixtures only (non-product) |
+Git is the authority for commits and patches. Optional GitHub page HTTP can go
+through Oxylabs (`source=universal` only) when credentials are configured.
 
-Evidence after a successful archive:
+## Honesty floors (brief)
 
-- `datasets/deepagent_v1_hybrid_archive/pack_manifest.json`
-- `datasets/deepagent_v1_hybrid_archive/tasks/<pack_id>/`
-- `datasets/deepagent_v1_hybrid_archive/ARCHIVE_README.md`
-- `datasets/deepagent_v1_hybrid_archive/archive_report.json`
+- Product / wave N counts **live-mined `real_pr` only**. Hybrid archive, seed
+  archive, and `fixtures/real_pr_ship` never pad N.
+- Docker oracle only on the certified path (`HarborDockerVerifier`); fake
+  backends are refused.
+- Dual-truth required: solution reward = 1, null reward = 0.
+- Multi-file gold from a merged public PR; hard floors include **≥10 source
+  hunks** and real-suite F2P/P2P labels where product cert applies.
+- Panel / eval spend stops under the hard budget (default **$600**); never invent
+  panel spend. Default eval models: **grok-4.5** + **kimi-k2.6**.
+- Secrets (HF / OpenRouter / GitHub) stay in env / `.env` only — never in help
+  examples, logs, or uploaded trees.
+- Under-supply and offline modes (panel offline, pier scripted when not live)
+  must be stated honestly in ship reports.
 
-Re-running `archive-hybrid-deepagent` is safe (idempotent no-op when the archive
-already holds pack_manifest + tasks). Product clear/overwrite happens only in
-the real-PR ship step **after** archive verification. Hybrid is never claimed
-as the current certified product corpus.
+## Compatibility CLI (`swe-factory`)
 
-## DeepAgent v1 product (live-mined real_pr)
-
-**Current product:** `datasets/deepagent_v1` ships **N=20** certified Real-PR
-packs (`source_track=real_pr`, live-mined materials, `materials_is_fixture=false`,
-clone@SHA agent trees, real-suite dual-run, `HarborDockerVerifier` sol=1 / null=0).
-
-| Language | Certified |
-|---|---:|
-| python | 17 |
-| javascript | 2 |
-| rust | 1 |
-| **total** | **20** |
-
-Hard floors: ≥10 source hunks, multi-file gold from a merged public PR, held-out
-`tests/test.patch`, dual-run F2P/P2P labels, Docker sol=1/null=0. Pier on the
-current corpus is **scripted**; panel is offline (no invented panel spend).
-
-Archives (not product N): hybrid motors under
-`datasets/deepagent_v1_hybrid_archive/`; prior seed under
-`datasets/deepagent_v1_seed5_archive/`. See archive `PROVENANCE.md` / `report.md`.
-
-## Historical fixtures (non-product)
-
-| Surface | Path | Status |
-|---|---|---|
-| Hybrid DeepAgent motors | `datasets/deepagent_v1_hybrid_archive` | **Historical hybrid archive only** |
-| Seed5 real_pr product | `datasets/deepagent_v1_seed5_archive` | **Historical real_pr seed only** |
-| Real-PR unit shortlist | `fixtures/real_pr_ship` | **Unit / CI only — not product mine** |
-| Harbor motors (synth) | `datasets/harbor_v1` | **Historical fixture / regression only** |
-| V1 boltons JSONL | `datasets/v1` | **Historical fixture / regression only** |
-| DeepAgent product | `datasets/deepagent_v1` | **Product north star (live-mined real_pr, N=20)** |
-
-- `datasets/deepagent_v1_hybrid_archive`: archived hybrid_curated motors.
-  **Not** the Real-PR product; do not count archive N as product N.
-- `datasets/deepagent_v1_seed5_archive`: prior real_pr seed product archived
-  before live-mine overwrite. **Not** current product N.
-- `fixtures/real_pr_ship`: offline unit shortlist for tests. **Never** pad
-  product N; product materials are live-mined (not fixture).
-- `datasets/harbor_v1`: twelve multi-language synthetic motors; may still use a
-  non-Docker offline oracle for fixture demos. **Not** DeepAgent Real-PR product.
-- `datasets/v1`: twenty multi-file boltons synthetic keeps for older V1 export
-  path tests. **Not** DeepAgent Real-PR product.
-- Milestone and product count gates use **only** independent
-  `datasets/deepagent_v1` certified live-mined `real_pr` N.
-
-## Ship DeepAgent v1
-
-### Setup
+Longer factory stages remain on `swe-factory` (same package):
 
 ```bash
-cd /projects/deepagent
-python3 -m venv .venv
-.venv/bin/pip install -U pip
-.venv/bin/pip install -e ".[dev]"
-cp .env.example .env   # set keys as needed; never commit .env
+swe-factory --help
+swe-factory ship-deepagent --help
+swe-factory real-pr-pool --help
+swe-factory eval-deepagent --help
+swe-factory deepagent-oracle --help
+swe-factory ledger
+swe-factory config              # masked settings
+swe-factory archive-hybrid-deepagent --json
+swe-factory archive-seed5-deepagent --json
 ```
 
-Python **≥ 3.12**. Console entrypoint: `swe-factory`.
+`deepagent generate` wraps the same honesty path as
+`swe-factory ship-deepagent` (no fork of gates). `deepagent eval` / `oracle`
+wrap the Pier mini-swe and HarborDocker surfaces.
 
-### Configuration (`.env`)
+## Ship DeepAgent v1 (product archive)
 
-| Variable | Purpose |
-|---|---|
-| `OPENROUTER_API_KEY` | Live teacher / hardness panel |
-| `OPENROUTER_BASE_URL` | Default `https://openrouter.ai/api/v1` |
-| `FACTORY_TEACHER_MODEL` | Default `anthropic/claude-opus-4.8` |
-| `FACTORY_PANEL_MODELS` | Grok / Kimi / Opus panel triad |
-| `FACTORY_BUDGET_USD` | Hard cap (default `600`) |
-| `OXYLABS_USERNAME` / `OXYLABS_PASSWORD` | Optional; live GitHub HTTP via universal source |
-| `GITHUB_TOKEN` or `GH_TOKEN` | Live Real-PR mine (`real-pr-pool --live`). Prefer `gh auth login` so `gh auth token` can supply the token |
+**Product archive:** `datasets/deepagent_v1` — **N=20** certified Real-PR packs
+(`source_track=real_pr`, live-mined, `materials_is_fixture=false`). Language
+mix on that corpus: **python 17 · javascript 2 · rust 1**.
 
-Secrets never appear in logs, CLI output, or exported datasets. Scannable
-secrets are fail-closed on the certified path.
+M16 wave work targets `datasets/test_n10` + HF **`test`**, not a rewrite of
+product N=20. Prefer:
 
-### Archive legacy product first (before live-mine overwrite)
+```bash
+deepagent generate --target 10 --out datasets/test_n10 --live-mine
+```
+
+Historical full ship (compat) still works:
+
+```bash
+swe-factory ship-deepagent --out datasets/deepagent_v1 \
+  --source real_pr --live-mine --target 20 --min-packs 15 \
+  --oracle docker --panel offline --pier scripted --json
+```
+
+On memory-constrained hosts, run Docker oracle cert **serially**.
+
+### Archives (historical only)
 
 ```bash
 swe-factory archive-hybrid-deepagent --json
 # → datasets/deepagent_v1_hybrid_archive/
 
 swe-factory archive-seed5-deepagent --json
-# → datasets/deepagent_v1_seed5_archive/  (prior real_pr seed; not live N)
+# → datasets/deepagent_v1_seed5_archive/
 ```
-
-### Live-mine product packs (Real-PR M14)
-
-Product materials are **live-mined**, not `fixtures/real_pr_ship`. Recommend
-GitHub auth first (`gh auth login` or set `GITHUB_TOKEN` / `GH_TOKEN`):
-
-```bash
-# 1) Live merged-PR pool (Search / list_pulls; needs token + network)
-swe-factory real-pr-pool --live --out datasets/real_pr_pool_live --json
-
-# 2) Ship product with --live-mine (refuses fixture pad of productN)
-swe-factory ship-deepagent --out datasets/deepagent_v1 \
-  --source real_pr --live-mine --target 20 --min-packs 15 \
-  --oracle docker --panel offline --pier scripted --json
-
-# Fake oracle and hybrid bind are hard-refused on the product path (non-zero)
-swe-factory ship-deepagent --oracle fake                   # exit 2
-swe-factory ship-deepagent --source real_pr --hybrid-bind  # exit 2
-```
-
-On memory-constrained hosts, Docker oracle cert may need **serial** runs
-(avoid unbounded parallel cert containers).
-
-Product truth (current wave):
 
 | Path | Role |
 |---|---|
-| `datasets/deepagent_v1/` | **Product** — live-mined `source_track=real_pr`, **N=20** |
+| `datasets/deepagent_v1/` | **Product archive** — live-mined real_pr, **N=20** |
+| `datasets/test_n10/` | **M16 wave** — live-mined real_pr, **N=10** |
 | `datasets/deepagent_v1_hybrid_archive/` | Historical hybrid motors (never product N) |
 | `datasets/deepagent_v1_seed5_archive/` | Historical real_pr seed (never live N) |
 | `fixtures/real_pr_ship` | Unit shortlist only (not product mine) |
 | `datasets/harbor_v1`, `datasets/v1` | Non-product fixtures |
 
-Each real_pr pack carries a clone@SHA agent Dockerfile, multi-file gold from a
-merged GitHub PR (≥10 source hunks), held-out `tests/test.patch`, real-suite
-dual-run labels, Docker oracle sol=1 / null=0 (`HarborDockerVerifier`), and pier
-evidence (scripted on this ship). `PROVENANCE.md` / `report.md` count
-**real_pr only**.
+## Historical fixtures (non-product)
 
-### Related stage commands
+| Surface | Path | Status |
+|---|---|---|
+| Wave N=10 | `datasets/test_n10` | **M16 wave product path** |
+| Product N=20 | `datasets/deepagent_v1` | **Product archive** |
+| Hybrid motors | `datasets/deepagent_v1_hybrid_archive` | Historical only |
+| Seed5 real_pr | `datasets/deepagent_v1_seed5_archive` | Historical only |
+| Real-PR unit shortlist | `fixtures/real_pr_ship` | Unit / CI only — not product mine |
+| Harbor motors (synth) | `datasets/harbor_v1` | Fixture / regression only |
+| V1 boltons JSONL | `datasets/v1` | Fixture / regression only |
 
-```bash
-swe-factory --help
-swe-factory config              # masked settings
-swe-factory ledger              # exact spend vs $600
-swe-factory archive-hybrid-deepagent --help
-swe-factory archive-seed5-deepagent --help
-swe-factory real-pr-pool --help
-swe-factory ship-deepagent --help
-swe-factory discover --help
-swe-factory mine-allowlist --help
-swe-factory deepagent-oracle --help
-swe-factory pier-cert --help
-swe-factory oxylabs-probe --json --out datasets/oxylabs_probe_val_oxy_005.json
-```
+Milestone and product count gates use independent certified live-mined
+`real_pr` N only (`test_n10` for this wave; `deepagent_v1` for the N=20 archive).
 
-`oxylabs-probe` records an honest `status=blocked` when credentials are absent;
-it never invents a pass.
-
-### Historical fixture ships (not product)
-
-```bash
-# Offline Harbor motors fixture (12 packs) — regression only
-swe-factory ship-harbor --out datasets/harbor_v1 --target 12
-
-# Older V1 boltons JSONL export — regression only
-swe-factory ship-v1 --out datasets/v1 --target 20 --offline
-```
-
-## CLI (`swe-factory`)
-
-```bash
-swe-factory --help
-swe-factory build …
-swe-factory envbuild …
-swe-factory export …
-swe-factory score …
-swe-factory offline-fixture --out datasets/fixture_demo
-```
-
-Unit and package checks:
+## Tests
 
 ```bash
 .venv/bin/ruff format --check src tests
@@ -299,52 +279,57 @@ Unit and package checks:
 .venv/bin/python -m pytest tests -q -p no:cacheprovider -m "not integration"
 ```
 
-Focused shipping suites:
+Focused suites:
 
 ```bash
+.venv/bin/python -m pytest tests/test_deepagent_cli.py -q -p no:cacheprovider
+.venv/bin/python -m pytest tests/test_hf_packs.py -q -p no:cacheprovider
 .venv/bin/python -m pytest tests/test_ship_deepagent.py -q -p no:cacheprovider
 .venv/bin/python -m pytest tests/test_package_layout.py -q -p no:cacheprovider
 ```
 
 ## How it works
 
-1. **Discover / live-mine** multi-file Real-PR candidates (`real-pr-pool --live`;
-   GitHub token recommended; optional Oxylabs for page HTTP).
+1. **Live-mine** multi-file Real-PR candidates (`deepagent generate --live-mine`).
 2. **Envbuild** agent images pinned at a real base SHA with offline runtime.
 3. **Label** fail-to-pass and pass-to-pass node ids via dual-run suites.
 4. **Oracle-cert** with Docker: solution reward 1, null reward 0; refuse fake.
 5. **Export** Harbor v1.1 tree with held-out tests and isolation-clean agent view.
-6. **Pier-load** proof and optional hardness panel while budget remains.
-7. **Ship** to `datasets/deepagent_v1` with PROVENANCE, report, and ledger.
+6. **Upload / pull** optional HF mirror (`BaseIntelligence/deepagent` `@test`).
+7. **Eval** Pier mini-swe + Harbor under hard-stop budget (fidelity
+   `pier_miniswe_harbor`).
 
 ## Documentation
 
 | Audience | Guide | Contents |
 |---|---|---|
-| New operators | this README | setup, ship, fixture labeling |
+| Operators | this README | install, CLI, HF, honesty floors |
 | Implementers | [docs/architecture.md](docs/architecture.md) | pipeline stages and gates |
-| Consumers of packs | `datasets/deepagent_v1/report.md` | corpus mix and honesty notes |
-| License audit | `datasets/deepagent_v1/PROVENANCE.md` | license / URL / SHA per keep |
+| Wave consumers | `datasets/test_n10/report.md` | M16 N=10 mix and honesty notes |
+| Product archive | `datasets/deepagent_v1/report.md` | N=20 corpus and provenance |
 
 ## Repository layout
 
 ```text
 src/swe_factory/
-  cli.py                 # swe-factory entrypoint
+  deepagent_cli.py       # primary deepagent entrypoint
+  cli.py                 # swe-factory compatibility entrypoint
+  export/hf_packs.py     # HF upload / pull
+  panel/eval_deepagent.py
   pipeline/ship_deepagent.py
   harbor/                # pack export + docker oracle cert
   producers/             # mine / motors / labeling
   sources/               # allowlist, git mine, oxylabs client
   accounting.py          # exact ledger under $600 cap
-fixtures/                # offline regression trees
 datasets/
-  deepagent_v1/              # PRODUCT: live-mined real_pr N=20
-  deepagent_v1_hybrid_archive/  # historical hybrid motors
-  deepagent_v1_seed5_archive/   # historical real_pr seed
-  harbor_v1/               # historical Harbor motors fixture
-  v1/                      # historical boltons V1 export
+  test_n10/                  # M16 wave: live-mined real_pr N=10
+  deepagent_v1/              # product archive: real_pr N=20
+  deepagent_v1_hybrid_archive/
+  deepagent_v1_seed5_archive/
+  harbor_v1/                 # historical Harbor motors fixture
+  v1/                        # historical boltons V1 export
 fixtures/
-  real_pr_ship/            # unit shortlist only (not product mine)
+  real_pr_ship/              # unit shortlist only (not product mine)
 tests/
 docs/
   architecture.md
@@ -352,29 +337,23 @@ docs/
 
 ## Limits and non-goals
 
-- Product count is **`datasets/deepagent_v1` only** (live-mined real_pr). Hybrid
-  archive, seed5 archive, `fixtures/real_pr_ship`, Harbor motors, and boltons
-  never substitute for product N.
-- Current language mix: python 17, javascript 2, rust 1. Under-supply must be
-  stated honestly in the ship report (no hybrid fill-in).
+- Wave N (`test_n10` / HF `test`) and product archive N (`deepagent_v1`) are
+  independent; hybrid/seed/fixture surfaces never substitute for either.
+- Not the DeepAgent forge authority / recovery stack; CLI + Docker + Pier, no
+  browser UI.
 - Copyleft / unknown licenses are fail-closed and never appear in PROVENANCE.
-- Not the DeepAgent forge authority / recovery stack; CLI + Docker + Pier, no browser UI.
-- Panel spend stops when remaining budget hits $0. Mining and docker-oracle work
-  may continue only without inventing panel calls. Current wave: panel offline,
-  pier scripted — do not claim live pier or fabricated panel spend.
-- On constrained hosts, prefer serial Docker cert to bound memory.
+- On constrained hosts, prefer serial Docker cert and `n_concurrent=1` eval.
 
 ## Spend
 
 | Metric | Value |
 |---|---|
-| Cap | $600 |
-| Settled (project ledger) | ~$3.460345 |
-| Remaining | ~$596.54 |
-| Under cap | yes |
-| This wave panel provider calls | 0 (panel offline) |
+| Cap | $600 (`FACTORY_BUDGET_USD` / eval hard-stop) |
+| Default eval concurrency | 1 |
+| Default eval models | grok-4.5 · kimi-k2.6 |
+| Eval fidelity | `pier_miniswe_harbor` |
 
-Source of truth: `swe-factory ledger` and `datasets/deepagent_v1/ledger_summary.json`.
+Source of truth: pack-root `ledger_summary.json` and (compat) `swe-factory ledger`.
 
 ## License
 
