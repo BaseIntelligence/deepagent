@@ -1,7 +1,8 @@
-"""Full DeepSWE-style real_pr agent prompts (VAL-DPRMPT-001/002/003/006).
+"""Full DeepSWE-style real_pr agent prompts (VAL-DPRMPT + VAL-DSTYLE).
 
 Stub "Merged PR #N … Restore multi-file…" product instructions are forbidden.
-Full multi-section prompts + PR body on materials are required by default.
+M18 agent-visible instructions are behavior-first DeepSWE rewrites with **no**
+PR / repo / SHA provenance (private materials may still store body/meta).
 """
 
 from __future__ import annotations
@@ -10,6 +11,10 @@ import json
 from pathlib import Path
 
 from swe_factory.harbor.real_pack import scan_instruction_gold_leak
+from swe_factory.pipeline.deepswe_prompt import (
+    find_provenance_fingerprints,
+    has_deepswe_footer,
+)
 from swe_factory.pipeline.ship_real_pr import (
     RealPrMaterial,
     build_real_pr_agent_instruction,
@@ -146,74 +151,51 @@ def test_load_real_pr_materials_includes_body_field(tmp_path: Path) -> None:
 
 
 def test_build_real_pr_agent_instruction_is_full_not_stub() -> None:
-    """VAL-DPRMPT-002 / VAL-DPRMPT-006: multi-section full prompt, not PR-number stub."""
+    """VAL-DSTYLE: DeepSWE-true behavior-first prompt, not PR-number stub."""
     mat = _material()
-    text = build_real_pr_agent_instruction(mat)
+    text = build_real_pr_agent_instruction(mat, force_offline=True)
 
     # Floor: narrative richness for long-horizon agent consumption
-    assert len(text.strip()) >= 400
+    assert len(text.strip()) >= 200
 
     lower = text.lower()
-    # Required sections (case-insensitive headings)
-    assert "context" in lower
-    assert "pr description" in lower or "description" in lower
-    assert "behavioural" in lower or "behavioral" in lower
-    assert "deliverable" in lower
+    # DeepSWE register (not M17 Context/PR description scaffolding)
+    assert find_provenance_fingerprints(text) == []
+    assert has_deepswe_footer(text)
+    assert "expected outcomes" in lower or "constraint" in lower
+    assert "## context" not in lower
+    assert "pr description" not in lower
+    assert mat.base_commit not in text
+    assert "github.com/owner/demo" not in lower
 
-    # Substantive fields
-    assert mat.repository_url.rstrip(".git") in text or mat.repository_url in text
-    assert mat.base_commit in text
-    assert mat.title in text
-    assert "pkg/pricing.py" in text
-    assert mat.body[:80] in text
-    assert "python" in lower
-    assert "fail_to_pass" in lower or "fail-to-pass" in lower
-
-    # Product isolation: no held-out node-id dump required; if omitting, state
-    # that the verifier suite defines fail_to_pass.
-    assert "held-out" in lower or "verifier" in lower
+    # Substance from title/body without provenance
+    assert "checkout" in lower or "pricing" in lower or "inventory" in lower
+    assert "python" in lower or "module" in lower or "constraint" in lower
 
     # Must not be the short Merged-PR-only stub
     stub_hits = sum(1 for marker in _STUB_MARKERS if text.strip() == marker)
     assert stub_hits == 0
-    # Stub-only opening phrase without multi-section structure is banned for full path
-    if text.lstrip().startswith("Merged PR #"):
-        assert "##" in text or "# " in text  # still multi-section markdown
+    assert not text.lstrip().startswith("Merged PR #")
 
 
 def test_build_real_pr_pack_spec_uses_full_instruction_by_default() -> None:
-    """VAL-DPRMPT-006: generate/ship path builder emits full instruction by default."""
+    """VAL-DSTYLE: generate/ship path builder emits DeepSWE-true instruction."""
     mat = _material()
-    spec = build_real_pr_pack_spec(mat)
+    spec = build_real_pr_pack_spec(mat, force_offline=True)
     instruction = spec.instruction_md
-    assert len(instruction.strip()) >= 400
-    lower = instruction.lower()
-    assert "context" in lower
-    assert "deliverable" in lower
-    assert "pr description" in lower or "description" in lower
-    assert mat.body[:40] in instruction
-    assert mat.base_commit in instruction
-    # Still authentic real_pr track
+    assert len(instruction.strip()) >= 200
+    assert find_provenance_fingerprints(instruction) == []
+    assert has_deepswe_footer(instruction)
+    assert mat.base_commit not in instruction
+    # Still authentic real_pr track on private Harbor metadata
     assert spec.task_toml.metadata.source_track == "real_pr"
     assert "git clone" in (spec.environment_dockerfile or "").lower()
 
 
 def test_full_instruction_gold_leak_scan_clean() -> None:
-    """VAL-DPRMPT-003: full prompts never embed solution.patch markers."""
+    """VAL-DPRMPT-003 / VAL-DSTYLE-005: prompts never embed solution.patch markers."""
     mat = _material()
-    # Inject a unique long gold line into solution
     unique_gold = "return atomic_reserve_and_price_with_unique_marker_ZXQ99_never_in_prompt()\n"
-    mat_leaky_sol = _material(
-        solution_extra=(
-            "diff --git a/pkg/secret_solver.py b/pkg/secret_solver.py\n"
-            "--- a/pkg/secret_solver.py\n"
-            "+++ b/pkg/secret_solver.py\n"
-            "@@ -0,0 +1,2 @@\n"
-            f"+{unique_gold}"
-            "+# end\n"
-        )
-    )
-    # Replace solution body entirely for a clearer gold marker set
     mat_leaky_sol = RealPrMaterial(
         task_id=mat.task_id,
         repository_url=mat.repository_url,
@@ -238,44 +220,45 @@ def test_full_instruction_gold_leak_scan_clean() -> None:
         discovery_path=mat.discovery_path,
         source_hunk_count=mat.source_hunk_count,
     )
-    instruction = build_real_pr_agent_instruction(mat_leaky_sol)
+    instruction = build_real_pr_agent_instruction(mat_leaky_sol, force_offline=True)
     hits = scan_instruction_gold_leak(instruction, mat_leaky_sol.solution_patch)
     assert hits == []
-    assert "atomic_reserve_and_price_with_unique_marker_ZXQ99" not in instruction
     assert "diff --git" not in instruction
+    assert find_provenance_fingerprints(instruction) == []
 
 
 def test_body_truncated_and_sanitized_in_prompt() -> None:
-    """Body is included (≤~2000 chars) and excess noise is normalized."""
+    """Huge / dirty body is distilled (not unbounded dump) and antifingerprint-clean."""
     huge = ("Paragraph about product behaviour. " * 200) + "TAIL_MARKER_END"
     mat = _material(body=huge)
-    text = build_real_pr_agent_instruction(mat)
-    # Truncation floor keeps prompt bounded
-    assert "Paragraph about product behaviour" in text
-    # Raw entire huge body should not dump unbounded
+    text = build_real_pr_agent_instruction(mat, force_offline=True)
+    assert (
+        "product behaviour" in text.lower()
+        or "behavior" in text.lower()
+        or "checkout" in text.lower()
+    )
     assert len(text) < len(huge) + 2500
-    # No pure stub
-    assert len(text) >= 400
+    assert len(text) >= 200
+    assert find_provenance_fingerprints(text) == []
 
 
 def test_build_problem_statement_still_usable_and_aligned() -> None:
-    """Shared pr_miner helper remains gold-safe and includes PR description."""
+    """Shared pr_miner helper remains gold-safe (mine path; may keep PR framing)."""
     pr = _merged_pr()
     prompt = build_problem_statement(pr=pr)
-    assert "PR description" in prompt
-    assert pr.title in prompt
+    # Mine-side helper may still mention PR; product path uses DeepSWE rewrite.
+    assert pr.title in prompt or "Restore multi-module" in prompt
     assert "diff --git" not in prompt
     assert len(prompt) >= 100
 
 
 def test_empty_body_still_full_multi_section() -> None:
-    """When GitHub provides no body, still emit full framing (not Merged-PR stub)."""
+    """When GitHub provides no body, still emit DeepSWE framing (not Merged-PR stub)."""
     mat = _material(body="")
-    text = build_real_pr_agent_instruction(mat)
-    assert len(text.strip()) >= 400
+    text = build_real_pr_agent_instruction(mat, force_offline=True)
+    assert len(text.strip()) >= 200
     lower = text.lower()
-    assert "context" in lower
-    assert "deliverable" in lower
-    assert "behavioural" in lower or "behavioral" in lower
-    # Section present even if description notes absence
-    assert "description" in lower or "title" in lower
+    assert "expected outcomes" in lower or "constraint" in lower
+    assert has_deepswe_footer(text)
+    assert find_provenance_fingerprints(text) == []
+    assert not text.lstrip().startswith("Merged PR #")

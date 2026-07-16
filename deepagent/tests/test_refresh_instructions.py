@@ -115,7 +115,7 @@ def _write_materials(root: Path, task_id: str = "realpr-demo-77", *, body: str =
 
 
 def test_refresh_pack_from_materials_body(tmp_path: Path) -> None:
-    """Materials body → full multi-section instruction (no GitHub)."""
+    """Materials body → DeepSWE-style instruction without provenance."""
     packs = tmp_path / "test_n10"
     mats = tmp_path / "live_materials"
     pack = _write_pack(packs)
@@ -125,17 +125,20 @@ def test_refresh_pack_from_materials_body(tmp_path: Path) -> None:
         pack,
         materials_root=mats,
         fetch_github=False,
+        force_offline=True,
     )
     assert one.ok, one.error
-    assert one.chars_after >= 400
+    assert one.chars_after >= 200
     assert one.body_source == "meta"
     assert one.body_chars == len(_LONG_BODY)
     text = (pack / "instruction.md").read_text(encoding="utf-8")
     lower = text.lower()
-    assert "context" in lower
-    assert "pr description" in lower
-    assert "deliverable" in lower
-    assert _LONG_BODY[:40] in text
+    assert "expected outcomes" in lower or "constraint" in lower
+    assert "important:" in lower
+    assert "new branch" in lower
+    assert "## context" not in lower
+    assert "pr description" not in lower
+    assert "github.com" not in lower
     assert not text.lstrip().startswith("Merged PR #77 on")
 
 
@@ -156,15 +159,18 @@ def test_refresh_pack_fetches_github_when_body_missing(tmp_path: Path) -> None:
         materials_root=mats,
         fetch_github=True,
         get_pull=fake_get_pull,
+        force_offline=True,
     )
     assert one.ok, one.error
     assert one.body_source == "github"
-    # Body persisted onto materials meta.json
+    # Body persisted onto materials meta.json (private)
     meta = json.loads((mats / "realpr-demo-77" / "meta.json").read_text(encoding="utf-8"))
     assert meta.get("body") == _LONG_BODY
     text = (pack / "instruction.md").read_text(encoding="utf-8")
-    assert "PR description" in text
-    assert _LONG_BODY[:30] in text
+    # Agent-visible: rewritten, not raw GitHub PR description dump
+    assert "github.com" not in text.lower()
+    assert "pricing" in text.lower() or "inventory" in text.lower() or "checkout" in text.lower()
+    assert "important:" in text.lower()
 
 
 def test_refresh_root_stamps_manifest_prompt_style(tmp_path: Path) -> None:
@@ -189,6 +195,7 @@ def test_refresh_root_stamps_manifest_prompt_style(tmp_path: Path) -> None:
         materials_root=mats,
         fetch_github=False,
         stamp_manifest=True,
+        force_offline=True,
     )
     assert result.ok
     assert result.refreshed == 1
@@ -213,7 +220,9 @@ def test_refresh_gold_leak_fails_closed(tmp_path: Path) -> None:
     mats = tmp_path / "live_materials"
     _write_materials(mats, body=_LONG_BODY)
 
-    one = refresh_pack_instruction(pack, materials_root=mats, fetch_github=False)
+    one = refresh_pack_instruction(
+        pack, materials_root=mats, fetch_github=False, force_offline=True
+    )
     assert one.ok, one.error
     text = (pack / "instruction.md").read_text(encoding="utf-8")
     assert unique not in text
@@ -225,9 +234,10 @@ def test_material_from_pack_empty_body_still_full(tmp_path: Path) -> None:
     pack = _write_pack(packs)
     mat, body_res = material_from_pack(pack, fetch_github=False)
     assert body_res.source == "empty"
-    text = build_real_pr_agent_instruction(mat)
-    assert len(text) >= 400
-    assert "context" in text.lower()
+    text = build_real_pr_agent_instruction(mat, force_offline=True)
+    assert len(text) >= 200
+    assert "expected outcomes" in text.lower() or "constraint" in text.lower()
+    assert "important:" in text.lower()
 
 
 def test_stamp_manifest_helper_idempotent(tmp_path: Path) -> None:

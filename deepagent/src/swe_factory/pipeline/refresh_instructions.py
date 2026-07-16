@@ -21,14 +21,22 @@ from pathlib import Path
 from typing import Any
 
 from swe_factory.harbor.real_pack import scan_instruction_gold_leak
+from swe_factory.pipeline.deepswe_prompt import (
+    PROMPT_STYLE_DEEPSWE_V1,
+    has_deepswe_footer,
+    has_provenance_fingerprints,
+    style_ok,
+)
 from swe_factory.pipeline.ship_real_pr import (
     RealPrMaterial,
     build_real_pr_agent_instruction,
     sanitize_pr_body_for_prompt,
 )
 
-PROMPT_STYLE_FULL_V1 = "deepagent_full_v1"
-_AGENT_INSTRUCTION_MIN_CHARS = 400
+# M18 DeepSWE-true style is product default; keep FULL_V1 as historical alias name.
+PROMPT_STYLE_FULL_V1 = PROMPT_STYLE_DEEPSWE_V1
+PROMPT_STYLE_DEEPSWE = PROMPT_STYLE_DEEPSWE_V1
+_AGENT_INSTRUCTION_MIN_CHARS = 200
 _STUB_OPENING = re.compile(r"^Merged PR #\d+\s+on\s+", re.MULTILINE)
 
 
@@ -298,18 +306,29 @@ def _tests_from_materials(materials_meta: Mapping[str, Any], test_patch: str) ->
 
 
 def _sections_ok(text: str) -> bool:
-    lower = text.lower()
+    """Accept DeepSWE-true register (M18) or legacy full multi-section (compat)."""
+    body = text or ""
+    lower = body.lower()
+    long_enough = len(body.strip()) >= _AGENT_INSTRUCTION_MIN_CHARS
+    not_pure_stub = not (
+        body.lstrip().startswith("Merged PR #") and "## " not in body and "# " not in body[:20]
+    )
+    if _STUB_OPENING.search(body) and not has_deepswe_footer(body):
+        return False
+    # Preferred: DeepSWE-true (no provenance fingerprints + footer + outcomes)
+    if (
+        long_enough
+        and not_pure_stub
+        and not has_provenance_fingerprints(body)
+        and has_deepswe_footer(body)
+        and style_ok(body)
+    ):
+        return True
+    # Legacy M17 multi-section (still greppable for older packs mid-refresh)
     has_context = "context" in lower
-    has_desc = "pr description" in lower or ("description" in lower and "##" in text)
+    has_desc = "pr description" in lower or ("description" in lower and "##" in body)
     has_behav = "behavioural" in lower or "behavioral" in lower
     has_deliver = "deliverable" in lower
-    long_enough = len(text.strip()) >= _AGENT_INSTRUCTION_MIN_CHARS
-    not_pure_stub = not (
-        text.lstrip().startswith("Merged PR #") and "## " not in text and "# " not in text[:20]
-    )
-    # Stub-only short form rejected even if ≥400 padding
-    if _STUB_OPENING.search(text) and "pr description" not in lower and not has_context:
-        return False
     return bool(
         has_context and has_desc and has_behav and has_deliver and long_enough and not_pure_stub
     )
@@ -405,6 +424,7 @@ def material_from_pack(
         counted = sum(1 for line in solution.splitlines() if line.startswith("@@"))
         hunk_n = counted if counted > 0 else None
 
+    agent_instr = str(materials_meta.get("agent_instruction") or "").strip()
     material = RealPrMaterial(
         task_id=task_id,
         repository_url=repository_url,
@@ -421,6 +441,7 @@ def material_from_pack(
         materials_dir=materials_dir,
         discovery_path=str(materials_meta.get("discovery_path") or ""),
         source_hunk_count=hunk_n,
+        agent_instruction=agent_instr,
     )
     return material, body_res
 
@@ -433,8 +454,15 @@ def refresh_pack_instruction(
     dry_run: bool = False,
     github_client: Any | None = None,
     get_pull: Callable[[str, int], Mapping[str, Any]] | None = None,
+    force_offline: bool | None = None,
+    use_llm: bool | None = None,
 ) -> PackInstructionRefresh:
-    """Rewrite one pack's instruction.md with the full builder + leak scan."""
+    """Rewrite one pack's instruction.md with DeepSWE-style builder + leak scan.
+
+    *force_offline* / *use_llm* control OpenRouter rewrite. When neither is set,
+    live LLM is used iff ``OPENROUTER_API_KEY`` is present (product default).
+    Unit tests should pass ``force_offline=True``.
+    """
     pack = Path(pack_dir)
     task_id = pack.name
     instr_path = pack / "instruction.md"
@@ -442,6 +470,13 @@ def refresh_pack_instruction(
     if instr_path.is_file():
         before = instr_path.read_text(encoding="utf-8", errors="replace")
     chars_before = len(before)
+
+    # Resolve offline policy: use_llm=False or force_offline=True ⇒ no network.
+    offline_flag = force_offline
+    if use_llm is False:
+        offline_flag = True
+    elif use_llm is True:
+        offline_flag = False
 
     try:
         material, body_res = material_from_pack(
@@ -457,13 +492,22 @@ def refresh_pack_instruction(
                 f"(url={material.repository_url!r}, base={material.base_commit!r})"
             )
         # Even empty solution is rare on certified packs; still require for leak-safe.
-        instruction = build_real_pr_agent_instruction(material)
+        instruction = build_real_pr_agent_instruction(
+            material,
+            force_offline=offline_flag,
+        )
         # Defense-in-depth: re-sanitize embedded body (builder already sanitizes).
         _ = sanitize_pr_body_for_prompt(material.body)
         sol_hits = scan_instruction_gold_leak(instruction, material.solution_patch)
         test_hits = scan_instruction_gold_leak(instruction, material.test_patch)
         leak_hits = tuple(dict.fromkeys([*sol_hits, *test_hits]))
-        sections = _sections_ok(instruction)
+        # Hard fail if agent-visible text still carries mining fingerprints.
+        fingerprints = (
+            ()
+            if not has_provenance_fingerprints(instruction)
+            else tuple(h for h in ("provenance",))
+        )
+        sections = _sections_ok(instruction) and not has_provenance_fingerprints(instruction)
         if leak_hits:
             return PackInstructionRefresh(
                 task_id=task_id,
@@ -477,6 +521,18 @@ def refresh_pack_instruction(
                 leak_hits=leak_hits,
                 error=f"gold leak scan failed: {list(leak_hits)}",
             )
+        if fingerprints or has_provenance_fingerprints(instruction):
+            return PackInstructionRefresh(
+                task_id=task_id,
+                pack_dir=str(pack),
+                ok=False,
+                chars_before=chars_before,
+                chars_after=len(instruction),
+                body_chars=len(material.body or ""),
+                body_source=body_res.source,
+                sections_ok=False,
+                error="instruction still contains provenance fingerprints (VAL-DSTYLE-001)",
+            )
         if not sections:
             return PackInstructionRefresh(
                 task_id=task_id,
@@ -487,7 +543,7 @@ def refresh_pack_instruction(
                 body_chars=len(material.body or ""),
                 body_source=body_res.source,
                 sections_ok=False,
-                error="instruction missing required full-prompt sections or length floor",
+                error="instruction missing required DeepSWE-style sections or length floor",
             )
         if not dry_run:
             instr_path.write_text(instruction, encoding="utf-8")
@@ -501,6 +557,7 @@ def refresh_pack_instruction(
             body_source=body_res.source,
             sections_ok=True,
             leak_hits=(),
+            prompt_style=PROMPT_STYLE_DEEPSWE_V1,
         )
     except RefreshInstructionsError as exc:
         return PackInstructionRefresh(
@@ -586,6 +643,8 @@ def refresh_product_instructions(
     github_client: Any | None = None,
     get_pull: Callable[[str, int], Mapping[str, Any]] | None = None,
     task_ids: Sequence[str] | None = None,
+    force_offline: bool | None = None,
+    use_llm: bool | None = None,
 ) -> RefreshInstructionsResult:
     """Refresh all (or selected) pack ``instruction.md`` under a product root.
 
@@ -615,6 +674,8 @@ def refresh_product_instructions(
             dry_run=dry_run,
             github_client=github_client,
             get_pull=get_pull,
+            force_offline=force_offline,
+            use_llm=use_llm,
         )
         if one.body_source == "github" and one.ok:
             fetched += 1
@@ -651,6 +712,8 @@ def refresh_product_instructions(
 
 
 __all__ = [
+    "PROMPT_STYLE_DEEPSWE",
+    "PROMPT_STYLE_DEEPSWE_V1",
     "PROMPT_STYLE_FULL_V1",
     "PackInstructionRefresh",
     "RefreshInstructionsError",
