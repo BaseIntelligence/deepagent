@@ -22,6 +22,12 @@ from typing import Annotated, Any
 import typer
 
 from swe_factory import __version__
+from swe_factory.panel.eval_deepagent import (
+    DEFAULT_N_CONCURRENT as DEFAULT_EVAL_N_CONCURRENT,
+)
+from swe_factory.panel.eval_deepagent import (
+    MAX_N_CONCURRENT as MAX_EVAL_N_CONCURRENT,
+)
 
 # M16 product defaults (architecture.md / AGENTS.md).
 DEFAULT_HF_REPO_ID = "BaseIntelligence/deepagent"
@@ -29,9 +35,8 @@ DEFAULT_HF_REVISION = "test"
 DEFAULT_GENERATE_OUT = Path("datasets/test_n10")
 DEFAULT_GENERATE_TARGET = 10
 DEFAULT_EVAL_HARD_STOP_USD = 600.0
-DEFAULT_EVAL_N_CONCURRENT = 1
-# M19 concurrent-bench cap (default still 1). Values > MAX raise host Mem risk.
-MAX_EVAL_N_CONCURRENT = 5
+# M19 concurrent-bench cap aliases DEFAULT_N_CONCURRENT / MAX_N_CONCURRENT from
+# eval_deepagent (shared refuse path with swe-factory eval-deepagent wrapper).
 DEFAULT_PRODUCT_ROOT = Path("datasets/deepagent_v1")
 
 app = typer.Typer(

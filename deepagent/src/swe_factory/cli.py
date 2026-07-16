@@ -2102,16 +2102,19 @@ def eval_deepagent_cmd(
     from swe_factory.panel.eval_deepagent import (
         DEEPAGENT_EVAL_FIDELITY,
         DEEPAGENT_EVAL_MODELS,
+        DEFAULT_N_CONCURRENT,
+        MAX_N_CONCURRENT,
         DeepAgentEvalError,
         mocked_miniswe_invoker,
         run_deepagent_eval,
     )
 
     n_conc = int(n_concurrent)
-    if n_conc < 1 or n_conc > 5:
+    if n_conc < 1 or n_conc > MAX_N_CONCURRENT:
         typer.secho(
             f"eval-deepagent: refuse n_concurrent={n_concurrent} "
-            "(must be in 1..5; default 1; n>1 raises host Mem / concurrent docker risk)",
+            f"(must be in 1..{MAX_N_CONCURRENT}; default {DEFAULT_N_CONCURRENT}; "
+            "n>1 raises host Mem / concurrent docker risk)",
             fg=typer.colors.RED,
             err=True,
         )
