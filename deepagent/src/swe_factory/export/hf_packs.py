@@ -42,6 +42,144 @@ class HfPacksError(RuntimeError):
     """Fail-closed HF pack I/O error (schema, auth, revision, empty corpus)."""
 
 
+# ---------------------------------------------------------------------------
+# Auth-safe constant messages (never interpolate raw Hub ``str(exc)``).
+# User-facing CLI paths surface these constants so Hub HTTP text cannot leak
+# tokens, request ids, or other provider detail into console / JSON logs.
+# ---------------------------------------------------------------------------
+
+MSG_TOKEN_MISSING = (
+    "upload: HF_TOKEN / HUGGING_FACE_HUB_TOKEN missing (fail-closed; no network spam)"
+)
+MSG_UPLOAD_AUTH = (
+    "upload: Hugging Face authentication failed "
+    "(check HF_TOKEN / HUGGING_FACE_HUB_TOKEN and write access)"
+)
+MSG_PULL_AUTH = (
+    "pull: Hugging Face authentication failed "
+    "(check HF_TOKEN / HUGGING_FACE_HUB_TOKEN and read access)"
+)
+MSG_UPLOAD_REPO = "upload: Hugging Face dataset repository create/access failed"
+MSG_UPLOAD_HUB = "upload: Hugging Face Hub push failed"
+MSG_PULL_REVISION = "pull: revision not found (or inaccessible) on remote dataset"
+MSG_PULL_HUB = "pull: Hugging Face Hub download failed"
+MSG_HUB_DEPENDENCY = "huggingface_hub not installed; pip install 'huggingface_hub>=0.23'"
+
+
+def _exc_class_name(exc: BaseException) -> str:
+    """Best-effort exception class name (supports Hub error hierarchy)."""
+    return type(exc).__name__
+
+
+def _hub_exc_blob_lower(exc: BaseException) -> str:
+    """Lowercased status+message blob used only for classification (never echoed)."""
+    parts: list[str] = [_exc_class_name(exc), str(exc)]
+    # HfHubHTTPError often carries .response.status_code
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+        if status is not None:
+            parts.append(str(status))
+    status_attr = getattr(exc, "status_code", None)
+    if status_attr is not None:
+        parts.append(str(status_attr))
+    return " ".join(parts).lower()
+
+
+def is_auth_hub_failure(exc: BaseException) -> bool:
+    """True when *exc* looks like HF auth / gate / unauthorized failure.
+
+    Classification only — never used as a user-visible string source.
+    """
+    name = _exc_class_name(exc)
+    if name in {
+        "GatedRepoError",
+        "LocalTokenNotFoundError",
+        "DisabledRepoError",
+    }:
+        return True
+    blob = _hub_exc_blob_lower(exc)
+    auth_markers = (
+        " 401",
+        "401 ",
+        "401:",
+        " 403",
+        "403 ",
+        "403:",
+        "unauthorized",
+        "forbidden",
+        "invalid token",
+        "invalid credentials",
+        "authentication",
+        "not authenticated",
+        "access denied",
+        "permission denied",
+        "gated repo",
+        "gated repository",
+        "token is required",
+        "invalid username or password",
+        "wrong credentials",
+    )
+    # status codes may appear bare; require common framing or known Hub HTTP types
+    auth_type = name in {
+        "HfHubHTTPError",
+        "HTTPError",
+        "RepositoryNotFoundError",  # HF often 401-masquerades as 404
+        "GatedRepoError",
+    }
+    if ("401" in blob or "403" in blob) and (any(m in blob for m in auth_markers) or auth_type):
+        return True
+    return any(m.strip() in blob for m in auth_markers if m.strip())
+
+
+def is_revision_not_found(exc: BaseException) -> bool:
+    """True when *exc* indicates a missing/invalid HF revision/ref."""
+    name = _exc_class_name(exc)
+    if name in {"RevisionNotFoundError", "EntryNotFoundError"}:
+        return True
+    blob = _hub_exc_blob_lower(exc)
+    return any(
+        m in blob
+        for m in (
+            "revisionnotfound",
+            "revision not found",
+            "invalid ref",
+            "does not exist on the server",
+            "is not a valid git identifier",
+        )
+    )
+
+
+def map_hub_failure(action: str, exc: BaseException, *, stage: str = "") -> str:
+    """Map a Hub/network exception to a constant auth-safe message.
+
+    Never interpolates ``str(exc)``. ``action`` is ``\"upload\"`` or ``\"pull\"``.
+    """
+    act = (action or "hub").strip().lower()
+    if act not in {"upload", "pull"}:
+        act = "upload"
+
+    if is_auth_hub_failure(exc):
+        return MSG_UPLOAD_AUTH if act == "upload" else MSG_PULL_AUTH
+
+    if act == "pull" and is_revision_not_found(exc):
+        return MSG_PULL_REVISION
+
+    stage_l = (stage or "").strip().lower()
+    if act == "upload" and stage_l in {"create_repo", "repo", "branch"}:
+        # create_repo access failures that are not auth still stay constant
+        return MSG_UPLOAD_REPO
+
+    if act == "upload":
+        return MSG_UPLOAD_HUB
+    return MSG_PULL_HUB
+
+
+def hub_error(action: str, exc: BaseException, *, stage: str = "") -> HfPacksError:
+    """Build an :class:`HfPacksError` from a Hub failure without leaking Hub text."""
+    return HfPacksError(map_hub_failure(action, exc, stage=stage))
+
+
 @dataclass(frozen=True, slots=True)
 class PackCorpusValidation:
     """Result of local Harbor pack corpus validation."""
@@ -302,9 +440,7 @@ def upload_packs(
 
     auth = resolve_hf_token(token)
     if not auth:
-        raise HfPacksError(
-            "upload: HF_TOKEN / HUGGING_FACE_HUB_TOKEN missing (fail-closed; no network spam)"
-        )
+        raise HfPacksError(MSG_TOKEN_MISSING)
 
     # Lazy import so offline unit paths without the wheel still import this module
     # when ``api`` is injected — but production requires huggingface_hub.
@@ -312,9 +448,7 @@ def upload_packs(
         try:
             from huggingface_hub import HfApi
         except ImportError as exc:  # pragma: no cover - env issue
-            raise HfPacksError(
-                "upload: huggingface_hub not installed; pip install 'huggingface_hub>=0.23'"
-            ) from exc
+            raise HfPacksError(f"upload: {MSG_HUB_DEPENDENCY}") from exc
         client = HfApi(token=auth)
     else:
         client = api
@@ -323,9 +457,14 @@ def upload_packs(
         client.create_repo(repo_id=repo_id, repo_type="dataset", exist_ok=True)
     except Exception as exc:  # noqa: BLE001
         # Repo may already exist with different visibility; still attempt upload.
-        msg = str(exc).lower()
-        if "already" not in msg and "409" not in msg and "exist" not in msg:
-            raise HfPacksError(f"upload: create_repo failed for {repo_id}: {exc}") from exc
+        # Classification uses message for "already exists" only — never re-echoed.
+        existing_blob = _hub_exc_blob_lower(exc)
+        if (
+            "already" not in existing_blob
+            and "409" not in existing_blob
+            and "exist" not in existing_blob
+        ):
+            raise hub_error("upload", exc, stage="create_repo") from exc
 
     _ensure_branch(client, repo_id=repo_id, revision=revision)
 
@@ -341,7 +480,7 @@ def upload_packs(
             commit_message=msg,
         )
     except Exception as exc:  # noqa: BLE001
-        raise HfPacksError(f"upload: push to {repo_id}@{revision} failed: {exc}") from exc
+        raise hub_error("upload", exc, stage="upload_folder") from exc
 
     result["pushed"] = True
     result["message"] = "upload_folder complete"
@@ -437,9 +576,7 @@ def pull_packs(
         try:
             from huggingface_hub import snapshot_download
         except ImportError as exc:  # pragma: no cover
-            raise HfPacksError(
-                "pull: huggingface_hub not installed; pip install 'huggingface_hub>=0.23'"
-            ) from exc
+            raise HfPacksError(f"pull: {MSG_HUB_DEPENDENCY}") from exc
         download = snapshot_download
     else:
         download = snapshot_fn
@@ -454,20 +591,23 @@ def pull_packs(
             token=auth,
         )
     except Exception as exc:  # noqa: BLE001
-        # Normalize fail-closed message for bad revision (VAL-DHF-004)
-        msg = str(exc)
-        lower = msg.lower()
-        if (
-            "revision" in lower
-            or "not found" in lower
-            or "404" in lower
-            or "does not exist" in lower
-            or "invalid ref" in lower
+        # Auth first (constant message; never re-echo Hub HTTP body).
+        if is_auth_hub_failure(exc):
+            raise hub_error("pull", exc, stage="snapshot_download") from exc
+        # VAL-DHF-004: missing/invalid revision → constant pull message.
+        blob = _hub_exc_blob_lower(exc)
+        if is_revision_not_found(exc) or any(
+            m in blob
+            for m in (
+                "revision",
+                "not found",
+                "404",
+                "does not exist",
+                "invalid ref",
+            )
         ):
-            raise HfPacksError(
-                f"pull: revision {rev!r} not found (or inaccessible) on {repo_id}: {exc}"
-            ) from exc
-        raise HfPacksError(f"pull: snapshot_download failed for {repo_id}@{rev}: {exc}") from exc
+            raise HfPacksError(MSG_PULL_REVISION) from exc
+        raise hub_error("pull", exc, stage="snapshot_download") from exc
 
     task_ids = _materialized_pack_ids(out)
     if not task_ids:
@@ -569,9 +709,21 @@ __all__ = [
     "DEFAULT_HF_REVISION",
     "HF_PACKS_SCHEMA",
     "HfPacksError",
+    "MSG_HUB_DEPENDENCY",
+    "MSG_PULL_AUTH",
+    "MSG_PULL_HUB",
+    "MSG_PULL_REVISION",
+    "MSG_TOKEN_MISSING",
+    "MSG_UPLOAD_AUTH",
+    "MSG_UPLOAD_HUB",
+    "MSG_UPLOAD_REPO",
     "PackCorpusValidation",
     "build_pack_manifest",
+    "hub_error",
+    "is_auth_hub_failure",
+    "is_revision_not_found",
     "list_pack_dirs",
+    "map_hub_failure",
     "pull_pack_tree",
     "pull_packs",
     "resolve_hf_token",

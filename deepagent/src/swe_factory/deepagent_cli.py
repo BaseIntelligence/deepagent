@@ -208,6 +208,53 @@ def _resolve_hf_token() -> str | None:
     return None
 
 
+def _safe_hub_cli_message(action: str, exc: BaseException) -> str:
+    """Map Hub/CLI failures to constant auth-safe text (no raw str(exc)).
+
+    Prefer messages already produced by :mod:`swe_factory.export.hf_packs`
+    (``HfPacksError`` carries constants). For other exception types
+    (fallback HfApi path), classify via ``map_hub_failure``.
+    """
+    try:
+        from swe_factory.export.hf_packs import (
+            MSG_PULL_AUTH,
+            MSG_PULL_HUB,
+            MSG_PULL_REVISION,
+            MSG_TOKEN_MISSING,
+            MSG_UPLOAD_AUTH,
+            MSG_UPLOAD_HUB,
+            MSG_UPLOAD_REPO,
+            HfPacksError,
+            map_hub_failure,
+        )
+    except ImportError:
+        # Absolute last resort when export package is missing — still no raw Hub text.
+        if action == "upload":
+            return "upload: Hugging Face Hub operation failed"
+        return "pull: Hugging Face Hub operation failed"
+
+    # Schema / self-contained HfPacksError messages are already safe constants
+    # or intentionally product-owned (never Hub HTTP bodies for auth paths).
+    if isinstance(exc, HfPacksError):
+        text = str(exc)
+        # Known constants always pass through; unknown leftovers stay as-owned.
+        known = {
+            MSG_TOKEN_MISSING,
+            MSG_UPLOAD_AUTH,
+            MSG_UPLOAD_HUB,
+            MSG_UPLOAD_REPO,
+            MSG_PULL_AUTH,
+            MSG_PULL_HUB,
+            MSG_PULL_REVISION,
+        }
+        if text in known or text.startswith(("upload: pack ", "pull: no ", "pull: revision")):
+            return text
+        # Unexpected HfPacksError body → re-map without leaking
+        return map_hub_failure(action, exc)
+
+    return map_hub_failure(action, exc)
+
+
 def _pack_schema_ok(src: Path) -> tuple[bool, list[str]]:
     """Validate Harbor pack tree layout before any HF push (offline-safe).
 
@@ -326,8 +373,8 @@ def upload_cmd(
                 dry_run=dry_run,
             )
         except Exception as exc:  # noqa: BLE001
-            # Never echo token material; exception text is redacted by HfPacks paths.
-            typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
+            # Auth-safe constants only — never raw Hub str(exc).
+            typer.secho(_safe_hub_cli_message("upload", exc), fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from exc
         payload: dict[str, Any] = {
             "ok": True,
@@ -415,7 +462,7 @@ def upload_cmd(
         payload["pushed"] = True
         payload["message"] = "upload_folder complete"
     except Exception as exc:  # noqa: BLE001
-        typer.secho(f"upload: {exc}", fg=typer.colors.RED, err=True)
+        typer.secho(_safe_hub_cli_message("upload", exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
     if json_out:
@@ -507,7 +554,7 @@ def pull_cmd(
                 dry_run=dry_run,
             )
         except Exception as exc:  # noqa: BLE001
-            typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+            typer.secho(_safe_hub_cli_message("pull", exc), fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from exc
         if isinstance(result, dict):
             payload.update({k: v for k, v in result.items() if k.lower() not in {"token"}})
@@ -554,7 +601,7 @@ def pull_cmd(
         payload["path"] = str(path)
         payload["message"] = "snapshot_download complete"
     except Exception as exc:  # noqa: BLE001
-        typer.secho(f"pull: {exc}", fg=typer.colors.RED, err=True)
+        typer.secho(_safe_hub_cli_message("pull", exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
     if json_out:
