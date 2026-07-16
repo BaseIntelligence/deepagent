@@ -471,6 +471,8 @@ def upload_packs(
     msg = commit_message or (
         f"deepagent upload: {len(validation.task_ids)} packs → {repo_id}@{revision}"
     )
+    # Mirror local corpus exactly: remove remote-only pack trees / evidence
+    # left by prior waves (e.g. curated prod_hard_keep drops misalign/solve-all).
     try:
         commit = client.upload_folder(
             folder_path=str(root),
@@ -478,6 +480,7 @@ def upload_packs(
             repo_type="dataset",
             revision=revision,
             commit_message=msg,
+            delete_patterns=["*"],
         )
     except Exception as exc:  # noqa: BLE001
         raise hub_error("upload", exc, stage="upload_folder") from exc

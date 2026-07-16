@@ -1,0 +1,2005 @@
+{
+  "archive_note": "Hybrid archive action=`already_archived` \u2192 `datasets/deepagent_v1_hybrid_archive` (archive_pack_count=113); ok=True; historical only, never product N. reason=Idempotent no-op: archive already contains hybrid pack evidence (N=113). Product not claimed as current certified real_pr corpus by this archive step.",
+  "assertions": [
+    "VAL-DHARD-004",
+    "VAL-DHARD-002",
+    "VAL-DHARD-003"
+  ],
+  "band": {
+    "max": 5,
+    "min": 5,
+    "target": 5
+  },
+  "budget_stop": false,
+  "count": 5,
+  "curated_at": "2026-07-16T21:29:36.485581+00:00",
+  "curated_hardness": true,
+  "curation_schema": "deepagent.prod_hard_curation.v1",
+  "curation_source": "datasets/test_n10",
+  "drop_reasons": {
+    "realpr-charset-normalizer-715": {
+      "alignment_ok": true,
+      "detail": "Solve-all / easy class: frontier panel pass@k=1.0 (both models resolved) and thin F2P=1 below MIN_F2P_NODES floor.",
+      "f2p_count": 1,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": false,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "solve_all_easy_policy_drop"
+    },
+    "realpr-more-itertools-1136": {
+      "alignment_ok": false,
+      "detail": "Prompt\u2013verifier misalignment: instruction claims version/export-only and do-not-change-runtime while F2P/gold assert runtime behaviour (windowed/unique_everseen class).",
+      "f2p_count": 4,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": true,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "prompt_verifier_misalign"
+    },
+    "realpr-more-itertools-943": {
+      "alignment_ok": false,
+      "detail": "instruction claims do-not-change-runtime while test.patch/gold exercises runtime behavioural asserts (classes=['error_contract'])",
+      "f2p_count": 1,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": false,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "prompt_no_runtime_claim_vs_runtime_f2p"
+    },
+    "realpr-rich-3486": {
+      "alignment_ok": true,
+      "detail": "f2p_count=1 < MIN_F2P_NODES=3 (thin F2P refused on product hardness path); thin F2P\u22481 classified as easy; anti-easy policy drop",
+      "f2p_count": 1,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": false,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "f2p_nodes_below_floor"
+    },
+    "realpr-rich-4070": {
+      "alignment_ok": true,
+      "detail": "Solve-all / easy class: frontier panel pass@k=1.0 (both models resolved) and thin F2P=1 below MIN_F2P_NODES floor.",
+      "f2p_count": 1,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": false,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "solve_all_easy_policy_drop"
+    }
+  },
+  "dropped_count": 5,
+  "harbor_load_smoke": {
+    "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
+    "cli_version_exit": 1,
+    "cli_version_out": "",
+    "environment_mode": "VerifierEnvironmentMode.SEPARATE",
+    "errors": [],
+    "harbor_version": "0.18.0",
+    "listed": [
+      "realpr-attrs-1323",
+      "realpr-attrs-1457",
+      "realpr-httpx-3672",
+      "realpr-itemadapter-101",
+      "realpr-packaging-1120"
+    ],
+    "metadata_language": "python",
+    "ok": true,
+    "paths": {
+      "environment/": true,
+      "instruction.md": true,
+      "solution/": true,
+      "task.toml": true,
+      "tests/": true
+    },
+    "paths_ok": true,
+    "schema_version": "1.1",
+    "task_config_ok": true,
+    "task_id": "realpr-attrs-1323",
+    "task_object": "Task",
+    "task_short_name": "realpr-attrs-1323",
+    "tool": "harbor"
+  },
+  "historical_fixtures_only": [
+    "datasets/deepagent_v1_hybrid_archive",
+    "datasets/harbor_v1",
+    "datasets/v1",
+    "fixtures/real_pr_ship"
+  ],
+  "hybrid_claimed_as_product": false,
+  "identity": {
+    "realpr-attrs-1323": {
+      "base_commit": "dbb25ce34787a30e2ffa65685f6c689a269c3521",
+      "language": "python",
+      "license": "MIT",
+      "repository_url": "https://github.com/python-attrs/attrs.git",
+      "seed_id": "pr:1323",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/python-attrs/attrs.git"
+    },
+    "realpr-attrs-1457": {
+      "base_commit": "af349876f4fb5df2b71a3f4878239b775bc89230",
+      "language": "python",
+      "license": "MIT",
+      "repository_url": "https://github.com/python-attrs/attrs.git",
+      "seed_id": "pr:1457",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/python-attrs/attrs.git"
+    },
+    "realpr-httpx-3672": {
+      "base_commit": "4acf5c2c37714cc63b5cf71b3e284fca83c90311",
+      "language": "python",
+      "license": "BSD-3-Clause",
+      "repository_url": "https://github.com/encode/httpx.git",
+      "seed_id": "pr:3672",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/encode/httpx.git"
+    },
+    "realpr-itemadapter-101": {
+      "base_commit": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+      "language": "python",
+      "license": "MIT",
+      "repository_url": "https://github.com/scrapy/itemadapter.git",
+      "seed_id": "pr:101",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/scrapy/itemadapter.git"
+    },
+    "realpr-packaging-1120": {
+      "base_commit": "ff14df979f865165553999d9d1a111feec6f4843",
+      "language": "python",
+      "license": "Apache-2.0",
+      "repository_url": "https://github.com/pypa/packaging.git",
+      "seed_id": "pr:1120",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/pypa/packaging.git"
+    }
+  },
+  "keep_dispositions": {
+    "realpr-attrs-1323": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "dual_truth_ok": true,
+      "f2p_count": 4,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": true,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
+      "solution_reward": 1,
+      "source_hunk_count": 14,
+      "task_id": "realpr-attrs-1323"
+    },
+    "realpr-attrs-1457": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
+      "dual_truth_ok": true,
+      "f2p_count": 14,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": true,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "keep_legit_hard_solve_none",
+      "solution_reward": 1,
+      "source_hunk_count": 21,
+      "task_id": "realpr-attrs-1457"
+    },
+    "realpr-httpx-3672": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "dual_truth_ok": true,
+      "f2p_count": 5,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": true,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
+      "solution_reward": 1,
+      "source_hunk_count": 18,
+      "task_id": "realpr-httpx-3672"
+    },
+    "realpr-itemadapter-101": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "dual_truth_ok": true,
+      "f2p_count": 43,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": true,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
+      "solution_reward": 1,
+      "source_hunk_count": 15,
+      "task_id": "realpr-itemadapter-101"
+    },
+    "realpr-packaging-1120": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
+      "dual_truth_ok": true,
+      "f2p_count": 9,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": true,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "keep_legit_hard_solve_none",
+      "solution_reward": 1,
+      "source_hunk_count": 24,
+      "task_id": "realpr-packaging-1120"
+    }
+  },
+  "languages": {
+    "python": 10
+  },
+  "layout": "tasks/<task_id>/{task.toml,environment/,tests/,solution/}",
+  "live_generate_dest": false,
+  "live_mine": true,
+  "materials_is_fixture": false,
+  "materials_root": "datasets/live_materials",
+  "mode": "curate_prod_hard_keep",
+  "multi_file": {
+    "realpr-attrs-1323": [
+      "src/attr/_make.py",
+      "src/attr/_next_gen.py",
+      "src/attr/validators.py"
+    ],
+    "realpr-attrs-1457": [
+      "src/attr/_make.py",
+      "src/attr/_next_gen.py"
+    ],
+    "realpr-charset-normalizer-715": [
+      "_mypyc_hook/backend.py",
+      "noxfile.py",
+      "src/charset_normalizer/api.py",
+      "src/charset_normalizer/cd.py",
+      "src/charset_normalizer/cli/__main__.py",
+      "src/charset_normalizer/constant.py",
+      "src/charset_normalizer/legacy.py",
+      "src/charset_normalizer/md.py",
+      "src/charset_normalizer/models.py",
+      "src/charset_normalizer/utils.py",
+      "src/charset_normalizer/version.py"
+    ],
+    "realpr-httpx-3672": [
+      "src/ahttpx/_parsers.py",
+      "src/ahttpx/_pool.py",
+      "src/ahttpx/_server.py",
+      "src/httpx/_network.py",
+      "src/httpx/_parsers.py",
+      "src/httpx/_pool.py",
+      "src/httpx/_server.py"
+    ],
+    "realpr-itemadapter-101": [
+      "itemadapter/_imports.py",
+      "itemadapter/_json_schema.py",
+      "itemadapter/adapter.py",
+      "itemadapter/utils.py"
+    ],
+    "realpr-more-itertools-1136": [
+      "more_itertools/__init__.py",
+      "more_itertools/more.py",
+      "more_itertools/recipes.py"
+    ],
+    "realpr-more-itertools-943": [
+      "docs/conf.py",
+      "more_itertools/more.py",
+      "more_itertools/recipes.py"
+    ],
+    "realpr-packaging-1120": [
+      "benchmarks/specifiers.py",
+      "src/packaging/_ranges.py",
+      "src/packaging/specifiers.py"
+    ],
+    "realpr-rich-3486": [
+      "rich/default_styles.py",
+      "rich/syntax.py",
+      "rich/traceback.py"
+    ],
+    "realpr-rich-4070": [
+      "rich/_emoji_replace.py",
+      "rich/console.py",
+      "rich/emoji.py",
+      "rich/logging.py",
+      "rich/protocol.py",
+      "rich/repr.py",
+      "rich/segment.py",
+      "rich/syntax.py",
+      "rich/theme.py"
+    ]
+  },
+  "offline_only": false,
+  "ok": true,
+  "oracle": {
+    "realpr-attrs-1323": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-attrs-1323.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-attrs-1457": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-attrs-1457.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-charset-normalizer-715": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-charset-normalizer-715.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-httpx-3672": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-httpx-3672.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-itemadapter-101": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-itemadapter-101.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-more-itertools-1136": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-more-itertools-1136.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-more-itertools-943": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-more-itertools-943.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-packaging-1120": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-packaging-1120.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-rich-3486": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-rich-3486.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-rich-4070": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-rich-4070.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    }
+  },
+  "pack_count": 5,
+  "packs": [
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 14,
+      "source_track": "real_pr",
+      "task_id": "realpr-attrs-1323"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 21,
+      "source_track": "real_pr",
+      "task_id": "realpr-attrs-1457"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 18,
+      "source_track": "real_pr",
+      "task_id": "realpr-httpx-3672"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 15,
+      "source_track": "real_pr",
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 24,
+      "source_track": "real_pr",
+      "task_id": "realpr-packaging-1120"
+    }
+  ],
+  "panel": {
+    "realpr-attrs-1323": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "a625c9b26eab46e898e88b91130d30e7",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "dd4390679e9c4013b77676b0179fc8fa",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "ef0a02d38f2b49a4907e0631704eb360",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "744195a187734fcf99475fd37e59165c",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-attrs-1323",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-attrs-1323",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-attrs-1323",
+      "total_cost_usd": "0"
+    },
+    "realpr-attrs-1457": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "a4fcbcc0e8724dc9943db4e451ef19ac",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "7199879a6ae743a8aba5fc05d4c0dd12",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "f60ecb09627a4deabd3c896b8e94bfee",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "4911cc27f8e84c7e82c1c96d49c02362",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-attrs-1457",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-attrs-1457",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-attrs-1457",
+      "total_cost_usd": "0"
+    },
+    "realpr-charset-normalizer-715": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "21b0878dcee84265b1a542e3655611ad",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "2d222414f9714ba38bd04ade1227c787",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "0c894788d6af404aa66e49c6339ad6c9",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "db7a07bf81414f6c8f58a7e1c3150687",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-charset-normalizer-715",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-charset-normalizer-715",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-charset-normalizer-715",
+      "total_cost_usd": "0"
+    },
+    "realpr-httpx-3672": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "27e3c4739f294d80aea4ce55478b38ec",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "5777a579ed734c90880263af50dbac0a",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "32d86afd2d9447e680d460c7188cb30b",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "15da144087b94fbe99120997d5e7ff19",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-httpx-3672",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-httpx-3672",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-httpx-3672",
+      "total_cost_usd": "0"
+    },
+    "realpr-itemadapter-101": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "0515e4d2de1143b097dfdbcaab54a747",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "1403290c6eec4680902eb0ae5ef03d3d",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "ee7a04ac80f14fc6acbf0ec443f2bb58",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "e882a5be6b774f5991d55f7089d4b6ea",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-itemadapter-101",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-itemadapter-101",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-itemadapter-101",
+      "total_cost_usd": "0"
+    },
+    "realpr-more-itertools-1136": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "9302c898eb4c490c91df8976fed0c7ac",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "dc9fd01ba6614ed69e090484e79ddd75",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "b0647ca4b6f3421a9418da4512cbe4b4",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "599e8b575ad343cda84b013358315e7a",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-more-itertools-1136",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-more-itertools-1136",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-more-itertools-1136",
+      "total_cost_usd": "0"
+    },
+    "realpr-more-itertools-943": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "f2b7df0f9dca4ca79e4a208a24d5b33d",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "5d6ae9f294834d99af311ff49ffc8fd3",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "712909bafe15439d88117661239e4905",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "ffb4182723554f4f9101db742be66100",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-more-itertools-943",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-more-itertools-943",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-more-itertools-943",
+      "total_cost_usd": "0"
+    },
+    "realpr-packaging-1120": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "6906641552c14031a4f6fb7270a3690a",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "3f29e867ec904f1b8bbb9dabd8ca2da8",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "c9d32cf33f234ecbaa1fb838fd4ad1f5",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "ac26f0a0680d4b05abd3284fa5d13b9c",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-packaging-1120",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-packaging-1120",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-packaging-1120",
+      "total_cost_usd": "0"
+    },
+    "realpr-rich-3486": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "88125762dded4f6f8f2c7b18e17becb9",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "02ef350d978949a8bff92b52d21dc5d4",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "40de71ede6ac4ad6b0602720738da29b",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "e253012b8d4443eb8ac36cf0b5716431",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-rich-3486",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-rich-3486",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-rich-3486",
+      "total_cost_usd": "0"
+    },
+    "realpr-rich-4070": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "c82effaa910f4a688d2158218491de15",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "ab4dda46267e428c9c3b5b61779b28c2",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "8b850797b440497498471154468266d4",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "3d6e3843245846f582c34d3d2db4691c",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-rich-4070",
+        "pack_path": "/tmp/work_generate_n10/staging/realpr-rich-4070",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-rich-4070",
+      "total_cost_usd": "0"
+    }
+  },
+  "panel_mode": "offline",
+  "panel_note": "Hardness curate from live panel + dual-truth. Solve-all/misalign dropped; legit hard solve-none retained when dual-truth/align/floors ok.",
+  "pier": {
+    "realpr-attrs-1323": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-attrs-1457": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1457.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-charset-normalizer-715": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-charset-normalizer-715.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-httpx-3672": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-itemadapter-101": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-more-itertools-1136": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-more-itertools-1136.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-more-itertools-943": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-more-itertools-943.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-packaging-1120": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-packaging-1120.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-rich-3486": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-rich-3486.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-rich-4070": {
+      "certified": true,
+      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-rich-4070.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    }
+  },
+  "pier_mode": "scripted",
+  "pier_mode_requested": "scripted",
+  "product_dest": true,
+  "product_surface": "datasets/prod_hard_keep",
+  "product_track": "real_pr",
+  "prompt_style": "deepswe_style_v1",
+  "prompt_style_refreshed_at": "2026-07-16T12:49:22Z",
+  "provider_calls": 0,
+  "refuse_fake": true,
+  "refuse_fixture_materials_default": true,
+  "refuse_hybrid": true,
+  "refuse_synthetic_dual_run": true,
+  "repo_id": "BaseIntelligence/deepagent",
+  "require_live_docker_images": true,
+  "required_relpaths": [
+    "task.toml",
+    "instruction.md",
+    "pre_artifacts.sh",
+    "environment/Dockerfile",
+    "tests/Dockerfile",
+    "tests/test.sh",
+    "tests/grader.py",
+    "tests/config.json",
+    "tests/test.patch",
+    "solution/solution.patch",
+    "solution/solve.sh"
+  ],
+  "revision": "test",
+  "schema": "deepagent.hf_packs.v1",
+  "source_tracks": {
+    "realpr-attrs-1323": "real_pr",
+    "realpr-attrs-1457": "real_pr",
+    "realpr-charset-normalizer-715": "real_pr",
+    "realpr-httpx-3672": "real_pr",
+    "realpr-itemadapter-101": "real_pr",
+    "realpr-more-itertools-1136": "real_pr",
+    "realpr-more-itertools-943": "real_pr",
+    "realpr-packaging-1120": "real_pr",
+    "realpr-rich-3486": "real_pr",
+    "realpr-rich-4070": "real_pr"
+  },
+  "task_ids": [
+    "realpr-attrs-1323",
+    "realpr-attrs-1457",
+    "realpr-httpx-3672",
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120"
+  ],
+  "under_supply_reasons": [
+    "go=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
+    "typescript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
+    "javascript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
+    "rust=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)"
+  ]
+}

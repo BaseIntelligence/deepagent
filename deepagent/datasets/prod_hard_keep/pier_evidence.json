@@ -1,0 +1,44 @@
+{
+  "certified_count": 5,
+  "curated_hardness": true,
+  "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
+  "product_surface": "datasets/prod_hard_keep",
+  "product_track": "real_pr",
+  "records": [
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-packaging-1120.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-packaging-1120"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-attrs-1323"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1457.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-attrs-1457"
+    },
+    {
+      "certified": true,
+      "evidence_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-httpx-3672"
+    }
+  ]
+}
