@@ -1157,9 +1157,7 @@ def _execute_trial_with_settle(
             reward_path=str(inv["reward_path"]) if inv.get("reward_path") else None,
             physical_call_id=physical,
             cost_usd=cost,
-            exit_code=inv.get("exit_code")
-            if isinstance(inv.get("exit_code"), int)
-            else None,
+            exit_code=inv.get("exit_code") if isinstance(inv.get("exit_code"), int) else None,
             errors=errors if isinstance(errors, tuple) else tuple(errors),
             invented_reward=invented,
             openrouter_model=openrouter_model_flag(spec.model),

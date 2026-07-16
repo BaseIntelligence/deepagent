@@ -383,9 +383,7 @@ class BudgetLedger:
             if not stage_s or not task_s or not model_s:
                 raise AccountingError("stage, task_id, and model must be non-empty")
             reserved = _money(
-                reserved_cost_usd
-                if reserved_cost_usd is not None
-                else self.worst_case_cost_usd,
+                reserved_cost_usd if reserved_cost_usd is not None else self.worst_case_cost_usd,
                 field="reserved_cost_usd",
             )
             if reserved <= 0:
@@ -481,9 +479,7 @@ class BudgetLedger:
             physical = physical_call_id.strip()
             base = self._records.get(physical)
             if base is None:
-                raise AccountingError(
-                    f"unknown_billing for unknown physical call {physical!r}"
-                )
+                raise AccountingError(f"unknown_billing for unknown physical call {physical!r}")
             if not base.is_open:
                 raise AccountingError(f"physical call {physical!r} is already closed")
             code = reason_code.strip() or "unknown_billing"
