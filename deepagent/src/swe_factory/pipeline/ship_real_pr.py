@@ -90,6 +90,10 @@ from swe_factory.pipeline.gate_audit_product import (
     require_gate_audit_pass,
     write_product_gate_audit,
 )
+from swe_factory.pipeline.prompt_alignment import (
+    PromptVerifierMisalignRejected,
+    refuse_prompt_verifier_misalign,
+)
 from swe_factory.pipeline.ship_deepagent import (
     DeepAgentPackRecord,
     HybridIdentity,
@@ -188,6 +192,21 @@ class ProductSeed5ArchiveMissing(ShipRealPrError, FakeBackendRejected):
 
 class ProductGateAuditRejected(ShipRealPrError, FakeBackendRejected, ProductGateAuditError):
     """Product overwrite refused when dual-truth gate_audit fails (VAL-LSHIP-007)."""
+
+
+class ProductPromptAlignRejected(ShipRealPrError, FakeBackendRejected):
+    """Product/live_generate refuse when instruction contradicts F2P (VAL-DHARD-001)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str = "prompt_verifier_misalign",
+        result: Any | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.result = result
 
 
 @dataclass(frozen=True, slots=True)
@@ -1834,12 +1853,21 @@ def build_real_pr_pack_spec(
     client: Any | None = None,
     model: str | None = None,
     persist_cache: bool = True,
+    dest: Path | str | None = None,
+    offline_only: bool = False,
+    enforce_prompt_alignment: bool | None = None,
 ) -> HarborPackSpec:
     """Assemble a product HarborPackSpec for one merged PR material.
 
     Default agent prompt is the DeepSWE-true rewrite (VAL-DSTYLE-001..005) —
     behavior-first, no mining provenance — not the M17 Context/PR scaffolding
     and not the historical Merged-PR stub.
+
+    VAL-DHARD-001: when *dest* is a product / live_generate surface (or
+    *enforce_prompt_alignment* is True), fail-closed if the agent instruction
+    contradicts high-level F2P/gold behavioural delta (e.g. version-only
+    narrative while test.patch asserts windowed/unique_everseen runtime
+    contracts). Offline engineering builds skip the hard refuse by default.
     """
     refuse_hybrid_product_promote(REAL_PR_SOURCE_TRACK)
     f2p = f2p_node_ids_from_test_patch(material.test_patch, material.test_files)
@@ -1857,6 +1885,28 @@ def build_real_pr_pack_spec(
         model=model,
         persist_cache=persist_cache,
     )
+    # Prompt↔verifier alignment gate (M21 / VAL-DHARD-001).
+    enforce = enforce_prompt_alignment
+    if enforce is None and dest is not None:
+        enforce = requires_dual_truth_honesty(dest, live_mine=False, offline_only=offline_only)
+    if enforce:
+        try:
+            refuse_prompt_verifier_misalign(
+                instruction,
+                test_patch=material.test_patch,
+                solution_patch=material.solution_patch,
+                f2p_node_ids=f2p,
+                dest=dest if dest is not None else "datasets/deepagent_v1",
+                offline_only=offline_only,
+                force=bool(enforce_prompt_alignment is True),
+                task_id=material.task_id,
+            )
+        except PromptVerifierMisalignRejected as exc:
+            raise ProductPromptAlignRejected(
+                str(exc),
+                reason_code=exc.reason_code,
+                result=exc.result,
+            ) from exc
     return HarborPackSpec.model_validate(
         {
             "task_id": material.task_id,
@@ -2587,11 +2637,15 @@ def run_ship_deepagent_real_pr(
 
         identity = _real_pr_identity(material)
 
-        # export real harbor pack (refuse hybrid)
+        # export real harbor pack (refuse hybrid + prompt↔verifier alignment)
         staging_pack = work / "staging" / task_id
         try:
             refuse_hybrid_product_promote(REAL_PR_SOURCE_TRACK, dest=dest)
-            spec = build_real_pr_pack_spec(material)
+            spec = build_real_pr_pack_spec(
+                material,
+                dest=dest,
+                offline_only=offline_only or not honesty_dest,
+            )
             export_result = export_real_harbor_pack(
                 spec,
                 dest=staging_pack,
@@ -2600,6 +2654,43 @@ def run_ship_deepagent_real_pr(
                 allow_hybrid=False,
             )
             pack_dir = export_result.pack_dir
+        except (ProductPromptAlignRejected, PromptVerifierMisalignRejected) as exc:
+            reason_code = getattr(exc, "reason_code", "prompt_verifier_misalign")
+            records.append(
+                DeepAgentPackRecord(
+                    task_id=task_id,
+                    seed_id=identity.seed_id,
+                    language=material.language,
+                    pack_dir=staging_pack,
+                    hybrid=identity,
+                    solution_files=list(material.source_files),
+                    multi_file_ok=len(material.source_files) >= 2,
+                    tree_complete=False,
+                    real_pack_ok=False,
+                    docker_oracle_certified=False,
+                    pier_certified=False,
+                    panel_keep=False,
+                    solution_reward=None,
+                    null_reward=None,
+                    pier_oracle_reward=None,
+                    pier_null_reward=None,
+                    agent_isolated=False,
+                    reasons=[f"prompt_alignment refused: {reason_code}: {exc}"],
+                    certified=False,
+                    drip=drip,
+                )
+            )
+            _append_drip(
+                drip,
+                task_id=task_id,
+                stage="prompt_alignment",
+                status="reject",
+                detail={"reason_code": reason_code, "err": str(exc)},
+            )
+            with e2e_path.open("a", encoding="utf-8") as handle:
+                for row in drip:
+                    handle.write(json.dumps(row, sort_keys=True) + "\n")
+            continue
         except (RealPackError, Exception) as exc:  # noqa: BLE001
             records.append(
                 DeepAgentPackRecord(
@@ -3709,6 +3800,7 @@ __all__ = [
     "ProductFixtureMaterialsRejected",
     "ProductGateAuditRejected",
     "ProductOracleBackendRejected",
+    "ProductPromptAlignRejected",
     "ProductSeed5ArchiveMissing",
     "RealPrMaterial",
     "ShipRealPrError",
@@ -3728,6 +3820,7 @@ __all__ = [
     "refuse_empty_live_yield",
     "refuse_hybrid_product_promote",
     "refuse_product_fixture_materials",
+    "refuse_prompt_verifier_misalign",
     "refuse_scripted_product_oracle",
     "refuse_synthetic_product_dual_run",
     "require_live_docker_images",
