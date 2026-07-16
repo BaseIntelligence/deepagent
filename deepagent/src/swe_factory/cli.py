@@ -2018,7 +2018,10 @@ def eval_deepagent_cmd(
         int,
         typer.Option(
             "--n-concurrent",
-            help="Pier/docker concurrency (must be 1 for DeepAgent serial fidelity)",
+            help=(
+                "Pier/docker concurrency in 1..5 (default 1; refuse outside; "
+                "n>1 raises host Mem / concurrent docker risk)"
+            ),
         ),
     ] = 1,
     hard_stop_usd: Annotated[
@@ -2104,9 +2107,11 @@ def eval_deepagent_cmd(
         run_deepagent_eval,
     )
 
-    if int(n_concurrent) != 1:
+    n_conc = int(n_concurrent)
+    if n_conc < 1 or n_conc > 5:
         typer.secho(
-            "eval-deepagent: n_concurrent must be 1 (serial pier/docker)",
+            f"eval-deepagent: refuse n_concurrent={n_concurrent} "
+            "(must be in 1..5; default 1; n>1 raises host Mem / concurrent docker risk)",
             fg=typer.colors.RED,
             err=True,
         )

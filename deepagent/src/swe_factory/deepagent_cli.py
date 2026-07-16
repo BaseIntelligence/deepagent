@@ -30,6 +30,8 @@ DEFAULT_GENERATE_OUT = Path("datasets/test_n10")
 DEFAULT_GENERATE_TARGET = 10
 DEFAULT_EVAL_HARD_STOP_USD = 600.0
 DEFAULT_EVAL_N_CONCURRENT = 1
+# M19 concurrent-bench cap (default still 1). Values > MAX raise host Mem risk.
+MAX_EVAL_N_CONCURRENT = 5
 DEFAULT_PRODUCT_ROOT = Path("datasets/deepagent_v1")
 
 app = typer.Typer(
@@ -45,9 +47,10 @@ app = typer.Typer(
         f"dataset {DEFAULT_HF_REPO_ID} (revision default {DEFAULT_HF_REVISION})\n"
         f"  pull      — download pack trees from {DEFAULT_HF_REPO_ID} "
         f"(revision main|test)\n"
-        f"  eval      — Pier + mini-swe-agent + HarborDocker serial model eval "
-        f"(n_concurrent={DEFAULT_EVAL_N_CONCURRENT}; hard-stop-usd="
-        f"{int(DEFAULT_EVAL_HARD_STOP_USD)}; fidelity=pier_miniswe_harbor)\n"
+        f"  eval      — Pier + mini-swe-agent + HarborDocker model eval "
+        f"(n_concurrent default {DEFAULT_EVAL_N_CONCURRENT}, max {MAX_EVAL_N_CONCURRENT}; "
+        f"hard-stop-usd={int(DEFAULT_EVAL_HARD_STOP_USD)}; "
+        f"fidelity=pier_miniswe_harbor; n>1 raises host Mem risk)\n"
         "  oracle    — HarborDocker dual-truth cert (sol=1 / null=0; refuse fake)\n"
         "  version   — package version identity\n\n"
         "Compatibility: historical factory stages remain on `swe-factory` "
@@ -753,8 +756,9 @@ def eval_cmd(
         typer.Option(
             "--n-concurrent",
             help=(
-                "Pier/docker concurrency — MUST be 1 for DeepAgent serial fidelity "
-                "(refuse !=1; host Mem policy)"
+                f"Pier/docker concurrency in 1..{MAX_EVAL_N_CONCURRENT} "
+                f"(default {DEFAULT_EVAL_N_CONCURRENT}; refuse outside range; "
+                "n>1 raises host Mem / concurrent docker risk)"
             ),
         ),
     ] = DEFAULT_EVAL_N_CONCURRENT,
@@ -826,16 +830,20 @@ def eval_cmd(
         typer.Option("--json", help="Emit eval report path + summary as JSON"),
     ] = False,
 ) -> None:
-    """Pier mini-swe + HarborDocker serial model eval (fidelity=pier_miniswe_harbor).
+    """Pier mini-swe + HarborDocker model eval (fidelity=pier_miniswe_harbor).
 
-    n_concurrent must be 1 (refuse otherwise). M16 hard-stop-usd default is 600.
-    Models: x-ai/grok-4.5 + moonshotai/kimi-k2.6. Wraps eval_deepagent core.
+    n_concurrent accepted in 1..5 (default 1; refuse outside; n>1 has host Mem risk).
+    M16 hard-stop-usd default is 600. Models: x-ai/grok-4.5 + moonshotai/kimi-k2.6.
+    Wraps eval_deepagent core.
     """
     from swe_factory.cli import eval_deepagent_cmd
 
-    if int(n_concurrent) != 1:
+    n_conc = int(n_concurrent)
+    if n_conc < 1 or n_conc > MAX_EVAL_N_CONCURRENT:
         typer.secho(
-            "eval: refuse n_concurrent!=1 (must be 1; serial pier/docker fidelity)",
+            f"eval: refuse n_concurrent={n_concurrent} "
+            f"(must be in 1..{MAX_EVAL_N_CONCURRENT}; default "
+            f"{DEFAULT_EVAL_N_CONCURRENT}; n>1 raises host Mem / concurrent docker risk)",
             fg=typer.colors.RED,
             err=True,
         )

@@ -157,20 +157,45 @@ def test_offline_mocked_pier_reward_paths(tmp_path: Path) -> None:
     assert float(blob["hard_stop_usd"]) == 300.0
 
 
-def test_n_concurrent_must_be_one(tmp_path: Path) -> None:
-    """VAL-DEVAL-004: serial docker only."""
+def test_n_concurrent_accepts_one_and_five(tmp_path: Path) -> None:
+    """VAL-DBENCH-001: n_concurrent in 1..5 is accepted; report records value."""
     product = tmp_path / "deepagent_v1"
     _write_min_pack(product, "realpr-itemadapter-101")
-    with pytest.raises(DeepAgentEvalError, match="n_concurrent"):
-        run_deepagent_eval(
+    matrix = {"realpr-itemadapter-101": {GROK: [True], KIMI: [False]}}
+    for n in (1, 5):
+        report = run_deepagent_eval(
             product_root=product,
-            out_dir=tmp_path / "out",
+            out_dir=tmp_path / f"out_n{n}",
             max_packs=1,
-            n_concurrent=4,
-            invoker=mocked_miniswe_invoker({}),
+            k=1,
+            n_concurrent=n,
+            hard_stop_usd=Decimal("300"),
+            reserve_usd=Decimal("1.00"),
+            jobs_dir=tmp_path / f"jobs_n{n}",
+            invoker=mocked_miniswe_invoker(matrix),
             offline=True,
             reclaim=False,
         )
+        assert report.n_concurrent == n
+        blob = json.loads((tmp_path / f"out_n{n}" / "report.json").read_text(encoding="utf-8"))
+        assert blob["n_concurrent"] == n
+
+
+def test_n_concurrent_refuses_zero_and_above_five(tmp_path: Path) -> None:
+    """VAL-DBENCH-001: n_concurrent <1 or >5 refuse fail-closed."""
+    product = tmp_path / "deepagent_v1"
+    _write_min_pack(product, "realpr-itemadapter-101")
+    for bad in (0, 6):
+        with pytest.raises(DeepAgentEvalError, match="n_concurrent"):
+            run_deepagent_eval(
+                product_root=product,
+                out_dir=tmp_path / f"out_bad_{bad}",
+                max_packs=1,
+                n_concurrent=bad,
+                invoker=mocked_miniswe_invoker({}),
+                offline=True,
+                reclaim=False,
+            )
 
 
 def test_budget_hard_stop(tmp_path: Path) -> None:
@@ -261,9 +286,35 @@ def test_offline_cli_writes_report(tmp_path: Path) -> None:
     assert report["agent"] == "mini-swe-agent"
 
 
-def test_cli_rejects_parallel_concurrency(tmp_path: Path) -> None:
+def test_cli_rejects_n_concurrent_outside_range(tmp_path: Path) -> None:
+    """VAL-DBENCH-001: swe-factory eval-deepagent refuses n_concurrent 0 and 6."""
     product = tmp_path / "deepagent_v1"
     _write_min_pack(product, "realpr-itemadapter-101")
+    for bad in (0, 6):
+        result = runner.invoke(
+            app,
+            [
+                "eval-deepagent",
+                "--product-root",
+                str(product),
+                "--out",
+                str(tmp_path / f"out_bad_{bad}"),
+                "--n-concurrent",
+                str(bad),
+                "--offline",
+            ],
+        )
+        assert result.exit_code == 2, (bad, result.output)
+        combined = result.output.lower()
+        assert "n_concurrent" in combined or "1..5" in combined or "refuse" in combined
+
+
+def test_cli_accepts_n_concurrent_five_offline(tmp_path: Path) -> None:
+    """VAL-DBENCH-001: n_concurrent=5 offline path accepted and recorded."""
+    product = tmp_path / "deepagent_v1"
+    _write_min_pack(product, "realpr-itemadapter-101")
+    out = tmp_path / "panel_n5"
+    jobs = tmp_path / "jobs_n5"
     result = runner.invoke(
         app,
         [
@@ -271,14 +322,27 @@ def test_cli_rejects_parallel_concurrency(tmp_path: Path) -> None:
             "--product-root",
             str(product),
             "--out",
-            str(tmp_path / "out"),
+            str(out),
+            "--max-packs",
+            "1",
+            "--k",
+            "1",
             "--n-concurrent",
-            "2",
+            "5",
+            "--hard-stop-usd",
+            "300",
+            "--reserve-usd",
+            "1",
+            "--jobs-dir",
+            str(jobs),
             "--offline",
+            "--no-reclaim",
+            "--json",
         ],
     )
-    assert result.exit_code == 2
-    assert "n_concurrent" in result.output.lower() or "serial" in result.output.lower()
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["n_concurrent"] == 5
 
 
 def test_preflight_offline_stub(tmp_path: Path) -> None:

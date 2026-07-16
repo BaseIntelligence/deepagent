@@ -88,20 +88,47 @@ def test_pull_help_documents_download_and_revisions() -> None:
 
 
 def test_eval_help_documents_n_concurrent_one_and_hard_stop() -> None:
-    """VAL-DCLI-005 (help part): eval --help documents n_concurrent=1 and hard-stop 600."""
+    """eval --help documents n_concurrent default 1, max 5, mem risk, hard-stop 600."""
     result = runner.invoke(app, ["eval", "--help"])
     assert result.exit_code == 0, result.output
     text = result.output.lower()
     assert "n-concurrent" in text or "n_concurrent" in text or "concurrent" in text
     assert "1" in result.output
+    # M19: cap is 5; help should surface range and/or mem risk wording
+    assert "5" in result.output
     assert "hard-stop" in text or "hard_stop" in text or "600" in result.output
+    assert "mem" in text or "risk" in text or "1.." in text or "1.." in result.output
     # Pier + HarborDocker fidelity discoverable
     assert "pier" in text or "mini-swe" in text or "harbor" in text
 
 
-def test_eval_refuses_n_concurrent_not_one() -> None:
-    """VAL-DCLI-005: eval with n_concurrent!=1 fails closed non-zero with explicit refuse."""
-    for bad in (0, 2, 4):
+def test_eval_accepts_n_concurrent_one_and_five() -> None:
+    """VAL-DBENCH-001: n_concurrent=1 and 5 are accepted (not hard-refused for !=1)."""
+    for good in (1, 5):
+        result = runner.invoke(
+            app,
+            [
+                "eval",
+                "--product-root",
+                "datasets/missing_for_concurrent_ok",
+                "--n-concurrent",
+                str(good),
+                "--offline",
+            ],
+        )
+        combined = (result.output + (result.stderr or "")).lower()
+        # Must not refuse for concurrency; missing product root may still fail later.
+        assert "refuse n_concurrent" not in combined, (good, result.output)
+        assert "must be 1" not in combined, (good, result.output)
+        if result.exit_code != 0:
+            # Failure (if any) is not the hard-only-1 concurrency refuse.
+            assert "1..5" not in combined or "n_concurrent" not in combined or good in (1, 5)
+            assert "must be in 1.." not in combined
+
+
+def test_eval_refuses_n_concurrent_outside_1_to_5() -> None:
+    """VAL-DBENCH-001: n_concurrent <1 or >5 fails closed non-zero with explicit refuse."""
+    for bad in (0, 6):
         result = runner.invoke(
             app,
             [
@@ -115,9 +142,14 @@ def test_eval_refuses_n_concurrent_not_one() -> None:
         )
         assert result.exit_code != 0, (bad, result.output)
         combined = (result.output + (result.stderr or "")).lower()
-        assert "concurrent" in combined or "n_concurrent" in combined or "serial" in combined
+        assert "concurrent" in combined or "n_concurrent" in combined
         # explicit refuse is not silent clamp
-        assert "must be 1" in combined or "must be" in combined or "refuse" in combined
+        assert (
+            "refuse" in combined
+            or "must be in 1" in combined
+            or "1..5" in combined
+            or "must be" in combined
+        )
 
 
 def test_oracle_help_documents_harbor_dual_truth() -> None:

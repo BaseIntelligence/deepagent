@@ -7,7 +7,8 @@ This is the **only** path allowed to claim DeepAgent-grade hardness fidelity
 Wave protocol (VAL-DEVAL-001..007):
 1. Load Harbor product packs from ``datasets/deepagent_v1/tasks/*``.
 2. Preflight dual-truth (oracle/solution reward=1, nop/null reward=0) when enabled.
-3. Run Pier ``-a mini-swe-agent`` per model serial (``n_concurrent=1``) on exact
+3. Run Pier ``-a mini-swe-agent`` per model with ``n_concurrent`` in 1..5
+   (default 1; cap 5 for host mem / concurrent docker risk) on exact
    OpenRouter ids ``x-ai/grok-4.5`` and ``moonshotai/kimi-k2.6``.
 4. Harvest verifier ``reward.json``; compute pass@k and band rules.
 5. Ledger reserve/settle under ``hard_stop_usd`` (default $300).
@@ -62,6 +63,9 @@ DEEPAGENT_EVAL_FIDELITY = "pier_miniswe_harbor"
 DEEPAGENT_EVAL_STAGE = "deepagent-eval-pier-miniswe"
 DEFAULT_HARD_STOP_USD = Decimal("300")
 DEFAULT_N_CONCURRENT = 1
+# Upper bound for pier/docker concurrency (M19 concurrent bench). Higher values
+# raise host RAM / docker load risk; refuse > MAX_N_CONCURRENT.
+MAX_N_CONCURRENT = 5
 DEFAULT_EVAL_K = 1
 # Multi-turn mini-swe worst-case reserve per trial (ledger hard-stops at 300).
 DEFAULT_TRIAL_RESERVE_USD = Decimal("25.00")
@@ -1023,16 +1027,21 @@ def run_deepagent_eval(
     reclaim: bool = True,
     skip_preflight_fail: bool = True,
 ) -> DeepAgentEvalReport:
-    """Run DeepAgent-grade pier mini-swe serial eval and write report.json.
+    """Run DeepAgent-grade pier mini-swe eval and write report.json.
 
-    Offline tests pass ``offline=True`` + a mocked ``invoker`` (and optional
-    ``preflight_stubs``). Live calls leave invoker None (uses pier binary).
+    ``n_concurrent`` accepted in ``1..MAX_N_CONCURRENT`` (default 1). Values above
+    1 raise host memory / concurrent docker risk; callers must document that
+    tradeoff. Offline tests pass ``offline=True`` + a mocked ``invoker`` (and
+    optional ``preflight_stubs``). Live calls leave invoker None (uses pier binary).
     """
     if k <= 0:
         raise DeepAgentEvalError(f"k must be positive; got {k}")
-    if int(n_concurrent) != 1:
+    n_conc = int(n_concurrent)
+    if n_conc < 1 or n_conc > MAX_N_CONCURRENT:
         raise DeepAgentEvalError(
-            f"n_concurrent must be 1 for DeepAgent pier/docker serial eval; got {n_concurrent}"
+            f"n_concurrent must be in 1..{MAX_N_CONCURRENT} "
+            f"(default {DEFAULT_N_CONCURRENT}; higher values raise host Mem / "
+            f"concurrent docker risk); got {n_concurrent}"
         )
     models_t = resolve_eval_models(models)
     hard_stop = Decimal(str(hard_stop_usd))
@@ -1365,7 +1374,7 @@ def run_deepagent_eval(
     report = DeepAgentEvalReport(
         fidelity=DEEPAGENT_EVAL_FIDELITY,
         models=list(models_t),
-        n_concurrent=1,
+        n_concurrent=n_conc,
         k=k,
         hard_stop_usd=hard_stop,
         product_root=str(product.resolve()) if product.exists() else str(product),
@@ -1420,6 +1429,7 @@ __all__ = [
     "DEFAULT_HARD_STOP_USD",
     "DEFAULT_JOBS_ROOT",
     "DEFAULT_N_CONCURRENT",
+    "MAX_N_CONCURRENT",
     "DEFAULT_OUT_ROOT",
     "DEFAULT_PRODUCT_ROOT",
     "DEFAULT_TRIAL_RESERVE_USD",
