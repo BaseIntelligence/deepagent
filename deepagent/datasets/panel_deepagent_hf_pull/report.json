@@ -1,0 +1,132 @@
+{
+  "agent": "mini-swe-agent",
+  "budget_stop": false,
+  "fidelity": "pier_miniswe_harbor",
+  "finished_at": "2026-07-15T22:40:01.299043+00:00",
+  "hard_stop_usd": "600.0",
+  "host_mem_after": {
+    "available": 225.53,
+    "total": 377.26,
+    "used": 151.73
+  },
+  "host_mem_before": {
+    "available": 225.6,
+    "total": 377.26,
+    "used": 151.66
+  },
+  "invented_rewards": false,
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-eval",
+  "k": 1,
+  "ledger_path": "datasets/panel_deepagent_hf_pull/ledger.jsonl",
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.6"
+  ],
+  "n_concurrent": 1,
+  "n_packs_preflight_ok": 0,
+  "n_packs_requested": 1,
+  "n_packs_scored": 1,
+  "never_solve_panel": false,
+  "offline": false,
+  "out_dir": "/projects/Agent-SWE/deepagent/datasets/panel_deepagent_hf_pull",
+  "pack_results": [
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 4.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.5,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.0,
+          "x-ai/grok-4.5": 1.0
+        },
+        "reason": "keep: frontier pass@k 0.5000 is in the low-but-nonzero band (0, 0.5000], discrimination 4.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 2,
+        "verdict": "keep"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_usd": "1.1477279999999999",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-eval/eval-realpr-itemadapter-101-x-ai_grok-4.5-k0-1784154503-3a5c2013",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "8db8dab72a51434e90720592e3cf5549",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepagent-jobs-eval/eval-realpr-itemadapter-101-x-ai_grok-4.5-k0-1784154503-3a5c2013/realpr-itemadapter-101__gxyqBaM/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.6",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "1.6758726700000002",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-eval/eval-realpr-itemadapter-101-moonshotai_kimi-k2.6-k0-1784154756-6cb1c3f7",
+              "model": "moonshotai/kimi-k2.6",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.6",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "a39fd1ec35434ea484f627a69b533e58",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-eval/eval-realpr-itemadapter-101-moonshotai_kimi-k2.6-k0-1784154756-6cb1c3f7/realpr-itemadapter-101__S4JG4ug/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-itemadapter-101",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/hf_pull_test/tasks/realpr-itemadapter-101",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "2.8236006700000001"
+    }
+  ],
+  "pass_at_k_present": true,
+  "pier_bin": "/tmp/pier-venv/bin/pier",
+  "preferred_pack_ids": [
+    "realpr-itemadapter-101",
+    "realpr-click-3645",
+    "realpr-attrs-1323",
+    "realpr-httpx-3672",
+    "realpr-packaging-1120"
+  ],
+  "preflight_enabled": false,
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/hf_pull_test",
+  "remaining_usd": "597.1763993299999999",
+  "runtime": "pier",
+  "scaffold": "pier/mini-swe-agent",
+  "soft_l2_panel": false,
+  "spend_usd": "2.8236006700000001",
+  "started_at": "2026-07-15T22:28:23.046731+00:00",
+  "stop_reason": null,
+  "total_spend_usd": "2.8236006700000001",
+  "wall_s": 698.252
+}

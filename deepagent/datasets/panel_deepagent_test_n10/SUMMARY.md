@@ -1,0 +1,13 @@
+# DeepAgent eval report summary
+- fidelity: `pier_miniswe_harbor`
+- models: x-ai/grok-4.5, moonshotai/kimi-k2.6
+- n_concurrent: 1
+- hard_stop_usd: 600.0
+- product_root: /projects/Agent-SWE/deepagent/datasets/hf_pull_test
+- n_packs_scored: 5/5
+- spend_usd: 28.7089600600000014
+- remaining_usd: 571.2910399399999986
+- budget_stop: False
+- offline: False
+- wall_s: 7031.3
+- packs: realpr-itemadapter-101, realpr-attrs-1323, realpr-httpx-3672, realpr-packaging-1120, realpr-attrs-1457

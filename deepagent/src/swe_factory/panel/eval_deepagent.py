@@ -500,6 +500,37 @@ def harvest_miniswe_cost_usd(job_root: Path | str | None) -> Decimal:
     return Decimal("0")
 
 
+def ensure_eval_agent_mintag(
+    pack_path: Path | str,
+    *,
+    pack_id: str | None = None,
+    jobs_dir: Path | str = DEFAULT_JOBS_ROOT,
+    stage_only: bool = False,
+    force_rebuild: bool = False,
+    build_timeout: float = 1800.0,
+) -> str:
+    """Ensure pack-scoped ``deepagent-agent-<digest>:local`` for pier/HarborDocker.
+
+    Product and HF-pulled packs ship ``tests/Dockerfile`` with
+    ``FROM deepagent-agent:local``. Pier force-build fails without a real local
+    image. This mints a pack-scoped tag, paints tests/Dockerfile FROM, and builds
+    the environment image when missing (same helper as pier_cert).
+    """
+    from swe_factory.harbor.harbor_docker import ensure_deepagent_agent_local
+
+    path = Path(pack_path)
+    pid = (pack_id or path.name).strip() or path.name
+    work = Path(jobs_dir) / "_agent_mintag" / pid
+    return ensure_deepagent_agent_local(
+        path,
+        work_dir=work,
+        stage_only=stage_only,
+        force_rebuild=force_rebuild,
+        build_timeout=build_timeout,
+        paint_tests_from=True,
+    )
+
+
 def preflight_pack_oracle_nop(
     pack_path: Path | str,
     *,
@@ -513,6 +544,7 @@ def preflight_pack_oracle_nop(
     """Dual-truth preflight: solution/oracle=1 and nop/null=0 (VAL-DEVAL-002).
 
     When ``offline_stub`` is provided (unit tests), no pier process is started.
+    Live pier/runners mint pack-scoped agent images before oracle/nop.
     """
     path = Path(pack_path)
     pid = (pack_id or path.name).strip()
@@ -549,6 +581,28 @@ def preflight_pack_oracle_nop(
             )
         runner = SubprocessPierRunner(pier_bin=bin_path, timeout_sec=timeout_s)
         mode = "live-pier"
+
+    # Pack-scoped mintag required before pier verifier FROM can resolve.
+    # Injected runners (unit tests) skip docker build path.
+    if mode == "live-pier":
+        try:
+            ensure_eval_agent_mintag(
+                path,
+                pack_id=pid,
+                jobs_dir=jobs,
+                stage_only=False,
+                build_timeout=max(600.0, float(timeout_s)),
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed
+            return PackPreflight(
+                pack_id=pid,
+                pack_path=str(path),
+                ok=False,
+                solution_reward=None,
+                null_reward=None,
+                errors=(f"agent mintag ensure failed (fail-closed): {exc}",),
+                mode="mintag-fail",
+            )
 
     errors: list[str] = []
     sol_reward: float | int | None = None
@@ -627,6 +681,27 @@ def _default_live_miniswe_invoke(
             "ok": False,
         }
     jobs_dir.mkdir(parents=True, exist_ok=True)
+    # Mint pack-scoped deepagent-agent image + paint tests/Dockerfile FROM before pier.
+    try:
+        ensure_eval_agent_mintag(
+            pack_path,
+            pack_id=pack_id,
+            jobs_dir=jobs_dir,
+            stage_only=False,
+            build_timeout=max(600.0, float(timeout_s)),
+        )
+    except Exception as exc:  # noqa: BLE001 — fail closed; no fake solve
+        return {
+            "reward": None,
+            "solved": False,
+            "job_dir": None,
+            "reward_path": None,
+            "exit_code": None,
+            "errors": (f"agent mintag ensure failed (fail-closed): {exc}",),
+            "cost_usd": Decimal("0"),
+            "ok": False,
+            "invented_reward": False,
+        }
     model_flag = openrouter_model_flag(model)
     safe_model = re.sub(r"[^A-Za-z0-9_.-]+", "_", model)
     job_name = f"eval-{pack_id}-{safe_model}-k{index}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
@@ -1358,6 +1433,7 @@ __all__ = [
     "PackPreflight",
     "TrialReward",
     "default_ledger_path",
+    "ensure_eval_agent_mintag",
     "harvest_miniswe_cost_usd",
     "load_product_packs",
     "mocked_miniswe_invoker",

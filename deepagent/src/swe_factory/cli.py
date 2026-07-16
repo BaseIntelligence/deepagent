@@ -2209,6 +2209,18 @@ def eval_deepagent_cmd(
                 err=True,
             )
 
+    # VAL-DPEVAL-003: fail closed non-zero when hard-stop / budget_stop fires so
+    # callers cannot treat an incompletely budgeted wave as green success.
+    if report.budget_stop:
+        typer.secho(
+            "eval-deepagent: hard-stop / budget_stop engaged "
+            f"(remaining_usd={format(report.remaining_usd, 'f')}; "
+            f"stop_reason={report.stop_reason!r})",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
 
 @app.command("panel")
 def panel_cmd(

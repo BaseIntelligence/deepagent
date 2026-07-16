@@ -387,6 +387,11 @@ def test_live_invoker_returns_non_zero_cost_from_trajectory(
         "swe_factory.panel.eval_deepagent.subprocess.run",
         _fake_run,
     )
+    # Live pier path mints pack-scoped agent image before shelling pier; stub here.
+    monkeypatch.setattr(
+        "swe_factory.panel.eval_deepagent.ensure_eval_agent_mintag",
+        lambda *a, **k: "deepagent-agent-deadbeef:local",
+    )
 
     result = _default_live_miniswe_invoke(
         pack_path=pack,
@@ -477,3 +482,71 @@ def test_trajectory_backed_invoker_zero_when_metrics_missing(tmp_path: Path) -> 
     )
     assert out["cost_usd"] == Decimal("0")
     assert out["reward"] == 1
+
+
+def test_ensure_eval_agent_mintag_stage_only_paints_from(tmp_path: Path) -> None:
+    """Eval mintag helper paints pack-scoped FROM without inventing global tag reuse."""
+    from swe_factory.panel.eval_deepagent import ensure_eval_agent_mintag
+
+    pack = tmp_path / "tasks" / "realpr-itemadapter-101"
+    pack.mkdir(parents=True)
+    env = pack / "environment"
+    tests = pack / "tests"
+    env.mkdir()
+    tests.mkdir()
+    (env / "Dockerfile").write_text(
+        "FROM python:3.12-slim\nWORKDIR /app\n",
+        encoding="utf-8",
+    )
+    (tests / "Dockerfile").write_text(
+        "FROM deepagent-agent:local\nCOPY test.sh /tests/test.sh\n",
+        encoding="utf-8",
+    )
+    (pack / "task.toml").write_text('schema_version = "1.1"\n', encoding="utf-8")
+    (pack / "instruction.md").write_text("fix\n", encoding="utf-8")
+    tag = ensure_eval_agent_mintag(
+        pack,
+        pack_id="realpr-itemadapter-101",
+        jobs_dir=tmp_path / "jobs",
+        stage_only=True,
+    )
+    assert tag.startswith("deepagent-agent-")
+    assert tag.endswith(":local")
+    assert tag != "deepagent-agent:local"
+    painted = (tests / "Dockerfile").read_text(encoding="utf-8")
+    assert painted.splitlines()[0] == f"FROM {tag}"
+
+
+def test_live_invoker_fails_closed_on_mintag_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Live mini-swe invoker must not invent reward when agent mintag ensure fails."""
+    pier_bin = tmp_path / "fake-pier"
+    pier_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    pier_bin.chmod(0o755)
+    pack = _write_min_pack(tmp_path / "product", "realpr-itemadapter-101")
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+
+    def _boom(*_a: object, **_k: object) -> str:
+        raise RuntimeError("simulated mintag build failure")
+
+    monkeypatch.setattr(
+        "swe_factory.panel.eval_deepagent.ensure_eval_agent_mintag",
+        _boom,
+    )
+
+    result = _default_live_miniswe_invoke(
+        pack_path=pack,
+        pack_id="realpr-itemadapter-101",
+        model=GROK,
+        jobs_dir=jobs_dir,
+        index=0,
+        timeout_s=30.0,
+        pier_bin=pier_bin,
+    )
+    assert result["ok"] is False
+    assert result["reward"] is None
+    assert result["solved"] is False
+    assert result["invented_reward"] is False
+    assert any("mintag" in e.lower() for e in result["errors"])
