@@ -51,18 +51,24 @@ flowchart TB
 
 ## Certified keep gates
 
-Every keep under `datasets/deepagent_v1` must satisfy:
+Every keep under `datasets/deepagent_v1` (and live-generate dests like
+`datasets/test_n10`) must satisfy:
 
 1. Real HTTPS `repository_url` and immutable 40-char `base_commit_hash`
 2. Multi-file gold solution (≥2 product sources); tests held out in `test.patch`
-3. Dual-run fail_to_pass / pass_to_pass node ids
-4. Docker oracle: solution reward = 1, null reward = 0
-5. Agent isolation (no solution/ or held-out tests in the agent view)
-6. `allow_internet=false` at agent + verifier runtime
-7. Permissive license only (copyleft / unknown fail closed)
-8. Panel attempted while project remaining budget is positive
+3. Dual-run fail_to_pass / pass_to_pass node ids with **F2P ≥ MIN_F2P_NODES
+   (default 3)** — thin F2P=1 refused on product/live_generate
+4. Source hunks ≥ 10 on product hard path
+5. Docker oracle: solution reward = 1, null reward = 0
+6. Agent isolation (no solution/ or held-out tests in the agent view)
+7. `allow_internet=false` at agent + verifier runtime
+8. Permissive license only (copyleft / unknown fail closed)
+9. Prompt–verifier alignment (instruction not version-only vs behavioural F2P)
+10. Anti-easy: solve-all class dropped from hardness promote
+11. Panel attempted while project remaining budget is positive
 
 Fake / stub oracle backends are refused on the deepagent ship and cert paths.
+See [PRODUCT_HARDNESS.md](PRODUCT_HARDNESS.md) for floors and opt-out rules.
 
 ## CLI map
 

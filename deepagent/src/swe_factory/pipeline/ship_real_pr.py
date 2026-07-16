@@ -90,6 +90,12 @@ from swe_factory.pipeline.gate_audit_product import (
     require_gate_audit_pass,
     write_product_gate_audit,
 )
+from swe_factory.pipeline.hardness_floors import (
+    DEFAULT_MIN_F2P_NODES,
+    ProductHardnessFloorRejected,
+    refuse_product_hardness_floors,
+    resolve_min_f2p_nodes,
+)
 from swe_factory.pipeline.prompt_alignment import (
     PromptVerifierMisalignRejected,
     refuse_prompt_verifier_misalign,
@@ -158,7 +164,8 @@ _GIT_DIFF_TEST_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path_b>.+)$",
 _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _PRODUCT_DEST_MARKERS = ("deepagent_v1",)
 # M16 live generate dest (VAL-DGEN): dual-truth honesty, not deepagent_v1 product wipe.
-_LIVE_GENERATE_DEST_MARKERS = ("test_n10",)
+# M16 live generate + M21 prod hardness curate dest (VAL-DGEN / VAL-DHARD).
+_LIVE_GENERATE_DEST_MARKERS = ("test_n10", "prod_hard_keep")
 _OFFLINE_DEST_MARKERS = ("offline", "offline_only", "_ut_", "fixture", "sandbox", "unit")
 
 
@@ -202,6 +209,21 @@ class ProductPromptAlignRejected(ShipRealPrError, FakeBackendRejected):
         message: str,
         *,
         reason_code: str = "prompt_verifier_misalign",
+        result: Any | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.result = result
+
+
+class ProductHardnessFloorsRejected(ShipRealPrError, FakeBackendRejected):
+    """Product/live_generate refuse when hardness floors fail (VAL-DHARD-002/003)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason_code: str = "f2p_nodes_below_floor",
         result: Any | None = None,
     ) -> None:
         super().__init__(message)
@@ -1272,6 +1294,22 @@ def _label_dual_run_for_material(
         suite_command=result.suite_command,
         require_suite_path=True,
     )
+    # VAL-DHARD-002: F2P≥MIN_F2P_NODES (default 3) + multi-file + hunk floors.
+    try:
+        refuse_product_hardness_floors(
+            f2p_node_ids=f2p,
+            source_files=list(material.source_files),
+            source_hunk_count=material.source_hunk_count,
+            dest=dest,
+            offline_only=False,
+            task_id=material.task_id,
+        )
+    except ProductHardnessFloorRejected as exc:
+        raise ProductHardnessFloorsRejected(
+            str(exc),
+            reason_code=exc.reason_code,
+            result=exc.result,
+        ) from exc
     # Re-assert pin: dual-run recorded base_commit must match ledger.
     assert_product_clone_sha_pin(
         ledger_base_commit=material.base_commit,
@@ -2774,6 +2812,25 @@ def run_ship_deepagent_real_pr(
                 ),
                 require_suite_path=honesty_dest,
             )
+            # VAL-DHARD-002/003/005: hardness floors fail-closed on product path.
+            # Offline engineering dests skip unless honesty_dest (test_n10/product).
+            try:
+                refuse_product_hardness_floors(
+                    f2p_node_ids=list(dual_detail.get("f2p_node_ids") or []),
+                    source_files=list(material.source_files),
+                    source_hunk_count=material.source_hunk_count,
+                    dest=dest,
+                    offline_only=offline_only or not honesty_dest,
+                    live_mine=bool(live_mine),
+                    engineering_opt_out=bool(offline_only and not honesty_dest),
+                    task_id=task_id,
+                )
+            except ProductHardnessFloorRejected as exc:
+                raise ProductHardnessFloorsRejected(
+                    str(exc),
+                    reason_code=exc.reason_code,
+                    result=exc.result,
+                ) from exc
             if honesty_dest and dual_detail.get("workspace"):
                 assert_product_clone_sha_pin(
                     ledger_base_commit=material.base_commit,
@@ -2788,17 +2845,21 @@ def run_ship_deepagent_real_pr(
                         (Path(str(dual_detail.get("workspace"))) / ".git").exists()
                     ),
                 )
-        except ProductDualRunRejected as exc:
+        except (ProductDualRunRejected, ProductHardnessFloorsRejected) as exc:
             dual_detail = {
                 "ok": False,
                 "error": str(exc),
                 "label_method": LABEL_METHOD_SYNTHETIC,
+                "reason_code": getattr(exc, "reason_code", "dual_run_rejected"),
             }
             dual_ok = False
+            stage = (
+                "hardness_floors" if isinstance(exc, ProductHardnessFloorsRejected) else "dual_run"
+            )
             _append_drip(
                 drip,
                 task_id=task_id,
-                stage="dual_run",
+                stage=stage,
                 status="reject",
                 detail=dual_detail,
             )
@@ -2821,7 +2882,7 @@ def run_ship_deepagent_real_pr(
                     pier_oracle_reward=None,
                     pier_null_reward=None,
                     agent_isolated=False,
-                    reasons=[f"dual_run rejected: {exc}"],
+                    reasons=[f"{stage} rejected: {exc}"],
                     certified=False,
                     drip=drip,
                 )
@@ -3771,6 +3832,13 @@ def run_ship_deepagent_real_pr(
                 "never fixtures/real_pr_ship for product).",
                 "Docker oracle: HarborDockerVerifier sol=1 / null=0; pier mode honest;",
                 "gate_audit dual-truth pass required before overwrite (VAL-LSHIP-007 / VAL-DGEN).",
+                (
+                    f"Hardness floors (VAL-DHARD-002): F2P≥{resolve_min_f2p_nodes()} "
+                    f"(default MIN_F2P_NODES={DEFAULT_MIN_F2P_NODES}), "
+                    "source hunks≥10, multi-file sources; thin F2P=1 refused; "
+                    "solve-all class dropped from hardness promote (VAL-DHARD-003). "
+                    "See docs/PRODUCT_HARDNESS.md."
+                ),
                 "",
             ]
         ),
@@ -3783,6 +3851,7 @@ __all__ = [
     "BURNT_WORK_ROOT_MARKERS",
     "DEFAULT_ARCHIVE",
     "DEFAULT_MATERIALS",
+    "DEFAULT_MIN_F2P_NODES",
     "DEFAULT_OUT",
     "DEFAULT_PRODUCT_MATERIALS",
     "DEFAULT_REAL_PR_MAX",
@@ -3799,6 +3868,7 @@ __all__ = [
     "ProductEmptyLiveYieldRejected",
     "ProductFixtureMaterialsRejected",
     "ProductGateAuditRejected",
+    "ProductHardnessFloorsRejected",
     "ProductOracleBackendRejected",
     "ProductPromptAlignRejected",
     "ProductSeed5ArchiveMissing",
@@ -3811,6 +3881,8 @@ __all__ = [
     "f2p_node_ids_from_test_patch",
     "is_fixture_real_pr_materials",
     "is_live_generate_dest",
+    "refuse_product_hardness_floors",
+    "resolve_min_f2p_nodes",
     "is_product_deepagent_dest",
     "load_real_pr_materials",
     "lookslike_burnt_work_root",

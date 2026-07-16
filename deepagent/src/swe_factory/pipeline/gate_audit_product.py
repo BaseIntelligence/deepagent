@@ -22,6 +22,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from swe_factory.pipeline.hardness_floors import (
+    DEFAULT_MIN_F2P_NODES,
+    REASON_F2P_BELOW_FLOOR,
+    REASON_THIN_F2P_EASY,
+    resolve_min_f2p_nodes,
+)
 from swe_factory.producers.materialize_from_pr import is_fixture_materials_root
 
 LABEL_METHOD_LIVE = "real_pr_dual_run_base_vs_gold"
@@ -33,6 +39,8 @@ SYNTHETIC_MARKERS = (
 )
 PRODUCT_BACKEND = "HarborDockerVerifier"
 PRODUCT_SOURCE_HUNK_FLOOR = 10
+# M21 product hardness F2P floor (VAL-DHARD-002); env MIN_F2P_NODES overrides.
+PRODUCT_MIN_F2P_NODES = DEFAULT_MIN_F2P_NODES
 
 
 class ProductGateAuditError(RuntimeError):
@@ -125,12 +133,21 @@ def audit_keep_dual_truth(
     discovery_path: str | None = None,
     offline_only: bool = False,
     require_hunk_floor: bool = True,
+    require_f2p_floor: bool = True,
+    min_f2p_nodes: int | None = None,
+    engineering_opt_out: bool = False,
 ) -> GateAuditRow:
-    """Audit one intended keep for dual-truth product promote."""
+    """Audit one intended keep for dual-truth product promote.
+
+    VAL-DHARD-002: when *require_f2p_floor* (default True for product) and not
+    *engineering_opt_out*, refuse F2P node count below MIN_F2P_NODES (default 3).
+    """
+    min_f2p = resolve_min_f2p_nodes(override=min_f2p_nodes)
+    f2p_list = _as_list(f2p_node_ids)
     reasons: list[str] = []
     fields: dict[str, Any] = {
         "label_method": label_method,
-        "f2p_count": len(_as_list(f2p_node_ids)),
+        "f2p_count": len(f2p_list),
         "p2p_count": len(_as_list(p2p_node_ids)),
         "backend_class": backend_class,
         "agent_image": agent_image or "",
@@ -142,11 +159,15 @@ def audit_keep_dual_truth(
         "discovery_path": discovery_path,
         "materials_root": str(materials_root) if materials_root is not None else None,
         "live_mine": live_mine,
+        "min_f2p_nodes": min_f2p,
+        "engineering_opt_out": engineering_opt_out,
     }
 
-    if offline_only:
-        # Offline unit path does not use this product gate for promote; accept soft.
-        return GateAuditRow(task_id=task_id, accepted=True, reasons=["offline_only"], fields=fields)
+    if offline_only or engineering_opt_out:
+        # Offline unit / explicit engineering opt-out does not product-promote;
+        # accept soft (never the product/live_generate default).
+        soft_reason = "engineering_opt_out" if engineering_opt_out else "offline_only"
+        return GateAuditRow(task_id=task_id, accepted=True, reasons=[soft_reason], fields=fields)
 
     if source_track and source_track != "real_pr":
         reasons.append(f"source_track_not_real_pr:{source_track}")
@@ -157,10 +178,15 @@ def audit_keep_dual_truth(
     lm = (label_method or "").strip()
     if lm != LABEL_METHOD_LIVE and "dual_run" not in lm:
         reasons.append(f"label_method_not_live:{lm or 'missing'}")
-    if _has_synthetic(_as_list(f2p_node_ids) + _as_list(p2p_node_ids) + [lm]):
+    if _has_synthetic(f2p_list + _as_list(p2p_node_ids) + [lm]):
         reasons.append("synthetic_dual_run_markers")
-    if not _as_list(f2p_node_ids):
+    if not f2p_list:
         reasons.append("empty_f2p_node_ids")
+    elif require_f2p_floor and len(f2p_list) < min_f2p:
+        # VAL-DHARD-002: product hardness F2P floor (anti-easy thin F2P).
+        reasons.append(f"{REASON_F2P_BELOW_FLOOR}:{len(f2p_list)}<{min_f2p}")
+        if len(f2p_list) <= 1:
+            reasons.append(REASON_THIN_F2P_EASY)
 
     bc = (backend_class or "").strip()
     if bc != PRODUCT_BACKEND and "HarborDocker" not in bc:
@@ -1103,6 +1129,7 @@ def rebuild_product_dual_truth_from_tasks(
 __all__ = [
     "LABEL_METHOD_LIVE",
     "PRODUCT_BACKEND",
+    "PRODUCT_MIN_F2P_NODES",
     "PRODUCT_SOURCE_HUNK_FLOOR",
     "GateAuditRow",
     "ProductGateAuditError",

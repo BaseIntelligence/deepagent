@@ -25,8 +25,13 @@ def test_audit_keep_accepts_live_dual_truth() -> None:
         materials_root="datasets/live_materials",
         live_mine=True,
         label_method=LABEL_METHOD_LIVE,
-        f2p_node_ids=["tests.test_x::test_a"],
-        p2p_node_ids=["tests.test_x::test_b"],
+        # VAL-DHARD-002: product floor requires F2P ≥ MIN_F2P_NODES (default 3)
+        f2p_node_ids=[
+            "tests.test_x::test_a",
+            "tests.test_x::test_b",
+            "tests.test_x::test_c",
+        ],
+        p2p_node_ids=["tests.test_x::test_p2p"],
         backend_class="HarborDockerVerifier",
         agent_image="harbor-sdf-agent-rpr00:oracle",
         tests_image="harbor-sdf-tests-rpr00:oracle",
@@ -69,8 +74,8 @@ def test_write_and_require_gate_audit(tmp_path: Path) -> None:
         materials_root="datasets/live_materials",
         live_mine=True,
         label_method=LABEL_METHOD_LIVE,
-        f2p_node_ids=["n1"],
-        p2p_node_ids=["n2"],
+        f2p_node_ids=["n1", "n2", "n3"],
+        p2p_node_ids=["p1"],
         backend_class="HarborDockerVerifier",
         agent_image="a:tag",
         tests_image="t:tag",
@@ -243,7 +248,11 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
             language="python",
             agent_image=f"harbor-sdf-agent-rpr{i:02d}:oracle",
             tests_image=f"harbor-sdf-tests-rpr{i:02d}:oracle",
-            f2p=[f"tests.t::test_{i}"],
+            f2p=[
+                f"tests.t::test_{i}_a",
+                f"tests.t::test_{i}_b",
+                f"tests.t::test_{i}_c",
+            ],
             materials_root=mats,
             source_hunk_count=15 + i,
             repo=f"py/pkg{i}",
@@ -266,7 +275,11 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
         language="javascript",
         agent_image="harbor-sdf-agent-ml301:oracle",
         tests_image="harbor-sdf-tests-ml301:oracle",
-        f2p=["should be strictly equal", "should throw"],
+        f2p=[
+            "should be strictly equal",
+            "should throw",
+            "should coerce undefined",
+        ],
         materials_root=mats,
         source_hunk_count=12,
         repo="ljharb/qs",
@@ -278,7 +291,11 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
         language="rust",
         agent_image="harbor-sdf-agent-mlrust483b:oracle",
         tests_image="harbor-sdf-tests-mlrust483b:oracle",
-        f2p=["pass", "tests/compile-pass/bitflags_flag_name.rs"],
+        f2p=[
+            "pass",
+            "tests/compile-pass/bitflags_flag_name.rs",
+            "tests/compile-fail/flag_value.rs",
+        ],
         p2p=[],
         materials_root=mats,
         source_hunk_count=10,
@@ -473,7 +490,7 @@ def test_gate_audit_product_cli_smoke(tmp_path: Path) -> None:
         language="python",
         agent_image="harbor-sdf-agent-rpr00:oracle",
         tests_image="harbor-sdf-tests-rpr00:oracle",
-        f2p=["tests.t::test_a"],
+        f2p=["tests.t::test_a", "tests.t::test_b", "tests.t::test_c"],
         materials_root=mats,
     )
     runner = CliRunner()
@@ -493,3 +510,48 @@ def test_gate_audit_product_cli_smoke(tmp_path: Path) -> None:
     assert payload["ok"] is True
     assert payload["accepted_count"] == 1
     assert "realpr-demo-1" in payload["accepted_ids"]
+
+
+def test_audit_keep_refuses_thin_f2p_below_floor() -> None:
+    """VAL-DHARD-002: f2p=1 refuse on product gate_audit by default."""
+    row = audit_keep_dual_truth(
+        task_id="thin-f2p",
+        materials_root="datasets/live_materials",
+        live_mine=True,
+        label_method=LABEL_METHOD_LIVE,
+        f2p_node_ids=["tests.t::only_one"],
+        p2p_node_ids=["tests.t::p2p"],
+        backend_class="HarborDockerVerifier",
+        agent_image="a:tag",
+        tests_image="t:tag",
+        solution_reward=1,
+        null_reward=0,
+        source_track="real_pr",
+        source_hunk_count=12,
+        discovery_path="list_pulls",
+    )
+    assert not row.accepted
+    joined = " ".join(row.reasons)
+    assert "f2p_nodes_below_floor" in joined
+    assert "thin_f2p_easy_class" in joined
+
+
+def test_audit_keep_engineering_opt_out_skips_f2p_floor() -> None:
+    """Offline / engineering opt-out may skip MIN_F2P (never product default)."""
+    row = audit_keep_dual_truth(
+        task_id="eng-opt-out",
+        materials_root="fixtures/real_pr_ship",
+        live_mine=False,
+        label_method=LABEL_METHOD_LIVE,
+        f2p_node_ids=["tests.t::only_one"],
+        p2p_node_ids=["tests.t::p2p"],
+        backend_class="HarborDockerVerifier",
+        agent_image="a:tag",
+        tests_image="t:tag",
+        solution_reward=1,
+        null_reward=0,
+        source_hunk_count=12,
+        engineering_opt_out=True,
+    )
+    assert row.accepted
+    assert "engineering_opt_out" in row.reasons

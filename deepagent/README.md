@@ -309,6 +309,7 @@ Focused suites:
 |---|---|---|
 | Operators | this README | install, CLI, HF, honesty floors |
 | Implementers | [docs/architecture.md](docs/architecture.md) | pipeline stages and gates |
+| Hardness policy | [docs/PRODUCT_HARDNESS.md](docs/PRODUCT_HARDNESS.md) | F2P≥3 floors, anti-easy, opt-out |
 | Wave consumers | `datasets/test_n10/report.md` | M16 N=10 mix and honesty notes |
 | Product archive | `datasets/deepagent_v1/report.md` | N=20 corpus and provenance |
 
