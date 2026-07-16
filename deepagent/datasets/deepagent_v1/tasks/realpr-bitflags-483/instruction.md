@@ -1,27 +1,8 @@
-# realpr-bitflags-483
+# Add support for custom flag names via a `#[flag_name]` attribute
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+Flags defined in `bitflags!` currently derive their string representation (used by things like `Display`, iteration, and parsing) directly from the Rust constant identifier. There are cases where the desired external name of a flag cannot match a valid Rust identifier — for example, a single-character name like `"a"`, or a name that mirrors an existing external convention. We need a way to decouple the flag's Rust identifier from the name used when the flag is formatted or otherwise referred to as a string.
 
-- **Repository URL:** `https://github.com/bitflags/bitflags.git`
-- **Base commit (immutable):** `4ed9ffa949970239cd2d87c775e9fdcf9c438fb5`
-- **Language:** `rust`
-- **Merged PR:** `#483` — realpr-bitflags-483
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
-
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
-
-Affected product source modules include:
-`src/lib.rs`, `src/public.rs`, `src/tests.rs`
-
-## PR description
-Closes #470 
-
-This PR introduces a `#[flag_name]` attribute you can apply to flags to give them a different name. I've tried to avoid adding these kinds of attributes in the past, but there's no way to get around this one with `bitflags`, so we support it. It lets you write:
+Introduce a `#[flag_name = "..."]` attribute that can be applied to individual flag definitions inside the `bitflags!` macro. When present, the provided string literal overrides the identifier-derived name for that flag everywhere the flag's textual name is used.
 
 ```rust
 bitflags! {
@@ -32,29 +13,20 @@ bitflags! {
 }
 ```
 
-There isn't any validation done on the `flag_name` given, so you could pick strange names like `_`, or `a | b` or `  a`, etc. I need to add some more test coverage before this is ready.
+## Expected outcomes
+1. A `#[flag_name = "<literal>"]` attribute is accepted on any flag constant inside `bitflags!` and compiles cleanly.
+2. When a flag carries `#[flag_name = "x"]`, the string `"x"` is used in place of the constant's identifier for all name-based behaviour: formatting/`Display`, flag iteration that yields names, and parsing from strings.
+3. Flags without the attribute continue to use their identifier as the name, exactly as before.
+4. The attribute works alongside other attributes and doc comments on the same flag without interfering with them.
+5. Existing behaviour and public APIs remain fully backward compatible for code that does not use the attribute.
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+## Constraints
+- The attribute value is a plain string literal and is used verbatim. Do not validate, trim, or reject unusual values (e.g. `"_"`, `"a | b"`, or names with leading/trailing whitespace) — passing such names through is acceptable and must not cause a panic or compile error.
+- Do not change the numeric representation, bit values, or type parameters of any flag; only the string name is affected.
+- Keep the macro ergonomic: the attribute must be optional and independent per flag.
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
+## Implementation notes
+- The name substitution needs to flow through the macro expansion into whatever internal structure records each flag's name, so that all name-consuming code paths pick it up from a single source.
+- Add test coverage exercising: a flag with `#[flag_name]` compared to one without, round-tripping through formatting and parsing, and at least one "unusual" name value to confirm it is passed through unmodified.
 
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

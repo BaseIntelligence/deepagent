@@ -1,60 +1,26 @@
-# Fix support for connection Upgrade and CONNECT when some data in the stream has been read.
+# Preserve buffered response data during connection Upgrade and CONNECT
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+When handling HTTP/1.1 connection upgrades (via the `Upgrade` header) or `CONNECT` tunneling, the HTTP/1.1 transport hands the raw underlying stream back to the caller so they can continue reading/writing on it directly. The current implementation assumes no response body data has already been buffered internally at that point. This assumption breaks when the parser has already read bytes past the response headers into its internal buffer: those bytes are silently lost when the stream is handed off, corrupting the caller's view of the connection.
 
-- **Repository URL:** `https://github.com/encode/httpcore.git`
-- **Base commit (immutable):** `c46802478cdd8a82ee8cb333420080fab1aed00b`
-- **Language:** `python`
-- **Merged PR:** `#882` — Fix support for connection Upgrade and CONNECT when some data in the stream has been read.
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+Fix the handoff so that any data already read into the internal buffer is not discarded and is made available to the consumer of the upgraded/tunneled stream.
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+## Expected outcomes
 
-Affected product source modules include:
-`httpcore/_async/http11.py`, `httpcore/_sync/http11.py`
+1. For a `101 Switching Protocols` response with connection upgrade, if the HTTP/1.1 reader has buffered bytes beyond the response headers, those buffered bytes must be delivered to the caller before any further reads from the raw network stream.
+2. For a successful `CONNECT` request establishing a tunnel, any bytes already buffered internally must likewise be preserved and surfaced ahead of subsequent stream reads.
+3. Reading from the returned network stream after an upgrade/CONNECT yields the exact byte sequence the server sent, regardless of how the internal buffer was populated during header parsing.
+4. The behavior is identical across the async and sync implementations.
 
-## PR description
-<!-- Thanks for contributing to HTTP Core! 💚
-Given this is a project maintained by volunteers, please read this template to not waste your time, or ours! 😁 -->
+## Constraints
 
-# Summary
+- Apply the fix consistently to both the async and sync HTTP/1.1 code paths so they stay in lockstep.
+- Do not change the public API or the type of object returned to the caller for upgrade/CONNECT scenarios.
+- Behavior for the common case (no leftover buffered data) must remain unchanged.
+- Add tests covering both the upgrade and CONNECT paths where the internal buffer contains data at handoff time, and verify the caller reads the correct bytes.
 
-<!-- Write a small summary about what is happening here. -->
+## Implementation notes
 
-- Closes #872
+- The internal read buffer used during header/line parsing is the source of the leftover bytes; wrap or prepend it so those bytes are yielded first when the caller reads from the handed-off stream.
+- Ensure both `httpcore/_async/http11.py` and `httpcore/_sync/http11.py` receive equivalent changes; the sync module is typically generated/mirrored from the async one, so keep them in sync.
 
-# Checklist
-
-- [x] I understand that this PR may be closed in case there was no previous discussion. (This doesn't apply to typos!)
-- [x] I've added a test for each change that was introduced, and I tried as much as possible to make a single atomic change.
-- [ ] I've updated the documentation accordingly.
-
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
-
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
-
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

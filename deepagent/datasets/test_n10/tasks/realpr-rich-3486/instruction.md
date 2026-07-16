@@ -1,47 +1,27 @@
-# report fine grained error locations
+# Fine-Grained Error Location Highlighting in Tracebacks
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+Modern Python interpreters (3.11+) expose column-level position information for each frame in a traceback via PEP 657. When an exception occurs on a line containing multiple expressions or operations, the interpreter can pinpoint the exact span of code responsible. Our traceback rendering currently only shows the offending line without indicating *where* on that line the error originated.
 
-- **Repository URL:** `https://github.com/Textualize/rich.git`
-- **Base commit (immutable):** `d0de442c08df8793c5ff36d9ad322ca5c47fc38c`
-- **Language:** `python`
-- **Merged PR:** `#3486` — report fine grained error locations
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+Enhance the traceback formatter so it visually highlights the precise segment of source code that triggered the error, using the column offset data available on the frame objects.
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+## Expected outcomes
 
-Affected product source modules include:
-`rich/default_styles.py`, `rich/syntax.py`, `rich/traceback.py`
+1. When rendering a traceback frame, the specific character range within the source line that caused the error is visually distinguished from the rest of the line (e.g. via a distinct style applied to that span).
+2. A dedicated style entry exists for this highlight so users can theme or override it, consistent with how other traceback styles are defined.
+3. The column position data is read from frame metadata when present and correctly maps to the start and end columns on the relevant line(s).
+4. When the interpreter does not provide position data (older Python versions, or frames lacking the information), rendering falls back to the previous behavior with no highlight and no errors.
+5. The syntax rendering path accepts and applies the highlighted range so the emphasis appears within the already-formatted source snippet.
 
-## PR description
-Adds PEP 657 finely grained error locations to rich.traceback
+## Constraints
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+- Guard all access to the new position attributes; they must not be assumed present. Behavior on Python versions without PEP 657 support must remain unchanged.
+- Handle edge cases in the reported ranges gracefully: missing end offsets, ranges spanning line boundaries, and zero-width or out-of-bounds columns should not raise exceptions.
+- Do not alter the existing structure or ordering of unrelated traceback output; the highlight is additive.
+- Keep the new style overridable through the standard style definitions rather than hard-coding colors inline.
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
+## Implementation notes
 
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
+- The relevant column data lives on the frame/summary objects surfaced during traceback extraction; capture start line, end line, start column, and end column where available.
+- Thread the highlight range through to the syntax renderer so it can apply the style to the correct token span when producing the code snippet.
 
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

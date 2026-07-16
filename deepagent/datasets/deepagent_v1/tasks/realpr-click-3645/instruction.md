@@ -1,71 +1,26 @@
-# Merge stable into main
+# Synchronize CLI Behavior Across Core, Decorators, and Shell Completion
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+The command-line framework's core module, decorator layer, and shell-completion logic have drifted out of alignment. Recent fixes and refinements that landed independently need to be reconciled so the public API behaves consistently across all three areas. Your task is to reconcile these modules so their shared behaviors, edge-case handling, and public contracts agree.
 
-- **Repository URL:** `https://github.com/pallets/click.git`
-- **Base commit (immutable):** `679a7a0eccbdded7a6e85680bdaaf08003765e01`
-- **Language:** `python`
-- **Merged PR:** `#3645` — Merge stable into main
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+## Expected outcomes
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+1. Command and group construction in the core module correctly propagates all options, parameters, and context settings so that behavior matches what the decorator layer advertises when defining commands, groups, options, and arguments.
+2. Decorators produce command objects whose attributes (name, help text, parameters, callbacks) are fully consistent with how the core executes and introspects them—no attribute set by a decorator should be silently ignored or overridden during command construction.
+3. Shell completion returns correct suggestions for commands, subcommands, options, and argument values, including nested groups, and reflects any parameter metadata defined via the decorators.
+4. Existing public function and class signatures remain backward compatible; callers relying on current behavior continue to work without changes.
+5. The full existing test suite passes, and any behavior that was previously inconsistent between these modules is resolved in favor of the documented/intended behavior.
 
-Affected product source modules include:
-`src/click/core.py`, `src/click/decorators.py`, `src/click/shell_completion.py`
+## Constraints
 
-## PR description
-<!--
-Before opening a PR, open a ticket describing the issue or feature the
-PR will address. An issue is not required for fixing typos in
-documentation, or other simple non-code changes.
+- Do not break the public API of the affected modules; keep exported names, signatures, and default argument values stable.
+- Avoid introducing new external dependencies.
+- Keep changes focused on reconciling behavior between core, decorators, and shell completion; do not perform unrelated refactors.
+- Preserve support for nested command groups and lazily-loaded subcommands in completion output.
+- Ensure completion logic degrades gracefully when a shell integration or completion context is unavailable.
 
-Replace this comment with a description of the change. Describe how it
-addresses the linked ticket.
--->
+## Implementation notes
 
-<!--
-Link to relevant issues or previous PRs, one per line. Use "fixes" to
-automatically close an issue.
+- Pay attention to how parameter defaults, `expose_value`, hidden flags, and context settings flow from decorators into the constructed command objects, since these are common sources of divergence.
+- When generating completions, resolve the active command path first, then enumerate the relevant parameters and choices from the resolved command rather than re-deriving them.
 
-fixes #<issue number>
--->
-
-<!--
-Ensure each step in CONTRIBUTING.rst is complete, especially the following:
-
-- Add tests that demonstrate the correct behavior of the change. Tests
-  should fail without the change.
-- Add or update relevant docs, in the docs folder and in code.
-- Add an entry in CHANGES.rst summarizing the change and linking to the issue.
-- Add `.. versionchanged::` entries in any relevant code docs.
--->
-
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
-
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
-
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

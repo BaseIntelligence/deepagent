@@ -1,54 +1,31 @@
-# Add get_json_schema()
+# Add JSON Schema generation for item classes
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+`itemadapter` supports several item types (dictionaries, `scrapy.Item`, `dataclass`-based classes, `attrs`-based classes, and Pydantic models). We want a way to introspect an item class and produce a JSON Schema document describing its structure. This is useful for validation, documentation, and interoperability tooling.
 
-- **Repository URL:** `https://github.com/scrapy/itemadapter.git`
-- **Base commit (immutable):** `f7860b6ec7c5b49f623ecd1f67e73877f08039b6`
-- **Language:** `python`
-- **Merged PR:** `#101` — Add get_json_schema()
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+Add a `get_json_schema()` function that, given a supported item class, returns a JSON Schema (`dict`) describing that class's fields and their types.
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+## Expected outcomes
 
-Affected product source modules include:
-`itemadapter/_imports.py`, `itemadapter/_json_schema.py`, `itemadapter/adapter.py`, `itemadapter/utils.py`
+1. A public `get_json_schema(item_class)` callable is available from `itemadapter.utils` (and re-exported at package level) that accepts a supported item class and returns a JSON Schema as a plain `dict`.
+2. The result has `"type": "object"` at the top level, with a `"properties"` mapping keyed by field name.
+3. Field Python types are mapped to their JSON Schema equivalents where determinable (e.g. `str` → `{"type": "string"}`, `int` → `{"type": "integer"}`, `float` → `{"type": "number"}`, `bool` → `{"type": "boolean"}`, `list`/sequence types → `{"type": "array"}`, `dict`/mapping types → `{"type": "object"}`, `None`/`Optional` handled appropriately).
+4. Container types with parameterized element types (e.g. `list[int]`) populate the corresponding nested schema (e.g. `"items"`).
+5. Field metadata that maps naturally onto JSON Schema keywords is honored — e.g. per-field constraints such as minimum/maximum, min/max length, enum choices, descriptions, titles, and default values are emitted where available from the underlying item definition.
+6. Required fields (those without defaults) are collected into a top-level `"required"` list.
+7. The function works consistently across all supported item types, deriving field information via the appropriate adapter for each class.
 
-## PR description
-Post-merge work:
+## Constraints
 
-- [x] Create issues to eventually address the following:
-  - [x] [Support converting Python regexp patterns to JSON Schema patterns where possible, instead of ignoring any incompatible pattern however easy it would be to convert it](https://github.com/scrapy/itemadapter/issues/102).
-  - [x] [Support recursive type definition (e.g. an item class has a field of its same type) by implementing $refs support, and use $refs as well when a given type is used more than once in the schema](https://github.com/scrapy/itemadapter/issues/103).
-  - [x] [Improve JSON Schema generation](https://github.com/scrapy/itemadapter/issues/104).
-    We can take some notes from https://github.com/pydantic/pydantic/blob/d156ba08c140ee1e2b931120cb150080843476fe/pydantic/json_schema.py#L1064.
-    Maybe we can come up with an implementation that is flexible enough to support itemadapter and pydantic cases and split it into a separate library? Maybe learn lessons from JSON serializers out there, or even reuse one?
+- Do not raise on field types that cannot be represented in JSON Schema; skip or fall back gracefully to a permissive schema for those fields rather than failing the whole call.
+- Regular-expression patterns that cannot be safely represented as JSON Schema `pattern` strings should be ignored rather than emitted incorrectly.
+- Recursive or self-referential type definitions (a class with a field of its own type) do not need full `$ref` support in this iteration; avoid infinite recursion by handling such cases defensively.
+- Keep type-detection imports isolated so the feature degrades gracefully when optional dependencies (attrs, pydantic, scrapy) are not installed.
+- Do not change existing public adapter behavior; this is additive.
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+## Implementation notes
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
+- Centralize the schema-building logic (e.g. in a dedicated module) and expose it through the existing adapter/utility layer so each supported item type reuses the same conversion code.
+- Reuse the existing adapter machinery to enumerate fields and read per-field metadata rather than special-casing each item type inline.
+- Add tests covering each supported item type and the mapping of primitive, container, optional, and constrained fields.
 
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

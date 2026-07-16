@@ -1,49 +1,25 @@
-# implement or and ior operators
+# Implement `|` and `|=` operators for MultiDict and Headers
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+The `MultiDict` and `Headers` datastructures should support the union operators `|` and `|=`, mirroring the semantics that Python's built-in `dict` gained. Right now these types can only be merged via method calls; they should behave naturally with the operators too, while respecting the immutability and identity guarantees of their subclasses.
 
-- **Repository URL:** `https://github.com/pallets/werkzeug.git`
-- **Base commit (immutable):** `862cb193c2b13db860d886725fa4235173d0dfcd`
-- **Language:** `python`
-- **Merged PR:** `#2979` — implement or and ior operators
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+## Expected outcomes
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+1. `MultiDict` and `Headers` support `a | b`, returning a new instance that combines the contents of both operands. The `|` operator only accepts another mapping on the right-hand side; anything else should result in `NotImplemented` (raising `TypeError` at the operator level).
+2. `MultiDict` and `Headers` support `a |= b` for in-place updates. Unlike `|`, the in-place variant is more permissive: it accepts either a mapping or an iterable of key/value pairs, matching what the corresponding `update` behavior already allows.
+3. `UpdateDictMixin` implements `|=` so that in-place union routes through its update mechanism (triggering the on-update callback where applicable).
+4. `ImmutableDictMixin` and `ImmutableHeadersMixin` disallow `|=`, raising the same immutability error these types already raise for mutating operations.
+5. `EnvironHeaders` disallows both `|` and `|=`. Since its `copy` cannot produce a mutable independent instance, the non-mutating `|` operator is also unsupported for this type.
 
-Affected product source modules include:
-`src/werkzeug/datastructures/headers.py`, `src/werkzeug/datastructures/mixins.py`, `src/werkzeug/datastructures/structures.py`
+## Constraints
 
-## PR description
-`MultiDict` and `Headers` implement `|` and `|=`. Similar to the `dict` implementation, `|` only works with other mappings, and `|=` works with mappings or iterators. `UpdateDictMixin` implements `|=` for updates. `ImmutableDictMixin` and `ImmutableHeadersMixin` disallow `|=`. `EnvironHeaders` disallows `|` as well to match its `copy`.
+- `|` must not mutate either operand; it produces a fresh object of the appropriate type.
+- The result type and preserved multi-value semantics of `|` on a `MultiDict` should match the type's normal copy/update behavior (multiple values per key are retained).
+- Right-hand operands that are not valid for a given operator should yield `NotImplemented` rather than a bespoke error, so Python's operator protocol can fall back correctly.
+- Immutable variants must reject `|=` consistently with their existing mutation-blocking exceptions; do not silently succeed.
 
-closes #2977
+## Implementation notes
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+- Add `__or__` and `__ior__` to the relevant classes in the datastructures package (headers, mixins, and the core structures module).
+- For `__or__`, start from a copy of the left operand and apply the right mapping; for `__ior__`, delegate to the existing update path.
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
-
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

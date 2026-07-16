@@ -1,55 +1,34 @@
-# realpr-qs-488
+# Fix round-tripping of encoded dots in keys
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+The query-string library supports an `allowDots` option that lets nested objects be represented using dot notation in keys (e.g. `a.b=c` ↔ `{ a: { b: 'c' } }`). However, when a key itself contains a literal dot, round-tripping is broken: stringifying and then re-parsing does not recover the original key, because the literal dot in the key is indistinguishable from a dot used as a nesting separator.
 
-- **Repository URL:** `https://github.com/ljharb/qs.git`
-- **Base commit (immutable):** `5f0449fff1d9fb236d297cd0d3650b42d2d93b8a`
-- **Language:** `javascript`
-- **Merged PR:** `#488` — realpr-qs-488
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+We need a way to encode literal dots in keys during `stringify` and decode them back during `parse`, so that keys containing dots survive a full round trip.
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+## Expected outcomes
 
-Affected product source modules include:
-`lib/parse.js`, `lib/stringify.js`
+1. Add an `encodeDotInKeys` option to `stringify`. When enabled, literal dots that appear inside key names are percent-encoded (as `%2E`) so they are not later interpreted as nesting separators.
+2. Add a `decodeDotInKeys` option to `parse`. When enabled, the encoded dots produced above are decoded back into literal dots in the resulting key names.
+3. With both options enabled alongside `allowDots`, a value like `{ "name.obj": { first: "John", last: "Doe" } }` must round-trip exactly:
+   ```js
+   qs.parse(
+     qs.stringify({ "name.obj": { first: "John", last: "Doe" } }, { allowDots: true, encodeDotInKeys: true }),
+     { allowDots: true, decodeDotInKeys: true }
+   )
+   // => { 'name.obj': { first: 'John', last: 'Doe' } }
+   ```
+4. Without these options, the existing (lossy for dotted keys) behavior stays unchanged.
 
-## PR description
-Previously the dot in the keys would be encoded but the round-tripping was broken. Here is the previous behavior
-```javascript
-const opts = { allowDots: true };
-qs.parse(qs.stringify({ "name.obj": { "first": "John", "last": "Doe" } }, opts), opts)
- // => { name: { obj: { first: 'John', last: 'Doe' } } }
- [diff/code block omitted from agent prompt]javascript
- qs.parse(qs.stringify({ "name.obj": { "first": "John", "last": "Doe" } }, { allowDots: true, encodeDotKeys: true }), { allowDots: true, decodeDotKeys: true })
-{ 'name.obj': { first: 'John', last: 'Doe' } }
-```
+## Constraints
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+- `encodeDotInKeys` and `decodeDotInKeys` default to `false`; existing behavior must be fully preserved when they are not set.
+- Encoding of literal dots applies only to key names, not to values, and only to the key segments — dots used as legitimate nesting separators must remain functional.
+- Validate the interaction with `allowDots`: enabling `encodeDotInKeys`/`decodeDotInKeys` implies dot-based nesting is in play, so guard against contradictory option combinations and throw a clear `TypeError` when they conflict (e.g. `encodeDotInKeys: true` without dot handling enabled).
+- Nested keys that themselves contain dots must be distinguished from nesting dots after decoding — the decoded literal dot must never be re-split into further nesting.
+- Keep both `parse` and `stringify` symmetric so any input stringified with `encodeDotInKeys: true` parses cleanly with `decodeDotInKeys: true`.
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
+## Implementation notes
 
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
+- Use `%2E` as the encoded form of a literal dot so it is preserved through standard percent-decoding paths.
+- Thread the new options through the existing option-normalization/defaults logic in both `parse` and `stringify`, and update any relevant option validation.
 
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

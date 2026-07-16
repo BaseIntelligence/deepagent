@@ -1,53 +1,25 @@
-# improve subdomain and host matching
+# Improve subdomain and host matching in the routing map
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+The URL routing `Map` needs clearer, more predictable control over how a request's `Host` header influences matching. Currently subdomain handling is entangled with host detection and can produce surprising results (for example, forcing an `"<invalid>"` subdomain when detection fails, or letting a bound `server_name` restrict routing even when host matching is active).
 
-- **Repository URL:** `https://github.com/pallets/werkzeug.git`
-- **Base commit (immutable):** `cb307c144e7b9092bf72b1a1dba5281e7c6ff838`
-- **Language:** `python`
-- **Merged PR:** `#3006` — improve subdomain and host matching
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+## Expected outcomes
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+1. `Map.__init__` accepts a new `subdomain_matching` keyword argument that controls whether the request's subdomain is considered during routing. It defaults to enabled so existing behavior is preserved.
+2. When both `subdomain_matching` and `host_matching` are disabled, the request's `Host` header does not factor into routing at all — matching proceeds without deriving or comparing any subdomain/host component.
+3. In `bind_to_environ`, the `server_name` value is ignored when `host_matching` is enabled, so binding does not incorrectly restrict routing to a single host. When `host_matching` is disabled, `server_name` continues to be used as before to derive the subdomain.
+4. When `subdomain_matching` is enabled but a subdomain cannot be detected from the environment, fall back to `default_subdomain` if it is set, instead of unconditionally substituting `"<invalid>"`. The `"<invalid>"` placeholder should only be used when no usable default is available.
 
-Affected product source modules include:
-`src/werkzeug/routing/map.py`, `src/werkzeug/routing/rules.py`
+## Constraints
 
-## PR description
-`Map` takes `subdomain_matching`, moving the behavior out of Flask pallets/flask#5634. It's enabled by default to match current behavior. If it and `host_matching` are disabled, the request's `Host` doesn't factor into routing at all.
+- Keep the default behavior backward compatible: a `Map` constructed without the new argument must behave exactly as it does today.
+- Do not break the interaction between `host_matching` and `subdomain_matching`; the two flags represent distinct, non-overlapping strategies and should not both drive matching simultaneously in a conflicting way.
+- Confine changes to the routing map and rule logic; do not alter unrelated public API surfaces.
+- Preserve existing type hints and follow the module's current style.
 
-`bind_to_environ` `server_name` is not used if `host_matching` is enabled, otherwise it would restrict routing to only that host. If `subdomain_matching` is enabled and a subdomain couldn't be detected, `default_subdomain` is used if set, rather than always `"<invalid>"`.
+## Implementation notes
 
-This did not affect any existing tests. Leaving as draft until I have a chance to write tests and docs for all this. I also want to consider the use of `"<invalid>"` more, whether it should always be used (current behavior) or never be used (further than this PR).
+- The `subdomain_matching` flag lives on the `Map` instance and should be threaded through to the binding/matching paths where the subdomain is derived and compared.
+- Review the code path in `bind_to_environ` that computes the effective subdomain from `server_name` and the request host, and gate the `server_name`-based restriction behind the `host_matching` check.
+- Add focused tests covering: subdomain matching disabled + host matching disabled (Host ignored), `server_name` ignored under host matching, and the `default_subdomain` fallback when detection fails.
 
-fixes #3005
-
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
-
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
-
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

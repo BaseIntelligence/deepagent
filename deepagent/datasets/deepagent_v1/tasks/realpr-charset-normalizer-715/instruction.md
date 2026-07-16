@@ -1,60 +1,29 @@
-# Release 3.4.6
+# Improve charset detection performance and fix output/scoring edge cases
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+This task covers a set of performance and correctness improvements to the charset detection library. The work touches the "mess detector" internals, candidate scoring, the command-line interface, and the Unicode range data.
 
-- **Repository URL:** `https://github.com/jawah/charset_normalizer.git`
-- **Base commit (immutable):** `7411396ebd495e1abc28f5682975b5c662b2ff35`
-- **Language:** `python`
-- **Merged PR:** `#715` — Release 3.4.6
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+## Expected outcomes
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+1. Refactor the mess-detection plugin architecture in `md.py` so per-character analysis follows a single, flattened code path. Replace the previous two-step `eligible(...)` / `feed(...)` interface on the detector plugins with a single combined method (e.g. `feed_info(...)`) that both determines eligibility and records the character in one call. All existing detector plugins and the aggregation logic that drives them must be updated to use the new interface, and the observable mess-ratio results must remain equivalent to before.
 
-Affected product source modules include:
-`_mypyc_hook/backend.py`, `noxfile.py`, `src/charset_normalizer/api.py`, `src/charset_normalizer/cd.py`, `src/charset_normalizer/cli/__main__.py`, `src/charset_normalizer/constant.py`, `src/charset_normalizer/legacy.py`, `src/charset_normalizer/md.py`, `src/charset_normalizer/models.py`, `src/charset_normalizer/utils.py`, `src/charset_normalizer/version.py`
+2. Fix a scoring edge case where the noise/mess difference between two candidate encodings can be almost insignificant. When two candidates are effectively tied on mess ratio, tie-breaking must be deterministic and produce the more appropriate result rather than being sensitive to negligible floating-point differences.
 
-## PR description
-## [3.4.6](https://github.com/Ousret/charset_normalizer/compare/3.4.5...3.4.6) (2026-03-15)
+3. Fix the CLI `--normalize` behaviour when multiple input files are passed. Each normalized output must be written next to its own corresponding input file, not to a single shared or incorrect path. Verify that running normalization on several files at once produces one correctly named output per input.
 
-### Changed
-- Flattened the logic in `charset_normalizer.md` for higher performance. Removed `eligible(..)` and `feed(...)`
-  in favor of `feed_info(...)`.
-- Raised upper bound for mypy[c] to 1.20, for our optimized version.
-- Updated `UNICODE_RANGES_COMBINED` using Unicode blocks v17.
+4. Update the combined Unicode range table (`UNICODE_RANGES_COMBINED`) to reflect the current Unicode block definitions, keeping the range names and boundaries consistent with the rest of the detection logic.
 
-### Fixed
-- Edge case where noise difference between two candidates can be almost insignificant. (#672)
-- CLI `--normalize` writing to wrong path when passing multiple files in. (#702)
+5. Raise the supported upper bound for the `mypy`/`mypyc` build dependency so the optimized compiled build can use the newer toolchain.
 
-### Misc
-- Freethreaded pre-built wheels now shipped in PyPI starting with 3.14t. (#616)
+## Constraints
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+- Preserve the public API of the package; the plugin interface change is internal only and must not alter externally observable detection results beyond the intended edge-case fixes.
+- The flattened `md.py` logic should be measurably faster or at least no slower; do not regress detection accuracy on existing behaviour.
+- The CLI fix must handle both single-file and multi-file invocations correctly.
+- Keep the version identifier consistent across the package's version metadata.
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
+## Implementation notes
 
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
+- The mess-detector plugins each currently expose separate eligibility and feed steps; collapsing them removes redundant per-character branching and function-call overhead.
+- For the tie-breaking fix, compare mess ratios with an appropriate tolerance and fall back to secondary, deterministic criteria when the difference is within that tolerance.
 
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

@@ -1,49 +1,19 @@
-# Changes for version 11.0.0
+Prepare the codebase for the next major release by bumping the package version and ensuring the public API surface is consistent and correct across the module.
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+## Expected outcomes
+1. The package version string is updated to `11.0.0` wherever it is exposed (e.g., `__version__` in the package's `__init__.py`).
+2. All public functions defined in the `more` and `recipes` modules are correctly exported via `__all__`, and there are no stale entries referencing removed or renamed callables.
+3. Importing the package and inspecting its version reports `11.0.0`.
+4. The existing test suite continues to pass without regressions.
 
-- **Repository URL:** `https://github.com/more-itertools/more-itertools.git`
-- **Base commit (immutable):** `e4d2a4a2a97246a73856754b2c4866d7f41d4875`
-- **Language:** `python`
-- **Merged PR:** `#1136` — Changes for version 11.0.0
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+## Constraints
+- Do not change the runtime behavior of existing iterators, recipes, or helper functions unless required to keep `__all__` and actual definitions in sync.
+- Keep the version string in a single canonical location if the project already centralizes it; avoid duplicating it inconsistently across files.
+- Maintain backward compatibility for all documented, public names.
+- Follow the existing code style and formatting conventions used throughout the modules.
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+## Implementation notes
+- Verify that every name listed in `__all__` resolves to an actual object in the module, and that every intended public object appears in `__all__`.
+- If the version is referenced elsewhere (documentation strings, metadata helpers), ensure those references are consistent with the new value.
 
-Affected product source modules include:
-`more_itertools/__init__.py`, `more_itertools/more.py`, `more_itertools/recipes.py`
-
-## PR description
-This PR adds notes and updates for 11.0.0, the next major release. 
-
-Many thanks to all contributors!
-
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
-
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
-
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

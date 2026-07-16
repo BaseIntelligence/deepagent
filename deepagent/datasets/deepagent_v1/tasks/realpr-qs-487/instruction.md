@@ -1,53 +1,26 @@
-# realpr-qs-487
+# Add `allowEmptyArrays` option for query string serialization
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+Our query string library currently drops empty arrays during stringification. When an object contains a key whose value is an empty array, that key disappears entirely from the output rather than being represented. Some consumers need a way to preserve these empty arrays so the serialized form round-trips more faithfully.
 
-- **Repository URL:** `https://github.com/ljharb/qs.git`
-- **Base commit (immutable):** `04f422fe91985103d2fdca0280ee362ecf5e43f2`
-- **Language:** `javascript`
-- **Merged PR:** `#487` — realpr-qs-487
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+Introduce a new `allowEmptyArrays` option that, when enabled, keeps empty-array values in the output instead of silently omitting them.
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+## Expected outcomes
 
-Affected product source modules include:
-`lib/parse.js`, `lib/stringify.js`
+1. Add an `allowEmptyArrays` option (boolean) to the stringify entry point. It defaults to `false`, preserving current behavior — empty arrays are omitted from the output.
+2. When `allowEmptyArrays` is set to `true`, a key mapped to an empty array must be emitted with an empty bracket notation (e.g. `foo[]=`), rather than being dropped.
+3. The option must interact sensibly with existing options (e.g. `encode`, `arrayFormat`, nested objects). Keys with empty arrays should still respect encoding and prefixing rules.
+4. Parsing behavior should remain consistent so that supported serialized forms continue to be interpreted correctly.
 
-## PR description
-This PR adds `allowEmptyArrays` option which let's you keep empty arrays in the object values and address [this issue](https://github.com/ljharb/qs/issues/362)
+## Constraints
 
-Without `allowEmptyArrays` option
-[diff/code block omitted from agent prompt]
+- Do not change the default output for any existing input; the new behavior must be opt-in only.
+- Non-empty arrays and all other value types must serialize exactly as before, regardless of the new option's value.
+- Validate the option as a boolean and fall back to the default when it is not explicitly provided.
+- Keep the option threaded correctly through recursive/nested serialization so empty arrays are preserved at any depth.
 
-With `allowEmptyArrays` options set to true
-[diff/code block omitted from agent prompt]
+## Implementation notes
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+- The relevant logic lives in the stringify path; the empty-array short-circuit that currently returns nothing should be gated on the new option.
+- Add test coverage demonstrating both states: with the option off (empty arrays omitted) and on (empty arrays retained as `key[]=`).
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
-
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.

@@ -1,47 +1,25 @@
-# Deprecate hash for unsafe_hash
+# Deprecate the `hash` argument in favor of `unsafe_hash`
 
-## Context
-You are solving a **long-horizon multi-file** software engineering task mined from
-a real merged pull request on a public repository.
+Our class-decorator API currently exposes a `hash` argument for controlling automatic `__hash__` generation. To align with the naming used elsewhere in the ecosystem (and to make the danger of the operation explicit), we want the parameter to be called `unsafe_hash` instead. The old name should continue to work for now, but should surface a deprecation warning so users have time to migrate.
 
-- **Repository URL:** `https://github.com/python-attrs/attrs.git`
-- **Base commit (immutable):** `dbb25ce34787a30e2ffa65685f6c689a269c3521`
-- **Language:** `python`
-- **Merged PR:** `#1323` — Deprecate hash for unsafe_hash
-- **Source track:** `real_pr` (agent environment is a clean clone at the base SHA)
+## Expected outcomes
 
-Cross-module product behaviour is composed across independent source files rather
-than a single helper. A regression was fixed upstream by multi-file changes that
-touched at least two product sources. Your job is to restore that intended
-contract from the agent-visible tree alone.
+1. Add an `unsafe_hash` argument to the relevant class-building decorator(s) that behaves identically to the existing `hash` argument.
+2. When a caller passes `hash`, emit a `DeprecationWarning` explaining that `hash` is deprecated and that `unsafe_hash` should be used instead. The warning must point at the caller's code (appropriate stack level).
+3. Passing both `hash` and `unsafe_hash` in the same call is an error and should raise a clear exception describing the conflict.
+4. When neither is passed, behavior is unchanged (hashing decision falls back to the existing default logic).
+5. `unsafe_hash` accepts the same value domain as the old `hash` argument (`True`, `False`, or `None`) and produces the same resulting `__hash__` behavior for each value.
 
-Affected product source modules include:
-`src/attr/_make.py`, `src/attr/_next_gen.py`, `src/attr/validators.py`
+## Constraints
 
-## PR description
-It's the standard -- what are we gonna do.
+- Do not remove or break the existing `hash` argument; existing code that relies on it must keep working (just with a warning).
+- The deprecation warning text should be user-actionable and mention both the deprecated name and the replacement.
+- Keep the public signatures backwards compatible; only additive changes plus the warning are expected.
+- Ensure the internal machinery that decides whether to generate `__hash__` reads from a single normalized value, regardless of which argument name the user supplied.
 
-## Behavioural requirements
-1. Restore the original multi-module contracts so the held-out **fail_to_pass**
-   cases pass when your solution is applied.
-2. Do **not** remove, skip, rename, or rewrite existing tests as a "fix". The
-   graded suite is enforced by a separate verifier image; plastic diffs that
-   weaken coverage score 0.
-3. Prefer a minimal multi-file unified-diff style change under the repository
-   root. Paths should look like `--- a/<rel>` / `+++ b/<rel>` relative product
-   paths (the harness materializes your work as `model.patch`).
-4. Keep **pass_to_pass** behaviour intact for unrelated modules and branches.
-5. Hard product track requires a multi-file solution (≥2 product source files).
-   Single-hunk NotImplemented stubs or docs-only edits are not acceptable.
-6. Do not invent secrets, API keys, or vendor credentials in the tree.
+## Implementation notes
 
-The held-out verifier suite defines the graded **fail_to_pass** set (node ids live only in the hidden tests/config, not in this prompt). Your multi-file source patch must flip every fail-to-pass case red → green while **pass_to_pass** regressions stay green.
+- Normalize the two arguments into one internal value early, raising on conflict before any hashing logic runs.
+- Use `warnings.warn(..., DeprecationWarning, stacklevel=...)` with a stacklevel that reports the user's call site rather than internal frames.
 
-## Deliverable
-Work on a **new branch** from the pinned base checkout. Implement the multi-file
-source fix that restores the green behavioural contract against the held-out
-verifier suite. Commit when done and leave a clean porcelain tree so the grader
-can harvest `model.patch`.
-
-IMPORTANT: Please work on this in a new branch from the base commit and commit
-everything when you are done. Do not weaken pass_to_pass coverage.
+IMPORTANT: Please work on this in a new branch from main and commit everything when you are done.
