@@ -39,6 +39,8 @@ app = typer.Typer(
         "Primary product commands:\n"
         f"  generate  — live-mine / ship-deepagent path → local pack root "
         f"(default {DEFAULT_GENERATE_OUT}, --target {DEFAULT_GENERATE_TARGET})\n"
+        "  refresh-instructions — rewrite instruction.md to full DeepSWE-style "
+        "(instruction-only; no dual-run/oracle re-cert)\n"
         f"  upload    — push pack trees + pack_manifest to Hugging Face "
         f"dataset {DEFAULT_HF_REPO_ID} (revision default {DEFAULT_HF_REVISION})\n"
         f"  pull      — download pack trees from {DEFAULT_HF_REPO_ID} "
@@ -195,6 +197,109 @@ def generate_cmd(
         hybrid_bind=False,
         json_out=json_out,
     )
+
+
+@app.command("refresh-instructions")
+def refresh_instructions_cmd(
+    root: Annotated[
+        Path,
+        typer.Option(
+            "--root",
+            help=(
+                "Certified product root with tasks/<id>/instruction.md "
+                "(default datasets/test_n10)"
+            ),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = DEFAULT_GENERATE_OUT,
+    materials: Annotated[
+        Path | None,
+        typer.Option(
+            "--materials",
+            help=(
+                "Live materials root with meta.json/solution.patch per task_id "
+                "(default datasets/live_materials when present)"
+            ),
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = None,
+    fetch_github: Annotated[
+        bool,
+        typer.Option(
+            "--fetch-github/--no-fetch-github",
+            help=(
+                "When materials lack PR body, re-fetch from GitHub REST "
+                "(requires GITHUB_TOKEN / gh auth)"
+            ),
+        ),
+    ] = True,
+    stamp_manifest: Annotated[
+        bool,
+        typer.Option(
+            "--stamp-manifest/--no-stamp-manifest",
+            help="Note prompt_style=deepagent_full_v1 on pack_manifest.json",
+        ),
+    ] = True,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Build/validate full prompts without writing instruction.md",
+        ),
+    ] = False,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit refresh summary as JSON"),
+    ] = False,
+) -> None:
+    """Rewrite pack instruction.md to full DeepSWE-style prompts (VAL-DPRMPT-004).
+
+    Instruction-only re-export: loads materials/PR meta (or re-fetches body via
+    GitHub), rewrites instruction.md in place, gold-leak scans each pack.
+    Does **not** re-run dual-run/oracle when dual-truth evidence is already valid.
+    Never fixture-pads product trees.
+    """
+    from swe_factory.pipeline.refresh_instructions import (
+        RefreshInstructionsError,
+        refresh_product_instructions,
+    )
+
+    materials_root = materials
+    if materials_root is None:
+        default_mats = Path("datasets/live_materials")
+        if default_mats.is_dir():
+            materials_root = default_mats
+
+    try:
+        result = refresh_product_instructions(
+            root,
+            materials_root=materials_root,
+            fetch_github=fetch_github,
+            dry_run=dry_run,
+            stamp_manifest=stamp_manifest,
+        )
+    except RefreshInstructionsError as exc:
+        typer.echo(f"refresh-instructions: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_out:
+        typer.echo(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+    else:
+        typer.echo(result.message)
+        for pack in result.packs:
+            status = "ok" if pack.ok else "FAIL"
+            typer.echo(
+                f"  [{status}] {pack.task_id}: "
+                f"{pack.chars_before}→{pack.chars_after} chars "
+                f"body={pack.body_chars} ({pack.body_source})"
+                + (f" err={pack.error}" if pack.error else "")
+            )
+    if not result.ok:
+        raise typer.Exit(code=1)
 
 
 def _resolve_hf_token() -> str | None:
