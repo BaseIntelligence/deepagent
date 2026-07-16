@@ -215,9 +215,13 @@ wrap the Pier mini-swe and HarborDocker surfaces.
 
 ## Ship DeepAgent v1 (product archive)
 
-**Product archive:** `datasets/deepagent_v1` — **N=20** certified Real-PR packs
-(`source_track=real_pr`, live-mined, `materials_is_fixture=false`). Language
-mix on that corpus: **python 17 · javascript 2 · rust 1**.
+**Product surface / product north star:** `datasets/deepagent_v1` — **N=20**
+certified Real-PR packs (`source_track=real_pr`, live-mined,
+`materials_is_fixture=false`). Language mix on that corpus:
+**python 17 · javascript 2 · rust 1**.
+
+Use `swe-factory` build / export / score stages on the compatibility CLI when
+you need full factory panels or ledger scoring alongside `deepagent generate`.
 
 M16 wave work targets `datasets/test_n10` + HF **`test`**, not a rewrite of
 product N=20. Prefer:
