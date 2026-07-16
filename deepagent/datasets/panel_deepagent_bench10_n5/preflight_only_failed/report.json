@@ -1,0 +1,264 @@
+{
+  "agent": "mini-swe-agent",
+  "budget_stop": false,
+  "fidelity": "pier_miniswe_harbor",
+  "finished_at": "2026-07-16T13:38:29.447078+00:00",
+  "hard_stop_usd": "600.0",
+  "host_mem_after": {
+    "available": 214.15,
+    "total": 377.26,
+    "used": 163.1
+  },
+  "host_mem_before": {
+    "available": 213.99,
+    "total": 377.26,
+    "used": 163.27
+  },
+  "invented_rewards": false,
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-eval",
+  "k": 1,
+  "ledger_path": "datasets/panel_deepagent_bench10_n5/ledger.jsonl",
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.6"
+  ],
+  "n_concurrent": 5,
+  "n_packs_preflight_ok": 0,
+  "n_packs_requested": 10,
+  "n_packs_scored": 0,
+  "never_solve_panel": false,
+  "offline": false,
+  "out_dir": "/projects/Agent-SWE/deepagent/datasets/panel_deepagent_bench10_n5",
+  "pack_results": [
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-itemadapter-101",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-itemadapter-101",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-itemadapter-101",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-itemadapter-101",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-attrs-1323",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-attrs-1323",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-attrs-1323",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-attrs-1323",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-httpx-3672",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-httpx-3672",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-httpx-3672",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-httpx-3672",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-packaging-1120",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-packaging-1120",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-packaging-1120",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-packaging-1120",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-attrs-1457",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-attrs-1457",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-attrs-1457",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-attrs-1457",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-charset-normalizer-715",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-charset-normalizer-715",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-charset-normalizer-715",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-charset-normalizer-715",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-more-itertools-1136",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-more-itertools-1136",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-more-itertools-1136",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-more-itertools-1136",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-more-itertools-943",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-more-itertools-943",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-more-itertools-943",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-more-itertools-943",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-rich-3486",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-rich-3486",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-rich-3486",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-rich-3486",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    },
+    {
+      "budget_stop": false,
+      "complete": false,
+      "decision": null,
+      "models": [],
+      "pack_id": "realpr-rich-4070",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-rich-4070",
+      "preflight": {
+        "errors": [
+          "oracle/solution reward expected 1, got 0"
+        ],
+        "mode": "live-pier",
+        "null_reward": 0,
+        "ok": false,
+        "pack_id": "realpr-rich-4070",
+        "pack_path": "/projects/Agent-SWE/deepagent/datasets/test_n10/tasks/realpr-rich-4070",
+        "solution_reward": 0
+      },
+      "stop_reason": "preflight_failed",
+      "total_cost_usd": "0"
+    }
+  ],
+  "pass_at_k_present": true,
+  "pier_bin": "/tmp/pier-venv/bin/pier",
+  "preferred_pack_ids": [
+    "realpr-itemadapter-101",
+    "realpr-click-3645",
+    "realpr-attrs-1323",
+    "realpr-httpx-3672",
+    "realpr-packaging-1120"
+  ],
+  "preflight_enabled": true,
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/test_n10",
+  "remaining_usd": "600.0",
+  "runtime": "pier",
+  "scaffold": "pier/mini-swe-agent",
+  "soft_l2_panel": false,
+  "spend_usd": "0",
+  "started_at": "2026-07-16T13:24:00.975496+00:00",
+  "stop_reason": null,
+  "total_spend_usd": "0",
+  "wall_s": 868.472
+}

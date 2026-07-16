@@ -1,0 +1,190 @@
+{
+  "n_packs_scored": 10,
+  "n_packs_requested": 10,
+  "fidelity": "pier_miniswe_harbor",
+  "n_concurrent": 5,
+  "k": 1,
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.6"
+  ],
+  "spend_usd": "33.72599655000000386",
+  "remaining_usd": "566.27400344999999614",
+  "budget_stop": false,
+  "wall_s": 13473.02,
+  "invented_rewards": false,
+  "overall_pass_at_1": {
+    "x-ai/grok-4.5": {
+      "solves": 5,
+      "trials": 10,
+      "pass_at_1": 0.5
+    },
+    "moonshotai/kimi-k2.6": {
+      "solves": 4,
+      "trials": 10,
+      "pass_at_1": 0.4
+    }
+  },
+  "per_pack": [
+    {
+      "pack_id": "realpr-itemadapter-101",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.265822"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "0.9408011399999999"
+      ]
+    },
+    {
+      "pack_id": "realpr-attrs-1323",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "1.8640920000000005"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "0.8491018300000002"
+      ]
+    },
+    {
+      "pack_id": "realpr-httpx-3672",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "2.021924"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "2.7833333000000007"
+      ]
+    },
+    {
+      "pack_id": "realpr-packaging-1120",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.7719480000000001"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "0"
+      ]
+    },
+    {
+      "pack_id": "realpr-attrs-1457",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "2.8660620000000008"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "3.0487090199999995"
+      ]
+    },
+    {
+      "pack_id": "realpr-charset-normalizer-715",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.27682"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "5.251840050000003"
+      ]
+    },
+    {
+      "pack_id": "realpr-more-itertools-1136",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.6236780000000001"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "0.6106858459999999"
+      ]
+    },
+    {
+      "pack_id": "realpr-more-itertools-943",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.37528999999999996"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "3.4895073200000004"
+      ]
+    },
+    {
+      "pack_id": "realpr-rich-3486",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "0.5377419999999999"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "1.36945028"
+      ]
+    },
+    {
+      "pack_id": "realpr-rich-4070",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "0.9401639999999999"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "2.839025763999999"
+      ]
+    }
+  ]
+}

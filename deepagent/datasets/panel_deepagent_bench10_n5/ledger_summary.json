@@ -1,0 +1,32 @@
+{
+  "by_model": {
+    "moonshotai/kimi-k2.6": "21.1824545500000026",
+    "x-ai/grok-4.5": "12.54354200000000126"
+  },
+  "by_stage": {
+    "deepagent-eval-pier-miniswe": "33.72599655000000386"
+  },
+  "by_task": {
+    "realpr-attrs-1323": "2.7131938300000007",
+    "realpr-attrs-1457": "5.9147710200000003",
+    "realpr-charset-normalizer-715": "6.528660050000003",
+    "realpr-httpx-3672": "4.8052573000000007",
+    "realpr-itemadapter-101": "2.2066231399999999",
+    "realpr-more-itertools-1136": "1.2343638460000000",
+    "realpr-more-itertools-943": "3.86479732000000036",
+    "realpr-packaging-1120": "0.7719480000000001",
+    "realpr-rich-3486": "1.9071922799999999",
+    "realpr-rich-4070": "3.7791897639999989"
+  },
+  "cap_usd": "600.0",
+  "has_unknown_billing": false,
+  "open_call_count": 0,
+  "open_reserved_usd": "0",
+  "path": "datasets/panel_deepagent_bench10_n5/ledger.jsonl",
+  "remaining_usd": "566.27400344999999614",
+  "settled_call_count": 20,
+  "settled_exact_usd": "33.72599655000000386",
+  "total_commit_usd": "33.72599655000000386",
+  "under_cap": true,
+  "unknown_billing_count": 0
+}

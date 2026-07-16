@@ -1,0 +1,5 @@
+free_before_eval
+               total        used        free      shared  buff/cache   available
+Mem:             377         163           5           0         212         214
+Swap:              7           7           0
+2026-07-16T13:23:51+00:00
