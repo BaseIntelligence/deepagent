@@ -1,30 +1,36 @@
-"""DeepAgent-grade product eval: Pier + mini-swe-agent + Harbor verifier (serial).
+"""DeepAgent-grade product eval: Pier + mini-swe-agent + Harbor verifier.
 
 This is the **only** path allowed to claim DeepAgent-grade hardness fidelity
 (``fidelity=pier_miniswe_harbor``). It is NOT the host-soft L2 script and NOT
 ``swe-factory panel --live`` never-solve soft solver (VAL-DEVAL-001/006).
 
-Wave protocol (VAL-DEVAL-001..007):
+Wave protocol (VAL-DEVAL-001..007 + VAL-DPOOL-001..004):
 1. Load Harbor product packs from ``datasets/deepagent_v1/tasks/*``.
 2. Preflight dual-truth (oracle/solution reward=1, nop/null reward=0) when enabled.
-3. Run Pier ``-a mini-swe-agent`` per model with ``n_concurrent`` in 1..5
-   (default 1; cap 5 for host mem / concurrent docker risk) on exact
-   OpenRouter ids ``x-ai/grok-4.5`` and ``moonshotai/kimi-k2.6``.
+3. Run Pier ``-a mini-swe-agent`` trials with ``n_concurrent`` in 1..5
+   (default 1; cap 5 for host mem / concurrent docker risk) via a real
+   ThreadPoolExecutor pool (max_workers=n_concurrent); n=1 keeps default
+   behavior while still using the pool. Exact OpenRouter ids
+   ``x-ai/grok-4.5`` and ``moonshotai/kimi-k2.6``.
 4. Harvest verifier ``reward.json``; compute pass@k and band rules.
-5. Ledger reserve/settle under ``hard_stop_usd`` (default $300).
-6. Write ``datasets/panel_deepagent_*/report.json`` with fidelity + spend + models.
+5. Thread-safe ledger reserve/settle under ``hard_stop_usd`` (default $300);
+   hard-stop checked before scheduling new work.
+6. Write ``datasets/panel_deepagent_*/report.json`` with fidelity + spend +
+   models + optional ``actual_max_inflight``.
 
 Offline unit tests inject a mocked pier invoker; live path shells pier.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from collections.abc import Sequence
@@ -248,6 +254,9 @@ class DeepAgentEvalReport:
     jobs_dir: str | None = None
     started_at: str = ""
     finished_at: str = ""
+    # Observed peak concurrent pier/mock trials (pool workers in-flight).
+    actual_max_inflight: int | None = None
+    pool_workers: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -282,11 +291,42 @@ class DeepAgentEvalReport:
             "jobs_dir": self.jobs_dir,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
+            "actual_max_inflight": self.actual_max_inflight,
+            "pool_workers": self.pool_workers
+            if self.pool_workers is not None
+            else self.n_concurrent,
+            "concurrent_pool": True,
             # Honesty markers
             "pass_at_k_present": True,
             "never_solve_panel": False,
             "soft_l2_panel": False,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _TrialSpec:
+    """One pack × model × index trial to run under the pier pool."""
+
+    order: int
+    pack_id: str
+    pack_path: Path
+    model: str
+    index: int
+
+
+@dataclass
+class _TrialOutcome:
+    """Result of one scheduled trial (completed, budget-blocked, or error)."""
+
+    order: int
+    pack_id: str
+    model: str
+    index: int
+    trial: TrialReward | None
+    cost_usd: Decimal = Decimal("0")
+    budget_stop: bool = False
+    stop_reason: str | None = None
+    error: str | None = None
 
 
 class MiniSweInvoker(Protocol):
@@ -1004,6 +1044,296 @@ def _decision_from_model_stats(
     )
 
 
+def trial_jobs_subdir(
+    jobs_root: Path | str,
+    *,
+    pack_id: str,
+    model: str,
+    index: int,
+    salt: str | None = None,
+) -> Path:
+    """Isolated per-trial job dir under the wave jobs root (pool-safe)."""
+    safe_model = re.sub(r"[^A-Za-z0-9_.-]+", "_", model)
+    safe_pack = re.sub(r"[^A-Za-z0-9_.-]+", "_", pack_id)
+    tag = salt if salt is not None else uuid.uuid4().hex[:8]
+    return Path(jobs_root) / "_trials" / f"{safe_pack}__{safe_model}__k{index}__{tag}"
+
+
+class _InflightTracker:
+    """Thread-safe peak in-flight counter for the pier trial pool."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._current = 0
+        self.max_inflight = 0
+
+    def enter(self) -> None:
+        with self._lock:
+            self._current += 1
+            if self._current > self.max_inflight:
+                self.max_inflight = self._current
+
+    def leave(self) -> None:
+        with self._lock:
+            self._current = max(0, self._current - 1)
+
+
+def _execute_trial_with_settle(
+    *,
+    spec: _TrialSpec,
+    physical: str,
+    invoke_fn: MiniSweInvoker,
+    ledger: BudgetLedger,
+    jobs_root: Path,
+    reserve: Decimal,
+    trial_timeout_s: float,
+    inflight: _InflightTracker,
+) -> _TrialOutcome:
+    """Run one reserved trial under isolation; settle ledger (never invent reward)."""
+    inflight.enter()
+    try:
+        trial_jobs = trial_jobs_subdir(
+            jobs_root,
+            pack_id=spec.pack_id,
+            model=spec.model,
+            index=spec.index,
+        )
+        trial_jobs.mkdir(parents=True, exist_ok=True)
+        try:
+            inv = invoke_fn(
+                pack_path=spec.pack_path,
+                pack_id=spec.pack_id,
+                model=spec.model,
+                jobs_dir=trial_jobs,
+                index=spec.index,
+                timeout_s=trial_timeout_s,
+            )
+        except Exception as exc:  # noqa: BLE001 — fail closed, still settle
+            with contextlib.suppress(AccountingError):
+                ledger.settle(
+                    physical,
+                    cost_usd=Decimal("0"),
+                    status="error",
+                    usage={
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                )
+            return _TrialOutcome(
+                order=spec.order,
+                pack_id=spec.pack_id,
+                model=spec.model,
+                index=spec.index,
+                trial=None,
+                cost_usd=Decimal("0"),
+                error=f"invoker raised: {exc}",
+            )
+
+        reward = inv.get("reward")
+        if isinstance(reward, bool):
+            reward = 1 if reward else 0
+        if reward is not None and not isinstance(reward, int | float):
+            reward = None
+        solved = bool(inv.get("solved")) if "solved" in inv else _reward_solved(reward)
+        cost_raw = inv.get("cost_usd", Decimal("0"))
+        try:
+            cost = Decimal(str(cost_raw))
+        except Exception:  # noqa: BLE001
+            cost = Decimal("0")
+        if cost < 0:
+            cost = Decimal("0")
+        if cost > reserve:
+            cost = reserve
+        invented = bool(inv.get("invented_reward", False))
+        errors = tuple(inv.get("errors") or ())
+        trial = TrialReward(
+            pack_id=spec.pack_id,
+            model=spec.model,
+            index=spec.index,
+            reward=reward if isinstance(reward, int | float) else None,
+            solved=solved,
+            job_dir=str(inv["job_dir"]) if inv.get("job_dir") else str(trial_jobs),
+            reward_path=str(inv["reward_path"]) if inv.get("reward_path") else None,
+            physical_call_id=physical,
+            cost_usd=cost,
+            exit_code=inv.get("exit_code")
+            if isinstance(inv.get("exit_code"), int)
+            else None,
+            errors=errors if isinstance(errors, tuple) else tuple(errors),
+            invented_reward=invented,
+            openrouter_model=openrouter_model_flag(spec.model),
+        )
+        try:
+            ledger.settle(
+                physical,
+                cost_usd=cost,
+                status="success" if inv.get("ok", True) or reward is not None else "error",
+                usage={
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
+            )
+        except AccountingError as exc:
+            return _TrialOutcome(
+                order=spec.order,
+                pack_id=spec.pack_id,
+                model=spec.model,
+                index=spec.index,
+                trial=trial,
+                cost_usd=cost,
+                budget_stop=True,
+                stop_reason=f"budget_stop: settle failed: {exc}",
+            )
+        return _TrialOutcome(
+            order=spec.order,
+            pack_id=spec.pack_id,
+            model=spec.model,
+            index=spec.index,
+            trial=trial,
+            cost_usd=cost,
+        )
+    finally:
+        inflight.leave()
+
+
+def _run_trial_pool(
+    *,
+    specs: Sequence[_TrialSpec],
+    n_concurrent: int,
+    invoke_fn: MiniSweInvoker,
+    ledger: BudgetLedger,
+    jobs_root: Path,
+    reserve: Decimal,
+    trial_timeout_s: float,
+) -> tuple[list[_TrialOutcome], int, bool, str | None]:
+    """Schedule pier trials on a ThreadPoolExecutor (max_workers=n_concurrent).
+
+    Hard-stop is checked **before** each reserve/submit so concurrent workers
+    never exceed remaining budget. Results collected deterministically by order.
+    Returns (outcomes, actual_max_inflight, budget_stop, stop_reason).
+    """
+    n_workers = max(1, min(int(n_concurrent), len(specs) if specs else 1))
+    inflight = _InflightTracker()
+    outcomes: list[_TrialOutcome] = []
+    budget_stop = False
+    stop_reason: str | None = None
+    if not specs:
+        return outcomes, 0, False, None
+
+    pending = list(specs)
+    # Schedule-gate lock: only one thread reserves / mutates the submit frontier.
+    schedule_lock = threading.Lock()
+
+    def _try_reserve(spec: _TrialSpec) -> tuple[str | None, str | None]:
+        """Attempt reserve; return (physical_id, stop_reason_if_blocked)."""
+        rem = ledger.remaining_usd()
+        if rem < reserve or ledger.has_unknown_billing():
+            return None, (
+                f"budget_stop: remaining_usd={format(rem, 'f')} "
+                f"< reserve {format(reserve, 'f')} before trial "
+                f"pack={spec.pack_id!r} model={spec.model!r} trial={spec.index}"
+            )
+        try:
+            physical = ledger.reserve(
+                stage=DEEPAGENT_EVAL_STAGE,
+                task_id=spec.pack_id,
+                model=spec.model,
+                reserved_cost_usd=reserve,
+            )
+        except AccountingError as exc:
+            return None, f"budget_stop: reserve failed: {exc}"
+        return physical, None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as pool:
+        future_map: dict[concurrent.futures.Future[_TrialOutcome], _TrialSpec] = {}
+
+        def _submit_one(spec: _TrialSpec) -> bool:
+            """Reserve then submit. Returns False if budget-blocked (no submit)."""
+            nonlocal budget_stop, stop_reason
+            physical, blocked = _try_reserve(spec)
+            if physical is None:
+                budget_stop = True
+                stop_reason = blocked
+                return False
+            fut = pool.submit(
+                _execute_trial_with_settle,
+                spec=spec,
+                physical=physical,
+                invoke_fn=invoke_fn,
+                ledger=ledger,
+                jobs_root=jobs_root,
+                reserve=reserve,
+                trial_timeout_s=trial_timeout_s,
+                inflight=inflight,
+            )
+            future_map[fut] = spec
+            return True
+
+        # Initial fill up to min(n_workers, pending).
+        while pending and len(future_map) < n_workers and not budget_stop:
+            with schedule_lock:
+                if not pending or budget_stop:
+                    break
+                next_spec = pending.pop(0)
+                if not _submit_one(next_spec):
+                    # re-queue is unnecessary: stop scheduling further work
+                    break
+
+        while future_map:
+            done, _pending_set = concurrent.futures.wait(
+                set(future_map.keys()),
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for fut in done:
+                spec = future_map.pop(fut)
+                try:
+                    outcomes.append(fut.result())
+                except Exception as exc:  # noqa: BLE001
+                    outcomes.append(
+                        _TrialOutcome(
+                            order=spec.order,
+                            pack_id=spec.pack_id,
+                            model=spec.model,
+                            index=spec.index,
+                            trial=None,
+                            error=f"pool future failed: {exc}",
+                        )
+                    )
+                else:
+                    last = outcomes[-1]
+                    if last.budget_stop and last.stop_reason:
+                        budget_stop = True
+                        stop_reason = last.stop_reason
+
+            # Top up from pending while under cap and not budget_stopped.
+            while pending and len(future_map) < n_workers and not budget_stop:
+                with schedule_lock:
+                    if not pending or budget_stop:
+                        break
+                    next_spec = pending.pop(0)
+                    if not _submit_one(next_spec):
+                        break
+
+        # Any remaining unscheduled specs were hard-stopped before launch.
+        for skipped in pending:
+            outcomes.append(
+                _TrialOutcome(
+                    order=skipped.order,
+                    pack_id=skipped.pack_id,
+                    model=skipped.model,
+                    index=skipped.index,
+                    trial=None,
+                    budget_stop=True,
+                    stop_reason=stop_reason or "budget_stop: unscheduled after hard-stop",
+                )
+            )
+
+    outcomes.sort(key=lambda o: o.order)
+    return outcomes, inflight.max_inflight, budget_stop, stop_reason
+
+
 def run_deepagent_eval(
     *,
     product_root: Path | str = DEFAULT_PRODUCT_ROOT,
@@ -1031,8 +1361,10 @@ def run_deepagent_eval(
 
     ``n_concurrent`` accepted in ``1..MAX_N_CONCURRENT`` (default 1). Values above
     1 raise host memory / concurrent docker risk; callers must document that
-    tradeoff. Offline tests pass ``offline=True`` + a mocked ``invoker`` (and
-    optional ``preflight_stubs``). Live calls leave invoker None (uses pier binary).
+    tradeoff. Trials always go through a ThreadPoolExecutor with
+    ``max_workers=n_concurrent`` (n=1 is serial-equivalent; n>1 is a true pool).
+    Offline tests pass ``offline=True`` + a mocked ``invoker`` (and optional
+    ``preflight_stubs``). Live calls leave invoker None (uses pier binary).
     """
     if k <= 0:
         raise DeepAgentEvalError(f"k must be positive; got {k}")
@@ -1120,7 +1452,10 @@ def run_deepagent_eval(
     n_scored = 0
     n_preflight_ok = 0
     invented_any = False
+    actual_max_inflight = 0
 
+    # Phase 1: preflight each pack; collect runnable packs with preflight status.
+    runnable: list[tuple[str, Path, PackPreflight | None]] = []
     for keep in keeps:
         pack_id = str(keep["task_id"])
         pack_path = Path(str(keep["pack_path"]))
@@ -1176,17 +1511,101 @@ def run_deepagent_eval(
                     )
                 )
                 break
+        runnable.append((pack_id, pack_path, pf))
 
-        # Budget gate: need full matrix for this pack (models × k).
+    # Phase 2: build ordered trial matrix across runnable packs × models × k.
+    # Pack budget gate: need full matrix for the next pack before enqueueing it.
+    trial_specs: list[_TrialSpec] = []
+    pack_preflights: dict[str, PackPreflight | None] = {}
+    pack_paths: dict[str, Path] = {}
+    halted_pack_ids: list[str] = []  # packs budget-stopped before any trial scheduled
+
+    for pack_id, pack_path, pf in runnable:
+        pack_preflights[pack_id] = pf
+        pack_paths[pack_id] = pack_path
         need = reserve * Decimal(len(models_t) * k)
         remaining = ledger.remaining_usd()
-        if remaining < need or ledger.has_unknown_billing():
+        # Account for already-queued (not yet reserved) worst-case cost.
+        queued_need = reserve * Decimal(len(trial_specs))
+        remaining_after_queued = remaining - queued_need
+        if remaining_after_queued < need or ledger.has_unknown_billing():
             budget_stop = True
             stop_reason = (
                 f"budget_stop: remaining_usd={format(remaining, 'f')} "
+                f"(after queued {format(queued_need, 'f')}) "
                 f"< need {format(need, 'f')} before pack {pack_id!r}; "
                 "no further paid pier trials; no invented rewards"
             )
+            halted_pack_ids.append(pack_id)
+            # Remaining packs after this also halt.
+            rest = False
+            for pid2, ppath2, pf2 in runnable:
+                if pid2 == pack_id:
+                    rest = True
+                    pack_preflights[pid2] = pf2
+                    pack_paths[pid2] = ppath2
+                    continue
+                if rest:
+                    pack_preflights[pid2] = pf2
+                    pack_paths[pid2] = ppath2
+                    halted_pack_ids.append(pid2)
+            break
+        for model in models_t:
+            for i in range(k):
+                trial_specs.append(
+                    _TrialSpec(
+                        order=len(trial_specs),
+                        pack_id=pack_id,
+                        pack_path=pack_path,
+                        model=model,
+                        index=i,
+                    )
+                )
+
+    # Phase 3: concurrent pier trial pool (ThreadPoolExecutor, max_workers=n_conc).
+    outcomes: list[_TrialOutcome] = []
+    pool_budget_stop = False
+    pool_stop_reason: str | None = None
+    if trial_specs:
+        outcomes, actual_max_inflight, pool_budget_stop, pool_stop_reason = _run_trial_pool(
+            specs=trial_specs,
+            n_concurrent=n_conc,
+            invoke_fn=invoke_fn,
+            ledger=ledger,
+            jobs_root=jobs,
+            reserve=reserve,
+            trial_timeout_s=trial_timeout_s,
+        )
+        if pool_budget_stop:
+            budget_stop = True
+            stop_reason = pool_stop_reason or stop_reason
+
+    # Phase 4: group outcomes into PackEvalResult (deterministic pack × model order).
+    # Map pack_id -> model -> index -> trial/outcome
+    by_pack: dict[str, list[_TrialOutcome]] = {}
+    for oc in outcomes:
+        by_pack.setdefault(oc.pack_id, []).append(oc)
+
+    # Preserve runnable order for scored packs that had specs; then halted packs.
+    ordered_pack_ids: list[str] = []
+    seen_ids: set[str] = set()
+    for pack_id, _pp, _pf in runnable:
+        if (pack_id in by_pack or pack_id in halted_pack_ids) and pack_id not in seen_ids:
+            ordered_pack_ids.append(pack_id)
+            seen_ids.add(pack_id)
+
+    for pack_id in ordered_pack_ids:
+        pack_path = pack_paths[pack_id]
+        pf = pack_preflights.get(pack_id)
+        pack_ocs = by_pack.get(pack_id, [])
+        pack_cost = Decimal("0")
+        pack_budget_stop = False
+        pack_incomplete = False
+        model_stats: list[ModelPackStats] = []
+        per_model_sk: dict[str, tuple[int, int]] = {}
+
+        if pack_id in halted_pack_ids and not pack_ocs:
+            # Never scheduled: clean budget halt before pack.
             pack_results.append(
                 PackEvalResult(
                     pack_id=pack_id,
@@ -1200,118 +1619,42 @@ def run_deepagent_eval(
                     stop_reason=stop_reason,
                 )
             )
-            break
-
-        model_stats: list[ModelPackStats] = []
-        pack_cost = Decimal("0")
-        pack_budget_stop = False
-        pack_incomplete = False
-        per_model_sk: dict[str, tuple[int, int]] = {}
-        stop_mid = False
+            continue
 
         for model in models_t:
+            model_ocs = sorted(
+                [o for o in pack_ocs if o.model == model],
+                key=lambda o: o.index,
+            )
             trials: list[TrialReward] = []
             solves = 0
-            for i in range(k):
-                rem = ledger.remaining_usd()
-                if rem < reserve or ledger.has_unknown_billing():
+            for oc in model_ocs:
+                if oc.budget_stop and oc.trial is None:
                     pack_budget_stop = True
-                    budget_stop = True
                     pack_incomplete = True
-                    stop_reason = (
-                        f"budget_stop: remaining_usd={format(rem, 'f')} "
-                        f"< reserve {format(reserve, 'f')} mid pack {pack_id!r} "
-                        f"model={model!r} trial={i}"
-                    )
-                    stop_mid = True
-                    break
-                try:
-                    physical = ledger.reserve(
-                        stage=DEEPAGENT_EVAL_STAGE,
-                        task_id=pack_id,
-                        model=model,
-                        reserved_cost_usd=reserve,
-                    )
-                except AccountingError as exc:
+                    if oc.stop_reason:
+                        stop_reason = stop_reason or oc.stop_reason
+                    continue
+                if oc.error and oc.trial is None:
+                    pack_incomplete = True
+                    continue
+                if oc.budget_stop:
                     pack_budget_stop = True
-                    budget_stop = True
-                    pack_incomplete = True
-                    stop_reason = f"budget_stop: reserve failed: {exc}"
-                    stop_mid = True
-                    break
-
-                inv = invoke_fn(
-                    pack_path=pack_path,
-                    pack_id=pack_id,
-                    model=model,
-                    jobs_dir=jobs,
-                    index=i,
-                    timeout_s=trial_timeout_s,
-                )
-                reward = inv.get("reward")
-                if isinstance(reward, bool):
-                    reward = 1 if reward else 0
-                if reward is not None and not isinstance(reward, int | float):
-                    reward = None
-                solved = bool(inv.get("solved")) if "solved" in inv else _reward_solved(reward)
-                if solved:
-                    solves += 1
-                cost_raw = inv.get("cost_usd", Decimal("0"))
-                try:
-                    cost = Decimal(str(cost_raw))
-                except Exception:  # noqa: BLE001
-                    cost = Decimal("0")
-                if cost < 0:
-                    cost = Decimal("0")
-                if cost > reserve:
-                    # Cap settle at reserved (accounting integrity).
-                    cost = reserve
-                invented = bool(inv.get("invented_reward", False))
-                if invented:
-                    invented_any = True
-                errors = tuple(inv.get("errors") or ())
-                trial = TrialReward(
-                    pack_id=pack_id,
-                    model=model,
-                    index=i,
-                    reward=reward if isinstance(reward, int | float) else None,
-                    solved=solved,
-                    job_dir=str(inv["job_dir"]) if inv.get("job_dir") else None,
-                    reward_path=str(inv["reward_path"]) if inv.get("reward_path") else None,
-                    physical_call_id=physical,
-                    cost_usd=cost,
-                    exit_code=inv.get("exit_code")
-                    if isinstance(inv.get("exit_code"), int)
-                    else None,
-                    errors=errors if isinstance(errors, tuple) else tuple(errors),
-                    invented_reward=invented,
-                    openrouter_model=openrouter_model_flag(model),
-                )
-                trials.append(trial)
-                pack_cost += cost
-                total_spend += cost
-                try:
-                    ledger.settle(
-                        physical,
-                        cost_usd=cost,
-                        status="success" if inv.get("ok", True) or reward is not None else "error",
-                        usage={
-                            "prompt_tokens": 0,
-                            "completion_tokens": 0,
-                            "total_tokens": 0,
-                        },
-                    )
-                except AccountingError as exc:
-                    pack_budget_stop = True
-                    budget_stop = True
-                    pack_incomplete = True
-                    stop_reason = f"budget_stop: settle failed: {exc}"
-                    stop_mid = True
-                    break
-
+                    if oc.stop_reason:
+                        stop_reason = stop_reason or oc.stop_reason
+                if oc.trial is not None:
+                    if oc.trial.invented_reward:
+                        invented_any = True
+                    if oc.trial.solved:
+                        solves += 1
+                    pack_cost += oc.trial.cost_usd
+                    total_spend += oc.trial.cost_usd
+                    trials.append(oc.trial)
             completed = len(trials)
             incomplete = completed < k
             if incomplete:
+                pack_incomplete = True
+            if pack_budget_stop:
                 pack_incomplete = True
             pass_k = compute_pass_at_k(solves, k) if k > 0 else 0.0
             per_model_sk[model] = (solves, k)
@@ -1327,13 +1670,13 @@ def run_deepagent_eval(
                     incomplete=incomplete,
                 )
             )
-            if stop_mid:
-                break
+
+        if pack_budget_stop:
+            budget_stop = True
 
         decision: BandDecision | None = None
         complete = not pack_incomplete and all(not m.incomplete for m in model_stats)
         if model_stats and not pack_incomplete:
-            # Only band-classify full matrices.
             if all(not m.incomplete for m in model_stats):
                 decision = _decision_from_model_stats(per_model_sk)
                 complete = True
@@ -1341,7 +1684,6 @@ def run_deepagent_eval(
             else:
                 complete = False
         elif model_stats and not pack_budget_stop:
-            # Partial model set without budget stop still counts as incomplete.
             complete = False
         if complete and not pack_budget_stop and decision is None and model_stats:
             decision = _decision_from_model_stats(per_model_sk)
@@ -1361,8 +1703,6 @@ def run_deepagent_eval(
                 stop_reason=stop_reason if pack_budget_stop else None,
             )
         )
-        if pack_budget_stop:
-            break
 
     finished = datetime.now(UTC).isoformat()
     wall = time.monotonic() - t0
@@ -1402,6 +1742,8 @@ def run_deepagent_eval(
         jobs_dir=str(jobs.resolve()) if jobs.exists() else str(jobs),
         started_at=started,
         finished_at=finished,
+        actual_max_inflight=actual_max_inflight,
+        pool_workers=n_conc,
     )
     write_eval_report(out, report)
     with contextlib.suppress(Exception):
@@ -1455,6 +1797,8 @@ __all__ = [
     "resolve_eval_models",
     "run_deepagent_eval",
     "trajectory_backed_miniswe_invoker",
+    "trial_jobs_subdir",
     "write_eval_report",
     "_default_live_miniswe_invoke",
+    "_run_trial_pool",
 ]

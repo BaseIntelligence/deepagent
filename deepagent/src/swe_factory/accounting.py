@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -165,6 +166,8 @@ class BudgetLedger:
         if self.worst_case_cost_usd <= 0:
             raise AccountingError("worst_case_cost_usd must be greater than zero")
         self.run_id = (run_id or "default").strip() or "default"
+        # RLock so concurrent pier trials can reserve/settle race-safely (M20 pool).
+        self._lock = threading.RLock()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self.path.touch()
@@ -323,31 +326,36 @@ class BudgetLedger:
                 )
 
     def settled_exact_usd(self) -> Decimal:
-        total = Decimal("0")
-        for rec in self._records.values():
-            if rec.settle_event is not None:
-                total += _money(rec.settle_event.get("cost_usd"), field="cost_usd")
-        return total
+        with self._lock:
+            total = Decimal("0")
+            for rec in self._records.values():
+                if rec.settle_event is not None:
+                    total += _money(rec.settle_event.get("cost_usd"), field="cost_usd")
+            return total
 
     def open_reserved_usd(self) -> Decimal:
-        total = Decimal("0")
-        for rec in self._records.values():
-            if rec.is_open:
-                total += rec.reserved_cost_usd
-            elif rec.is_unknown_billing:
-                # Unknown billing keeps full reserved commit until resolved —
-                # fail-closed remains under cap including these liabilities.
-                total += rec.reserved_cost_usd
-        return total
+        with self._lock:
+            total = Decimal("0")
+            for rec in self._records.values():
+                if rec.is_open:
+                    total += rec.reserved_cost_usd
+                elif rec.is_unknown_billing:
+                    # Unknown billing keeps full reserved commit until resolved —
+                    # fail-closed remains under cap including these liabilities.
+                    total += rec.reserved_cost_usd
+            return total
 
     def total_commit_usd(self) -> Decimal:
-        return self.settled_exact_usd() + self.open_reserved_usd()
+        with self._lock:
+            return self.settled_exact_usd() + self.open_reserved_usd()
 
     def remaining_usd(self) -> Decimal:
-        return self.cap_usd - self.total_commit_usd()
+        with self._lock:
+            return self.cap_usd - self.total_commit_usd()
 
     def has_unknown_billing(self) -> bool:
-        return any(r.is_unknown_billing for r in self._records.values())
+        with self._lock:
+            return any(r.is_unknown_billing for r in self._records.values())
 
     def reserve(
         self,
@@ -362,54 +370,58 @@ class BudgetLedger:
 
         Returns the durable ``physical_call_id``. Raises :class:`AccountingError`
         when the reservation would exceed the hard cap or leave unknown billing.
+        Thread-safe for concurrent pier trial pools (M20).
         """
-        if self.has_unknown_billing():
-            raise AccountingError(
-                "ledger has unknown_billing entries; reconcile before new reserves"
+        with self._lock:
+            if self.has_unknown_billing():
+                raise AccountingError(
+                    "ledger has unknown_billing entries; reconcile before new reserves"
+                )
+            stage_s = stage.strip()
+            task_s = task_id.strip()
+            model_s = model.strip()
+            if not stage_s or not task_s or not model_s:
+                raise AccountingError("stage, task_id, and model must be non-empty")
+            reserved = _money(
+                reserved_cost_usd
+                if reserved_cost_usd is not None
+                else self.worst_case_cost_usd,
+                field="reserved_cost_usd",
             )
-        stage_s = stage.strip()
-        task_s = task_id.strip()
-        model_s = model.strip()
-        if not stage_s or not task_s or not model_s:
-            raise AccountingError("stage, task_id, and model must be non-empty")
-        reserved = _money(
-            reserved_cost_usd if reserved_cost_usd is not None else self.worst_case_cost_usd,
-            field="reserved_cost_usd",
-        )
-        if reserved <= 0:
-            raise AccountingError("reserved_cost_usd must be greater than zero")
-        commit_after = self.total_commit_usd() + reserved
-        if commit_after > self.cap_usd:
-            raise AccountingError(
-                f"reserve would exceed cap: commit_after={commit_after} > "
-                f"cap={self.cap_usd} (stage={stage_s!r} task={task_s!r} model={model_s!r})"
+            if reserved <= 0:
+                raise AccountingError("reserved_cost_usd must be greater than zero")
+            commit_after = self.total_commit_usd() + reserved
+            if commit_after > self.cap_usd:
+                raise AccountingError(
+                    f"reserve would exceed cap: commit_after={commit_after} > "
+                    f"cap={self.cap_usd} (stage={stage_s!r} task={task_s!r} model={model_s!r})"
+                )
+            physical = (physical_call_id or uuid.uuid4().hex).strip()
+            if not physical:
+                raise AccountingError("physical_call_id must be non-empty")
+            if physical in self._records:
+                raise AccountingError(f"duplicate physical_call_id {physical!r}")
+            event: dict[str, object] = {
+                "schema_version": SCHEMA_VERSION,
+                "event": _EVENT_RESERVE,
+                "ts": _timestamp(),
+                "run_id": self.run_id,
+                "physical_call_id": physical,
+                "stage": stage_s,
+                "task_id": task_s,
+                "model": model_s,
+                "reserved_cost_usd": _money_text(reserved, field="reserved_cost_usd"),
+            }
+            self._append(event)
+            self._records[physical] = Reservation(
+                physical_call_id=physical,
+                stage=stage_s,
+                task_id=task_s,
+                model=model_s,
+                reserved_cost_usd=reserved,
+                reserve_event=event,
             )
-        physical = (physical_call_id or uuid.uuid4().hex).strip()
-        if not physical:
-            raise AccountingError("physical_call_id must be non-empty")
-        if physical in self._records:
-            raise AccountingError(f"duplicate physical_call_id {physical!r}")
-        event: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
-            "event": _EVENT_RESERVE,
-            "ts": _timestamp(),
-            "run_id": self.run_id,
-            "physical_call_id": physical,
-            "stage": stage_s,
-            "task_id": task_s,
-            "model": model_s,
-            "reserved_cost_usd": _money_text(reserved, field="reserved_cost_usd"),
-        }
-        self._append(event)
-        self._records[physical] = Reservation(
-            physical_call_id=physical,
-            stage=stage_s,
-            task_id=task_s,
-            model=model_s,
-            reserved_cost_usd=reserved,
-            reserve_event=event,
-        )
-        return physical
+            return physical
 
     def settle(
         self,
@@ -420,134 +432,140 @@ class BudgetLedger:
         usage: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> None:
-        """Settle an open reservation with exact provider cost."""
-        physical = physical_call_id.strip()
-        base = self._records.get(physical)
-        if base is None:
-            raise AccountingError(f"settle unknown physical call {physical!r}")
-        if not base.is_open:
-            raise AccountingError(f"physical call {physical!r} is already closed")
-        cost = _money(cost_usd, field="cost_usd")
-        if cost > base.reserved_cost_usd:
-            raise AccountingError(
-                f"settled cost {cost} exceeds reserved {base.reserved_cost_usd} for {physical!r}"
+        """Settle an open reservation with exact provider cost. Thread-safe."""
+        with self._lock:
+            physical = physical_call_id.strip()
+            base = self._records.get(physical)
+            if base is None:
+                raise AccountingError(f"settle unknown physical call {physical!r}")
+            if not base.is_open:
+                raise AccountingError(f"physical call {physical!r} is already closed")
+            cost = _money(cost_usd, field="cost_usd")
+            if cost > base.reserved_cost_usd:
+                raise AccountingError(
+                    f"settled cost {cost} exceeds reserved {base.reserved_cost_usd} "
+                    f"for {physical!r}"
+                )
+            if status not in _SETTLED_STATUSES:
+                raise AccountingError(f"invalid settle status {status!r}")
+            usage_d = _usage_dict(usage)
+            event: dict[str, object] = {
+                "schema_version": SCHEMA_VERSION,
+                "event": _EVENT_SETTLE,
+                "ts": _timestamp(),
+                "run_id": self.run_id,
+                "physical_call_id": physical,
+                "stage": base.stage,
+                "task_id": base.task_id,
+                "model": base.model,
+                "status": status,
+                "cost_usd": _money_text(cost, field="cost_usd"),
+                "usage": usage_d,
+                "request_id": request_id or "",
+            }
+            self._append(event)
+            self._records[physical] = Reservation(
+                physical_call_id=base.physical_call_id,
+                stage=base.stage,
+                task_id=base.task_id,
+                model=base.model,
+                reserved_cost_usd=base.reserved_cost_usd,
+                reserve_event=base.reserve_event,
+                settle_event=event,
+                unknown_billing_event=None,
             )
-        if status not in _SETTLED_STATUSES:
-            raise AccountingError(f"invalid settle status {status!r}")
-        usage_d = _usage_dict(usage)
-        event: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
-            "event": _EVENT_SETTLE,
-            "ts": _timestamp(),
-            "run_id": self.run_id,
-            "physical_call_id": physical,
-            "stage": base.stage,
-            "task_id": base.task_id,
-            "model": base.model,
-            "status": status,
-            "cost_usd": _money_text(cost, field="cost_usd"),
-            "usage": usage_d,
-            "request_id": request_id or "",
-        }
-        self._append(event)
-        self._records[physical] = Reservation(
-            physical_call_id=base.physical_call_id,
-            stage=base.stage,
-            task_id=base.task_id,
-            model=base.model,
-            reserved_cost_usd=base.reserved_cost_usd,
-            reserve_event=base.reserve_event,
-            settle_event=event,
-            unknown_billing_event=None,
-        )
 
     def mark_unknown_billing(self, physical_call_id: str, *, reason_code: str) -> None:
         """Mark a reservation as unknown billing (fail closed for keeps)."""
-        physical = physical_call_id.strip()
-        base = self._records.get(physical)
-        if base is None:
-            raise AccountingError(f"unknown_billing for unknown physical call {physical!r}")
-        if not base.is_open:
-            raise AccountingError(f"physical call {physical!r} is already closed")
-        code = reason_code.strip() or "unknown_billing"
-        event: dict[str, object] = {
-            "schema_version": SCHEMA_VERSION,
-            "event": _EVENT_UNKNOWN_BILLING,
-            "ts": _timestamp(),
-            "run_id": self.run_id,
-            "physical_call_id": physical,
-            "stage": base.stage,
-            "task_id": base.task_id,
-            "model": base.model,
-            "reason_code": code,
-        }
-        self._append(event)
-        self._records[physical] = Reservation(
-            physical_call_id=base.physical_call_id,
-            stage=base.stage,
-            task_id=base.task_id,
-            model=base.model,
-            reserved_cost_usd=base.reserved_cost_usd,
-            reserve_event=base.reserve_event,
-            settle_event=None,
-            unknown_billing_event=event,
-        )
+        with self._lock:
+            physical = physical_call_id.strip()
+            base = self._records.get(physical)
+            if base is None:
+                raise AccountingError(
+                    f"unknown_billing for unknown physical call {physical!r}"
+                )
+            if not base.is_open:
+                raise AccountingError(f"physical call {physical!r} is already closed")
+            code = reason_code.strip() or "unknown_billing"
+            event: dict[str, object] = {
+                "schema_version": SCHEMA_VERSION,
+                "event": _EVENT_UNKNOWN_BILLING,
+                "ts": _timestamp(),
+                "run_id": self.run_id,
+                "physical_call_id": physical,
+                "stage": base.stage,
+                "task_id": base.task_id,
+                "model": base.model,
+                "reason_code": code,
+            }
+            self._append(event)
+            self._records[physical] = Reservation(
+                physical_call_id=base.physical_call_id,
+                stage=base.stage,
+                task_id=base.task_id,
+                model=base.model,
+                reserved_cost_usd=base.reserved_cost_usd,
+                reserve_event=base.reserve_event,
+                settle_event=None,
+                unknown_billing_event=event,
+            )
 
     def summary(self) -> LedgerSummary:
         """Compute exact + reserved spend snapshot linked by stage/task/model."""
-        settled = Decimal("0")
-        open_reserved = Decimal("0")
-        open_count = 0
-        settled_count = 0
-        unknown_count = 0
-        by_stage: dict[str, Decimal] = {}
-        by_task: dict[str, Decimal] = {}
-        by_model: dict[str, Decimal] = {}
+        with self._lock:
+            settled = Decimal("0")
+            open_reserved = Decimal("0")
+            open_count = 0
+            settled_count = 0
+            unknown_count = 0
+            by_stage: dict[str, Decimal] = {}
+            by_task: dict[str, Decimal] = {}
+            by_model: dict[str, Decimal] = {}
 
-        def _bump(bucket: dict[str, Decimal], key: str, amount: Decimal) -> None:
-            bucket[key] = bucket.get(key, Decimal("0")) + amount
+            def _bump(bucket: dict[str, Decimal], key: str, amount: Decimal) -> None:
+                bucket[key] = bucket.get(key, Decimal("0")) + amount
 
-        for rec in self._records.values():
-            if rec.settle_event is not None:
-                amount = _money(rec.settle_event.get("cost_usd"), field="cost_usd")
-                settled += amount
-                settled_count += 1
-                _bump(by_stage, rec.stage, amount)
-                _bump(by_task, rec.task_id, amount)
-                _bump(by_model, rec.model, amount)
-            elif rec.is_unknown_billing:
-                amount = rec.reserved_cost_usd
-                open_reserved += amount
-                unknown_count += 1
-                _bump(by_stage, rec.stage, amount)
-                _bump(by_task, rec.task_id, amount)
-                _bump(by_model, rec.model, amount)
-            else:
-                amount = rec.reserved_cost_usd
-                open_reserved += amount
-                open_count += 1
-                _bump(by_stage, rec.stage, amount)
-                _bump(by_task, rec.task_id, amount)
-                _bump(by_model, rec.model, amount)
+            for rec in self._records.values():
+                if rec.settle_event is not None:
+                    amount = _money(rec.settle_event.get("cost_usd"), field="cost_usd")
+                    settled += amount
+                    settled_count += 1
+                    _bump(by_stage, rec.stage, amount)
+                    _bump(by_task, rec.task_id, amount)
+                    _bump(by_model, rec.model, amount)
+                elif rec.is_unknown_billing:
+                    amount = rec.reserved_cost_usd
+                    open_reserved += amount
+                    unknown_count += 1
+                    _bump(by_stage, rec.stage, amount)
+                    _bump(by_task, rec.task_id, amount)
+                    _bump(by_model, rec.model, amount)
+                else:
+                    amount = rec.reserved_cost_usd
+                    open_reserved += amount
+                    open_count += 1
+                    _bump(by_stage, rec.stage, amount)
+                    _bump(by_task, rec.task_id, amount)
+                    _bump(by_model, rec.model, amount)
 
-        total = settled + open_reserved
-        remaining = self.cap_usd - total
-        return LedgerSummary(
-            path=self.path,
-            cap_usd=self.cap_usd,
-            settled_exact_usd=settled,
-            open_reserved_usd=open_reserved,
-            total_commit_usd=total,
-            remaining_usd=remaining,
-            open_call_count=open_count,
-            settled_call_count=settled_count,
-            unknown_billing_count=unknown_count,
-            has_unknown_billing=unknown_count > 0,
-            under_cap=total <= self.cap_usd,
-            by_stage=by_stage,
-            by_task=by_task,
-            by_model=by_model,
-        )
+            total = settled + open_reserved
+            remaining = self.cap_usd - total
+            return LedgerSummary(
+                path=self.path,
+                cap_usd=self.cap_usd,
+                settled_exact_usd=settled,
+                open_reserved_usd=open_reserved,
+                total_commit_usd=total,
+                remaining_usd=remaining,
+                open_call_count=open_count,
+                settled_call_count=settled_count,
+                unknown_billing_count=unknown_count,
+                has_unknown_billing=unknown_count > 0,
+                under_cap=total <= self.cap_usd,
+                by_stage=by_stage,
+                by_task=by_task,
+                by_model=by_model,
+            )
 
     def write_summary_json(self, path: Path | str | None = None) -> Path:
         """Persist ``ledger_summary.json`` next to the ledger by default."""

@@ -6,12 +6,15 @@ Mocks pier reward paths; never uses never-solve panel as DeepAgent fidelity.
 from __future__ import annotations
 
 import json
+import threading
+import time
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from swe_factory.accounting import BudgetLedger
 from swe_factory.cli import app
 from swe_factory.panel.eval_deepagent import (
     DEEPAGENT_EVAL_FIDELITY,
@@ -614,3 +617,199 @@ def test_live_invoker_fails_closed_on_mintag_error(
     assert result["solved"] is False
     assert result["invented_reward"] is False
     assert any("mintag" in e.lower() for e in result["errors"])
+
+
+def _sleeping_invoker(
+    *,
+    delay_s: float = 0.15,
+    counter: dict[str, int] | None = None,
+) -> object:
+    """Mock pier invoker that sleeps to prove real thread-pool concurrency.
+
+    Tracks peak concurrent invocations in ``counter['max_inflight']``.
+    """
+    lock = threading.Lock()
+    state = counter if counter is not None else {"current": 0, "max_inflight": 0}
+    state.setdefault("current", 0)
+    state.setdefault("max_inflight", 0)
+    state.setdefault("calls", 0)
+
+    def _invoke(
+        *,
+        pack_path: Path,
+        pack_id: str,
+        model: str,
+        jobs_dir: Path,
+        index: int,
+        timeout_s: float,
+    ) -> dict[str, object]:
+        del pack_path, timeout_s
+        with lock:
+            state["current"] += 1
+            state["calls"] += 1
+            if state["current"] > state["max_inflight"]:
+                state["max_inflight"] = state["current"]
+        try:
+            time.sleep(delay_s)
+            mid = normalize_model_id(model)
+            jobs_dir.mkdir(parents=True, exist_ok=True)
+            job_dir = jobs_dir / f"sleep-{pack_id}-{mid.replace('/', '_')}-k{index}"
+            verifier = job_dir / "trial" / "verifier"
+            verifier.mkdir(parents=True, exist_ok=True)
+            reward_path = verifier / "reward.json"
+            reward_path.write_text(json.dumps({"reward": 0}) + "\n", encoding="utf-8")
+            return {
+                "reward": 0,
+                "solved": False,
+                "job_dir": str(job_dir),
+                "reward_path": str(reward_path),
+                "exit_code": 0,
+                "errors": (),
+                "cost_usd": Decimal("0.01"),
+                "ok": True,
+                "invented_reward": False,
+            }
+        finally:
+            with lock:
+                state["current"] = max(0, state["current"] - 1)
+
+    return _invoke
+
+
+def test_pool_max_inflight_ge_2_when_n_concurrent_2(tmp_path: Path) -> None:
+    """VAL-DPOOL-001: N=2 launches concurrent workers; max_in_flight >= 2."""
+    product = tmp_path / "deepagent_v1"
+    # 2 packs × 2 models = 4 trials; with N=2 must overlap in-flight.
+    for pid in ("p1", "p2"):
+        _write_min_pack(product, pid)
+    counter: dict[str, int] = {"current": 0, "max_inflight": 0, "calls": 0}
+    invoker = _sleeping_invoker(delay_s=0.2, counter=counter)
+    report = run_deepagent_eval(
+        product_root=product,
+        out_dir=tmp_path / "out_pool2",
+        max_packs=2,
+        k=1,
+        n_concurrent=2,
+        hard_stop_usd=Decimal("100"),
+        reserve_usd=Decimal("1.00"),
+        jobs_dir=tmp_path / "jobs_pool2",
+        invoker=invoker,  # type: ignore[arg-type]
+        offline=True,
+        reclaim=False,
+    )
+    assert counter["calls"] == 4  # 2 packs × 2 models
+    assert counter["max_inflight"] >= 2, counter
+    assert report.actual_max_inflight is not None
+    assert report.actual_max_inflight >= 2
+    assert report.n_concurrent == 2
+    assert report.pool_workers == 2
+    blob = json.loads((tmp_path / "out_pool2" / "report.json").read_text(encoding="utf-8"))
+    assert blob["actual_max_inflight"] >= 2
+    assert blob["n_concurrent"] == 2
+    assert blob["concurrent_pool"] is True
+    assert report.invented_rewards is False
+    assert report.n_packs_scored == 2
+
+
+def test_pool_max_inflight_le_n_for_n_equals_3(tmp_path: Path) -> None:
+    """VAL-DPOOL-002: N=3 with many trials keeps max in-flight ≤ 3."""
+    product = tmp_path / "deepagent_v1"
+    # 5 packs × 2 models = 10 trials; pool size 3.
+    pack_ids = [f"p{i}" for i in range(5)]
+    for pid in pack_ids:
+        _write_min_pack(product, pid)
+    counter: dict[str, int] = {"current": 0, "max_inflight": 0, "calls": 0}
+    invoker = _sleeping_invoker(delay_s=0.12, counter=counter)
+    report = run_deepagent_eval(
+        product_root=product,
+        out_dir=tmp_path / "out_pool3",
+        max_packs=5,
+        k=1,
+        n_concurrent=3,
+        hard_stop_usd=Decimal("100"),
+        reserve_usd=Decimal("1.00"),
+        jobs_dir=tmp_path / "jobs_pool3",
+        invoker=invoker,  # type: ignore[arg-type]
+        offline=True,
+        reclaim=False,
+    )
+    assert counter["calls"] == 10
+    assert counter["max_inflight"] <= 3, counter
+    assert counter["max_inflight"] >= 2  # with 10 trials must reach higher than 1
+    assert report.actual_max_inflight is not None
+    assert report.actual_max_inflight <= 3
+    assert report.actual_max_inflight >= 2
+    assert report.n_concurrent == 3
+    assert report.n_packs_scored == 5
+
+
+def test_pool_n1_still_serial_equivalent(tmp_path: Path) -> None:
+    """VAL-DPOOL default N=1: max_inflight ≤ 1 and full matrix scores."""
+    product = tmp_path / "deepagent_v1"
+    for pid in ("p1", "p2"):
+        _write_min_pack(product, pid)
+    counter: dict[str, int] = {"current": 0, "max_inflight": 0, "calls": 0}
+    invoker = _sleeping_invoker(delay_s=0.05, counter=counter)
+    report = run_deepagent_eval(
+        product_root=product,
+        out_dir=tmp_path / "out_pool1",
+        max_packs=2,
+        k=1,
+        n_concurrent=1,
+        hard_stop_usd=Decimal("100"),
+        reserve_usd=Decimal("1.00"),
+        jobs_dir=tmp_path / "jobs_pool1",
+        invoker=invoker,  # type: ignore[arg-type]
+        offline=True,
+        reclaim=False,
+    )
+    assert counter["max_inflight"] <= 1, counter
+    assert report.actual_max_inflight is not None
+    assert report.actual_max_inflight <= 1
+    assert report.n_concurrent == 1
+    assert report.n_packs_scored == 2
+    # Behavior parity: rewards/spend still present.
+    assert report.fidelity == DEEPAGENT_EVAL_FIDELITY
+
+
+def test_pool_ledger_race_safe_and_hard_stop(tmp_path: Path) -> None:
+    """VAL-DPOOL-003: concurrent reserve/settle race-safe; hard-stop prevents overspend."""
+    product = tmp_path / "deepagent_v1"
+    for pid in ("p1", "p2", "p3", "p4", "p5"):
+        _write_min_pack(product, pid)
+    counter: dict[str, int] = {"current": 0, "max_inflight": 0, "calls": 0}
+    invoker = _sleeping_invoker(delay_s=0.08, counter=counter)
+    # 5 packs × 2 models need 10 × $1 = $10 worst-case; cap hard_stop at $4
+    # so only a subset of trials may reserve.
+    report = run_deepagent_eval(
+        product_root=product,
+        out_dir=tmp_path / "out_pool_hs",
+        max_packs=5,
+        k=1,
+        n_concurrent=3,
+        hard_stop_usd=Decimal("4.00"),
+        reserve_usd=Decimal("1.00"),
+        jobs_dir=tmp_path / "jobs_pool_hs",
+        invoker=invoker,  # type: ignore[arg-type]
+        offline=True,
+        reclaim=False,
+    )
+    assert report.budget_stop is True
+    assert report.total_spend_usd <= Decimal("4.00")
+    # Ledger must settle without corruption under concurrency.
+    assert report.ledger_path is not None
+    ledger = BudgetLedger(report.ledger_path, cap_usd=Decimal("4.00"))
+    summary = ledger.summary()
+    assert summary.under_cap is True
+    assert summary.has_unknown_billing is False
+    assert summary.settled_call_count == counter["calls"]
+    assert summary.open_call_count == 0
+    assert summary.settled_exact_usd <= Decimal("4.00")
+    # No invented rewards under concurrent path.
+    assert report.invented_rewards is False
+    for pack in report.pack_results:
+        for model in pack.models:
+            for trial in model.trials:
+                assert trial.invented_reward is False
+    # Mus have observed multi-worker peak before/around hard-stop.
+    assert counter["max_inflight"] <= 3

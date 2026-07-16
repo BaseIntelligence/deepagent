@@ -6,7 +6,7 @@
 - fidelity: `pier_miniswe_harbor`
 - models: x-ai/grok-4.5, moonshotai/kimi-k2.6
 - k: 1
-- n_concurrent: 5 (CLI/report; trial launch is sequential in core loop)
+- n_concurrent: 5 (CLI/report; M19 wave launched sequential; M20 true ThreadPoolExecutor pool for n>1 is now product path)
 - hard_stop_usd: 600.0
 - n_packs_requested: 10
 - n_packs_scored: 10
@@ -54,7 +54,7 @@
 ## Trial anomalies
 - `realpr-packaging-1120` / `moonshotai/kimi-k2.6`: pier timeout after 3600s, reward=null, cost_usd=0, solved=false (honest fail; not invented).
 - Remaining 19 trials produced verifier rewards and/or non-zero trajectory cost settlements as applicable.
-- CLI accepted `n_concurrent=5` (report field); core evaluation loop still runs trials sequentially (max 5 allowed; observed concurrent pier/docker ≤1 in this monitoring).
+- M19 bench committed CLI `n_concurrent=5` while the then-current core loop still launched trials sequentially (observed concurrent pier/docker ≤1 in that monitoring). **M20 true pier pool:** `eval_deepagent` now uses `ThreadPoolExecutor(max_workers=n_concurrent)` with per-trial job dirs, thread-safe ledger reserve/settle, hard-stop before schedule, and report fields `actual_max_inflight` / `concurrent_pool=true`. Default `n_concurrent=1` remains serial-equivalent via the same pool (`max_workers=1`).
 
 ## Artifacts
 - `report.json`
