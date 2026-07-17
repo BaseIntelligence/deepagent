@@ -74,9 +74,9 @@ def test_green_fixture_envbuild_docker(docker_ready: DockerCLI) -> None:
     leftover = remove_leftover_sdf_containers(docker)
 
     try:
-        assert (
-            result.success is True
-        ), f"envbuild failed: {result.failure_kind}: {result.reason}\n{result.logs}"
+        assert result.success is True, (
+            f"envbuild failed: {result.failure_kind}: {result.reason}\n{result.logs}"
+        )
         assert result.env_image is not None
         assert result.env_image.baseline_green is True
         assert result.env_image.baseline_exit_code == 0

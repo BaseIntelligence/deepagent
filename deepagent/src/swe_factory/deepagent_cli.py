@@ -214,8 +214,7 @@ def refresh_instructions_cmd(
         typer.Option(
             "--root",
             help=(
-                "Certified product root with tasks/<id>/instruction.md "
-                "(default datasets/test_n10)"
+                "Certified product root with tasks/<id>/instruction.md (default datasets/test_n10)"
             ),
             file_okay=False,
             dir_okay=True,
