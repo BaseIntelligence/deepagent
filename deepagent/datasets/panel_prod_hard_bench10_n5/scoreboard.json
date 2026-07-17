@@ -1,0 +1,198 @@
+{
+  "n_packs_scored": 10,
+  "n_packs_requested": 10,
+  "fidelity": "pier_miniswe_harbor",
+  "n_concurrent": 5,
+  "actual_max_inflight": 5,
+  "concurrent_pool": true,
+  "k": 1,
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.6"
+  ],
+  "spend_usd": "51.75201631599999884",
+  "remaining_usd": "548.24798368400000116",
+  "budget_stop": false,
+  "stop_reason": null,
+  "wall_s": 3225.899,
+  "invented_rewards": false,
+  "hard_stop_usd": "600.0",
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-prod-reeval",
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/prod_hard_keep",
+  "overall_pass_at_1": {
+    "x-ai/grok-4.5": {
+      "solves": 5,
+      "trials": 10,
+      "pass_at_1": 0.5
+    },
+    "moonshotai/kimi-k2.6": {
+      "solves": 4,
+      "trials": 10,
+      "pass_at_1": 0.4
+    }
+  },
+  "per_pack": [
+    {
+      "pack_id": "realpr-itemadapter-101",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "0.654052"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "7.150363780000001"
+      ]
+    },
+    {
+      "pack_id": "realpr-attrs-1323",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.8474039999999996"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "1.8261040899999996"
+      ]
+    },
+    {
+      "pack_id": "realpr-httpx-3672",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "1.7330759999999994"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "2.63675383"
+      ]
+    },
+    {
+      "pack_id": "realpr-packaging-1120",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.6996860000000001"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "1.4634121800000002"
+      ]
+    },
+    {
+      "pack_id": "realpr-attrs-1457",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "2.1224279999999998"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "3.7764735499999995"
+      ]
+    },
+    {
+      "pack_id": "realpr-qs-487",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.3643240000000003"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "2.01109522"
+      ]
+    },
+    {
+      "pack_id": "realpr-qs-488",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.49561199999999994"
+      ],
+      "kimi-k2.6": 0.0,
+      "kimi-k2.6_solves": 0,
+      "kimi-k2.6_cost": [
+        "5.26463187"
+      ]
+    },
+    {
+      "pack_id": "realpr-werkzeug-2979",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "0.8604300000000001"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "2.6826315099999993"
+      ]
+    },
+    {
+      "pack_id": "realpr-werkzeug-3006",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.4491960000000002"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "4.676862130000001"
+      ]
+    },
+    {
+      "pack_id": "realpr-werkzeug-3101",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "3.0230840000000008"
+      ],
+      "kimi-k2.6": 1.0,
+      "kimi-k2.6_solves": 1,
+      "kimi-k2.6_cost": [
+        "7.014396155999998"
+      ]
+    }
+  ],
+  "started_at": "2026-07-17T01:24:21.032060+00:00",
+  "finished_at": "2026-07-17T02:18:06.930871+00:00"
+}
