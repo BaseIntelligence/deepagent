@@ -1,12 +1,16 @@
-"""Curate production hardness panel from test_n10 (M21c / VAL-DHARD-004).
+"""Curate production hardness panel from test_n10 (M21c + M25 intrinsic).
 
 Policy
 ------
 * DROP misaligned packs (e.g. more-itertools-1136 and same-class).
-* DROP solve-all / thin-F2P easy packs (e.g. charset-normalizer-715, rich-4070).
-* KEEP panel hard keep-band **when** dual-truth + alignment + floors hold.
-* INCLUDE legit hard solve-none (complex multi-file, dual-truth OK) such as
-  attrs-1457 and packaging-1120 (model scoreout ≠ auto-drop).
+* DROP structural floors fails (thin F2P, multi-file/hunk shortfalls).
+* DROP high-confidence **intrinsic** ``EASY_REQUEST`` (prompt + gold only).
+* **Do NOT** drop solely because dual-model eval solve-all (M25 / VAL-DINTR-001).
+  EASY_SOLVE_ALL remains a scoreboard label via :mod:`easy_detect`.
+* KEEP panel hard keep-band **when** dual-truth + alignment + floors + not
+  intrinsic-easy hold.
+* INCLUDE legit hard solve-none **and** model solve-alls that still pass
+  dual-truth + alignment + floors + intrinsic non-easy (model scoreout ≠ drop).
 * Never pad with fixtures. Residual after gates must be N≥5, else fail-closed
   so a later live re-mine can refill with new floors.
 
@@ -37,6 +41,11 @@ from swe_factory.pipeline.hardness_floors import (
     DEFAULT_MIN_F2P_NODES,
     hardness_result_from_pack_dir,
 )
+from swe_factory.pipeline.intrinsic_difficulty import (
+    CLASS_EASY_REQUEST,
+    REASON_EASY_REQUEST,
+    intrinsic_from_pack_dir,
+)
 from swe_factory.pipeline.prompt_alignment import alignment_result_from_pack_dir
 
 CURSOR_SCHEMA = "deepagent.prod_hard_curation.v1"
@@ -58,6 +67,7 @@ NOMINAL_KEEP_CANDIDATES: frozenset[str] = frozenset(
 )
 
 # Explicit drops (policy). Additional gate failures may drop more candidates.
+# M25: model solve-all alone is **not** a drop reason — thin-F2P / misalign only.
 EXPLICIT_DROP: dict[str, dict[str, str]] = {
     "realpr-more-itertools-1136": {
         "reason_code": "prompt_verifier_misalign",
@@ -68,17 +78,17 @@ EXPLICIT_DROP: dict[str, dict[str, str]] = {
         ),
     },
     "realpr-charset-normalizer-715": {
-        "reason_code": "solve_all_easy_policy_drop",
+        "reason_code": "thin_f2p_easy_class",
         "detail": (
-            "Solve-all / easy class: frontier panel pass@k=1.0 (both models resolved) "
-            "and thin F2P=1 below MIN_F2P_NODES floor."
+            "Structural hardness refuse: thin F2P=1 below MIN_F2P_NODES floor "
+            "(model solve-all is not the drop gate under M25)."
         ),
     },
     "realpr-rich-4070": {
-        "reason_code": "solve_all_easy_policy_drop",
+        "reason_code": "thin_f2p_easy_class",
         "detail": (
-            "Solve-all / easy class: frontier panel pass@k=1.0 (both models resolved) "
-            "and thin F2P=1 below MIN_F2P_NODES floor."
+            "Structural hardness refuse: thin F2P=1 below MIN_F2P_NODES floor "
+            "(model solve-all is not the drop gate under M25)."
         ),
     },
 }
@@ -256,8 +266,19 @@ def decide_pack(
     panel_row: Mapping[str, Any] | None = None,
     force_drop: Mapping[str, Mapping[str, str]] | None = None,
     min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
+    apply_intrinsic: bool = True,
 ) -> PackDisposition:
-    """Decide keep/drop for one pack with gates + policy drops."""
+    """Decide keep/drop for one pack with gates + policy drops.
+
+    Drop reasons (M25):
+    * explicit force_drop / EXPLICIT table (misalign, structural thin F2P names)
+    * incomplete tree / dual-truth fail
+    * prompt–verifier misalignment
+    * hardness floors (F2P<3, multi-file, hunks)
+    * high-confidence intrinsic ``EASY_REQUEST`` (prompt+gold only)
+
+    Model solve-all / panel rule=solve-all / frontier=1.0 do **not** auto-drop.
+    """
     explicit = dict(force_drop or EXPLICIT_DROP)
     hunks = None
     sol = None
@@ -267,15 +288,19 @@ def decide_pack(
         sol = pack_row.get("solution_reward")
         null = pack_row.get("null_reward")
 
-    panel_verdict = None
-    panel_rule = None
+    raw_panel_verdict = None
+    raw_panel_rule = None
     frontier = None
     if panel_row:
-        panel_verdict = panel_row.get("verdict")
-        panel_rule = panel_row.get("rule")
+        raw_panel_verdict = panel_row.get("verdict")
+        raw_panel_rule = panel_row.get("rule")
         frontier = panel_row.get("frontier_pass_at_k")
 
-    # Explicit policy drops first (misalign/solve-all named in m21c).
+    panel_verdict_s: str | None = str(raw_panel_verdict) if raw_panel_verdict is not None else None
+    panel_rule_s: str | None = str(raw_panel_rule) if raw_panel_rule is not None else None
+    frontier_f: float | None = float(frontier) if isinstance(frontier, int | float) else None
+
+    # Explicit policy drops first (misalign / structural thin-F2P named in m21c).
     if task_id in explicit:
         info = explicit[task_id]
         align = alignment_result_from_pack_dir(pack_dir)
@@ -297,9 +322,9 @@ def decide_pack(
             source_hunk_count=int(hunks) if isinstance(hunks, int) else hard.source_hunk_count,
             solution_reward=sol,
             null_reward=null,
-            panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-            panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
+            panel_verdict=panel_verdict_s,
+            panel_rule=panel_rule_s,
+            frontier_pass_at_k=frontier_f,
             meta={"explicit_policy_drop": True, "dual_detail": dual_detail},
         )
 
@@ -313,8 +338,9 @@ def decide_pack(
             dual_truth_ok=False,
             solution_reward=sol,
             null_reward=null,
-            panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-            panel_rule=str(panel_rule) if panel_rule is not None else None,
+            panel_verdict=panel_verdict_s,
+            panel_rule=panel_rule_s,
+            frontier_pass_at_k=frontier_f,
         )
 
     dual_ok, dual_detail = _dual_truth_ok(pack_row)
@@ -327,8 +353,9 @@ def decide_pack(
             dual_truth_ok=False,
             solution_reward=sol,
             null_reward=null,
-            panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-            panel_rule=str(panel_rule) if panel_rule is not None else None,
+            panel_verdict=panel_verdict_s,
+            panel_rule=panel_rule_s,
+            frontier_pass_at_k=frontier_f,
         )
 
     align = alignment_result_from_pack_dir(pack_dir)
@@ -350,9 +377,9 @@ def decide_pack(
             source_hunk_count=int(hunks) if isinstance(hunks, int) else hard.source_hunk_count,
             solution_reward=sol,
             null_reward=null,
-            panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-            panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
+            panel_verdict=panel_verdict_s,
+            panel_rule=panel_rule_s,
+            frontier_pass_at_k=frontier_f,
             meta={"gate": "prompt_alignment"},
         )
     if not hard.ok:
@@ -368,52 +395,78 @@ def decide_pack(
             source_hunk_count=int(hunks) if isinstance(hunks, int) else hard.source_hunk_count,
             solution_reward=sol,
             null_reward=null,
-            panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-            panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
+            panel_verdict=panel_verdict_s,
+            panel_rule=panel_rule_s,
+            frontier_pass_at_k=frontier_f,
             meta={"gate": "hardness_floors"},
         )
 
-    # Optional solve-all panel verdict even if not named explicitly.
-    if panel_rule == "solve-all" or (isinstance(frontier, int | float) and float(frontier) >= 1.0):
-        return PackDisposition(
-            task_id=task_id,
-            keep=False,
-            reason_code="solve_all_easy_policy_drop",
-            detail=(
-                f"panel rule={panel_rule!r} frontier_pass_at_k={frontier}; "
-                "solve-all dropped from hardness promote (VAL-DHARD-003)."
-            ),
-            alignment_ok=True,
-            hardness_ok=True,
-            dual_truth_ok=True,
+    # Intrinsic prompt+gold scorer (M25). High-confidence EASY_REQUEST may drop.
+    # Model solve-all is **not** consulted here.
+    intrinsic_meta: dict[str, Any] = {}
+    if apply_intrinsic:
+        intrinsic = intrinsic_from_pack_dir(
+            pack_dir,
             f2p_count=hard.f2p_count,
-            source_hunk_count=int(hunks) if isinstance(hunks, int) else hard.source_hunk_count,
-            solution_reward=sol,
-            null_reward=null,
-            panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-            panel_rule=str(panel_rule) if panel_rule is not None else None,
-            frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
-            meta={"gate": "anti_easy_panel"},
+            drop_on_easy_request=True,
+            high_confidence_only=True,
         )
+        intrinsic_meta = {
+            "intrinsic_class": intrinsic.intrinsic_class,
+            "easily_approachable": intrinsic.easily_approachable,
+            "intrinsic_confidence": intrinsic.confidence,
+            "intrinsic_reason_code": intrinsic.reason_code,
+            "intrinsic_metrics": dict(intrinsic.metrics),
+        }
+        if intrinsic.should_drop_hardness and intrinsic.intrinsic_class == CLASS_EASY_REQUEST:
+            return PackDisposition(
+                task_id=task_id,
+                keep=False,
+                reason_code=REASON_EASY_REQUEST,
+                detail=(
+                    f"intrinsic EASY_REQUEST (confidence={intrinsic.confidence}): "
+                    f"{intrinsic.detail}"
+                ),
+                alignment_ok=True,
+                hardness_ok=True,
+                dual_truth_ok=True,
+                f2p_count=hard.f2p_count,
+                source_hunk_count=(
+                    int(hunks) if isinstance(hunks, int) else hard.source_hunk_count
+                ),
+                solution_reward=sol,
+                null_reward=null,
+                panel_verdict=panel_verdict_s,
+                panel_rule=panel_rule_s,
+                frontier_pass_at_k=frontier_f,
+                meta={"gate": "intrinsic_easy_request", **intrinsic_meta},
+            )
 
-    # Solve-none is **kept** when dual-truth + floors + alignment hold (m21c).
+    # M25: panel solve-all / frontier=1.0 annotated, NEVER sole ship drop.
+    # Solve-none is **kept** when dual-truth + floors + alignment + non-intrinsic-easy.
     keep_reason = "keep_hard_dual_truth"
     detail = (
         "production hardness keep: dual-truth sol=1/null=0, prompt–verifier aligned, "
-        f"hardness floors ok (F2P≥{min_f2p_nodes}, multi-file/hunk floors). "
+        f"hardness floors ok (F2P≥{min_f2p_nodes}, multi-file/hunk floors); "
+        "intrinsic not high-confidence EASY_REQUEST. "
     )
-    if panel_rule == "solve-none":
+    if panel_rule_s == "solve-all" or (frontier_f is not None and frontier_f >= 1.0):
+        keep_reason = "keep_despite_model_solve_all"
+        detail += (
+            f"Panel rule={panel_rule_s!r} frontier_pass_at_k={frontier_f}: model dual "
+            "success is scoreboard-only (M25 / VAL-DINTR-001); not a hardness drop."
+        )
+    elif panel_rule_s == "solve-none":
         keep_reason = "keep_legit_hard_solve_none"
         detail += (
             "Panel solve-none retained: complex multi-file dual-truth pack; "
             "model scoreout ≠ dataset drop (M21 policy)."
         )
-    elif panel_verdict == "keep":
+    elif panel_verdict_s == "keep":
         keep_reason = "keep_hard_panel_band"
-        detail += f"Panel keep-band rule={panel_rule!r} frontier_pass_at_k={frontier}."
+        detail += f"Panel keep-band rule={panel_rule_s!r} frontier_pass_at_k={frontier_f}."
     else:
-        detail += f"Panel={panel_verdict!r}/{panel_rule!r}."
+        detail += f"Panel={panel_verdict_s!r}/{panel_rule_s!r}."
 
     return PackDisposition(
         task_id=task_id,
@@ -427,12 +480,14 @@ def decide_pack(
         source_hunk_count=int(hunks) if isinstance(hunks, int) else hard.source_hunk_count,
         solution_reward=sol,
         null_reward=null,
-        panel_verdict=str(panel_verdict) if panel_verdict is not None else None,
-        panel_rule=str(panel_rule) if panel_rule is not None else None,
-        frontier_pass_at_k=float(frontier) if isinstance(frontier, int | float) else None,
+        panel_verdict=panel_verdict_s,
+        panel_rule=panel_rule_s,
+        frontier_pass_at_k=frontier_f,
         meta={
             "nominal_keep_candidate": task_id in NOMINAL_KEEP_CANDIDATES,
             "required_paths_checked": list(REQUIRED_PACK_RELPATHS),
+            "policy": "m25_intrinsic_hardness",
+            **intrinsic_meta,
         },
     )
 
@@ -458,10 +513,17 @@ def force_drop_from_scoreboard(
     *,
     src: Path | str | None = None,
     min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
+    drop_on_solve_all: bool = False,
 ) -> tuple[dict[str, dict[str, str]], EasyDetectReport]:
     """Derive force_drop from panel/eval scoreboard (no hardcoded pack names).
 
-    M24 / VAL-DEASY-002/005: EASY_SOLVE_ALL when both/all models pass@1=1.0.
+    M24 labels EASY_SOLVE_ALL when both/all models pass@1=1.0.
+
+    M25 / VAL-DINTR-001: *drop_on_solve_all* defaults **False** so dual-model
+    solve-all only annotates the scoreboard. Structural thin-F2P under pack_dirs
+    may still populate force_drop. Hardness product drops for portfolio curation
+    primarily use alignment + floors + intrinsic EASY_REQUEST inside
+    :func:`decide_pack`.
     """
     pack_dirs: dict[str, Path] | None = None
     if src is not None:
@@ -475,6 +537,7 @@ def force_drop_from_scoreboard(
         scoreboard,
         pack_dirs=pack_dirs,
         min_f2p_nodes=min_f2p_nodes,
+        drop_on_solve_all=drop_on_solve_all,
     )
     return drops, report
 
@@ -487,11 +550,16 @@ def curate_dispositions(
     scoreboard: Mapping[str, Any] | Path | str | None = None,
     min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
     include_explicit_drops: bool = True,
+    drop_on_solve_all: bool = False,
+    apply_intrinsic: bool = True,
 ) -> list[PackDisposition]:
     """Score every pack under *src*.
 
-    When *scoreboard* is provided, dual-model solve-alls auto-populate force_drop
-    via :mod:`easy_detect` (no hardcoded pack names; M24).
+    When *scoreboard* is provided, dual-model solve-alls are **labeled** via
+    :mod:`easy_detect` (no hardcoded pack names). M25: they do **not** auto-drop
+    unless *drop_on_solve_all* is True (legacy M24 replay only). Structural
+    thin-F2P may still feed force_drop. Hardness product also applies intrinsic
+    prompt+gold scoring inside :func:`decide_pack`.
     """
     src_path = Path(src)
     task_ids = list_pack_task_ids(src_path)
@@ -506,8 +574,8 @@ def curate_dispositions(
         panel_blob = panel_report
     # Scoreboard path may stand in for panel report when report.json not given.
     if panel_blob is None and scoreboard is not None and panel_report is None:
-        # Scoreboard-only path: easy_detect still builds force_drop; panel
-        # verdict lookup remains empty unless report is supplied.
+        # Scoreboard-only path: easy_detect labels only (M25); panel verdict
+        # lookup remains empty unless report is supplied.
         pass
     panel_idx = _panel_lookup(panel_blob)
 
@@ -517,6 +585,7 @@ def curate_dispositions(
             scoreboard,
             src=src_path,
             min_f2p_nodes=min_f2p_nodes,
+            drop_on_solve_all=drop_on_solve_all,
         )
     base_explicit = EXPLICIT_DROP if include_explicit_drops else {}
     merged_drop = merge_force_drops(base_explicit, auto_drop, force_drop)
@@ -531,6 +600,7 @@ def curate_dispositions(
                 panel_row=panel_idx.get(tid),
                 force_drop=merged_drop,
                 min_f2p_nodes=min_f2p_nodes,
+                apply_intrinsic=apply_intrinsic,
             )
         )
     return out
@@ -609,8 +679,10 @@ def _filter_manifest(
     # Modes
     new["mode"] = "curate_prod_hard_keep"
     new["panel_note"] = (
-        "Hardness curate from live panel + dual-truth. Solve-all/misalign dropped; "
-        "legit hard solve-none retained when dual-truth/align/floors ok."
+        "Hardness curate from dual-truth + alignment + floors + intrinsic "
+        "request/patch analysis. Model solve-all is scoreboard-only (M25); "
+        "misalign / thin-F2P / high-confidence EASY_REQUEST dropped; legit hard "
+        "solve-none and non-intrinsic-easy solve-alls retained."
     )
     return new
 
@@ -764,7 +836,8 @@ def _render_provenance(
             "",
             "- Source wave: `datasets/test_n10` live-mine dual-truth packs.",
             "- Gates: prompt–verifier alignment, MIN_F2P≥3, ≥10 hunks, multi-file, dual-truth.",
-            "- Solve-all class + misalign class dropped from hardness promote.",
+            "- Intrinsic EASY_REQUEST (high confidence, prompt+gold) dropped from hardness.",
+            "- Model dual success is **not** a hardness drop gate (M25 / VAL-DINTR-001).",
             (
                 "- Legit hard solve-none kept when dual-truth+floors+align hold "
                 "(model scoreout ≠ drop)."
@@ -830,7 +903,8 @@ def _render_report(
             "- dual-truth HarborDocker sol=1 / null=0",
             "- prompt–verifier alignment fail-closed",
             f"- hardness floors F2P≥{DEFAULT_MIN_F2P_NODES}, multi-file≥2, hunks≥10",
-            "- anti-easy: solve-all + thin F2P dropped",
+            "- anti-easy: thin F2P floors + high-confidence intrinsic EASY_REQUEST",
+            "- model dual success is not a hardness gate (M25)",
             "- no fixture pad; hybrid never product N",
             "- re-upload HF BaseIntelligence/deepagent revision `test`",
             "",
@@ -838,6 +912,7 @@ def _render_report(
             "",
             "- VAL-DHARD-004 curated production N to HF test",
             "- VAL-DHARD-002 / VAL-DHARD-003 floors + anti-easy",
+            "- VAL-DINTR-001 / VAL-DINTR-002 / VAL-DINTR-005 intrinsic policy",
             "",
         ]
     )
@@ -849,7 +924,8 @@ def _render_product_readme(*, n: int, drop_n: int) -> str:
         "# datasets/prod_hard_keep — production hardness panel (M21c)\n\n"
         "Curated **source_track=real_pr** Harbor packs for hardness product.\n"
         f"Certified N: **{n}** (floor ≥{MIN_HARD_KEEP}). Dropped from test_n10: **{drop_n}** "
-        "(misalign / solve-all / thin-F2P / failed gates).\n"
+        "(misalign / thin-F2P / intrinsic EASY_REQUEST / failed floors).\n"
+        "Model dual success is not a hardness drop reason. "
         "Dual-truth sol=1/null=0 retained. No fixture pad. "
         "See `drop_reasons` in `pack_manifest.json` and `PROVENANCE.md`.\n"
     )
@@ -866,11 +942,15 @@ def materialize_prod_hard_keep(
     min_keep: int = MIN_HARD_KEEP,
     clean_out: bool = True,
     include_explicit_drops: bool = True,
+    drop_on_solve_all: bool = False,
+    apply_intrinsic: bool = True,
 ) -> CurationResult:
     """Curate *src* into *out* with drop_reasons + dual-truth keeps only.
 
-    *scoreboard* (M24): panel/eval ``scoreboard.json`` or ``report.json`` auto-drops
-    dual-model solve-alls (EASY_SOLVE_ALL) without hardcoding pack names.
+    *scoreboard* labels dual-model solve-alls (EASY_SOLVE_ALL) for audit notes
+    (M24). M25: those labels do **not** force-drop hardness product by default;
+    drops are misalign + hardness floors + high-confidence intrinsic
+    EASY_REQUEST.
 
     Raises ``ProdHardCurationError`` if residual keep count < *min_keep*
     (caller must re-mine with new floors — never fixture pad).
@@ -891,6 +971,8 @@ def materialize_prod_hard_keep(
         scoreboard=scoreboard,
         min_f2p_nodes=min_f2p_nodes,
         include_explicit_drops=include_explicit_drops,
+        drop_on_solve_all=drop_on_solve_all,
+        apply_intrinsic=apply_intrinsic,
     )
     keep_ids = tuple(sorted(d.task_id for d in dispositions if d.keep))
     drop_ids = tuple(sorted(d.task_id for d in dispositions if not d.keep))
@@ -1147,13 +1229,16 @@ def curate_hardness_from_scoreboard(
     min_keep: int = 0,
     clean_out: bool = True,
     include_explicit_drops: bool = False,
+    drop_on_solve_all: bool = False,
+    apply_intrinsic: bool = True,
 ) -> CurationResult:
-    """CLI-facing hardness curate driven by scoreboard auto-easy detection.
+    """CLI-facing hardness curate (M25: intrinsic + floors, not model solve-all).
 
-    Default *include_explicit_drops=False* so drops are scoreboard-driven only
-    (werkzeug-class solve-alls without name hardcoding). Residual floor defaults
-    to 0 for post-eval demote of an already-certified hardness set (M24 waves may
-    land below 5 after drops; report honesty preserves remaining keeps).
+    Scoreboard still labels dual-model solve-alls for reporting, but
+    *drop_on_solve_all* defaults False (VAL-DINTR-001). Residual floor defaults
+    to 0 for post-eval curate of an already-certified hardness set.
+    Intrinsic EASY_REQUEST (high confidence) + structural floors + misalign
+    remain the hardness drop gates.
     """
     return materialize_prod_hard_keep(
         src,
@@ -1164,6 +1249,8 @@ def curate_hardness_from_scoreboard(
         min_keep=min_keep,
         clean_out=clean_out,
         include_explicit_drops=include_explicit_drops,
+        drop_on_solve_all=drop_on_solve_all,
+        apply_intrinsic=apply_intrinsic,
     )
 
 

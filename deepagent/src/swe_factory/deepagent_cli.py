@@ -57,8 +57,8 @@ app = typer.Typer(
         f"hard-stop-usd={int(DEFAULT_EVAL_HARD_STOP_USD)}; "
         f"fidelity=pier_miniswe_harbor; n>1 raises host Mem risk)\n"
         "  oracle    — HarborDocker dual-truth cert (sol=1 / null=0; refuse fake)\n"
-        "  curate-hardness — post-eval auto drop dual-model solve-alls from hardness "
-        "(scoreboard-driven; M24)\n"
+        "  curate-hardness — hardness curate (floors + align + intrinsic; "
+        "model success is scoreboard-only, M25)\n"
         "  version   — package version identity\n\n"
         "Compatibility: historical factory stages remain on `swe-factory` "
         "(ship-deepagent, real-pr-pool, ledger, eval-deepagent, …). "
@@ -901,8 +901,8 @@ def curate_hardness_cmd(
         typer.Option(
             "--scoreboard",
             help=(
-                "Panel/eval scoreboard.json or report.json — auto-drop dual-model "
-                "solve-alls (pass@1=1.0 for all models) without hardcoding pack names"
+                "Panel/eval scoreboard.json or report.json — labels dual-model "
+                "solve-alls for reporting (M25: does not auto-drop hardness)"
             ),
             exists=False,
             file_okay=True,
@@ -950,11 +950,11 @@ def curate_hardness_cmd(
         typer.Option("--json", help="Emit curation summary as JSON"),
     ] = False,
 ) -> None:
-    """Auto-curate hardness keep set from panel scoreboard (M24 / VAL-DEASY).
+    """Curate hardness keep set (M25 intrinsic policy / VAL-DINTR-001).
 
-    Drops packs where BOTH/open models have pass_at_1==1.0 (EASY_SOLVE_ALL /
-    solve_all_easy_policy_drop). Driven by scoreboard matrix — no hardcoded pack
-    names. Also reuses thin F2P floor reasons when pack trees are present.
+    Drops only on misalign, hardness floors (thin F2P etc.), and high-confidence
+    intrinsic EASY_REQUEST from prompt+gold. Dual-model pass@1=1.0 is labeled
+    EASY_SOLVE_ALL for scoreboard notes but does **not** auto-drop hardness.
 
     Example::
 
@@ -986,7 +986,7 @@ def curate_hardness_cmd(
         pack_dirs = {
             p.name: p for p in tasks_root.iterdir() if p.is_dir() and not p.name.startswith(".")
         }
-    easy = classify_scoreboard(scoreboard, pack_dirs=pack_dirs)
+    easy = classify_scoreboard(scoreboard, pack_dirs=pack_dirs, drop_on_solve_all=False)
     try:
         result = curate_hardness_from_scoreboard(
             src,
@@ -996,6 +996,8 @@ def curate_hardness_cmd(
             min_keep=min_keep,
             clean_out=not no_clean,
             include_explicit_drops=include_explicit,
+            drop_on_solve_all=False,
+            apply_intrinsic=True,
         )
     except ProdHardCurationError as exc:
         typer.secho(f"curate-hardness fail-closed: {exc}", fg=typer.colors.RED, err=True)
@@ -1011,7 +1013,14 @@ def curate_hardness_cmd(
         "drop_ids": list(result.drop_ids),
         "drop_reasons": result.drop_reasons,
         "easy_detect": easy.to_dict(),
-        "assertions": ["VAL-DEASY-002", "VAL-DEASY-003", "VAL-DEASY-005"],
+        "policy": "m25_intrinsic_hardness",
+        "assertions": [
+            "VAL-DINTR-001",
+            "VAL-DINTR-002",
+            "VAL-DINTR-005",
+            "VAL-DEASY-002",
+            "VAL-DEASY-005",
+        ],
     }
     if json_out:
         typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))

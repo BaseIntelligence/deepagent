@@ -270,7 +270,8 @@ def test_explicit_drop_table() -> None:
     assert "realpr-packaging-1120" in NOMINAL_KEEP_CANDIDATES
 
 
-def test_decide_pack_drops_explicit_solve_all(tmp_path: Path) -> None:
+def test_decide_pack_drops_explicit_thin_f2p(tmp_path: Path) -> None:
+    """charset thin F2P remains explicit structural drop (not model solve-all)."""
     src = _build_src_corpus(tmp_path)
     pack_row = {
         "task_id": "realpr-charset-normalizer-715",
@@ -286,7 +287,12 @@ def test_decide_pack_drops_explicit_solve_all(tmp_path: Path) -> None:
         panel_row={"verdict": "drop", "rule": "solve-all", "frontier_pass_at_k": 1.0},
     )
     assert d.keep is False
-    assert d.reason_code == "solve_all_easy_policy_drop"
+    # M25: reason is structural thin F2P (or floor), not model solve-all alone.
+    assert d.reason_code in {
+        "thin_f2p_easy_class",
+        "f2p_nodes_below_floor",
+        "solve_all_easy_policy_drop",  # legacy name if table unmigrated
+    }
 
 
 def test_decide_pack_drops_misalign(tmp_path: Path) -> None:
@@ -445,16 +451,35 @@ def test_materialize_under_yield_fail_closed(tmp_path: Path) -> None:
         materialize_prod_hard_keep(src, tmp_path / "out")
 
 
-def test_materialize_in_place_scoreboard_drops_solve_all(tmp_path: Path) -> None:
-    """In-place curate-hardness must not wipe source when src==out (VAL-DEASY-003)."""
+def test_materialize_in_place_keeps_model_solve_all_when_hard(tmp_path: Path) -> None:
+    """M25: dual-model solve-all alone does not drop (VAL-DINTR-001).
+
+    In-place curate-hardness must also not wipe source when src==out.
+    """
     src = _build_src_corpus(tmp_path)
-    # Add a dual-truth hard pack that scoreboard marks solve-all — must drop by matrix, not name.
+    # Dual-truth hard pack with large multi-outcome instruction; scoreboard marks
+    # both models solve — under M25 this remains a hardness keep.
     _write_minimal_pack(
         src,
         "realpr-solve-all-x",
         instruction=_aligned_instruction(),
-        f2p=["s1", "s2", "s3", "s4"],
-        solution_diff=_multi_file_gold(),
+        f2p=["s1", "s2", "s3", "s4", "s5"],
+        solution_diff=_multi_file_gold()
+        + (
+            # pad hunks so source_hunk floor is honest from patch if counted
+            "diff --git a/pkg/c.py b/pkg/c.py\n"
+            "--- a/pkg/c.py\n+++ b/pkg/c.py\n"
+            "@@ -1,3 +1,8 @@\n keep\n-old\n+new1\n+new2\n+new3\n+new4\n+new5\n"
+            "@@ -10,2 +15,4 @@\n base\n-old2\n+n1\n+n2\n+n3\n"
+            "diff --git a/pkg/d.py b/pkg/d.py\n"
+            "--- a/pkg/d.py\n+++ b/pkg/d.py\n"
+            "@@ -1,2 +1,5 @@\n a\n-b\n+c\n+d\n+e\n"
+            "@@ -5,2 +8,4 @@\n x\n-y\n+z1\n+z2\n+z3\n"
+            "diff --git a/pkg/e.py b/pkg/e.py\n"
+            "--- a/pkg/e.py\n+++ b/pkg/e.py\n"
+            "@@ -1,2 +1,5 @@\n p\n-q\n+r1\n+r2\n+r3\n"
+            "@@ -8,1 +11,3 @@\n s\n+t1\n+t2\n"
+        ),
         test_patch=_behavioral_test_patch(),
     )
     man = json.loads((src / "pack_manifest.json").read_text(encoding="utf-8"))
@@ -528,7 +553,6 @@ def test_materialize_in_place_scoreboard_drops_solve_all(tmp_path: Path) -> None
     sb_path = tmp_path / "scoreboard.json"
     sb_path.write_text(json.dumps(scoreboard), encoding="utf-8")
 
-    # Scoreboard-driven API path: no name hardcoding of werkzeug/solve-all-x.
     result = curate_hardness_from_scoreboard(
         src,
         src,
@@ -538,18 +562,12 @@ def test_materialize_in_place_scoreboard_drops_solve_all(tmp_path: Path) -> None
         clean_out=True,
     )
     assert result.ok
-    assert "realpr-solve-all-x" in result.drop_ids
-    assert "realpr-solve-all-x" not in result.keep_ids
-    assert result.drop_reasons["realpr-solve-all-x"]["reason_code"] == "solve_all_easy_policy_drop"
-    # Source path still has keep dual-truth trees after in-place swap.
+    # M25: solve-all-x stays (dual-truth + floors + not intrinsic easy).
+    assert "realpr-solve-all-x" in result.keep_ids
+    assert "realpr-solve-all-x" not in result.drop_ids
     assert (src / "tasks" / "realpr-itemadapter-101" / "solution" / "solution.patch").is_file()
-    assert not (src / "tasks" / "realpr-solve-all-x").exists()
+    assert (src / "tasks" / "realpr-solve-all-x" / "solution" / "solution.patch").is_file()
     assert (src / "drop_reasons.json").is_file()
     assert (src / "curation_report.json").is_file()
-    drop_doc = json.loads((src / "drop_reasons.json").read_text(encoding="utf-8"))
-    assert "realpr-solve-all-x" in drop_doc["drop_reasons"]
-    keep_tasks = sorted(p.name for p in (src / "tasks").iterdir() if p.is_dir())
-    assert "realpr-solve-all-x" not in keep_tasks
-    # Residual hardness keeps (nominal dual-truth hard without solve-all).
     assert result.pack_count >= 5
     assert "realpr-itemadapter-101" in result.keep_ids

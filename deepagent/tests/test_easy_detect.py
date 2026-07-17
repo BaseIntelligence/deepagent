@@ -1,10 +1,9 @@
-"""M24 auto too-easy detector (VAL-DEASY-001/002/005).
+"""M24 scoreboard labels + M25 intrinsic policy flip (VAL-DEASY / VAL-DINTR).
 
-Synthetic scoreboard cases:
-- dual-model solve-all → EASY_SOLVE_ALL / should_drop
-- one-sided discrimination → keep
-- thin F2P structural → drop via hardness_floors reason reuse
-- scoreboard-driven force_drop (no hardcoded pack names)
+* dual-model solve-all → EASY_SOLVE_ALL label, should_drop_hardness=False (M25)
+* one-sided discrimination → keep
+* thin F2P structural → drop via hardness_floors reason reuse
+* scoreboard-driven force_drop no longer includes solve-all by default
 """
 
 from __future__ import annotations
@@ -73,7 +72,8 @@ def _scoreboard_dual_solve_all() -> dict:
     }
 
 
-def test_dual_solve_all_flags_easy_without_name_hardcode() -> None:
+def test_dual_solve_all_labels_easy_without_auto_drop() -> None:
+    """M25: solve-all is scoreboard label only (VAL-DINTR-001)."""
     row = {
         "pack_id": "any-solve-all-id",
         "frontier": 1.0,
@@ -84,12 +84,23 @@ def test_dual_solve_all_flags_easy_without_name_hardcode() -> None:
         row,
         models=["x-ai/grok-4.5", "moonshotai/kimi-k2.6"],
     )
-    assert r.should_drop_hardness is True
+    assert r.should_drop_hardness is False
     assert r.reason_code == REASON_SOLVE_ALL_EASY
     assert r.label == EASY_SOLVE_ALL
     assert r.all_models_solved is True
-    # Classification does not require name-based match (any-solve-all-id works).
     assert r.pack_id == "any-solve-all-id"
+
+
+def test_dual_solve_all_legacy_drop_opt_in() -> None:
+    row = {
+        "pack_id": "any-solve-all-id",
+        "frontier": 1.0,
+        "grok-4.5": 1.0,
+        "kimi-k2.6": 1.0,
+    }
+    r = classify_pack_from_panel_row(row, drop_on_solve_all=True)
+    assert r.should_drop_hardness is True
+    assert r.label == EASY_SOLVE_ALL
 
 
 def test_one_sided_discrimination_stays() -> None:
@@ -159,17 +170,28 @@ def test_classify_scoreboard_batch(tmp_path: Path) -> None:
     report = classify_scoreboard(path)
     assert report.ok
     by = report.by_pack()
-    assert by["realpr-werkzeug-fake-1"].should_drop_hardness is True
-    assert by["realpr-werkzeug-fake-1"].reason_code == REASON_SOLVE_ALL_EASY
-    assert by["realpr-werkzeug-fake-2"].should_drop_hardness is True
+    # M25: solve-alls labeled but NOT in drop_ids by default.
+    assert by["realpr-werkzeug-fake-1"].label == EASY_SOLVE_ALL
+    assert by["realpr-werkzeug-fake-1"].should_drop_hardness is False
+    assert by["realpr-werkzeug-fake-2"].should_drop_hardness is False
     assert by["realpr-discrim-oneside"].should_drop_hardness is False
     assert by["realpr-solve-none-hard"].should_drop_hardness is False
-    assert "realpr-werkzeug-fake-1" in report.drop_ids
+    assert "realpr-werkzeug-fake-1" not in report.drop_ids
+    assert "realpr-werkzeug-fake-1" in report.keep_ids
     assert "realpr-discrim-oneside" in report.keep_ids
-    # force_drop table is scoreboard-derived, no hardcoded keys required
+    assert "realpr-werkzeug-fake-1" in (report.meta.get("easy_solve_all_labels") or [])
+    # force_drop empty for pure solve-all matrix (no thin F2P enrichment)
+    drops = force_drop_from_easy_report(report)
+    assert drops == {}
+
+
+def test_classify_scoreboard_legacy_drop_on_solve_all(tmp_path: Path) -> None:
+    path = tmp_path / "scoreboard.json"
+    path.write_text(json.dumps(_scoreboard_dual_solve_all()), encoding="utf-8")
+    report = classify_scoreboard(path, drop_on_solve_all=True)
+    assert "realpr-werkzeug-fake-1" in report.drop_ids
     drops = force_drop_from_easy_report(report)
     assert set(drops) == {"realpr-werkzeug-fake-1", "realpr-werkzeug-fake-2"}
-    assert drops["realpr-werkzeug-fake-1"]["reason_code"] == REASON_SOLVE_ALL_EASY
 
 
 def test_classify_from_report_pack_results_shape() -> None:
@@ -204,7 +226,8 @@ def test_classify_from_report_pack_results_shape() -> None:
     }
     report = classify_scoreboard(report_doc)
     by = report.by_pack()
-    assert by["dual-all"].should_drop_hardness
+    assert by["dual-all"].label == EASY_SOLVE_ALL
+    assert by["dual-all"].should_drop_hardness is False
     assert not by["oneside"].should_drop_hardness
 
 
@@ -212,38 +235,36 @@ def test_force_drop_from_scoreboard_api(tmp_path: Path) -> None:
     path = tmp_path / "sb.json"
     path.write_text(json.dumps(_scoreboard_dual_solve_all()), encoding="utf-8")
     drops, easy = force_drop_from_scoreboard(path)
-    assert "realpr-werkzeug-fake-1" in drops
-    assert "realpr-discrim-oneside" not in drops
+    assert "realpr-werkzeug-fake-1" not in drops  # M25 default
     assert easy.ok
-    # merge with empty explicit table must not require name hardcodes
-    merged = merge_force_drops(None, drops)
+    # Legacy opt-in still works for audits.
+    drops_legacy, _ = force_drop_from_scoreboard(path, drop_on_solve_all=True)
+    assert "realpr-werkzeug-fake-1" in drops_legacy
+    merged = merge_force_drops(None, drops_legacy)
     assert set(merged) == {
         "realpr-werkzeug-fake-1",
         "realpr-werkzeug-fake-2",
     }
 
 
-def test_real_prod_hard_scoreboard_flags_three_werkzeug_class() -> None:
-    """Live M23 scoreboard artifact: auto-flag 3 dual solve-alls without name filter."""
+def test_real_prod_hard_scoreboard_labels_three_werkzeug_class() -> None:
+    """Live M23 scoreboard artifact: label ≥3 dual solve-alls without auto-drop."""
     sb_path = Path("datasets/panel_prod_hard_bench10_n5/scoreboard.json")
     if not sb_path.is_file():
-        # Offline-only environments without the panel artifact
         return
     report = classify_scoreboard(sb_path)
-    solve_alls = [
+    solve_all_labels = [
         r.pack_id
         for r in report.results
-        if r.should_drop_hardness and r.reason_code == REASON_SOLVE_ALL_EASY
+        if r.label == EASY_SOLVE_ALL or r.reason_code == REASON_SOLVE_ALL_EASY
     ]
-    # Scoreboard-driven detection (not name hardcode in detector)
-    assert len(solve_alls) >= 3
-    # Known M23 cells happen to be werkzeug — assert by matrix, not exclusive namesett
+    assert len(solve_all_labels) >= 3
     for r in report.results:
         rates = r.per_model_pass_at_k
         if rates and all(v >= 1.0 for v in rates.values()):
-            assert r.should_drop_hardness
-            assert r.pack_id in solve_alls
-    # One-sided stays
+            assert r.label == EASY_SOLVE_ALL
+            assert r.should_drop_hardness is False
+            assert r.pack_id in solve_all_labels
     by = report.by_pack()
     if "realpr-itemadapter-101" in by:
         assert by["realpr-itemadapter-101"].should_drop_hardness is False

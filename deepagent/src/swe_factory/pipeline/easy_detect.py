@@ -1,14 +1,16 @@
-"""Automatic too-easy detection from panel/eval scoreboards (M24 / VAL-DEASY).
+"""Panel/eval scoreboard easy **labels** (M24) + M25 intrinsic-policy flip.
 
 Classify packs as **EASY_SOLVE_ALL** when **every** model in the open panel matrix
-has ``pass_at_1 == 1.0`` (frontier pass@k ≥ 1.0 / solve-all). One-sided
-discrimination (only one model solves) stays.
+has ``pass_at_1 == 1.0`` (frontier pass@k ≥ 1.0 / solve-all). This is a
+**reporting / scoreboard label only** under M25: ``should_drop_hardness`` is
+``False`` by default for model solve-all (VAL-DINTR-001). Hardness drops come
+from misalign, structural floors (F2P<3, …), and high-confidence intrinsic
+``EASY_REQUEST`` (see :mod:`intrinsic_difficulty`) — never solely model outcomes.
 
-Also reuses the structural thin-F2P easy class reason from
-:mod:`swe_factory.pipeline.hardness_floors` so gates share stable codes.
+Thin F2P still reuses :mod:`hardness_floors` reason codes and **does** set
+``should_drop_hardness=True`` (structural floor, not model score).
 
-Drive curation by scoreboard **without hardcoding pack names** — werkzeug-class
-solve-alls are discovered post-eval, not via name filters.
+Drive scoreboard labeling without hardcoding pack names.
 """
 
 from __future__ import annotations
@@ -96,7 +98,11 @@ class EasyDetectReport:
             "results": [r.to_dict() for r in self.results],
             "reasons": list(self.reasons),
             "meta": dict(self.meta),
-            "assertions": ["VAL-DEASY-002", "VAL-DEASY-005"],
+            "assertions": [
+                "VAL-DEASY-002",
+                "VAL-DEASY-005",
+                "VAL-DINTR-001",
+            ],
         }
 
     def by_pack(self) -> dict[str, EasyDetectResult]:
@@ -240,15 +246,22 @@ def classify_pack_from_panel_row(
     min_f2p_nodes: int | None = None,
     require_all_models: bool = True,
     hardness: HardnessFloorResult | None = None,
+    drop_on_solve_all: bool = False,
 ) -> EasyDetectResult:
-    """Classify one pack from a scoreboard / panel row (VAL-DEASY-002).
+    """Classify one pack from a scoreboard / panel row (M24 / M25).
 
     *EASY_SOLVE_ALL* when **all** models in the matrix have pass@1 == 1.0, or
     when frontier_pass_at_k ≥ 1.0 and the matrix is non-empty with every rate 1.0.
 
-    One-sided discrimination (exactly one model at 1.0, others <1) → keep.
+    M25 / VAL-DINTR-001: model solve-all is a **label only** —
+    ``should_drop_hardness`` defaults to ``False`` (*drop_on_solve_all=False*).
+    Pass ``drop_on_solve_all=True`` only for legacy M24 replay tests / audits.
 
-    Thin F2P is also drop-flagged when *f2p_node_ids* / *hardness* is provided.
+    One-sided discrimination (exactly one model at 1.0, others <1) → keep
+    (label, no hardness drop).
+
+    Thin F2P is still drop-flagged when *f2p_node_ids* / *hardness* is provided
+    (structural floor, independent of model outcomes).
     """
     row = dict(row or {})
     pid = pack_id or pack_id_from_row(row) or "?"
@@ -287,15 +300,17 @@ def classify_pack_from_panel_row(
             )
 
     if not per_model:
-        # Frontier-only solve-all signal (legacy single aggregate).
+        # Frontier-only solve-all signal (legacy single aggregate) — label only by default.
         if frontier is not None and _pass_is_one(frontier):
             return EasyDetectResult(
                 pack_id=pid,
                 reason_code=REASON_SOLVE_ALL_EASY,
-                should_drop_hardness=True,
+                should_drop_hardness=bool(drop_on_solve_all),
                 detail=(
-                    f"frontier_pass_at_k={frontier} ≥ 1.0 (solve-all); "
-                    "no per-model matrix — drop from hardness (VAL-DEASY-002)"
+                    f"EASY_SOLVE_ALL (scoreboard label): frontier_pass_at_k={frontier} ≥ 1.0 "
+                    f"(no per-model matrix); should_drop_hardness={bool(drop_on_solve_all)} "
+                    f"(M25 default False — model outcomes are not a hardness gate; "
+                    f"VAL-DINTR-001)"
                 ),
                 label=EASY_SOLVE_ALL,
                 frontier_pass_at_k=frontier,
@@ -303,7 +318,11 @@ def classify_pack_from_panel_row(
                 models_scored=(),
                 all_models_solved=True,
                 f2p_count=hard.f2p_count if hard is not None else None,
-                meta={"gate": "frontier_only_solve_all"},
+                meta={
+                    "gate": "frontier_only_solve_all",
+                    "drop_on_solve_all": bool(drop_on_solve_all),
+                    "role": "scoreboard_label",
+                },
             )
         return EasyDetectResult(
             pack_id=pid,
@@ -325,17 +344,19 @@ def classify_pack_from_panel_row(
     n_models = len(per_model)
     n_full = sum(1 for v in per_model.values() if _pass_is_one(v))
 
-    # Primary: BOTH / all models at pass@1 == 1.0
+    # Primary: BOTH / all models at pass@1 == 1.0 — label only by default (M25).
     if require_all_models and n_models >= 1 and all_solved:
         return EasyDetectResult(
             pack_id=pid,
             reason_code=REASON_SOLVE_ALL_EASY,
-            should_drop_hardness=True,
+            should_drop_hardness=bool(drop_on_solve_all),
             detail=(
-                f"EASY_SOLVE_ALL: all {n_models} panel model(s) pass@1=1.0 "
+                f"EASY_SOLVE_ALL (scoreboard label): all {n_models} panel model(s) "
+                f"pass@1=1.0 "
                 f"({', '.join(f'{k}={v}' for k, v in sorted(per_model.items()))}); "
-                f"frontier={frontier}; auto-drop from hardness without name hardcoding "
-                f"(VAL-DEASY-002)"
+                f"frontier={frontier}; should_drop_hardness={bool(drop_on_solve_all)} "
+                f"(M25 default False — dual-model success is not a hardness drop gate; "
+                f"VAL-DINTR-001; use intrinsic request+patch + floors + alignment)"
             ),
             label=EASY_SOLVE_ALL,
             frontier_pass_at_k=frontier if frontier is not None else 1.0,
@@ -343,23 +364,36 @@ def classify_pack_from_panel_row(
             models_scored=model_names,
             all_models_solved=True,
             f2p_count=hard.f2p_count if hard is not None else None,
-            meta={"gate": "all_models_pass_at_1", "n_models": n_models},
+            meta={
+                "gate": "all_models_pass_at_1",
+                "n_models": n_models,
+                "drop_on_solve_all": bool(drop_on_solve_all),
+                "role": "scoreboard_label",
+            },
         )
 
-    # Also drop when frontier already ≥ 1.0 even if rates slightly noisy.
+    # Frontier ≥ 1.0 + full matrix: still label-only by default.
     if frontier is not None and _pass_is_one(frontier) and all_solved:
         return EasyDetectResult(
             pack_id=pid,
             reason_code=REASON_SOLVE_ALL_EASY,
-            should_drop_hardness=True,
-            detail=(f"EASY_SOLVE_ALL: frontier_pass_at_k={frontier} ≥ 1.0 and full solve matrix"),
+            should_drop_hardness=bool(drop_on_solve_all),
+            detail=(
+                f"EASY_SOLVE_ALL (scoreboard label): frontier_pass_at_k={frontier} ≥ 1.0 "
+                f"and full solve matrix; should_drop_hardness={bool(drop_on_solve_all)} "
+                f"(M25 / VAL-DINTR-001)"
+            ),
             label=EASY_SOLVE_ALL,
             frontier_pass_at_k=frontier,
             per_model_pass_at_k=per_model,
             models_scored=model_names,
             all_models_solved=True,
             f2p_count=hard.f2p_count if hard is not None else None,
-            meta={"gate": "frontier_and_matrix"},
+            meta={
+                "gate": "frontier_and_matrix",
+                "drop_on_solve_all": bool(drop_on_solve_all),
+                "role": "scoreboard_label",
+            },
         )
 
     # One-sided discrimination: at least one full solve, not all → keep.
@@ -441,8 +475,9 @@ def classify_scoreboard(
     pack_dirs: Mapping[str, Path | str] | None = None,
     min_f2p_nodes: int | None = None,
     models: Sequence[str] | None = None,
+    drop_on_solve_all: bool = False,
 ) -> EasyDetectReport:
-    """Classify every pack on a scoreboard or panel report (VAL-DEASY-002/005).
+    """Classify every pack on a scoreboard or panel report (M24 + M25).
 
     Accepts:
 
@@ -450,6 +485,9 @@ def classify_scoreboard(
     * ``datasets/.../report.json`` (``pack_results`` + nested decision)
 
     Optional thin-F2P enrichment via *pack_f2p* map or on-disk *pack_dirs*.
+
+    M25: *drop_on_solve_all* defaults False so model solve-all only labels;
+    structural thin-F2P still sets ``should_drop_hardness``.
     """
     source: str | None
     if isinstance(scoreboard, Path | str):
@@ -496,11 +534,13 @@ def classify_scoreboard(
                 f2p_node_ids=f2p,
                 min_f2p_nodes=min_f2p_nodes,
                 hardness=hard,
+                drop_on_solve_all=drop_on_solve_all,
             )
         )
 
     drop_ids = tuple(sorted(r.pack_id for r in results if r.should_drop_hardness))
     keep_ids = tuple(sorted(r.pack_id for r in results if not r.should_drop_hardness))
+    labeled_solve_all = tuple(sorted(r.pack_id for r in results if r.label == EASY_SOLVE_ALL))
     return EasyDetectReport(
         ok=True,
         results=tuple(results),
@@ -513,7 +553,11 @@ def classify_scoreboard(
             "n_rows": len(results),
             "n_drop": len(drop_ids),
             "n_keep": len(keep_ids),
+            "n_easy_solve_all_labels": len(labeled_solve_all),
+            "easy_solve_all_labels": list(labeled_solve_all),
+            "drop_on_solve_all": bool(drop_on_solve_all),
             "models": list(model_list or []),
+            "policy": "m25_intrinsic_hardness",
         },
     )
 
@@ -523,7 +567,11 @@ def force_drop_from_easy_report(
 ) -> dict[str, dict[str, str]]:
     """Build ``curate_prod_hard`` force_drop table from easy-detect results.
 
-    No hardcoded pack names — only scoreboard-derived ``should_drop_hardness``.
+    No hardcoded pack names — only ``should_drop_hardness`` entries.
+
+    M25: dual-model solve-all no longer populates this table by default
+    (should_drop_hardness=False for EASY_SOLVE_ALL labels). Thin F2P structural
+    drops still appear when present.
     """
     out: dict[str, dict[str, str]] = {}
     for r in report.results:
@@ -540,7 +588,10 @@ def classify_and_force_drop(
     scoreboard: Mapping[str, Any] | Path | str,
     **kwargs: Any,
 ) -> tuple[EasyDetectReport, dict[str, dict[str, str]]]:
-    """Convenience for curate-hardness CLI / pipeline wire-up."""
+    """Convenience for curate-hardness CLI / pipeline wire-up.
+
+    kwargs include *drop_on_solve_all* (default False under M25).
+    """
     report = classify_scoreboard(scoreboard, **kwargs)
     return report, force_drop_from_easy_report(report)
 
