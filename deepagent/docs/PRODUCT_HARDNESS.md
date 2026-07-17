@@ -76,6 +76,35 @@ If residual keep N < 5 after gates: fail-closed (`ProdHardCurationError`) and
 Agent **timeout-class** model failures remain harness OK (not automatic dataset
 drop) when dual-truth, alignment, and floors hold.
 
+## Auto easy detector (M24 / VAL-DEASY)
+
+Post-eval, hardness promote **must not** rely on human pack-name inspection.
+Classifier module: `swe_factory.pipeline.easy_detect`.
+
+| Input | Rule | Reason |
+|---|---|---|
+| scoreboard/report row: **all** open models `pass_at_1==1.0` | DROP hardness | `solve_all_easy_policy_drop` / `EASY_SOLVE_ALL` |
+| one-sided pass@1 (e.g. grok=1, kimi=0) | KEEP | discrimination |
+| thin F2P below `MIN_F2P_NODES` | DROP | `thin_f2p_easy_class` / `f2p_nodes_below_floor` |
+
+```bash
+# Read-only classification
+.venv/bin/python - <<'PY'
+from swe_factory.pipeline.easy_detect import classify_scoreboard
+r = classify_scoreboard("datasets/panel_prod_hard_bench10_n5/scoreboard.json")
+print(r.drop_ids, r.keep_ids)
+PY
+
+# Curate hardness set from scoreboard (CLI; no name hardcoding)
+.venv/bin/deepagent curate-hardness \
+  --src datasets/prod_hard_keep \
+  --scoreboard datasets/panel_prod_hard_bench10_n5/scoreboard.json \
+  --out datasets/prod_hard_keep --json
+```
+
+API: `classify_pack_from_panel_row`, `classify_scoreboard`, and
+`curate_hardness_from_scoreboard` / `materialize_prod_hard_keep(..., scoreboard=…)`.
+
 ## Engineering opt-out (fixtures only)
 
 Offline unit fixtures may pass with:

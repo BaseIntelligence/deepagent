@@ -57,6 +57,8 @@ app = typer.Typer(
         f"hard-stop-usd={int(DEFAULT_EVAL_HARD_STOP_USD)}; "
         f"fidelity=pier_miniswe_harbor; n>1 raises host Mem risk)\n"
         "  oracle    — HarborDocker dual-truth cert (sol=1 / null=0; refuse fake)\n"
+        "  curate-hardness — post-eval auto drop dual-model solve-alls from hardness "
+        "(scoreboard-driven; M24)\n"
         "  version   — package version identity\n\n"
         "Compatibility: historical factory stages remain on `swe-factory` "
         "(ship-deepagent, real-pr-pool, ledger, eval-deepagent, …). "
@@ -870,6 +872,158 @@ def eval_cmd(
         no_reclaim=no_reclaim,
         json_out=json_out,
     )
+
+
+@app.command("curate-hardness")
+def curate_hardness_cmd(
+    src: Annotated[
+        Path,
+        typer.Option(
+            "--src",
+            help="Source Harbor product root (tasks/* dual-truth packs)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/prod_hard_keep"),
+    out: Annotated[
+        Path,
+        typer.Option(
+            "--out",
+            help="Curated hardness product root (default: same as --src after drop)",
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/prod_hard_keep"),
+    scoreboard: Annotated[
+        Path,
+        typer.Option(
+            "--scoreboard",
+            help=(
+                "Panel/eval scoreboard.json or report.json — auto-drop dual-model "
+                "solve-alls (pass@1=1.0 for all models) without hardcoding pack names"
+            ),
+            exists=False,
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=False,
+        ),
+    ] = Path("datasets/panel_prod_hard_bench10_n5/scoreboard.json"),
+    panel_report: Annotated[
+        Path | None,
+        typer.Option(
+            "--panel-report",
+            help="Optional full panel report.json (verdict/rule enrich keep-band)",
+            exists=False,
+            file_okay=True,
+            dir_okay=False,
+            resolve_path=False,
+        ),
+    ] = None,
+    min_keep: Annotated[
+        int,
+        typer.Option(
+            "--min-keep",
+            help=(
+                "Fail-closed residual N floor (default 0 for post-eval demote; "
+                "use 5 for fresh test_n10 → prod_hard waves)"
+            ),
+        ),
+    ] = 0,
+    include_explicit: Annotated[
+        bool,
+        typer.Option(
+            "--include-explicit-drops",
+            help="Also apply legacy EXPLICIT_DROP name table (m21c); off by default for M24",
+        ),
+    ] = False,
+    no_clean: Annotated[
+        bool,
+        typer.Option(
+            "--no-clean",
+            help="Do not rmtree --out before materialize (rare; default cleans)",
+        ),
+    ] = False,
+    json_out: Annotated[
+        bool,
+        typer.Option("--json", help="Emit curation summary as JSON"),
+    ] = False,
+) -> None:
+    """Auto-curate hardness keep set from panel scoreboard (M24 / VAL-DEASY).
+
+    Drops packs where BOTH/open models have pass_at_1==1.0 (EASY_SOLVE_ALL /
+    solve_all_easy_policy_drop). Driven by scoreboard matrix — no hardcoded pack
+    names. Also reuses thin F2P floor reasons when pack trees are present.
+
+    Example::
+
+        deepagent curate-hardness \\
+          --src datasets/prod_hard_keep \\
+          --scoreboard datasets/panel_prod_hard_bench10_n5/scoreboard.json \\
+          --out datasets/prod_hard_keep --json
+    """
+    from swe_factory.pipeline.curate_prod_hard import (
+        ProdHardCurationError,
+        curate_hardness_from_scoreboard,
+    )
+    from swe_factory.pipeline.easy_detect import classify_scoreboard
+
+    if not src.is_dir():
+        typer.secho(f"curate-hardness: src missing: {src}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
+    if not scoreboard.is_file():
+        typer.secho(
+            f"curate-hardness: scoreboard missing: {scoreboard}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    pack_dirs: dict[str, Path] | None = None
+    tasks_root = src / "tasks"
+    if tasks_root.is_dir():
+        pack_dirs = {
+            p.name: p for p in tasks_root.iterdir() if p.is_dir() and not p.name.startswith(".")
+        }
+    easy = classify_scoreboard(scoreboard, pack_dirs=pack_dirs)
+    try:
+        result = curate_hardness_from_scoreboard(
+            src,
+            out,
+            scoreboard=scoreboard,
+            panel_report=panel_report if panel_report and panel_report.is_file() else None,
+            min_keep=min_keep,
+            clean_out=not no_clean,
+            include_explicit_drops=include_explicit,
+        )
+    except ProdHardCurationError as exc:
+        typer.secho(f"curate-hardness fail-closed: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    payload = {
+        "ok": result.ok,
+        "src": str(src),
+        "out": str(out),
+        "scoreboard": str(scoreboard),
+        "pack_count": result.pack_count,
+        "keep_ids": list(result.keep_ids),
+        "drop_ids": list(result.drop_ids),
+        "drop_reasons": result.drop_reasons,
+        "easy_detect": easy.to_dict(),
+        "assertions": ["VAL-DEASY-002", "VAL-DEASY-003", "VAL-DEASY-005"],
+    }
+    if json_out:
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True, default=str))
+    else:
+        typer.echo(
+            f"curate-hardness: ok keep={result.pack_count} drop={len(result.drop_ids)} out={out}"
+        )
+        for tid in result.drop_ids:
+            info = result.drop_reasons.get(tid) or {}
+            typer.echo(f"  DROP {tid}: {info.get('reason_code')}")
+        for tid in result.keep_ids:
+            typer.echo(f"  KEEP {tid}")
 
 
 @app.command("oracle")

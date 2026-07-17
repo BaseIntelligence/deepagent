@@ -28,6 +28,11 @@ from pathlib import Path
 from typing import Any
 
 from swe_factory.harbor.export_pack import REQUIRED_PACK_RELPATHS, verify_pack_tree
+from swe_factory.pipeline.easy_detect import (
+    EasyDetectReport,
+    classify_and_force_drop,
+    classify_scoreboard,
+)
 from swe_factory.pipeline.hardness_floors import (
     DEFAULT_MIN_F2P_NODES,
     hardness_result_from_pack_dir,
@@ -432,14 +437,62 @@ def decide_pack(
     )
 
 
+def merge_force_drops(
+    *tables: Mapping[str, Mapping[str, str]] | None,
+) -> dict[str, dict[str, str]]:
+    """Merge force-drop tables (later entries override earlier on same id)."""
+    merged: dict[str, dict[str, str]] = {}
+    for table in tables:
+        if not table:
+            continue
+        for tid, info in table.items():
+            merged[str(tid)] = {
+                "reason_code": str(info.get("reason_code") or "policy_drop"),
+                "detail": str(info.get("detail") or "policy drop"),
+            }
+    return merged
+
+
+def force_drop_from_scoreboard(
+    scoreboard: Mapping[str, Any] | Path | str,
+    *,
+    src: Path | str | None = None,
+    min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
+) -> tuple[dict[str, dict[str, str]], EasyDetectReport]:
+    """Derive force_drop from panel/eval scoreboard (no hardcoded pack names).
+
+    M24 / VAL-DEASY-002/005: EASY_SOLVE_ALL when both/all models pass@1=1.0.
+    """
+    pack_dirs: dict[str, Path] | None = None
+    if src is not None:
+        src_path = Path(src)
+        tasks = src_path / "tasks"
+        if tasks.is_dir():
+            pack_dirs = {
+                p.name: p for p in tasks.iterdir() if p.is_dir() and not p.name.startswith(".")
+            }
+    report, drops = classify_and_force_drop(
+        scoreboard,
+        pack_dirs=pack_dirs,
+        min_f2p_nodes=min_f2p_nodes,
+    )
+    return drops, report
+
+
 def curate_dispositions(
     src: Path | str,
     *,
     panel_report: Mapping[str, Any] | Path | None = None,
     force_drop: Mapping[str, Mapping[str, str]] | None = None,
+    scoreboard: Mapping[str, Any] | Path | str | None = None,
     min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
+    include_explicit_drops: bool = True,
 ) -> list[PackDisposition]:
-    """Score every pack under *src*."""
+    """Score every pack under *src*.
+
+    When *scoreboard* is provided, dual-model solve-alls auto-populate force_drop
+    via :mod:`easy_detect` (no hardcoded pack names; M24).
+    """
     src_path = Path(src)
     task_ids = list_pack_task_ids(src_path)
     manifest_path = src_path / "pack_manifest.json"
@@ -451,7 +504,22 @@ def curate_dispositions(
         panel_blob = _load_json(panel_report) if panel_report.is_file() else None
     else:
         panel_blob = panel_report
+    # Scoreboard path may stand in for panel report when report.json not given.
+    if panel_blob is None and scoreboard is not None and panel_report is None:
+        # Scoreboard-only path: easy_detect still builds force_drop; panel
+        # verdict lookup remains empty unless report is supplied.
+        pass
     panel_idx = _panel_lookup(panel_blob)
+
+    auto_drop: dict[str, dict[str, str]] = {}
+    if scoreboard is not None:
+        auto_drop, _easy = force_drop_from_scoreboard(
+            scoreboard,
+            src=src_path,
+            min_f2p_nodes=min_f2p_nodes,
+        )
+    base_explicit = EXPLICIT_DROP if include_explicit_drops else {}
+    merged_drop = merge_force_drops(base_explicit, auto_drop, force_drop)
 
     out: list[PackDisposition] = []
     for tid in task_ids:
@@ -461,7 +529,7 @@ def curate_dispositions(
                 pack_dir=src_path / "tasks" / tid,
                 pack_row=pack_idx.get(tid),
                 panel_row=panel_idx.get(tid),
-                force_drop=force_drop,
+                force_drop=merged_drop,
                 min_f2p_nodes=min_f2p_nodes,
             )
         )
@@ -793,11 +861,16 @@ def materialize_prod_hard_keep(
     *,
     panel_report: Mapping[str, Any] | Path | None = None,
     force_drop: Mapping[str, Mapping[str, str]] | None = None,
+    scoreboard: Mapping[str, Any] | Path | str | None = None,
     min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
     min_keep: int = MIN_HARD_KEEP,
     clean_out: bool = True,
+    include_explicit_drops: bool = True,
 ) -> CurationResult:
     """Curate *src* into *out* with drop_reasons + dual-truth keeps only.
+
+    *scoreboard* (M24): panel/eval ``scoreboard.json`` or ``report.json`` auto-drops
+    dual-model solve-alls (EASY_SOLVE_ALL) without hardcoding pack names.
 
     Raises ``ProdHardCurationError`` if residual keep count < *min_keep*
     (caller must re-mine with new floors — never fixture pad).
@@ -811,7 +884,9 @@ def materialize_prod_hard_keep(
         src_path,
         panel_report=panel_report,
         force_drop=force_drop,
+        scoreboard=scoreboard,
         min_f2p_nodes=min_f2p_nodes,
+        include_explicit_drops=include_explicit_drops,
     )
     keep_ids = tuple(sorted(d.task_id for d in dispositions if d.keep))
     drop_ids = tuple(sorted(d.task_id for d in dispositions if not d.keep))
@@ -990,9 +1065,45 @@ def materialize_prod_hard_keep(
         reasons=("curated_ok",),
         meta={
             "min_f2p_nodes": min_f2p_nodes,
-            "explicit_drops": sorted((force_drop or EXPLICIT_DROP).keys()),
+            "scoreboard": str(scoreboard) if scoreboard is not None else None,
+            "explicit_drops": sorted(
+                merge_force_drops(
+                    EXPLICIT_DROP if include_explicit_drops else None,
+                    force_drop,
+                ).keys()
+            ),
             "nominal_keep_candidates": sorted(NOMINAL_KEEP_CANDIDATES),
         },
+    )
+
+
+def curate_hardness_from_scoreboard(
+    src: Path | str,
+    out: Path | str,
+    *,
+    scoreboard: Mapping[str, Any] | Path | str,
+    panel_report: Mapping[str, Any] | Path | None = None,
+    min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
+    min_keep: int = 0,
+    clean_out: bool = True,
+    include_explicit_drops: bool = False,
+) -> CurationResult:
+    """CLI-facing hardness curate driven by scoreboard auto-easy detection.
+
+    Default *include_explicit_drops=False* so drops are scoreboard-driven only
+    (werkzeug-class solve-alls without name hardcoding). Residual floor defaults
+    to 0 for post-eval demote of an already-certified hardness set (M24 waves may
+    land below 5 after drops; report honesty preserves remaining keeps).
+    """
+    return materialize_prod_hard_keep(
+        src,
+        out,
+        panel_report=panel_report,
+        scoreboard=scoreboard,
+        min_f2p_nodes=min_f2p_nodes,
+        min_keep=min_keep,
+        clean_out=clean_out,
+        include_explicit_drops=include_explicit_drops,
     )
 
 
@@ -1007,7 +1118,11 @@ __all__ = [
     "PackDisposition",
     "ProdHardCurationError",
     "curate_dispositions",
+    "curate_hardness_from_scoreboard",
     "decide_pack",
+    "force_drop_from_scoreboard",
     "list_pack_task_ids",
     "materialize_prod_hard_keep",
+    "merge_force_drops",
+    "classify_scoreboard",
 ]
