@@ -1,5 +1,11 @@
 # DeepAgent prod_hard_keep re-eval (M23) summary
 
+**Authority:** This SUMMARY.md, `scoreboard.json`, and mission
+`library/m23-prod-reeval.md` are the **authoritative** Grok vs Kimi
+scoreboard for VAL-DREEVAL. Handoff `salientSummary` may be wiped by
+endfeature-proxy; do not re-run the multi-hour live wave solely to repair
+handoff stubs. Use these durable files instead.
+
 ## Wave
 - product_root: `/projects/Agent-SWE/deepagent/datasets/prod_hard_keep`
 - out: `datasets/panel_prod_hard_bench10_n5`

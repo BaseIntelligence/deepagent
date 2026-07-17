@@ -113,8 +113,38 @@ Rules:
 | `swe_factory.producers.hard_filter` | Mine-time ≥10 hunk / multi-file floors |
 | `swe_factory.panel.band` | Solve-all / solve-none band drops |
 
+## M23 live re-eval (Grok vs Kimi on prod_hard_keep)
+
+Mirror of the durable M23 scoreboard (do not re-run multi-hour wave for
+docs alone). Authoritative sources:
+`datasets/panel_prod_hard_bench10_n5/{SUMMARY.md,scoreboard.json}` and
+mission `library/m23-prod-reeval.md`.
+
+| Model | pass@1 (k=1) |
+|---|---|
+| x-ai/grok-4.5 | **5/10 = 0.500** |
+| moonshotai/kimi-k2.6 | **4/10 = 0.400** |
+| aggregate | 9/20 = 0.450 |
+
+n_concurrent=5 true pool (`actual_max_inflight=5`), spend ≈ $51.75/$600,
+n_scored=10, invented_rewards=false, fidelity `pier_miniswe_harbor`.
+
+| pack | grok | kimi | frontier |
+|---|---:|---:|---:|
+| itemadapter-101 | 1 | 0 | 0.5 |
+| attrs-1323 | 0 | 1 | 0.5 |
+| httpx-3672 | 0 | 0 | 0.0 |
+| packaging-1120 | 0 | 0 | 0.0 |
+| attrs-1457 | 0 | 0 | 0.0 |
+| qs-487 | 1 | 0 | 0.5 |
+| qs-488 | 0 | 0 | 0.0 |
+| werkzeug-2979 | 1 | 1 | 1.0 |
+| werkzeug-3006 | 1 | 1 | 1.0 |
+| werkzeug-3101 | 1 | 1 | 1.0 |
+
 ## Related docs
 
 - [architecture.md](architecture.md) — certified keep gates
 - Root `README.md` — CLI generate / honesty floors
-- Mission `AGENTS.md` — M21 production hardness policy
+- Mission `AGENTS.md` — M21 production hardness policy; M23 panel + library authority note
+- `datasets/panel_prod_hard_bench10_n5/SUMMARY.md` — full M23 re-eval wave
