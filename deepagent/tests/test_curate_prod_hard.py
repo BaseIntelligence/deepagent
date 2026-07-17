@@ -826,8 +826,6 @@ def test_recover_skips_materials_skeleton_not_harbor(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    out = recover_solve_all_only_drops(
-        dest, restore_roots=[tmp_path / "live_materials"]
-    )
+    out = recover_solve_all_only_drops(dest, restore_roots=[tmp_path / "live_materials"])
     assert out["recovered_ids"] == []
     assert "realpr-skel-1" in out["skipped"]

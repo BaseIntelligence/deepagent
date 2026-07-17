@@ -1042,9 +1042,7 @@ def curate_hardness_cmd(
         "keep_ids": list(result.keep_ids),
         "drop_ids": list(result.drop_ids),
         "drop_reasons": result.drop_reasons,
-        "restored_solve_all_only": list(
-            (result.meta or {}).get("restored_solve_all_only") or []
-        ),
+        "restored_solve_all_only": list((result.meta or {}).get("restored_solve_all_only") or []),
         "easy_detect": easy.to_dict(),
         "policy": "m25_intrinsic_hardness",
         "assertions": [

@@ -304,7 +304,9 @@ def _scoreboard_panel_lookup(
         pid = row.get("pack_id") or row.get("task_id") or row.get("id")
         if not pid:
             continue
-        frontier = _as_scoreboard_float(row.get("frontier") if "frontier" in row else row.get("frontier_pass_at_k"))
+        frontier = _as_scoreboard_float(
+            row.get("frontier") if "frontier" in row else row.get("frontier_pass_at_k")
+        )
         per_model: dict[str, float] = {}
         raw_pm = row.get("per_model_pass_at_k")
         if isinstance(raw_pm, dict):
@@ -332,13 +334,19 @@ def _scoreboard_panel_lookup(
             if fv is None:
                 continue
             # Prefer known model keys; also accept short pass@k floats
-            if model_keys and key not in model_keys and "/" not in str(key):
-                # Still accept common short model names when models list incomplete
-                if not any(ch.isdigit() for ch in str(key)) and str(key) not in {
+            # Still accept common short model names when models list incomplete
+            if (
+                model_keys
+                and key not in model_keys
+                and "/" not in str(key)
+                and not any(ch.isdigit() for ch in str(key))
+                and str(key)
+                not in {
                     "k",
                     "n",
-                }:
-                    continue
+                }
+            ):
+                continue
             per_model[str(key)] = fv
 
         all_solved = bool(per_model) and all(v >= 1.0 for v in per_model.values())
@@ -578,7 +586,7 @@ def recover_solve_all_only_drops(
         recovered.append(tid)
         pack_rows_to_merge[tid] = dict(pack_row)
         if archive and archive.get("identity"):
-            identity_to_merge[tid] = dict(archive["identity"])  # type: ignore[arg-type]
+            identity_to_merge[tid] = dict(archive["identity"])
         if not dry_run:
             dest_path.mkdir(parents=True, exist_ok=True)
             tasks_out = dest_path / "tasks"
@@ -647,7 +655,8 @@ def _infer_pack_row_from_gate_audit(
                 tid = row.get("task_id") or (row.get("fields") or {}).get("task_id")
                 if str(tid) != task_id:
                     continue
-                fields = row.get("fields") if isinstance(row.get("fields"), dict) else {}
+                raw_fields = row.get("fields")
+                fields: dict[str, Any] = raw_fields if isinstance(raw_fields, dict) else {}
                 sol = fields.get("solution_reward", row.get("solution_reward"))
                 null = fields.get("null_reward", row.get("null_reward"))
                 if sol is None and null is None:
@@ -661,8 +670,7 @@ def _infer_pack_row_from_gate_audit(
                     "source_track": fields.get("source_track") or "real_pr",
                     "language": fields.get("language") or "python",
                     "backend": fields.get("backend_class") or "HarborDockerVerifier",
-                    "label_method": fields.get("label_method")
-                    or "real_pr_dual_run_base_vs_gold",
+                    "label_method": fields.get("label_method") or "real_pr_dual_run_base_vs_gold",
                     "live_mine": bool(fields.get("live_mine", True)),
                     "f2p_count": fields.get("f2p_count"),
                 }
@@ -686,7 +694,8 @@ def _merge_manifest_rows(
         man = {"packs": [], "identity": {}}
     if not isinstance(man, dict):
         man = {"packs": [], "identity": {}}
-    packs_list = man.get("packs") if isinstance(man.get("packs"), list) else []
+    packs_raw = man.get("packs")
+    packs_list: list[Any] = packs_raw if isinstance(packs_raw, list) else []
     by_id: dict[str, dict[str, Any]] = {}
     for p in packs_list:
         if isinstance(p, dict) and p.get("task_id"):
@@ -700,8 +709,8 @@ def _merge_manifest_rows(
     man["packs"] = sorted(by_id.values(), key=lambda p: str(p.get("task_id")))
     man["count"] = len(man["packs"])
     man["pack_count"] = len(man["packs"])
-    identity = man.get("identity") if isinstance(man.get("identity"), dict) else {}
-    identity = dict(identity)
+    identity_raw = man.get("identity")
+    identity: dict[str, Any] = dict(identity_raw) if isinstance(identity_raw, dict) else {}
     for tid, idn in identity_rows.items():
         if isinstance(idn, dict) and idn:
             identity[tid] = dict(idn)
