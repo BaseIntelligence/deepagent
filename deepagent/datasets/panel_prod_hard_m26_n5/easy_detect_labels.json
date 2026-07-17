@@ -1,0 +1,273 @@
+{
+  "schema": "deepagent.easy_detect.v1",
+  "ok": true,
+  "source": null,
+  "drop_ids": [],
+  "keep_ids": [
+    "realpr-attrs-1323",
+    "realpr-attrs-1457",
+    "realpr-httpx-3672",
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-qs-487",
+    "realpr-qs-488",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
+  ],
+  "results": [
+    {
+      "pack_id": "realpr-itemadapter-101",
+      "reason_code": "one_sided_discrimination_keep",
+      "should_drop_hardness": false,
+      "detail": "one-sided discrimination: 1/2 models at pass@1=1.0; retains hardness signal (not solve-all)",
+      "label": null,
+      "frontier_pass_at_k": 0.5,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 1.0,
+        "moonshotai/kimi-k2.6": 0.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": false,
+      "f2p_count": null,
+      "meta": {
+        "gate": "one_sided",
+        "n_full": 1,
+        "n_models": 2
+      }
+    },
+    {
+      "pack_id": "realpr-attrs-1323",
+      "reason_code": "one_sided_discrimination_keep",
+      "should_drop_hardness": false,
+      "detail": "one-sided discrimination: 1/2 models at pass@1=1.0; retains hardness signal (not solve-all)",
+      "label": null,
+      "frontier_pass_at_k": 0.5,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 0.0,
+        "moonshotai/kimi-k2.6": 1.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": false,
+      "f2p_count": null,
+      "meta": {
+        "gate": "one_sided",
+        "n_full": 1,
+        "n_models": 2
+      }
+    },
+    {
+      "pack_id": "realpr-httpx-3672",
+      "reason_code": "not_easy_pass_matrix",
+      "should_drop_hardness": false,
+      "detail": "not easy: matrix={'x-ai/grok-4.5': 0.0, 'moonshotai/kimi-k2.6': 0.0} frontier=0.0 (solved_full=0/2)",
+      "label": null,
+      "frontier_pass_at_k": 0.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 0.0,
+        "moonshotai/kimi-k2.6": 0.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": false,
+      "f2p_count": null,
+      "meta": {
+        "gate": "not_easy"
+      }
+    },
+    {
+      "pack_id": "realpr-packaging-1120",
+      "reason_code": "not_easy_pass_matrix",
+      "should_drop_hardness": false,
+      "detail": "not easy: matrix={'x-ai/grok-4.5': 0.0, 'moonshotai/kimi-k2.6': 0.0} frontier=0.0 (solved_full=0/2)",
+      "label": null,
+      "frontier_pass_at_k": 0.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 0.0,
+        "moonshotai/kimi-k2.6": 0.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": false,
+      "f2p_count": null,
+      "meta": {
+        "gate": "not_easy"
+      }
+    },
+    {
+      "pack_id": "realpr-attrs-1457",
+      "reason_code": "not_easy_pass_matrix",
+      "should_drop_hardness": false,
+      "detail": "not easy: matrix={'x-ai/grok-4.5': 0.0, 'moonshotai/kimi-k2.6': 0.0} frontier=0.0 (solved_full=0/2)",
+      "label": null,
+      "frontier_pass_at_k": 0.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 0.0,
+        "moonshotai/kimi-k2.6": 0.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": false,
+      "f2p_count": null,
+      "meta": {
+        "gate": "not_easy"
+      }
+    },
+    {
+      "pack_id": "realpr-qs-487",
+      "reason_code": "solve_all_easy_policy_drop",
+      "should_drop_hardness": false,
+      "detail": "EASY_SOLVE_ALL (scoreboard label): all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; should_drop_hardness=False (M25 default False \u2014 dual-model success is not a hardness drop gate; VAL-DINTR-001; use intrinsic request+patch + floors + alignment)",
+      "label": "EASY_SOLVE_ALL",
+      "frontier_pass_at_k": 1.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 1.0,
+        "moonshotai/kimi-k2.6": 1.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": true,
+      "f2p_count": null,
+      "meta": {
+        "gate": "all_models_pass_at_1",
+        "n_models": 2,
+        "drop_on_solve_all": false,
+        "role": "scoreboard_label"
+      }
+    },
+    {
+      "pack_id": "realpr-qs-488",
+      "reason_code": "not_easy_pass_matrix",
+      "should_drop_hardness": false,
+      "detail": "not easy: matrix={'x-ai/grok-4.5': 0.0, 'moonshotai/kimi-k2.6': 0.0} frontier=0.0 (solved_full=0/2)",
+      "label": null,
+      "frontier_pass_at_k": 0.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 0.0,
+        "moonshotai/kimi-k2.6": 0.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": false,
+      "f2p_count": null,
+      "meta": {
+        "gate": "not_easy"
+      }
+    },
+    {
+      "pack_id": "realpr-werkzeug-2979",
+      "reason_code": "solve_all_easy_policy_drop",
+      "should_drop_hardness": false,
+      "detail": "EASY_SOLVE_ALL (scoreboard label): all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; should_drop_hardness=False (M25 default False \u2014 dual-model success is not a hardness drop gate; VAL-DINTR-001; use intrinsic request+patch + floors + alignment)",
+      "label": "EASY_SOLVE_ALL",
+      "frontier_pass_at_k": 1.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 1.0,
+        "moonshotai/kimi-k2.6": 1.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": true,
+      "f2p_count": null,
+      "meta": {
+        "gate": "all_models_pass_at_1",
+        "n_models": 2,
+        "drop_on_solve_all": false,
+        "role": "scoreboard_label"
+      }
+    },
+    {
+      "pack_id": "realpr-werkzeug-3006",
+      "reason_code": "solve_all_easy_policy_drop",
+      "should_drop_hardness": false,
+      "detail": "EASY_SOLVE_ALL (scoreboard label): all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; should_drop_hardness=False (M25 default False \u2014 dual-model success is not a hardness drop gate; VAL-DINTR-001; use intrinsic request+patch + floors + alignment)",
+      "label": "EASY_SOLVE_ALL",
+      "frontier_pass_at_k": 1.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 1.0,
+        "moonshotai/kimi-k2.6": 1.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": true,
+      "f2p_count": null,
+      "meta": {
+        "gate": "all_models_pass_at_1",
+        "n_models": 2,
+        "drop_on_solve_all": false,
+        "role": "scoreboard_label"
+      }
+    },
+    {
+      "pack_id": "realpr-werkzeug-3101",
+      "reason_code": "solve_all_easy_policy_drop",
+      "should_drop_hardness": false,
+      "detail": "EASY_SOLVE_ALL (scoreboard label): all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; should_drop_hardness=False (M25 default False \u2014 dual-model success is not a hardness drop gate; VAL-DINTR-001; use intrinsic request+patch + floors + alignment)",
+      "label": "EASY_SOLVE_ALL",
+      "frontier_pass_at_k": 1.0,
+      "per_model_pass_at_k": {
+        "x-ai/grok-4.5": 1.0,
+        "moonshotai/kimi-k2.6": 1.0
+      },
+      "models_scored": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "all_models_solved": true,
+      "f2p_count": null,
+      "meta": {
+        "gate": "all_models_pass_at_1",
+        "n_models": 2,
+        "drop_on_solve_all": false,
+        "role": "scoreboard_label"
+      }
+    }
+  ],
+  "reasons": [
+    "classified"
+  ],
+  "meta": {
+    "shape": "scoreboard.per_pack",
+    "n_rows": 10,
+    "n_drop": 0,
+    "n_keep": 10,
+    "n_easy_solve_all_labels": 4,
+    "easy_solve_all_labels": [
+      "realpr-qs-487",
+      "realpr-werkzeug-2979",
+      "realpr-werkzeug-3006",
+      "realpr-werkzeug-3101"
+    ],
+    "drop_on_solve_all": false,
+    "models": [
+      "x-ai/grok-4.5",
+      "moonshotai/kimi-k2.6"
+    ],
+    "policy": "m25_intrinsic_hardness"
+  },
+  "assertions": [
+    "VAL-DEASY-002",
+    "VAL-DEASY-005",
+    "VAL-DINTR-001"
+  ]
+}

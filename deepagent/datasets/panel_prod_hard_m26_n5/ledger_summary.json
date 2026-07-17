@@ -1,0 +1,32 @@
+{
+  "by_model": {
+    "moonshotai/kimi-k2.6": "31.9577477899999997",
+    "x-ai/grok-4.5": "13.8107739999999986"
+  },
+  "by_stage": {
+    "deepagent-eval-pier-miniswe": "45.7685217899999983"
+  },
+  "by_task": {
+    "realpr-attrs-1323": "2.7982526600000006",
+    "realpr-attrs-1457": "5.4905392099999987",
+    "realpr-httpx-3672": "6.3018820000000033",
+    "realpr-itemadapter-101": "3.7831203800000002",
+    "realpr-packaging-1120": "3.0450331100000006",
+    "realpr-qs-487": "4.2027305199999993",
+    "realpr-qs-488": "3.0830447500000011",
+    "realpr-werkzeug-2979": "3.15871695",
+    "realpr-werkzeug-3006": "4.5152069799999992",
+    "realpr-werkzeug-3101": "9.3899952299999953"
+  },
+  "cap_usd": "600.0",
+  "has_unknown_billing": false,
+  "open_call_count": 0,
+  "open_reserved_usd": "0",
+  "path": "datasets/panel_prod_hard_m26_n5/ledger.jsonl",
+  "remaining_usd": "554.2314782100000017",
+  "settled_call_count": 20,
+  "settled_exact_usd": "45.7685217899999983",
+  "total_commit_usd": "45.7685217899999983",
+  "under_cap": true,
+  "unknown_billing_count": 0
+}
