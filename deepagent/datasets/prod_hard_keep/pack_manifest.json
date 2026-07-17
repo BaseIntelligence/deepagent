@@ -6,49 +6,18 @@
     "VAL-DHARD-003"
   ],
   "band": {
-    "max": 7,
+    "max": 10,
     "min": 5,
-    "target": 7
+    "target": 10
   },
   "budget_stop": false,
-  "count": 7,
-  "curated_at": "2026-07-17T10:48:54.374452+00:00",
+  "count": 10,
+  "curated_at": "2026-07-17T13:04:24.822551+00:00",
   "curated_hardness": true,
   "curation_schema": "deepagent.prod_hard_curation.v1",
   "curation_source": "datasets/prod_hard_keep",
-  "drop_reasons": {
-    "realpr-werkzeug-2979": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "f2p_count": 9,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    },
-    "realpr-werkzeug-3006": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "f2p_count": 6,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    },
-    "realpr-werkzeug-3101": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "f2p_count": 4,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    }
-  },
-  "dropped_count": 3,
+  "drop_reasons": {},
+  "dropped_count": 0,
   "harbor_load_smoke": {
     "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
     "cli_version_exit": 1,
@@ -63,7 +32,10 @@
       "realpr-itemadapter-101",
       "realpr-packaging-1120",
       "realpr-qs-487",
-      "realpr-qs-488"
+      "realpr-qs-488",
+      "realpr-werkzeug-2979",
+      "realpr-werkzeug-3006",
+      "realpr-werkzeug-3101"
     ],
     "metadata_language": "python",
     "ok": true,
@@ -152,19 +124,67 @@
       "seed_id": "pr:488",
       "source_track": "real_pr",
       "upstream_label": "https://github.com/ljharb/qs.git"
+    },
+    "realpr-werkzeug-2979": {
+      "base_commit": "862cb193c2b13db860d886725fa4235173d0dfcd",
+      "language": "python",
+      "license": "MIT",
+      "repository_url": "https://github.com/pallets/werkzeug.git",
+      "seed_id": "pr:2979",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/pallets/werkzeug.git"
+    },
+    "realpr-werkzeug-3006": {
+      "base_commit": "cb307c144e7b9092bf72b1a1dba5281e7c6ff838",
+      "language": "python",
+      "license": "MIT",
+      "repository_url": "https://github.com/pallets/werkzeug.git",
+      "seed_id": "pr:3006",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/pallets/werkzeug.git"
+    },
+    "realpr-werkzeug-3101": {
+      "base_commit": "70551309d170d43696fff527cd5b5893421996ba",
+      "language": "python",
+      "license": "MIT",
+      "repository_url": "https://github.com/pallets/werkzeug.git",
+      "seed_id": "pr:3101",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/pallets/werkzeug.git"
     }
   },
   "keep_dispositions": {
     "realpr-attrs-1323": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel keep-band rule='split' frontier_pass_at_k=0.5.",
       "dual_truth_ok": true,
       "f2p_count": 4,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.5,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 37,
+          "constraints": 4,
+          "deleted_lines": 13,
+          "easy_signal_count": 0,
+          "f2p_count": 4,
+          "hard_signal_count": 6,
+          "hunk_count": 14,
+          "instruction_chars": 2148,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 3
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": true,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -180,23 +200,44 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "split",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
       "solution_reward": 1,
       "source_hunk_count": 14,
       "task_id": "realpr-attrs-1323"
     },
     "realpr-attrs-1457": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
       "dual_truth_ok": true,
       "f2p_count": 14,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.0,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 58,
+          "constraints": 5,
+          "deleted_lines": 11,
+          "easy_signal_count": 1,
+          "f2p_count": 14,
+          "hard_signal_count": 5,
+          "hunk_count": 21,
+          "instruction_chars": 3333,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 6,
+          "source_file_count": 2
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": true,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -212,23 +253,44 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "solve-none",
+      "panel_verdict": "keep",
+      "reason_code": "keep_legit_hard_solve_none",
       "solution_reward": 1,
       "source_hunk_count": 21,
       "task_id": "realpr-attrs-1457"
     },
     "realpr-httpx-3672": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
       "dual_truth_ok": true,
       "f2p_count": 5,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.0,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 57,
+          "constraints": 4,
+          "deleted_lines": 22,
+          "easy_signal_count": 0,
+          "f2p_count": 5,
+          "hard_signal_count": 6,
+          "hunk_count": 18,
+          "instruction_chars": 2528,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 7
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": true,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -244,23 +306,44 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "solve-none",
+      "panel_verdict": "keep",
+      "reason_code": "keep_legit_hard_solve_none",
       "solution_reward": 1,
       "source_hunk_count": 18,
       "task_id": "realpr-httpx-3672"
     },
     "realpr-itemadapter-101": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel keep-band rule='split' frontier_pass_at_k=0.5.",
       "dual_truth_ok": true,
       "f2p_count": 43,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.5,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 726,
+          "constraints": 5,
+          "deleted_lines": 47,
+          "easy_signal_count": 0,
+          "f2p_count": 43,
+          "hard_signal_count": 7,
+          "hunk_count": 15,
+          "instruction_chars": 3156,
+          "module_count": 1,
+          "modules": [
+            "itemadapter"
+          ],
+          "outcomes": 7,
+          "source_file_count": 4
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": true,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -276,23 +359,45 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "split",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
       "solution_reward": 1,
       "source_hunk_count": 15,
       "task_id": "realpr-itemadapter-101"
     },
     "realpr-packaging-1120": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
       "dual_truth_ok": true,
       "f2p_count": 9,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.0,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 882,
+          "constraints": 5,
+          "deleted_lines": 789,
+          "easy_signal_count": 0,
+          "f2p_count": 9,
+          "hard_signal_count": 7,
+          "hunk_count": 24,
+          "instruction_chars": 2723,
+          "module_count": 2,
+          "modules": [
+            "benchmarks",
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 3
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": true,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -308,23 +413,44 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "solve-none",
+      "panel_verdict": "keep",
+      "reason_code": "keep_legit_hard_solve_none",
       "solution_reward": 1,
       "source_hunk_count": 24,
       "task_id": "realpr-packaging-1120"
     },
     "realpr-qs-487": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel keep-band rule='split' frontier_pass_at_k=0.5.",
       "dual_truth_ok": true,
       "f2p_count": 3,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.5,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 21,
+          "constraints": 5,
+          "deleted_lines": 2,
+          "easy_signal_count": 2,
+          "f2p_count": 3,
+          "hard_signal_count": 4,
+          "hunk_count": 11,
+          "instruction_chars": 2589,
+          "module_count": 1,
+          "modules": [
+            "lib"
+          ],
+          "outcomes": 4,
+          "source_file_count": 2
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": false,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -340,23 +466,44 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "split",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
       "solution_reward": 1,
       "source_hunk_count": 11,
       "task_id": "realpr-qs-487"
     },
     "realpr-qs-488": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
       "dual_truth_ok": true,
       "f2p_count": 7,
-      "frontier_pass_at_k": null,
+      "frontier_pass_at_k": 0.0,
       "hardness_ok": true,
       "keep": true,
       "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 34,
+          "constraints": 5,
+          "deleted_lines": 11,
+          "easy_signal_count": 1,
+          "f2p_count": 7,
+          "hard_signal_count": 5,
+          "hunk_count": 12,
+          "instruction_chars": 2506,
+          "module_count": 1,
+          "modules": [
+            "lib"
+          ],
+          "outcomes": 4,
+          "source_file_count": 2
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
         "nominal_keep_candidate": false,
+        "policy": "m25_intrinsic_hardness",
         "required_paths_checked": [
           "task.toml",
           "instruction.md",
@@ -372,12 +519,171 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "keep_hard_dual_truth",
+      "panel_rule": "solve-none",
+      "panel_verdict": "keep",
+      "reason_code": "keep_legit_hard_solve_none",
       "solution_reward": 1,
       "source_hunk_count": 12,
       "task_id": "realpr-qs-488"
+    },
+    "realpr-werkzeug-2979": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel rule='solve-all' frontier_pass_at_k=1.0: model dual success is scoreboard-only (M25 / VAL-DINTR-001); not a hardness drop.",
+      "dual_truth_ok": true,
+      "f2p_count": 9,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 77,
+          "constraints": 4,
+          "deleted_lines": 0,
+          "easy_signal_count": 0,
+          "f2p_count": 9,
+          "hard_signal_count": 7,
+          "hunk_count": 11,
+          "instruction_chars": 2416,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 3
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
+        "nominal_keep_candidate": false,
+        "policy": "m25_intrinsic_hardness",
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "keep_despite_model_solve_all",
+      "solution_reward": 1,
+      "source_hunk_count": 11,
+      "task_id": "realpr-werkzeug-2979"
+    },
+    "realpr-werkzeug-3006": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel rule='solve-all' frontier_pass_at_k=1.0: model dual success is scoreboard-only (M25 / VAL-DINTR-001); not a hardness drop.",
+      "dual_truth_ok": true,
+      "f2p_count": 6,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 142,
+          "constraints": 4,
+          "deleted_lines": 107,
+          "easy_signal_count": 1,
+          "f2p_count": 6,
+          "hard_signal_count": 6,
+          "hunk_count": 14,
+          "instruction_chars": 2642,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 4,
+          "source_file_count": 2
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
+        "nominal_keep_candidate": false,
+        "policy": "m25_intrinsic_hardness",
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "keep_despite_model_solve_all",
+      "solution_reward": 1,
+      "source_hunk_count": 14,
+      "task_id": "realpr-werkzeug-3006"
+    },
+    "realpr-werkzeug-3101": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel rule='solve-all' frontier_pass_at_k=1.0: model dual success is scoreboard-only (M25 / VAL-DINTR-001); not a hardness drop.",
+      "dual_truth_ok": true,
+      "f2p_count": 4,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 188,
+          "constraints": 4,
+          "deleted_lines": 178,
+          "easy_signal_count": 0,
+          "f2p_count": 4,
+          "hard_signal_count": 7,
+          "hunk_count": 29,
+          "instruction_chars": 3257,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 8,
+          "source_file_count": 4
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
+        "nominal_keep_candidate": false,
+        "policy": "m25_intrinsic_hardness",
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "keep_despite_model_solve_all",
+      "solution_reward": 1,
+      "source_hunk_count": 29,
+      "task_id": "realpr-werkzeug-3101"
     }
   },
   "languages": {
@@ -528,7 +834,7 @@
       "solution_reward": 1
     }
   },
-  "pack_count": 7,
+  "pack_count": 10,
   "packs": [
     {
       "backend": "HarborDockerVerifier",
@@ -620,6 +926,42 @@
       "source_hunk_count": 12,
       "source_track": "real_pr",
       "task_id": "realpr-qs-488"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 11,
+      "source_track": "real_pr",
+      "task_id": "realpr-werkzeug-2979"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 14,
+      "source_track": "real_pr",
+      "task_id": "realpr-werkzeug-3006"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "python",
+      "null_reward": 0,
+      "prompt_style": "deepswe_style_v1",
+      "solution_reward": 1,
+      "source_hunk_count": 29,
+      "source_track": "real_pr",
+      "task_id": "realpr-werkzeug-3101"
     }
   ],
   "panel": {
@@ -1955,7 +2297,7 @@
     }
   },
   "panel_mode": "offline",
-  "panel_note": "Hardness curate from live panel + dual-truth. Solve-all/misalign dropped; legit hard solve-none retained when dual-truth/align/floors ok.",
+  "panel_note": "Hardness curate from dual-truth + alignment + floors + intrinsic request/patch analysis. Model solve-all is scoreboard-only (M25); misalign / thin-F2P / high-confidence EASY_REQUEST dropped; legit hard solve-none and non-intrinsic-easy solve-alls retained.",
   "pier": {
     "realpr-attrs-1323": {
       "certified": true,
@@ -2043,6 +2385,11 @@
     "solution/solution.patch",
     "solution/solve.sh"
   ],
+  "restored_solve_all_only": [
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
+  ],
   "revision": "test",
   "schema": "deepagent.hf_packs.v1",
   "source_tracks": {
@@ -2064,11 +2411,15 @@
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
     "realpr-qs-487",
-    "realpr-qs-488"
+    "realpr-qs-488",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
   ],
   "under_supply_reasons": [
     "go=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
     "typescript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
     "rust=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)"
-  ]
+  ],
+  "view": "prod_hard_keep_restored"
 }

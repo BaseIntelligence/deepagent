@@ -4,7 +4,7 @@ Curated **real_pr** Harbor hardness packs only. Droplist documents
 misalign + solve-all/easy removals from `datasets/test_n10`. Dual-truth 
 retained for every keep (sol=1 / null=0). No fixture pad.
 
-**Product hardness certified N: 7** (target ≥5)
+**Product hardness certified N: 10** (target ≥5)
 
 | pack_id | language | license | upstream_url | base_sha | source_track | pr |
 |---|---|---|---|---|---|---:|
@@ -15,20 +15,21 @@ retained for every keep (sol=1 / null=0). No fixture pad.
 | `realpr-packaging-1120` | python | Apache-2.0 | https://github.com/pypa/packaging.git | `ff14df979f865165553999d9d1a111feec6f4843` | real_pr | pr:1120 |
 | `realpr-qs-487` | javascript | BSD-3-Clause | https://github.com/ljharb/qs.git | `04f422fe91985103d2fdca0280ee362ecf5e43f2` | real_pr | pr:487 |
 | `realpr-qs-488` | javascript | BSD-3-Clause | https://github.com/ljharb/qs.git | `5f0449fff1d9fb236d297cd0d3650b42d2d93b8a` | real_pr | pr:488 |
+| `realpr-werkzeug-2979` | python | MIT | https://github.com/pallets/werkzeug.git | `862cb193c2b13db860d886725fa4235173d0dfcd` | real_pr | pr:2979 |
+| `realpr-werkzeug-3006` | python | MIT | https://github.com/pallets/werkzeug.git | `cb307c144e7b9092bf72b1a1dba5281e7c6ff838` | real_pr | pr:3006 |
+| `realpr-werkzeug-3101` | python | MIT | https://github.com/pallets/werkzeug.git | `70551309d170d43696fff527cd5b5893421996ba` | real_pr | pr:3101 |
 
 ## Drop reasons (not product hardness N)
 
 | pack_id | reason_code | detail |
 |---|---|---|
-| `realpr-werkzeug-2979` | `solve_all_easy_policy_drop` | EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002) |
-| `realpr-werkzeug-3006` | `solve_all_easy_policy_drop` | EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002) |
-| `realpr-werkzeug-3101` | `solve_all_easy_policy_drop` | EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002) |
 
 ## Notes
 
 - Source wave: `datasets/test_n10` live-mine dual-truth packs.
 - Gates: prompt–verifier alignment, MIN_F2P≥3, ≥10 hunks, multi-file, dual-truth.
-- Solve-all class + misalign class dropped from hardness promote.
+- Intrinsic EASY_REQUEST (high confidence, prompt+gold) dropped from hardness.
+- Model dual success is **not** a hardness drop gate (M25 / VAL-DINTR-001).
 - Legit hard solve-none kept when dual-truth+floors+align hold (model scoreout ≠ drop).
 - Agent trees: public git clone@SHA; Docker oracle never `oracle_mode=fake`.
 - Fixtures / hybrid archives are never product N.

@@ -258,6 +258,460 @@ def _panel_lookup(
     return out
 
 
+def _scoreboard_panel_lookup(
+    scoreboard: Mapping[str, Any] | Path | str | None,
+) -> dict[str, dict[str, Any]]:
+    """Annotate keep-band from eval scoreboard rows (no pack-name hardcoding).
+
+    Converts per_pack / packs scoreboard rows into the panel_row shape that
+    :func:`decide_pack` uses for ``keep_despite_model_solve_all`` annotation.
+    Dual-model pass@1=1.0 ⇒ rule=``solve-all`` + frontier=1.0 (still not a drop
+    under M25).
+    """
+    if scoreboard is None:
+        return {}
+    if isinstance(scoreboard, Path | str):
+        path = Path(scoreboard)
+        if not path.is_file():
+            return {}
+        try:
+            blob = _load_json(path)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(blob, dict):
+            return {}
+        scoreboard = blob
+    assert isinstance(scoreboard, Mapping)
+
+    rows = scoreboard.get("per_pack") or scoreboard.get("packs") or scoreboard.get("rows") or []
+    if not isinstance(rows, list):
+        return {}
+
+    model_keys: list[str] = []
+    raw_models = scoreboard.get("models")
+    if isinstance(raw_models, list):
+        for m in raw_models:
+            if not isinstance(m, str) or not m:
+                continue
+            short = m.rsplit("/", 1)[-1]
+            model_keys.append(short)
+            model_keys.append(m)
+
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        pid = row.get("pack_id") or row.get("task_id") or row.get("id")
+        if not pid:
+            continue
+        frontier = _as_scoreboard_float(row.get("frontier") if "frontier" in row else row.get("frontier_pass_at_k"))
+        per_model: dict[str, float] = {}
+        raw_pm = row.get("per_model_pass_at_k")
+        if isinstance(raw_pm, dict):
+            for k, v in raw_pm.items():
+                fv = _as_scoreboard_float(v)
+                if fv is not None:
+                    per_model[str(k)] = fv
+        # Board flattened: "grok-4.5": 1.0, "kimi-k2.6": 1.0
+        for key, val in row.items():
+            if key in {
+                "pack_id",
+                "task_id",
+                "id",
+                "frontier",
+                "frontier_pass_at_k",
+                "complete",
+                "decision",
+                "per_model_pass_at_k",
+                "models",
+            }:
+                continue
+            if key.endswith("_solves") or key.endswith("_cost") or key.endswith("_trials"):
+                continue
+            fv = _as_scoreboard_float(val)
+            if fv is None:
+                continue
+            # Prefer known model keys; also accept short pass@k floats
+            if model_keys and key not in model_keys and "/" not in str(key):
+                # Still accept common short model names when models list incomplete
+                if not any(ch.isdigit() for ch in str(key)) and str(key) not in {
+                    "k",
+                    "n",
+                }:
+                    continue
+            per_model[str(key)] = fv
+
+        all_solved = bool(per_model) and all(v >= 1.0 for v in per_model.values())
+        if frontier is None and all_solved:
+            frontier = 1.0
+        rule = None
+        verdict = None
+        if all_solved or (frontier is not None and frontier >= 1.0 and per_model and all_solved):
+            rule = "solve-all"
+            # Historical boards used decision=drop for solve-alls; M25 still keeps.
+            verdict = "drop"
+        elif per_model and all(v <= 0.0 for v in per_model.values()):
+            rule = "solve-none"
+            verdict = "keep"
+        elif per_model:
+            rule = "split"
+            verdict = "keep"
+
+        # Nested decision dict (full panel report shape) may enrich rule/frontier.
+        # Do **not** honour bare string decision="drop" on scoreboards where that
+        # field is a legacy M24 hardness drop label rather than a panel band;
+        # model matrix above already chose the correct keep/drop annotation.
+        raw_decision = row.get("decision")
+        if isinstance(raw_decision, dict):
+            if raw_decision.get("rule") and not rule:
+                rule = str(raw_decision.get("rule"))
+            if raw_decision.get("verdict") and not per_model:
+                verdict = str(raw_decision.get("verdict"))
+            if frontier is None:
+                frontier = _as_scoreboard_float(raw_decision.get("frontier_pass_at_k"))
+        elif (
+            isinstance(raw_decision, str)
+            and raw_decision.lower() in {"keep", "drop"}
+            and not per_model
+            and rule is None
+        ):
+            verdict = raw_decision.lower()
+
+        out[str(pid)] = {
+            "verdict": verdict,
+            "rule": rule,
+            "frontier_pass_at_k": frontier,
+            "reason": "scoreboard_annotate",
+            "per_model_pass_at_k": per_model,
+        }
+    return out
+
+
+def _as_scoreboard_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+# Default recovery roots used when packs were dropped for model solve-all only.
+# Order matters: prefer product archives before materials skeletons.
+DEFAULT_RESTORE_ROOTS: tuple[Path, ...] = (
+    Path("datasets/deepagent_v1"),
+    Path("datasets/deepagent_v1_seed5_archive"),
+    Path("datasets/prod_hard_keep_prev_archive"),
+    Path("datasets/live_materials"),
+    Path("datasets/live_materials_m22"),
+)
+
+# Codes that mean "dropped only for dual-model success" (re-admit candidates).
+SOLVE_ALL_ONLY_REASON_CODES: frozenset[str] = frozenset(
+    {
+        "solve_all_easy_policy_drop",
+    }
+)
+
+
+def _load_drop_reasons_table(
+    path_or_blob: Mapping[str, Any] | Path | str | None,
+) -> dict[str, dict[str, Any]]:
+    """Load drop_reasons map from drop_reasons.json / pack_manifest / dict."""
+    if path_or_blob is None:
+        return {}
+    if isinstance(path_or_blob, Mapping):
+        raw = path_or_blob.get("drop_reasons")
+        if isinstance(raw, dict):
+            return {str(k): dict(v) for k, v in raw.items() if isinstance(v, dict)}
+        # Already a drop_reasons map
+        if all(isinstance(v, dict) for v in path_or_blob.values()):
+            # Heuristic: reject if looks like a full report without drop_reasons
+            if "drop_reasons" not in path_or_blob and "keep_ids" not in path_or_blob:
+                return {str(k): dict(v) for k, v in path_or_blob.items() if isinstance(v, dict)}
+            raw2 = path_or_blob.get("drop_reasons")
+            if isinstance(raw2, dict):
+                return {str(k): dict(v) for k, v in raw2.items() if isinstance(v, dict)}
+        return {}
+    path = Path(path_or_blob)
+    if not path.is_file():
+        return {}
+    try:
+        blob = _load_json(path)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(blob, dict):
+        return {}
+    return _load_drop_reasons_table(blob)
+
+
+def _find_recoverable_pack_dir(
+    task_id: str,
+    restore_roots: Sequence[Path | str],
+) -> Path | None:
+    """Return first full Harbor task dir for *task_id* under restore roots."""
+    for root in restore_roots:
+        root_p = Path(root)
+        # Certified corpora store tasks/<id>
+        for candidate in (root_p / "tasks" / task_id, root_p / task_id):
+            if not candidate.is_dir():
+                continue
+            missing = verify_pack_tree(candidate)
+            if not missing:
+                return candidate
+    return None
+
+
+def _archive_pack_row(
+    task_id: str,
+    restore_roots: Sequence[Path | str],
+) -> dict[str, Any] | None:
+    """Load dual-truth pack_manifest row + identity stub for *task_id* from archives."""
+    for root in restore_roots:
+        root_p = Path(root)
+        man_path = root_p / "pack_manifest.json"
+        if not man_path.is_file():
+            continue
+        try:
+            man = _load_json(man_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(man, dict):
+            continue
+        idx = _manifest_pack_index(man)
+        row = idx.get(task_id)
+        if not isinstance(row, dict):
+            continue
+        out = dict(row)
+        # Enrich f2p from gate audit when missing
+        if out.get("source_hunk_count") is None:
+            hard = hardness_result_from_pack_dir(root_p / "tasks" / task_id)
+            if hard.source_hunk_count is not None:
+                out["source_hunk_count"] = hard.source_hunk_count
+        identity = man.get("identity") if isinstance(man.get("identity"), dict) else {}
+        idn = identity.get(task_id) if isinstance(identity, dict) else None
+        return {"pack_row": out, "identity": dict(idn) if isinstance(idn, dict) else {}}
+    return None
+
+
+def recover_solve_all_only_drops(
+    dest: Path | str,
+    *,
+    drop_reasons: Mapping[str, Any] | Path | str | None = None,
+    restore_roots: Sequence[Path | str] | None = None,
+    task_ids: Sequence[str] | None = None,
+    min_f2p_nodes: int = DEFAULT_MIN_F2P_NODES,
+    apply_intrinsic: bool = True,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Re-admit packs previously dropped only for dual-model solve-all (M25b).
+
+    Eligibility (VAL-DINTR-003):
+    * Listed in *drop_reasons* with reason_code ∈ SOLVE_ALL_ONLY_REASON_CODES,
+      **or** explicitly named in *task_ids*
+    * Full Harbor pack tree recoverable from *restore_roots* (default product
+      archives + deepagent_v1)
+    * Dual-truth sol=1/null=0 from archive manifest row
+    * Prompt–verifier alignment OK
+    * Hardness floors OK (F2P≥3, multi-file, hunks)
+    * Intrinsic **not** high-confidence EASY_REQUEST
+
+    Materials-only skeletons (patch+meta without Harbor layout) are skipped
+    (never fixture pad / never partial rearrange).
+
+    On success, copies pack trees into ``dest/tasks/<id>`` and merges dual-truth
+    rows into ``dest/pack_manifest.json`` (or creates a minimal index).
+    """
+    dest_path = Path(dest)
+    roots = tuple(Path(r) for r in (restore_roots or DEFAULT_RESTORE_ROOTS))
+    reasons_table = _load_drop_reasons_table(drop_reasons)
+    if not reasons_table and drop_reasons is None:
+        # Default: read dest drop_reasons.json when present
+        reasons_table = _load_drop_reasons_table(dest_path / "drop_reasons.json")
+        if not reasons_table:
+            reasons_table = _load_drop_reasons_table(dest_path / "pack_manifest.json")
+
+    candidates: list[str] = []
+    if task_ids:
+        candidates = [str(t) for t in task_ids]
+    else:
+        for tid, info in reasons_table.items():
+            code = str(info.get("reason_code") or "")
+            if code in SOLVE_ALL_ONLY_REASON_CODES:
+                candidates.append(str(tid))
+    candidates = sorted(set(candidates))
+
+    recovered: list[str] = []
+    skipped: dict[str, str] = {}
+    dispositions: list[dict[str, Any]] = []
+    pack_rows_to_merge: dict[str, dict[str, Any]] = {}
+    identity_to_merge: dict[str, dict[str, Any]] = {}
+
+    for tid in candidates:
+        pack_dir = _find_recoverable_pack_dir(tid, roots)
+        if pack_dir is None:
+            skipped[tid] = "no_full_harbor_tree_in_restore_roots"
+            continue
+        archive = _archive_pack_row(tid, roots)
+        pack_row = dict(archive["pack_row"]) if archive and archive.get("pack_row") else None
+        if pack_row is None:
+            # Infer dual-truth from gate_audit under any root
+            pack_row = _infer_pack_row_from_gate_audit(tid, roots)
+        if pack_row is None:
+            skipped[tid] = "missing_dual_truth_manifest_row"
+            continue
+        pack_row.setdefault("task_id", tid)
+        pack_row.setdefault("certified", True)
+        disp = decide_pack(
+            tid,
+            pack_dir=pack_dir,
+            pack_row=pack_row,
+            panel_row={"verdict": "drop", "rule": "solve-all", "frontier_pass_at_k": 1.0},
+            force_drop=None,
+            min_f2p_nodes=min_f2p_nodes,
+            apply_intrinsic=apply_intrinsic,
+        )
+        dispositions.append(disp.to_dict())
+        if not disp.keep:
+            skipped[tid] = f"re_eval_drop:{disp.reason_code}"
+            continue
+        recovered.append(tid)
+        pack_rows_to_merge[tid] = dict(pack_row)
+        if archive and archive.get("identity"):
+            identity_to_merge[tid] = dict(archive["identity"])  # type: ignore[arg-type]
+        if not dry_run:
+            dest_path.mkdir(parents=True, exist_ok=True)
+            tasks_out = dest_path / "tasks"
+            tasks_out.mkdir(parents=True, exist_ok=True)
+            target = tasks_out / tid
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(pack_dir, target)
+            missing = verify_pack_tree(target)
+            if missing:
+                shutil.rmtree(target, ignore_errors=True)
+                recovered.remove(tid)
+                pack_rows_to_merge.pop(tid, None)
+                skipped[tid] = f"copy_invalid:{missing}"
+                continue
+
+    if not dry_run and recovered:
+        _merge_manifest_rows(
+            dest_path,
+            pack_rows=pack_rows_to_merge,
+            identity_rows=identity_to_merge,
+        )
+
+    return {
+        "ok": True,
+        "dest": str(dest),
+        "recovered_ids": sorted(recovered),
+        "skipped": skipped,
+        "candidate_ids": candidates,
+        "dispositions": dispositions,
+        "restore_roots": [str(r) for r in roots],
+        "policy": "m25b_restore_solve_all_only",
+        "assertions": ["VAL-DINTR-003"],
+        "dry_run": bool(dry_run),
+        "n_recovered": len(recovered),
+    }
+
+
+def _infer_pack_row_from_gate_audit(
+    task_id: str,
+    restore_roots: Sequence[Path | str],
+) -> dict[str, Any] | None:
+    """Build a dual-truth pack_row from gate_audit.jsonl fields when marketing."""
+    for root in restore_roots:
+        for rel in (
+            Path("gate_audit.jsonl"),
+            Path("evidence/docker/gate_audit.jsonl"),
+        ):
+            path = Path(root) / rel
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                line = line.strip()
+                if not line or task_id not in line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(row, dict):
+                    continue
+                tid = row.get("task_id") or (row.get("fields") or {}).get("task_id")
+                if str(tid) != task_id:
+                    continue
+                fields = row.get("fields") if isinstance(row.get("fields"), dict) else {}
+                sol = fields.get("solution_reward", row.get("solution_reward"))
+                null = fields.get("null_reward", row.get("null_reward"))
+                if sol is None and null is None:
+                    continue
+                return {
+                    "task_id": task_id,
+                    "certified": True,
+                    "solution_reward": sol if sol is not None else 1,
+                    "null_reward": null if null is not None else 0,
+                    "source_hunk_count": fields.get("source_hunk_count"),
+                    "source_track": fields.get("source_track") or "real_pr",
+                    "language": fields.get("language") or "python",
+                    "backend": fields.get("backend_class") or "HarborDockerVerifier",
+                    "label_method": fields.get("label_method")
+                    or "real_pr_dual_run_base_vs_gold",
+                    "live_mine": bool(fields.get("live_mine", True)),
+                    "f2p_count": fields.get("f2p_count"),
+                }
+    return None
+
+
+def _merge_manifest_rows(
+    dest: Path,
+    *,
+    pack_rows: Mapping[str, Mapping[str, Any]],
+    identity_rows: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Merge recovered dual-truth pack rows into dest pack_manifest.json."""
+    man_path = dest / "pack_manifest.json"
+    if man_path.is_file():
+        try:
+            man = _load_json(man_path)
+        except (OSError, json.JSONDecodeError):
+            man = {"packs": [], "identity": {}}
+    else:
+        man = {"packs": [], "identity": {}}
+    if not isinstance(man, dict):
+        man = {"packs": [], "identity": {}}
+    packs_list = man.get("packs") if isinstance(man.get("packs"), list) else []
+    by_id: dict[str, dict[str, Any]] = {}
+    for p in packs_list:
+        if isinstance(p, dict) and p.get("task_id"):
+            by_id[str(p["task_id"])] = dict(p)
+    for tid, row in pack_rows.items():
+        merged = dict(by_id.get(tid) or {})
+        merged.update(dict(row))
+        merged["task_id"] = tid
+        merged.setdefault("certified", True)
+        by_id[tid] = merged
+    man["packs"] = sorted(by_id.values(), key=lambda p: str(p.get("task_id")))
+    man["count"] = len(man["packs"])
+    man["pack_count"] = len(man["packs"])
+    identity = man.get("identity") if isinstance(man.get("identity"), dict) else {}
+    identity = dict(identity)
+    for tid, idn in identity_rows.items():
+        if isinstance(idn, dict) and idn:
+            identity[tid] = dict(idn)
+    man["identity"] = identity
+    man["ok"] = True
+    man["view"] = man.get("view") or "prod_hard_keep_restored"
+    man["restored_solve_all_only"] = sorted(pack_rows.keys())
+    _write_json(man_path, man)
+
+
 def decide_pack(
     task_id: str,
     *,
@@ -560,6 +1014,9 @@ def curate_dispositions(
     unless *drop_on_solve_all* is True (legacy M24 replay only). Structural
     thin-F2P may still feed force_drop. Hardness product also applies intrinsic
     prompt+gold scoring inside :func:`decide_pack`.
+
+    Scoreboard rows also annotate ``panel_row`` so dual solve-all keeps surface as
+    ``keep_despite_model_solve_all`` rather than bare ``keep_hard_dual_truth``.
     """
     src_path = Path(src)
     task_ids = list_pack_task_ids(src_path)
@@ -572,12 +1029,12 @@ def curate_dispositions(
         panel_blob = _load_json(panel_report) if panel_report.is_file() else None
     else:
         panel_blob = panel_report
-    # Scoreboard path may stand in for panel report when report.json not given.
-    if panel_blob is None and scoreboard is not None and panel_report is None:
-        # Scoreboard-only path: easy_detect labels only (M25); panel verdict
-        # lookup remains empty unless report is supplied.
-        pass
     panel_idx = _panel_lookup(panel_blob)
+    # Scoreboard annotate fill gaps (FULL panel report preferred when present).
+    if scoreboard is not None:
+        for pid, row in _scoreboard_panel_lookup(scoreboard).items():
+            if pid not in panel_idx or not panel_idx[pid].get("rule"):
+                panel_idx[pid] = row
 
     auto_drop: dict[str, dict[str, str]] = {}
     if scoreboard is not None:
@@ -912,7 +1369,8 @@ def _render_report(
             "",
             "- VAL-DHARD-004 curated production N to HF test",
             "- VAL-DHARD-002 / VAL-DHARD-003 floors + anti-easy",
-            "- VAL-DINTR-001 / VAL-DINTR-002 / VAL-DINTR-005 intrinsic policy",
+            "- VAL-DINTR-001 / VAL-DINTR-002 / VAL-DINTR-003 / VAL-DINTR-005 "
+            "intrinsic policy (restore solve-all-only drops)",
             "",
         ]
     )
@@ -944,6 +1402,9 @@ def materialize_prod_hard_keep(
     include_explicit_drops: bool = True,
     drop_on_solve_all: bool = False,
     apply_intrinsic: bool = True,
+    restore_solve_all: bool = True,
+    restore_roots: Sequence[Path | str] | None = None,
+    restore_task_ids: Sequence[str] | None = None,
 ) -> CurationResult:
     """Curate *src* into *out* with drop_reasons + dual-truth keeps only.
 
@@ -951,6 +1412,11 @@ def materialize_prod_hard_keep(
     (M24). M25: those labels do **not** force-drop hardness product by default;
     drops are misalign + hardness floors + high-confidence intrinsic
     EASY_REQUEST.
+
+    M25b (*restore_solve_all*, default True): before scoring, re-admit packs
+    previously dropped only for model solve-all when dual-truth + alignment +
+    floors + intrinsic non-easy still hold (VAL-DINTR-003). Recovery sources
+    default to product archives under :data:`DEFAULT_RESTORE_ROOTS`.
 
     Raises ``ProdHardCurationError`` if residual keep count < *min_keep*
     (caller must re-mine with new floors — never fixture pad).
@@ -963,6 +1429,62 @@ def materialize_prod_hard_keep(
     out_path = Path(out).resolve()
     if not src_path.is_dir():
         raise ProdHardCurationError(f"src missing: {src_path}")
+
+    restore_meta: dict[str, Any] = {}
+    # Preserve prior M25b restore ledger so re-curate of an already-restored
+    # corpus still documents which packs returned after model-solve-all drops.
+    prior_restored: list[str] = []
+    for rel in ("drop_reasons.json", "curation_report.json", "pack_manifest.json"):
+        prev_path = src_path / rel
+        if not prev_path.is_file():
+            continue
+        try:
+            prev_blob = _load_json(prev_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(prev_blob, dict):
+            raw_prev = prev_blob.get("restored_solve_all_only") or prev_blob.get(
+                "restored_solve_all_only_ids"
+            )
+            if isinstance(raw_prev, list):
+                prior_restored = [str(x) for x in raw_prev if x]
+                if prior_restored:
+                    break
+    if restore_solve_all:
+        # Source drop_reasons from pack root (post-M24 wipe left them empty of
+        # keep trees but still documented the three werkzeug-class solves).
+        drop_blob: Path | Mapping[str, Any] | None = None
+        for rel in ("drop_reasons.json", "pack_manifest.json", "curation_report.json"):
+            p = src_path / rel
+            if p.is_file():
+                drop_blob = p
+                break
+        restore_meta = recover_solve_all_only_drops(
+            src_path,
+            drop_reasons=drop_blob,
+            restore_roots=restore_roots,
+            task_ids=restore_task_ids,
+            min_f2p_nodes=min_f2p_nodes,
+            apply_intrinsic=apply_intrinsic,
+            dry_run=False,
+        )
+    # Union: newly recovered + prior ledger that still exists under tasks/
+    tasks_now = src_path / "tasks"
+    present = {
+        p.name
+        for p in tasks_now.iterdir()
+        if tasks_now.is_dir() and p.is_dir() and not p.name.startswith(".")
+    }
+    union_restored = sorted(
+        set(list(restore_meta.get("recovered_ids") or []) + prior_restored) & present
+        if present
+        else set(list(restore_meta.get("recovered_ids") or []) + prior_restored)
+    )
+    restore_meta = dict(restore_meta or {})
+    restore_meta["recovered_ids"] = union_restored
+    restore_meta["prior_restored_ids"] = list(prior_restored)
+    if "skipped" not in restore_meta:
+        restore_meta["skipped"] = {}
 
     dispositions = curate_dispositions(
         src_path,
@@ -1052,8 +1574,10 @@ def materialize_prod_hard_keep(
         _write_json(write_root / "pack_manifest.json", filtered)
 
         # Corpus metadata
-        deasy_assertions = [
+        dintr_assertions = [
             "VAL-DHARD-004",
+            "VAL-DINTR-001",
+            "VAL-DINTR-003",
             "VAL-DEASY-002",
             "VAL-DEASY-003",
         ]
@@ -1068,7 +1592,9 @@ def materialize_prod_hard_keep(
                 "keep_ids": list(keep_ids),
                 "drop_ids": list(drop_ids),
                 "drop_reasons": drop_reasons,
-                "assertions": deasy_assertions,
+                "restored_solve_all_only": list(restore_meta.get("recovered_ids") or []),
+                "restore_skipped": dict(restore_meta.get("skipped") or {}),
+                "assertions": dintr_assertions,
                 "generated_at": _utc_now_iso(),
             },
         )
@@ -1086,10 +1612,14 @@ def materialize_prod_hard_keep(
                 "drop_ids": list(drop_ids),
                 "drop_reasons": drop_reasons,
                 "dispositions": [d.to_dict() for d in dispositions],
+                "restored_solve_all_only": list(restore_meta.get("recovered_ids") or []),
+                "restore_skipped": dict(restore_meta.get("skipped") or {}),
                 "assertions": [
                     "VAL-DHARD-002",
                     "VAL-DHARD-003",
                     "VAL-DHARD-004",
+                    "VAL-DINTR-001",
+                    "VAL-DINTR-003",
                     "VAL-DEASY-002",
                     "VAL-DEASY-003",
                 ],
@@ -1215,6 +1745,9 @@ def materialize_prod_hard_keep(
                 ).keys()
             ),
             "nominal_keep_candidates": sorted(NOMINAL_KEEP_CANDIDATES),
+            "restored_solve_all_only": list(restore_meta.get("recovered_ids") or []),
+            "restore_skipped": dict(restore_meta.get("skipped") or {}),
+            "restore_solve_all": bool(restore_solve_all),
         },
     )
 
@@ -1231,6 +1764,9 @@ def curate_hardness_from_scoreboard(
     include_explicit_drops: bool = False,
     drop_on_solve_all: bool = False,
     apply_intrinsic: bool = True,
+    restore_solve_all: bool = True,
+    restore_roots: Sequence[Path | str] | None = None,
+    restore_task_ids: Sequence[str] | None = None,
 ) -> CurationResult:
     """CLI-facing hardness curate (M25: intrinsic + floors, not model solve-all).
 
@@ -1239,6 +1775,10 @@ def curate_hardness_from_scoreboard(
     to 0 for post-eval curate of an already-certified hardness set.
     Intrinsic EASY_REQUEST (high confidence) + structural floors + misalign
     remain the hardness drop gates.
+
+    M25b: *restore_solve_all* (default True) re-includes packs that were drop-
+    listed solely for model solve-all when dual-truth + floors + alignment +
+    intrinsic non-easy still hold (VAL-DINTR-003).
     """
     return materialize_prod_hard_keep(
         src,
@@ -1251,16 +1791,21 @@ def curate_hardness_from_scoreboard(
         include_explicit_drops=include_explicit_drops,
         drop_on_solve_all=drop_on_solve_all,
         apply_intrinsic=apply_intrinsic,
+        restore_solve_all=restore_solve_all,
+        restore_roots=restore_roots,
+        restore_task_ids=restore_task_ids,
     )
 
 
 __all__ = [
     "CURSOR_SCHEMA",
     "DEFAULT_OUT",
+    "DEFAULT_RESTORE_ROOTS",
     "DEFAULT_SRC",
     "EXPLICIT_DROP",
     "MIN_HARD_KEEP",
     "NOMINAL_KEEP_CANDIDATES",
+    "SOLVE_ALL_ONLY_REASON_CODES",
     "CurationResult",
     "PackDisposition",
     "ProdHardCurationError",
@@ -1271,5 +1816,6 @@ __all__ = [
     "list_pack_task_ids",
     "materialize_prod_hard_keep",
     "merge_force_drops",
+    "recover_solve_all_only_drops",
     "classify_scoreboard",
 ]

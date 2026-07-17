@@ -945,16 +945,44 @@ def curate_hardness_cmd(
             help="Do not rmtree --out before materialize (rare; default cleans)",
         ),
     ] = False,
+    no_restore: Annotated[
+        bool,
+        typer.Option(
+            "--no-restore",
+            help=(
+                "Skip M25b re-admit of packs dropped only for dual-model solve-all "
+                "(default restores from product archives when dual-truth+floors+intrinsic OK)"
+            ),
+        ),
+    ] = False,
+    restore_from: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--restore-from",
+            help=(
+                "Optional product archive root(s) for solve-all-only recovery "
+                "(default: datasets/deepagent_v1 + seed5 archive + live_materials)"
+            ),
+            exists=False,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=False,
+        ),
+    ] = None,
     json_out: Annotated[
         bool,
         typer.Option("--json", help="Emit curation summary as JSON"),
     ] = False,
 ) -> None:
-    """Curate hardness keep set (M25 intrinsic policy / VAL-DINTR-001).
+    """Curate hardness keep set (M25 intrinsic policy / VAL-DINTR-001 + M25b restore).
 
     Drops only on misalign, hardness floors (thin F2P etc.), and high-confidence
     intrinsic EASY_REQUEST from prompt+gold. Dual-model pass@1=1.0 is labeled
     EASY_SOLVE_ALL for scoreboard notes but does **not** auto-drop hardness.
+
+    M25b: re-admits packs previously dropped only for model solve-all when they
+    still pass dual-truth + alignment + floors + intrinsic non-easy
+    (VAL-DINTR-003), then re-uploads stay on the caller (VAL-DINTR-004).
 
     Example::
 
@@ -998,6 +1026,8 @@ def curate_hardness_cmd(
             include_explicit_drops=include_explicit,
             drop_on_solve_all=False,
             apply_intrinsic=True,
+            restore_solve_all=not no_restore,
+            restore_roots=list(restore_from) if restore_from else None,
         )
     except ProdHardCurationError as exc:
         typer.secho(f"curate-hardness fail-closed: {exc}", fg=typer.colors.RED, err=True)
@@ -1012,11 +1042,15 @@ def curate_hardness_cmd(
         "keep_ids": list(result.keep_ids),
         "drop_ids": list(result.drop_ids),
         "drop_reasons": result.drop_reasons,
+        "restored_solve_all_only": list(
+            (result.meta or {}).get("restored_solve_all_only") or []
+        ),
         "easy_detect": easy.to_dict(),
         "policy": "m25_intrinsic_hardness",
         "assertions": [
             "VAL-DINTR-001",
             "VAL-DINTR-002",
+            "VAL-DINTR-003",
             "VAL-DINTR-005",
             "VAL-DEASY-002",
             "VAL-DEASY-005",

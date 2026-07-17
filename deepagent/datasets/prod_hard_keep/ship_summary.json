@@ -1,50 +1,12 @@
 {
   "archive_note": "Hybrid archive action=`already_archived` → `datasets/deepagent_v1_hybrid_archive` (archive_pack_count=113); ok=True; historical only, never product N. reason=Idempotent no-op: archive already contains hybrid pack evidence (N=113). Product not claimed as current certified real_pr corpus by this archive step.",
   "budget_stop": false,
-  "certified_count": 7,
-  "count": 7,
-  "curated_at": "2026-07-17T10:48:54.381973+00:00",
+  "certified_count": 10,
+  "count": 10,
+  "curated_at": "2026-07-17T13:04:24.832585+00:00",
   "curated_hardness": true,
-  "drop_ids": [
-    "realpr-werkzeug-2979",
-    "realpr-werkzeug-3006",
-    "realpr-werkzeug-3101"
-  ],
-  "drop_reasons": {
-    "realpr-werkzeug-2979": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "dual_truth_ok": true,
-      "f2p_count": 9,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    },
-    "realpr-werkzeug-3006": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "dual_truth_ok": true,
-      "f2p_count": 6,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    },
-    "realpr-werkzeug-3101": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "dual_truth_ok": true,
-      "f2p_count": 4,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    }
-  },
+  "drop_ids": [],
+  "drop_reasons": {},
   "e2e_drip_path": "datasets/prod_hard_keep/e2e_drip.jsonl",
   "easy_scoreboard": "datasets/panel_prod_hard_bench10_n5/scoreboard.json",
   "fixture_note": "Historical / engineering only (not Real-PR product N): datasets/deepagent_v1_hybrid_archive (hybrid_curated motors), datasets/harbor_v1 (synth motors), datasets/v1 (boltons), fixtures/real_pr_ship (unit shortlist). Product N uses live-mined real_pr materials under datasets/deepagent_v1 only.",
@@ -439,10 +401,13 @@
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
     "realpr-qs-487",
-    "realpr-qs-488"
+    "realpr-qs-488",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
   ],
   "languages": {
-    "python": 7
+    "python": 10
   },
   "ledger_summary_path": "datasets/prod_hard_keep/ledger_summary.json",
   "live_generate_dest": true,
@@ -456,7 +421,7 @@
   "ok": true,
   "oracle_evidence_path": "datasets/prod_hard_keep/oracle_evidence.json",
   "out_dir": "datasets/prod_hard_keep",
-  "pack_count": 7,
+  "pack_count": 10,
   "pack_manifest_path": "datasets/prod_hard_keep/pack_manifest.json",
   "panel_mode": "offline",
   "pier_evidence_path": "datasets/prod_hard_keep/pier_evidence.json",

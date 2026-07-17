@@ -1,51 +1,15 @@
 {
   "assertions": [
     "VAL-DHARD-004",
+    "VAL-DINTR-001",
+    "VAL-DINTR-003",
     "VAL-DEASY-002",
     "VAL-DEASY-003"
   ],
-  "drop_ids": [
-    "realpr-werkzeug-2979",
-    "realpr-werkzeug-3006",
-    "realpr-werkzeug-3101"
-  ],
-  "drop_reasons": {
-    "realpr-werkzeug-2979": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "dual_truth_ok": true,
-      "f2p_count": 9,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    },
-    "realpr-werkzeug-3006": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "dual_truth_ok": true,
-      "f2p_count": 6,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    },
-    "realpr-werkzeug-3101": {
-      "alignment_ok": true,
-      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
-      "dual_truth_ok": true,
-      "f2p_count": 4,
-      "frontier_pass_at_k": null,
-      "hardness_ok": true,
-      "panel_rule": null,
-      "panel_verdict": null,
-      "reason_code": "solve_all_easy_policy_drop"
-    }
-  },
-  "dropped_count": 3,
-  "generated_at": "2026-07-17T10:48:54.375371+00:00",
+  "drop_ids": [],
+  "drop_reasons": {},
+  "dropped_count": 0,
+  "generated_at": "2026-07-17T13:04:24.823549+00:00",
   "keep_ids": [
     "realpr-attrs-1323",
     "realpr-attrs-1457",
@@ -53,9 +17,18 @@
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
     "realpr-qs-487",
-    "realpr-qs-488"
+    "realpr-qs-488",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
   ],
   "out": "datasets/prod_hard_keep",
+  "restore_skipped": {},
+  "restored_solve_all_only": [
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
+  ],
   "schema": "deepagent.prod_hard_curation.v1",
   "scoreboard": "datasets/panel_prod_hard_bench10_n5/scoreboard.json",
   "source": "datasets/prod_hard_keep"

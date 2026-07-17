@@ -17,6 +17,7 @@ from swe_factory.pipeline.curate_prod_hard import (
     curate_hardness_from_scoreboard,
     decide_pack,
     materialize_prod_hard_keep,
+    recover_solve_all_only_drops,
 )
 
 
@@ -560,6 +561,7 @@ def test_materialize_in_place_keeps_model_solve_all_when_hard(tmp_path: Path) ->
         min_keep=0,
         include_explicit_drops=False,
         clean_out=True,
+        restore_solve_all=False,
     )
     assert result.ok
     # M25: solve-all-x stays (dual-truth + floors + not intrinsic easy).
@@ -571,3 +573,261 @@ def test_materialize_in_place_keeps_model_solve_all_when_hard(tmp_path: Path) ->
     assert (src / "curation_report.json").is_file()
     assert result.pack_count >= 5
     assert "realpr-itemadapter-101" in result.keep_ids
+
+
+def _hard_instruction() -> str:
+    return _aligned_instruction()
+
+
+def _easy_instruction_tiny() -> str:
+    return "Fix the typo in the docs title.\n"
+
+
+def test_recover_solve_all_only_drops_restores_hard_not_intrinsic_easy(
+    tmp_path: Path,
+) -> None:
+    """VAL-DINTR-003: re-admit solve-all-only drops that still pass gates."""
+    archive = tmp_path / "archive"
+    dest = tmp_path / "prod"
+    hard_id = "realpr-archive-hard-1"
+    easy_id = "realpr-archive-easy-1"
+    _write_minimal_pack(
+        archive,
+        hard_id,
+        instruction=_hard_instruction(),
+        f2p=["a", "b", "c", "d", "e"],
+        solution_diff=_multi_file_gold()
+        + (
+            "diff --git a/pkg/c.py b/pkg/c.py\n"
+            "--- a/pkg/c.py\n+++ b/pkg/c.py\n"
+            "@@ -1,3 +1,8 @@\n keep\n-old\n+new1\n+new2\n+new3\n+new4\n+new5\n"
+            "@@ -10,2 +15,4 @@\n base\n-old2\n+n1\n+n2\n+n3\n"
+            "diff --git a/pkg/d.py b/pkg/d.py\n"
+            "--- a/pkg/d.py\n+++ b/pkg/d.py\n"
+            "@@ -1,2 +1,5 @@\n a\n-b\n+c\n+d\n+e\n"
+            "@@ -5,2 +8,4 @@\n x\n-y\n+z1\n+z2\n+z3\n"
+        ),
+        test_patch=_behavioral_test_patch(),
+    )
+    _write_minimal_pack(
+        archive,
+        easy_id,
+        instruction=_easy_instruction_tiny(),
+        f2p=["only1", "only2", "only3"],
+        solution_diff=(
+            "diff --git a/pkg/a.py b/pkg/a.py\n"
+            "--- a/pkg/a.py\n+++ b/pkg/a.py\n"
+            "@@ -1,1 +1,2 @@\n"
+            " x=1\n+y=2\n"
+        ),
+        test_patch=_behavioral_test_patch(),
+    )
+    (archive / "pack_manifest.json").write_text(
+        json.dumps(
+            {
+                "packs": [
+                    {
+                        "task_id": hard_id,
+                        "certified": True,
+                        "solution_reward": 1,
+                        "null_reward": 0,
+                        "source_hunk_count": 18,
+                        "source_track": "real_pr",
+                        "language": "python",
+                        "backend": "docker",
+                        "label_method": "real_pr_dual_run_base_vs_gold",
+                    },
+                    {
+                        "task_id": easy_id,
+                        "certified": True,
+                        "solution_reward": 1,
+                        "null_reward": 0,
+                        "source_hunk_count": 11,
+                        "source_track": "real_pr",
+                        "language": "python",
+                        "backend": "docker",
+                        "label_method": "real_pr_dual_run_base_vs_gold",
+                    },
+                ],
+                "identity": {
+                    hard_id: {
+                        "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "language": "python",
+                        "license": "MIT",
+                        "repository_url": "https://github.com/example/x.git",
+                        "seed_id": "pr:1",
+                        "source_track": "real_pr",
+                    },
+                    easy_id: {
+                        "base_commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "language": "python",
+                        "license": "MIT",
+                        "repository_url": "https://github.com/example/x.git",
+                        "seed_id": "pr:2",
+                        "source_track": "real_pr",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    keep_id = "realpr-keep-train-1"
+    _write_minimal_pack(
+        dest,
+        keep_id,
+        instruction=_hard_instruction(),
+        f2p=["k1", "k2", "k3", "k4"],
+        solution_diff=_multi_file_gold(),
+        test_patch=_behavioral_test_patch(),
+    )
+    man_packs = [
+        {
+            "task_id": keep_id,
+            "certified": True,
+            "solution_reward": 1,
+            "null_reward": 0,
+            "source_hunk_count": 15,
+            "source_track": "real_pr",
+        }
+    ]
+    for extra in ("realpr-extra-a", "realpr-extra-b", "realpr-extra-c", "realpr-extra-d"):
+        _write_minimal_pack(
+            dest,
+            extra,
+            instruction=_hard_instruction(),
+            f2p=["e1", "e2", "e3", "e4"],
+            solution_diff=_multi_file_gold(),
+            test_patch=_behavioral_test_patch(),
+        )
+        man_packs.append(
+            {
+                "task_id": extra,
+                "certified": True,
+                "solution_reward": 1,
+                "null_reward": 0,
+                "source_hunk_count": 14,
+                "source_track": "real_pr",
+            }
+        )
+    (dest / "pack_manifest.json").write_text(
+        json.dumps(
+            {
+                "packs": man_packs,
+                "identity": {},
+                "drop_reasons": {
+                    hard_id: {
+                        "reason_code": "solve_all_easy_policy_drop",
+                        "detail": "EASY_SOLVE_ALL: both models pass@1=1.0",
+                    },
+                    easy_id: {
+                        "reason_code": "solve_all_easy_policy_drop",
+                        "detail": "EASY_SOLVE_ALL: both models pass@1=1.0",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (dest / "drop_reasons.json").write_text(
+        json.dumps(
+            {
+                "drop_reasons": {
+                    hard_id: {
+                        "reason_code": "solve_all_easy_policy_drop",
+                        "detail": "EASY_SOLVE_ALL: both models pass@1=1.0",
+                    },
+                    easy_id: {
+                        "reason_code": "solve_all_easy_policy_drop",
+                        "detail": "EASY_SOLVE_ALL: both models pass@1=1.0",
+                    },
+                },
+                "drop_ids": [hard_id, easy_id],
+                "keep_ids": [keep_id],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    recovered = recover_solve_all_only_drops(
+        dest,
+        restore_roots=[archive],
+        apply_intrinsic=True,
+    )
+    assert hard_id in recovered["recovered_ids"]
+    assert easy_id not in recovered["recovered_ids"]
+    assert (dest / "tasks" / hard_id / "solution" / "solution.patch").is_file()
+    assert easy_id in recovered["skipped"]
+    assert "re_eval_drop" in recovered["skipped"][easy_id]
+
+    scoreboard = {
+        "models": ["x-ai/grok-4.5", "moonshotai/kimi-k2.6"],
+        "per_pack": [
+            {
+                "pack_id": keep_id,
+                "grok-4.5": 0.0,
+                "kimi-k2.6": 0.0,
+                "frontier": 0.0,
+            },
+            {
+                "pack_id": hard_id,
+                "grok-4.5": 1.0,
+                "kimi-k2.6": 1.0,
+                "frontier": 1.0,
+                "decision": "drop",
+            },
+        ],
+    }
+    sb = tmp_path / "sb.json"
+    sb.write_text(json.dumps(scoreboard), encoding="utf-8")
+
+    result = materialize_prod_hard_keep(
+        dest,
+        dest,
+        scoreboard=sb,
+        min_keep=5,
+        include_explicit_drops=False,
+        restore_solve_all=True,
+        restore_roots=[archive],
+        clean_out=True,
+    )
+    assert result.ok
+    assert hard_id in result.keep_ids
+    assert easy_id not in result.keep_ids
+    assert hard_id not in result.drop_ids
+    for code in (d.get("reason_code") for d in result.drop_reasons.values()):
+        assert code != "solve_all_easy_policy_drop"
+    keep_disp = {d.task_id: d for d in result.dispositions if d.keep}
+    assert keep_disp[hard_id].reason_code == "keep_despite_model_solve_all"
+    assert (dest / "tasks" / hard_id / "instruction.md").is_file()
+    drop_blob = json.loads((dest / "drop_reasons.json").read_text(encoding="utf-8"))
+    assert hard_id in (drop_blob.get("restored_solve_all_only") or [])
+    assert hard_id not in (drop_blob.get("drop_ids") or [])
+
+
+def test_recover_skips_materials_skeleton_not_harbor(tmp_path: Path) -> None:
+    """Materials-only dirs (patch+meta) are not product harbor trees — skip."""
+    materials = tmp_path / "live_materials" / "realpr-skel-1"
+    materials.mkdir(parents=True)
+    (materials / "meta.json").write_text("{}", encoding="utf-8")
+    (materials / "solution.patch").write_text("diff\n", encoding="utf-8")
+    dest = tmp_path / "prod"
+    dest.mkdir()
+    (dest / "drop_reasons.json").write_text(
+        json.dumps(
+            {
+                "drop_reasons": {
+                    "realpr-skel-1": {
+                        "reason_code": "solve_all_easy_policy_drop",
+                        "detail": "was solve-all",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = recover_solve_all_only_drops(
+        dest, restore_roots=[tmp_path / "live_materials"]
+    )
+    assert out["recovered_ids"] == []
+    assert "realpr-skel-1" in out["skipped"]
