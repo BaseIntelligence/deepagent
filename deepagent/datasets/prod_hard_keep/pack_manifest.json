@@ -6,69 +6,49 @@
     "VAL-DHARD-003"
   ],
   "band": {
-    "max": 5,
+    "max": 7,
     "min": 5,
-    "target": 5
+    "target": 7
   },
   "budget_stop": false,
-  "count": 5,
-  "curated_at": "2026-07-16T21:29:36.485581+00:00",
+  "count": 7,
+  "curated_at": "2026-07-17T10:48:54.374452+00:00",
   "curated_hardness": true,
   "curation_schema": "deepagent.prod_hard_curation.v1",
-  "curation_source": "datasets/test_n10",
+  "curation_source": "datasets/prod_hard_keep",
   "drop_reasons": {
-    "realpr-charset-normalizer-715": {
+    "realpr-werkzeug-2979": {
       "alignment_ok": true,
-      "detail": "Solve-all / easy class: frontier panel pass@k=1.0 (both models resolved) and thin F2P=1 below MIN_F2P_NODES floor.",
-      "f2p_count": 1,
-      "frontier_pass_at_k": 1.0,
-      "hardness_ok": false,
-      "panel_rule": "solve-all",
-      "panel_verdict": "drop",
+      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
+      "f2p_count": 9,
+      "frontier_pass_at_k": null,
+      "hardness_ok": true,
+      "panel_rule": null,
+      "panel_verdict": null,
       "reason_code": "solve_all_easy_policy_drop"
     },
-    "realpr-more-itertools-1136": {
-      "alignment_ok": false,
-      "detail": "Prompt\u2013verifier misalignment: instruction claims version/export-only and do-not-change-runtime while F2P/gold assert runtime behaviour (windowed/unique_everseen class).",
-      "f2p_count": 4,
-      "frontier_pass_at_k": 0.0,
+    "realpr-werkzeug-3006": {
+      "alignment_ok": true,
+      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
+      "f2p_count": 6,
+      "frontier_pass_at_k": null,
       "hardness_ok": true,
-      "panel_rule": "solve-none",
-      "panel_verdict": "drop",
-      "reason_code": "prompt_verifier_misalign"
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "solve_all_easy_policy_drop"
     },
-    "realpr-more-itertools-943": {
-      "alignment_ok": false,
-      "detail": "instruction claims do-not-change-runtime while test.patch/gold exercises runtime behavioural asserts (classes=['error_contract'])",
-      "f2p_count": 1,
-      "frontier_pass_at_k": 0.5,
-      "hardness_ok": false,
-      "panel_rule": "in-band-high-discrimination",
-      "panel_verdict": "keep",
-      "reason_code": "prompt_no_runtime_claim_vs_runtime_f2p"
-    },
-    "realpr-rich-3486": {
+    "realpr-werkzeug-3101": {
       "alignment_ok": true,
-      "detail": "f2p_count=1 < MIN_F2P_NODES=3 (thin F2P refused on product hardness path); thin F2P\u22481 classified as easy; anti-easy policy drop",
-      "f2p_count": 1,
-      "frontier_pass_at_k": 0.5,
-      "hardness_ok": false,
-      "panel_rule": "in-band-high-discrimination",
-      "panel_verdict": "keep",
-      "reason_code": "f2p_nodes_below_floor"
-    },
-    "realpr-rich-4070": {
-      "alignment_ok": true,
-      "detail": "Solve-all / easy class: frontier panel pass@k=1.0 (both models resolved) and thin F2P=1 below MIN_F2P_NODES floor.",
-      "f2p_count": 1,
-      "frontier_pass_at_k": 1.0,
-      "hardness_ok": false,
-      "panel_rule": "solve-all",
-      "panel_verdict": "drop",
+      "detail": "EASY_SOLVE_ALL: all 2 panel model(s) pass@1=1.0 (moonshotai/kimi-k2.6=1.0, x-ai/grok-4.5=1.0); frontier=1.0; auto-drop from hardness without name hardcoding (VAL-DEASY-002)",
+      "f2p_count": 4,
+      "frontier_pass_at_k": null,
+      "hardness_ok": true,
+      "panel_rule": null,
+      "panel_verdict": null,
       "reason_code": "solve_all_easy_policy_drop"
     }
   },
-  "dropped_count": 5,
+  "dropped_count": 3,
   "harbor_load_smoke": {
     "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
     "cli_version_exit": 1,
@@ -81,7 +61,9 @@
       "realpr-attrs-1457",
       "realpr-httpx-3672",
       "realpr-itemadapter-101",
-      "realpr-packaging-1120"
+      "realpr-packaging-1120",
+      "realpr-qs-487",
+      "realpr-qs-488"
     ],
     "metadata_language": "python",
     "ok": true,
@@ -152,15 +134,33 @@
       "seed_id": "pr:1120",
       "source_track": "real_pr",
       "upstream_label": "https://github.com/pypa/packaging.git"
+    },
+    "realpr-qs-487": {
+      "base_commit": "04f422fe91985103d2fdca0280ee362ecf5e43f2",
+      "language": "javascript",
+      "license": "BSD-3-Clause",
+      "repository_url": "https://github.com/ljharb/qs.git",
+      "seed_id": "pr:487",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/ljharb/qs.git"
+    },
+    "realpr-qs-488": {
+      "base_commit": "5f0449fff1d9fb236d297cd0d3650b42d2d93b8a",
+      "language": "javascript",
+      "license": "BSD-3-Clause",
+      "repository_url": "https://github.com/ljharb/qs.git",
+      "seed_id": "pr:488",
+      "source_track": "real_pr",
+      "upstream_label": "https://github.com/ljharb/qs.git"
     }
   },
   "keep_dispositions": {
     "realpr-attrs-1323": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
       "dual_truth_ok": true,
       "f2p_count": 4,
-      "frontier_pass_at_k": 0.5,
+      "frontier_pass_at_k": null,
       "hardness_ok": true,
       "keep": true,
       "meta": {
@@ -180,19 +180,19 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": "in-band-high-discrimination",
-      "panel_verdict": "keep",
-      "reason_code": "keep_hard_panel_band",
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
       "solution_reward": 1,
       "source_hunk_count": 14,
       "task_id": "realpr-attrs-1323"
     },
     "realpr-attrs-1457": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
       "dual_truth_ok": true,
       "f2p_count": 14,
-      "frontier_pass_at_k": 0.0,
+      "frontier_pass_at_k": null,
       "hardness_ok": true,
       "keep": true,
       "meta": {
@@ -212,19 +212,19 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": "solve-none",
-      "panel_verdict": "drop",
-      "reason_code": "keep_legit_hard_solve_none",
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
       "solution_reward": 1,
       "source_hunk_count": 21,
       "task_id": "realpr-attrs-1457"
     },
     "realpr-httpx-3672": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
       "dual_truth_ok": true,
       "f2p_count": 5,
-      "frontier_pass_at_k": 0.5,
+      "frontier_pass_at_k": null,
       "hardness_ok": true,
       "keep": true,
       "meta": {
@@ -244,19 +244,19 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": "in-band-high-discrimination",
-      "panel_verdict": "keep",
-      "reason_code": "keep_hard_panel_band",
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
       "solution_reward": 1,
       "source_hunk_count": 18,
       "task_id": "realpr-httpx-3672"
     },
     "realpr-itemadapter-101": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
       "dual_truth_ok": true,
       "f2p_count": 43,
-      "frontier_pass_at_k": 0.5,
+      "frontier_pass_at_k": null,
       "hardness_ok": true,
       "keep": true,
       "meta": {
@@ -276,19 +276,19 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": "in-band-high-discrimination",
-      "panel_verdict": "keep",
-      "reason_code": "keep_hard_panel_band",
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
       "solution_reward": 1,
       "source_hunk_count": 15,
       "task_id": "realpr-itemadapter-101"
     },
     "realpr-packaging-1120": {
       "alignment_ok": true,
-      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel solve-none retained: complex multi-file dual-truth pack; model scoreout \u2260 dataset drop (M21 policy).",
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
       "dual_truth_ok": true,
       "f2p_count": 9,
-      "frontier_pass_at_k": 0.0,
+      "frontier_pass_at_k": null,
       "hardness_ok": true,
       "keep": true,
       "meta": {
@@ -308,22 +308,87 @@
         ]
       },
       "null_reward": 0,
-      "panel_rule": "solve-none",
-      "panel_verdict": "drop",
-      "reason_code": "keep_legit_hard_solve_none",
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
       "solution_reward": 1,
       "source_hunk_count": 24,
       "task_id": "realpr-packaging-1120"
+    },
+    "realpr-qs-487": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "dual_truth_ok": true,
+      "f2p_count": 3,
+      "frontier_pass_at_k": null,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": false,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
+      "solution_reward": 1,
+      "source_hunk_count": 11,
+      "task_id": "realpr-qs-487"
+    },
+    "realpr-qs-488": {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt\u2013verifier aligned, hardness floors ok (F2P\u22653, multi-file/hunk floors). Panel=None/None.",
+      "dual_truth_ok": true,
+      "f2p_count": 7,
+      "frontier_pass_at_k": null,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "nominal_keep_candidate": false,
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": null,
+      "panel_verdict": null,
+      "reason_code": "keep_hard_dual_truth",
+      "solution_reward": 1,
+      "source_hunk_count": 12,
+      "task_id": "realpr-qs-488"
     }
   },
   "languages": {
-    "python": 10
+    "javascript": 2,
+    "python": 8
   },
   "layout": "tasks/<task_id>/{task.toml,environment/,tests/,solution/}",
   "live_generate_dest": false,
   "live_mine": true,
   "materials_is_fixture": false,
-  "materials_root": "datasets/live_materials",
+  "materials_root": "datasets/live_materials_m22",
   "mode": "curate_prod_hard_keep",
   "multi_file": {
     "realpr-attrs-1323": [
@@ -334,19 +399,6 @@
     "realpr-attrs-1457": [
       "src/attr/_make.py",
       "src/attr/_next_gen.py"
-    ],
-    "realpr-charset-normalizer-715": [
-      "_mypyc_hook/backend.py",
-      "noxfile.py",
-      "src/charset_normalizer/api.py",
-      "src/charset_normalizer/cd.py",
-      "src/charset_normalizer/cli/__main__.py",
-      "src/charset_normalizer/constant.py",
-      "src/charset_normalizer/legacy.py",
-      "src/charset_normalizer/md.py",
-      "src/charset_normalizer/models.py",
-      "src/charset_normalizer/utils.py",
-      "src/charset_normalizer/version.py"
     ],
     "realpr-httpx-3672": [
       "src/ahttpx/_parsers.py",
@@ -363,36 +415,33 @@
       "itemadapter/adapter.py",
       "itemadapter/utils.py"
     ],
-    "realpr-more-itertools-1136": [
-      "more_itertools/__init__.py",
-      "more_itertools/more.py",
-      "more_itertools/recipes.py"
-    ],
-    "realpr-more-itertools-943": [
-      "docs/conf.py",
-      "more_itertools/more.py",
-      "more_itertools/recipes.py"
-    ],
     "realpr-packaging-1120": [
       "benchmarks/specifiers.py",
       "src/packaging/_ranges.py",
       "src/packaging/specifiers.py"
     ],
-    "realpr-rich-3486": [
-      "rich/default_styles.py",
-      "rich/syntax.py",
-      "rich/traceback.py"
+    "realpr-qs-487": [
+      "lib/parse.js",
+      "lib/stringify.js"
     ],
-    "realpr-rich-4070": [
-      "rich/_emoji_replace.py",
-      "rich/console.py",
-      "rich/emoji.py",
-      "rich/logging.py",
-      "rich/protocol.py",
-      "rich/repr.py",
-      "rich/segment.py",
-      "rich/syntax.py",
-      "rich/theme.py"
+    "realpr-qs-488": [
+      "lib/parse.js",
+      "lib/stringify.js"
+    ],
+    "realpr-werkzeug-2979": [
+      "src/werkzeug/datastructures/headers.py",
+      "src/werkzeug/datastructures/mixins.py",
+      "src/werkzeug/datastructures/structures.py"
+    ],
+    "realpr-werkzeug-3006": [
+      "src/werkzeug/routing/map.py",
+      "src/werkzeug/routing/rules.py"
+    ],
+    "realpr-werkzeug-3101": [
+      "src/werkzeug/datastructures/file_storage.py",
+      "src/werkzeug/formparser.py",
+      "src/werkzeug/test.py",
+      "src/werkzeug/wrappers/request.py"
     ]
   },
   "offline_only": false,
@@ -400,7 +449,7 @@
   "oracle": {
     "realpr-attrs-1323": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-attrs-1323.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-attrs-1323.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
@@ -408,15 +457,7 @@
     },
     "realpr-attrs-1457": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-attrs-1457.json",
-      "mode": "docker",
-      "null_reward": 0,
-      "oracle_mode": "docker",
-      "solution_reward": 1
-    },
-    "realpr-charset-normalizer-715": {
-      "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-charset-normalizer-715.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-attrs-1457.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
@@ -424,7 +465,7 @@
     },
     "realpr-httpx-3672": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-httpx-3672.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-httpx-3672.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
@@ -432,23 +473,7 @@
     },
     "realpr-itemadapter-101": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-itemadapter-101.json",
-      "mode": "docker",
-      "null_reward": 0,
-      "oracle_mode": "docker",
-      "solution_reward": 1
-    },
-    "realpr-more-itertools-1136": {
-      "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-more-itertools-1136.json",
-      "mode": "docker",
-      "null_reward": 0,
-      "oracle_mode": "docker",
-      "solution_reward": 1
-    },
-    "realpr-more-itertools-943": {
-      "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-more-itertools-943.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-itemadapter-101.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
@@ -456,30 +481,54 @@
     },
     "realpr-packaging-1120": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-packaging-1120.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-packaging-1120.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
       "solution_reward": 1
     },
-    "realpr-rich-3486": {
+    "realpr-qs-487": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-rich-3486.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-qs-487.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
       "solution_reward": 1
     },
-    "realpr-rich-4070": {
+    "realpr-qs-488": {
       "agent_isolated": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/docker/realpr-rich-4070.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-qs-488.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-werkzeug-2979": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-werkzeug-2979.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-werkzeug-3006": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-werkzeug-3006.json",
+      "mode": "docker",
+      "null_reward": 0,
+      "oracle_mode": "docker",
+      "solution_reward": 1
+    },
+    "realpr-werkzeug-3101": {
+      "agent_isolated": true,
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/docker/realpr-werkzeug-3101.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
       "solution_reward": 1
     }
   },
-  "pack_count": 5,
+  "pack_count": 7,
   "packs": [
     {
       "backend": "HarborDockerVerifier",
@@ -489,7 +538,6 @@
       "live_mine": true,
       "materials_is_fixture": false,
       "null_reward": 0,
-      "prompt_style": "deepswe_style_v1",
       "solution_reward": 1,
       "source_hunk_count": 14,
       "source_track": "real_pr",
@@ -503,7 +551,6 @@
       "live_mine": true,
       "materials_is_fixture": false,
       "null_reward": 0,
-      "prompt_style": "deepswe_style_v1",
       "solution_reward": 1,
       "source_hunk_count": 21,
       "source_track": "real_pr",
@@ -517,7 +564,6 @@
       "live_mine": true,
       "materials_is_fixture": false,
       "null_reward": 0,
-      "prompt_style": "deepswe_style_v1",
       "solution_reward": 1,
       "source_hunk_count": 18,
       "source_track": "real_pr",
@@ -531,7 +577,6 @@
       "live_mine": true,
       "materials_is_fixture": false,
       "null_reward": 0,
-      "prompt_style": "deepswe_style_v1",
       "solution_reward": 1,
       "source_hunk_count": 15,
       "source_track": "real_pr",
@@ -545,11 +590,36 @@
       "live_mine": true,
       "materials_is_fixture": false,
       "null_reward": 0,
-      "prompt_style": "deepswe_style_v1",
       "solution_reward": 1,
       "source_hunk_count": 24,
       "source_track": "real_pr",
       "task_id": "realpr-packaging-1120"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "javascript",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "solution_reward": 1,
+      "source_hunk_count": 11,
+      "source_track": "real_pr",
+      "task_id": "realpr-qs-487"
+    },
+    {
+      "backend": "HarborDockerVerifier",
+      "certified": true,
+      "label_method": "real_pr_dual_run_base_vs_gold",
+      "language": "javascript",
+      "live_mine": true,
+      "materials_is_fixture": false,
+      "null_reward": 0,
+      "solution_reward": 1,
+      "source_hunk_count": 12,
+      "source_track": "real_pr",
+      "task_id": "realpr-qs-488"
     }
   ],
   "panel": {
@@ -596,7 +666,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "a625c9b26eab46e898e88b91130d30e7",
+              "physical_call_id": "2a17fb9b0746409c99aa91db2366cb3c",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -611,7 +681,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "dd4390679e9c4013b77676b0179fc8fa",
+              "physical_call_id": "4a3c2042bd3e40609b8bb7c0e50c9250",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -636,7 +706,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "ef0a02d38f2b49a4907e0631704eb360",
+              "physical_call_id": "deccdef9117c401386a55047d60b531e",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -651,7 +721,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "744195a187734fcf99475fd37e59165c",
+              "physical_call_id": "312b5de259fa4ebe897286c8fc885fe7",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -676,7 +746,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-attrs-1323",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-attrs-1323",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-attrs-1323",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -729,7 +799,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "a4fcbcc0e8724dc9943db4e451ef19ac",
+              "physical_call_id": "c61698d2e45444a79ed958889bed6057",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -744,7 +814,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "7199879a6ae743a8aba5fc05d4c0dd12",
+              "physical_call_id": "762480811cd34a48990823303304d9a2",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -769,7 +839,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "f60ecb09627a4deabd3c896b8e94bfee",
+              "physical_call_id": "a2148be72ef5494884b595cb2c0629bc",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -784,7 +854,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "4911cc27f8e84c7e82c1c96d49c02362",
+              "physical_call_id": "7bbb2dc01cca4ee3a8682013c0f9f8c2",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -809,7 +879,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-attrs-1457",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-attrs-1457",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-attrs-1457",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -817,139 +887,6 @@
       "stage": "deepagent-panel-realpr",
       "stop_reason": null,
       "task_id": "realpr-attrs-1457",
-      "total_cost_usd": "0"
-    },
-    "realpr-charset-normalizer-715": {
-      "budget_stop": false,
-      "completed_rollouts": 4,
-      "decision": {
-        "band_high": 0.5,
-        "discrimination": 2.0,
-        "discrimination_floor": 1.0,
-        "frontier_pass_at_k": 0.25,
-        "per_model_pass_at_k": {
-          "moonshotai/kimi-k2.6": 0.5,
-          "x-ai/grok-4.5": 0.0
-        },
-        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
-        "rule": "in-band-high-discrimination",
-        "total_solves": 1,
-        "total_trials": 4,
-        "verdict": "keep"
-      },
-      "hardness": {
-        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
-        "band_rule": "in-band-high-discrimination",
-        "band_verdict": "keep",
-        "discrimination": 2.0,
-        "grok_4_5": 0.0,
-        "kimi_k2_6": 0.5,
-        "opus_4_8": null,
-        "pass_at_k": 0.25
-      },
-      "is_keep": true,
-      "mode": "offline",
-      "models": [
-        {
-          "completed_rollouts": 2,
-          "incomplete": false,
-          "k": 2,
-          "model": "x-ai/grok-4.5",
-          "pass_at_k": 0.0,
-          "rollouts": [
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 0,
-              "model": "x-ai/grok-4.5",
-              "physical_call_id": "21b0878dcee84265b1a542e3655611ad",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 22,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            },
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 1,
-              "model": "x-ai/grok-4.5",
-              "physical_call_id": "2d222414f9714ba38bd04ade1227c787",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 22,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            }
-          ],
-          "solves": 0
-        },
-        {
-          "completed_rollouts": 2,
-          "incomplete": false,
-          "k": 2,
-          "model": "moonshotai/kimi-k2.6",
-          "pass_at_k": 0.5,
-          "rollouts": [
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 0,
-              "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "0c894788d6af404aa66e49c6339ad6c9",
-              "skipped_budget": false,
-              "solved": true,
-              "text_bytes": 29,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            },
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 1,
-              "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "db7a07bf81414f6c8f58a7e1c3150687",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 29,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            }
-          ],
-          "solves": 1
-        }
-      ],
-      "panel_complete": true,
-      "planned_rollouts": 4,
-      "reserved_models": [
-        "x-ai/grok-4.5",
-        "moonshotai/kimi-k2.6"
-      ],
-      "scaffold": "pier/mini-swe-agent",
-      "scaffold_meta": {
-        "agent": "mini-swe-agent",
-        "name": "pier/mini-swe-agent",
-        "pack_id": "realpr-charset-normalizer-715",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-charset-normalizer-715",
-        "runtime": "pier",
-        "scaffold": "pier/mini-swe-agent",
-        "version": "fixed-v3-real-pr"
-      },
-      "stage": "deepagent-panel-realpr",
-      "stop_reason": null,
-      "task_id": "realpr-charset-normalizer-715",
       "total_cost_usd": "0"
     },
     "realpr-httpx-3672": {
@@ -995,7 +932,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "27e3c4739f294d80aea4ce55478b38ec",
+              "physical_call_id": "b075dd124cbc46d5b19ef051efe34466",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1010,7 +947,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "5777a579ed734c90880263af50dbac0a",
+              "physical_call_id": "a4763dcbefd8478fa9702403486304f1",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1035,7 +972,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "32d86afd2d9447e680d460c7188cb30b",
+              "physical_call_id": "99fe6eef767841f1bc5230bbbd9fef48",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -1050,7 +987,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "15da144087b94fbe99120997d5e7ff19",
+              "physical_call_id": "5aa0ff24632c432a868e744ff6938463",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -1075,7 +1012,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-httpx-3672",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-httpx-3672",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-httpx-3672",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -1128,7 +1065,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "0515e4d2de1143b097dfdbcaab54a747",
+              "physical_call_id": "1736daeac2064121bcbd558d994156c5",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1143,7 +1080,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "1403290c6eec4680902eb0ae5ef03d3d",
+              "physical_call_id": "6807544766374ec9a8aa1826c92e81f5",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1168,7 +1105,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "ee7a04ac80f14fc6acbf0ec443f2bb58",
+              "physical_call_id": "a6a3685ab0f742e8bfbdcca18aa8574c",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -1183,7 +1120,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "e882a5be6b774f5991d55f7089d4b6ea",
+              "physical_call_id": "395bcdb4897143189c10c91c3034a315",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -1208,7 +1145,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-itemadapter-101",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-itemadapter-101",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-itemadapter-101",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -1216,272 +1153,6 @@
       "stage": "deepagent-panel-realpr",
       "stop_reason": null,
       "task_id": "realpr-itemadapter-101",
-      "total_cost_usd": "0"
-    },
-    "realpr-more-itertools-1136": {
-      "budget_stop": false,
-      "completed_rollouts": 4,
-      "decision": {
-        "band_high": 0.5,
-        "discrimination": 2.0,
-        "discrimination_floor": 1.0,
-        "frontier_pass_at_k": 0.25,
-        "per_model_pass_at_k": {
-          "moonshotai/kimi-k2.6": 0.5,
-          "x-ai/grok-4.5": 0.0
-        },
-        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
-        "rule": "in-band-high-discrimination",
-        "total_solves": 1,
-        "total_trials": 4,
-        "verdict": "keep"
-      },
-      "hardness": {
-        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
-        "band_rule": "in-band-high-discrimination",
-        "band_verdict": "keep",
-        "discrimination": 2.0,
-        "grok_4_5": 0.0,
-        "kimi_k2_6": 0.5,
-        "opus_4_8": null,
-        "pass_at_k": 0.25
-      },
-      "is_keep": true,
-      "mode": "offline",
-      "models": [
-        {
-          "completed_rollouts": 2,
-          "incomplete": false,
-          "k": 2,
-          "model": "x-ai/grok-4.5",
-          "pass_at_k": 0.0,
-          "rollouts": [
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 0,
-              "model": "x-ai/grok-4.5",
-              "physical_call_id": "9302c898eb4c490c91df8976fed0c7ac",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 22,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            },
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 1,
-              "model": "x-ai/grok-4.5",
-              "physical_call_id": "dc9fd01ba6614ed69e090484e79ddd75",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 22,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            }
-          ],
-          "solves": 0
-        },
-        {
-          "completed_rollouts": 2,
-          "incomplete": false,
-          "k": 2,
-          "model": "moonshotai/kimi-k2.6",
-          "pass_at_k": 0.5,
-          "rollouts": [
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 0,
-              "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "b0647ca4b6f3421a9418da4512cbe4b4",
-              "skipped_budget": false,
-              "solved": true,
-              "text_bytes": 29,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            },
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 1,
-              "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "599e8b575ad343cda84b013358315e7a",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 29,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            }
-          ],
-          "solves": 1
-        }
-      ],
-      "panel_complete": true,
-      "planned_rollouts": 4,
-      "reserved_models": [
-        "x-ai/grok-4.5",
-        "moonshotai/kimi-k2.6"
-      ],
-      "scaffold": "pier/mini-swe-agent",
-      "scaffold_meta": {
-        "agent": "mini-swe-agent",
-        "name": "pier/mini-swe-agent",
-        "pack_id": "realpr-more-itertools-1136",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-more-itertools-1136",
-        "runtime": "pier",
-        "scaffold": "pier/mini-swe-agent",
-        "version": "fixed-v3-real-pr"
-      },
-      "stage": "deepagent-panel-realpr",
-      "stop_reason": null,
-      "task_id": "realpr-more-itertools-1136",
-      "total_cost_usd": "0"
-    },
-    "realpr-more-itertools-943": {
-      "budget_stop": false,
-      "completed_rollouts": 4,
-      "decision": {
-        "band_high": 0.5,
-        "discrimination": 2.0,
-        "discrimination_floor": 1.0,
-        "frontier_pass_at_k": 0.25,
-        "per_model_pass_at_k": {
-          "moonshotai/kimi-k2.6": 0.5,
-          "x-ai/grok-4.5": 0.0
-        },
-        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
-        "rule": "in-band-high-discrimination",
-        "total_solves": 1,
-        "total_trials": 4,
-        "verdict": "keep"
-      },
-      "hardness": {
-        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
-        "band_rule": "in-band-high-discrimination",
-        "band_verdict": "keep",
-        "discrimination": 2.0,
-        "grok_4_5": 0.0,
-        "kimi_k2_6": 0.5,
-        "opus_4_8": null,
-        "pass_at_k": 0.25
-      },
-      "is_keep": true,
-      "mode": "offline",
-      "models": [
-        {
-          "completed_rollouts": 2,
-          "incomplete": false,
-          "k": 2,
-          "model": "x-ai/grok-4.5",
-          "pass_at_k": 0.0,
-          "rollouts": [
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 0,
-              "model": "x-ai/grok-4.5",
-              "physical_call_id": "f2b7df0f9dca4ca79e4a208a24d5b33d",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 22,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            },
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 1,
-              "model": "x-ai/grok-4.5",
-              "physical_call_id": "5d6ae9f294834d99af311ff49ffc8fd3",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 22,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            }
-          ],
-          "solves": 0
-        },
-        {
-          "completed_rollouts": 2,
-          "incomplete": false,
-          "k": 2,
-          "model": "moonshotai/kimi-k2.6",
-          "pass_at_k": 0.5,
-          "rollouts": [
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 0,
-              "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "712909bafe15439d88117661239e4905",
-              "skipped_budget": false,
-              "solved": true,
-              "text_bytes": 29,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            },
-            {
-              "cost_usd": "0",
-              "error": null,
-              "index": 1,
-              "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "ffb4182723554f4f9101db742be66100",
-              "skipped_budget": false,
-              "solved": false,
-              "text_bytes": 29,
-              "usage": {
-                "completion_tokens": 5,
-                "prompt_tokens": 10,
-                "total_tokens": 15
-              }
-            }
-          ],
-          "solves": 1
-        }
-      ],
-      "panel_complete": true,
-      "planned_rollouts": 4,
-      "reserved_models": [
-        "x-ai/grok-4.5",
-        "moonshotai/kimi-k2.6"
-      ],
-      "scaffold": "pier/mini-swe-agent",
-      "scaffold_meta": {
-        "agent": "mini-swe-agent",
-        "name": "pier/mini-swe-agent",
-        "pack_id": "realpr-more-itertools-943",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-more-itertools-943",
-        "runtime": "pier",
-        "scaffold": "pier/mini-swe-agent",
-        "version": "fixed-v3-real-pr"
-      },
-      "stage": "deepagent-panel-realpr",
-      "stop_reason": null,
-      "task_id": "realpr-more-itertools-943",
       "total_cost_usd": "0"
     },
     "realpr-packaging-1120": {
@@ -1527,7 +1198,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "6906641552c14031a4f6fb7270a3690a",
+              "physical_call_id": "5a10c45188de4973a182e63ca1e5831d",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1542,7 +1213,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "3f29e867ec904f1b8bbb9dabd8ca2da8",
+              "physical_call_id": "5377cb9ea08f4896a1cfb2cf57171a79",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1567,7 +1238,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "c9d32cf33f234ecbaa1fb838fd4ad1f5",
+              "physical_call_id": "23bd65d03e794578a43253ac8dc6acaf",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -1582,7 +1253,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "ac26f0a0680d4b05abd3284fa5d13b9c",
+              "physical_call_id": "f62a6506d7cb4c4685029d2c6f13fe66",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -1607,7 +1278,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-packaging-1120",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-packaging-1120",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-packaging-1120",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -1617,7 +1288,7 @@
       "task_id": "realpr-packaging-1120",
       "total_cost_usd": "0"
     },
-    "realpr-rich-3486": {
+    "realpr-qs-487": {
       "budget_stop": false,
       "completed_rollouts": 4,
       "decision": {
@@ -1660,7 +1331,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "88125762dded4f6f8f2c7b18e17becb9",
+              "physical_call_id": "f705a4ef8fb84de2a97a398806ce2d97",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1675,7 +1346,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "02ef350d978949a8bff92b52d21dc5d4",
+              "physical_call_id": "14930573740e43a1bb1a6526fe5a4d19",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1700,7 +1371,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "40de71ede6ac4ad6b0602720738da29b",
+              "physical_call_id": "76616b18f9b14d0aa0c6e8debdddc7ee",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -1715,7 +1386,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "e253012b8d4443eb8ac36cf0b5716431",
+              "physical_call_id": "2b6a5b75f7bb4c3687da7ca62ee3aaee",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -1739,18 +1410,18 @@
       "scaffold_meta": {
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
-        "pack_id": "realpr-rich-3486",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-rich-3486",
+        "pack_id": "realpr-qs-487",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-qs-487",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
       },
       "stage": "deepagent-panel-realpr",
       "stop_reason": null,
-      "task_id": "realpr-rich-3486",
+      "task_id": "realpr-qs-487",
       "total_cost_usd": "0"
     },
-    "realpr-rich-4070": {
+    "realpr-qs-488": {
       "budget_stop": false,
       "completed_rollouts": 4,
       "decision": {
@@ -1793,7 +1464,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "c82effaa910f4a688d2158218491de15",
+              "physical_call_id": "c54d9d71d77447dfbf1ed707adebbc8e",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1808,7 +1479,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "ab4dda46267e428c9c3b5b61779b28c2",
+              "physical_call_id": "48c568fcbf2c4e9abfbd03a34bf1c8d4",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -1833,7 +1504,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "8b850797b440497498471154468266d4",
+              "physical_call_id": "27ad75f7e1c744518a776d76774edb8f",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -1848,7 +1519,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "3d6e3843245846f582c34d3d2db4691c",
+              "physical_call_id": "b7d3c3a6cbea487fb1c8a99300dfa8cd",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -1872,15 +1543,414 @@
       "scaffold_meta": {
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
-        "pack_id": "realpr-rich-4070",
-        "pack_path": "/tmp/work_generate_n10/staging/realpr-rich-4070",
+        "pack_id": "realpr-qs-488",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-qs-488",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
       },
       "stage": "deepagent-panel-realpr",
       "stop_reason": null,
-      "task_id": "realpr-rich-4070",
+      "task_id": "realpr-qs-488",
+      "total_cost_usd": "0"
+    },
+    "realpr-werkzeug-2979": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "a678c529a378472e99e5f945b82472cc",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "605f722466eb4041857f13f62bce6ec8",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "b02934df3e384523861810c2295e33f8",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "f112c1d0048c4af3863cf5252aad11be",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-werkzeug-2979",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-werkzeug-2979",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-werkzeug-2979",
+      "total_cost_usd": "0"
+    },
+    "realpr-werkzeug-3006": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "a294509eb6b4498194ba2493c68170d6",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "80f6140b8b9b40a188217e28efbac9e1",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "1ea1568faf284b0fa8780007631aadd3",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "3aa2ce46873e47b4ace45f2e947cbf30",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-werkzeug-3006",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-werkzeug-3006",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-werkzeug-3006",
+      "total_cost_usd": "0"
+    },
+    "realpr-werkzeug-3101": {
+      "budget_stop": false,
+      "completed_rollouts": 4,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 2.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.25,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.6": 0.5,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "rule": "in-band-high-discrimination",
+        "total_solves": 1,
+        "total_trials": 4,
+        "verdict": "keep"
+      },
+      "hardness": {
+        "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+        "band_rule": "in-band-high-discrimination",
+        "band_verdict": "keep",
+        "discrimination": 2.0,
+        "grok_4_5": 0.0,
+        "kimi_k2_6": 0.5,
+        "opus_4_8": null,
+        "pass_at_k": 0.25
+      },
+      "is_keep": true,
+      "mode": "offline",
+      "models": [
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "x-ai/grok-4.5",
+          "pass_at_k": 0.0,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "af3ae1d05b4e42aa80ad7b0eb07ecd43",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "x-ai/grok-4.5",
+              "physical_call_id": "376b62e6770647e3bf346d96620ede24",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 22,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 0
+        },
+        {
+          "completed_rollouts": 2,
+          "incomplete": false,
+          "k": 2,
+          "model": "moonshotai/kimi-k2.6",
+          "pass_at_k": 0.5,
+          "rollouts": [
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 0,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "91281acfb9a54ea9b8cf8ee725ff7ec3",
+              "skipped_budget": false,
+              "solved": true,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            },
+            {
+              "cost_usd": "0",
+              "error": null,
+              "index": 1,
+              "model": "moonshotai/kimi-k2.6",
+              "physical_call_id": "34e363142b424e2ca52059ed0fe5663e",
+              "skipped_budget": false,
+              "solved": false,
+              "text_bytes": 29,
+              "usage": {
+                "completion_tokens": 5,
+                "prompt_tokens": 10,
+                "total_tokens": 15
+              }
+            }
+          ],
+          "solves": 1
+        }
+      ],
+      "panel_complete": true,
+      "planned_rollouts": 4,
+      "reserved_models": [
+        "x-ai/grok-4.5",
+        "moonshotai/kimi-k2.6"
+      ],
+      "scaffold": "pier/mini-swe-agent",
+      "scaffold_meta": {
+        "agent": "mini-swe-agent",
+        "name": "pier/mini-swe-agent",
+        "pack_id": "realpr-werkzeug-3101",
+        "pack_path": "/tmp/work_prod_hard_m22/staging/realpr-werkzeug-3101",
+        "runtime": "pier",
+        "scaffold": "pier/mini-swe-agent",
+        "version": "fixed-v3-real-pr"
+      },
+      "stage": "deepagent-panel-realpr",
+      "stop_reason": null,
+      "task_id": "realpr-werkzeug-3101",
       "total_cost_usd": "0"
     }
   },
@@ -1889,61 +1959,61 @@
   "pier": {
     "realpr-attrs-1323": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-attrs-1323.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
     "realpr-attrs-1457": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1457.json",
-      "null_reward": 0,
-      "oracle_reward": 1
-    },
-    "realpr-charset-normalizer-715": {
-      "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-charset-normalizer-715.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-attrs-1457.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
     "realpr-httpx-3672": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-httpx-3672.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
     "realpr-itemadapter-101": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-itemadapter-101.json",
-      "null_reward": 0,
-      "oracle_reward": 1
-    },
-    "realpr-more-itertools-1136": {
-      "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-more-itertools-1136.json",
-      "null_reward": 0,
-      "oracle_reward": 1
-    },
-    "realpr-more-itertools-943": {
-      "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-more-itertools-943.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-itemadapter-101.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
     "realpr-packaging-1120": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-packaging-1120.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-packaging-1120.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
-    "realpr-rich-3486": {
+    "realpr-qs-487": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-rich-3486.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-qs-487.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
-    "realpr-rich-4070": {
+    "realpr-qs-488": {
       "certified": true,
-      "evidence": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-rich-4070.json",
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-qs-488.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-werkzeug-2979": {
+      "certified": true,
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-werkzeug-2979.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-werkzeug-3006": {
+      "certified": true,
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-werkzeug-3006.json",
+      "null_reward": 0,
+      "oracle_reward": 1
+    },
+    "realpr-werkzeug-3101": {
+      "certified": true,
+      "evidence": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-werkzeug-3101.json",
       "null_reward": 0,
       "oracle_reward": 1
     }
@@ -1953,8 +2023,6 @@
   "product_dest": true,
   "product_surface": "datasets/prod_hard_keep",
   "product_track": "real_pr",
-  "prompt_style": "deepswe_style_v1",
-  "prompt_style_refreshed_at": "2026-07-16T12:49:22Z",
   "provider_calls": 0,
   "refuse_fake": true,
   "refuse_fixture_materials_default": true,
@@ -1980,26 +2048,27 @@
   "source_tracks": {
     "realpr-attrs-1323": "real_pr",
     "realpr-attrs-1457": "real_pr",
-    "realpr-charset-normalizer-715": "real_pr",
     "realpr-httpx-3672": "real_pr",
     "realpr-itemadapter-101": "real_pr",
-    "realpr-more-itertools-1136": "real_pr",
-    "realpr-more-itertools-943": "real_pr",
     "realpr-packaging-1120": "real_pr",
-    "realpr-rich-3486": "real_pr",
-    "realpr-rich-4070": "real_pr"
+    "realpr-qs-487": "real_pr",
+    "realpr-qs-488": "real_pr",
+    "realpr-werkzeug-2979": "real_pr",
+    "realpr-werkzeug-3006": "real_pr",
+    "realpr-werkzeug-3101": "real_pr"
   },
   "task_ids": [
     "realpr-attrs-1323",
     "realpr-attrs-1457",
     "realpr-httpx-3672",
     "realpr-itemadapter-101",
-    "realpr-packaging-1120"
+    "realpr-packaging-1120",
+    "realpr-qs-487",
+    "realpr-qs-488"
   ],
   "under_supply_reasons": [
     "go=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
     "typescript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
-    "javascript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
     "rust=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)"
   ]
 }

@@ -14,6 +14,7 @@ from swe_factory.pipeline.curate_prod_hard import (
     NOMINAL_KEEP_CANDIDATES,
     ProdHardCurationError,
     curate_dispositions,
+    curate_hardness_from_scoreboard,
     decide_pack,
     materialize_prod_hard_keep,
 )
@@ -442,3 +443,113 @@ def test_materialize_under_yield_fail_closed(tmp_path: Path) -> None:
     )
     with pytest.raises(ProdHardCurationError, match="residual"):
         materialize_prod_hard_keep(src, tmp_path / "out")
+
+
+def test_materialize_in_place_scoreboard_drops_solve_all(tmp_path: Path) -> None:
+    """In-place curate-hardness must not wipe source when src==out (VAL-DEASY-003)."""
+    src = _build_src_corpus(tmp_path)
+    # Add a dual-truth hard pack that scoreboard marks solve-all — must drop by matrix, not name.
+    _write_minimal_pack(
+        src,
+        "realpr-solve-all-x",
+        instruction=_aligned_instruction(),
+        f2p=["s1", "s2", "s3", "s4"],
+        solution_diff=_multi_file_gold(),
+        test_patch=_behavioral_test_patch(),
+    )
+    man = json.loads((src / "pack_manifest.json").read_text(encoding="utf-8"))
+    man["packs"].append(
+        {
+            "task_id": "realpr-solve-all-x",
+            "certified": True,
+            "solution_reward": 1,
+            "null_reward": 0,
+            "source_hunk_count": 20,
+            "source_track": "real_pr",
+            "language": "python",
+            "backend": "docker",
+            "label_method": "real_pr_dual_run_base_vs_gold",
+            "live_mine": True,
+        }
+    )
+    man["identity"]["realpr-solve-all-x"] = {
+        "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/example/x.git",
+        "seed_id": "pr:99",
+        "source_track": "real_pr",
+    }
+    man["pack_count"] = len(man["packs"])
+    man["count"] = len(man["packs"])
+    (src / "pack_manifest.json").write_text(json.dumps(man, indent=2), encoding="utf-8")
+
+    scoreboard = {
+        "models": ["x-ai/grok-4.5", "moonshotai/kimi-k2.6"],
+        "per_pack": [
+            {
+                "pack_id": "realpr-itemadapter-101",
+                "grok-4.5": 1.0,
+                "kimi-k2.6": 0.0,
+                "frontier": 0.5,
+            },
+            {
+                "pack_id": "realpr-attrs-1323",
+                "grok-4.5": 0.0,
+                "kimi-k2.6": 1.0,
+                "frontier": 0.5,
+            },
+            {
+                "pack_id": "realpr-httpx-3672",
+                "grok-4.5": 0.0,
+                "kimi-k2.6": 0.0,
+                "frontier": 0.0,
+            },
+            {
+                "pack_id": "realpr-attrs-1457",
+                "grok-4.5": 0.0,
+                "kimi-k2.6": 0.0,
+                "frontier": 0.0,
+            },
+            {
+                "pack_id": "realpr-packaging-1120",
+                "grok-4.5": 0.0,
+                "kimi-k2.6": 0.0,
+                "frontier": 0.0,
+            },
+            {
+                "pack_id": "realpr-solve-all-x",
+                "grok-4.5": 1.0,
+                "kimi-k2.6": 1.0,
+                "frontier": 1.0,
+            },
+        ],
+    }
+    sb_path = tmp_path / "scoreboard.json"
+    sb_path.write_text(json.dumps(scoreboard), encoding="utf-8")
+
+    # Scoreboard-driven API path: no name hardcoding of werkzeug/solve-all-x.
+    result = curate_hardness_from_scoreboard(
+        src,
+        src,
+        scoreboard=sb_path,
+        min_keep=0,
+        include_explicit_drops=False,
+        clean_out=True,
+    )
+    assert result.ok
+    assert "realpr-solve-all-x" in result.drop_ids
+    assert "realpr-solve-all-x" not in result.keep_ids
+    assert result.drop_reasons["realpr-solve-all-x"]["reason_code"] == "solve_all_easy_policy_drop"
+    # Source path still has keep dual-truth trees after in-place swap.
+    assert (src / "tasks" / "realpr-itemadapter-101" / "solution" / "solution.patch").is_file()
+    assert not (src / "tasks" / "realpr-solve-all-x").exists()
+    assert (src / "drop_reasons.json").is_file()
+    assert (src / "curation_report.json").is_file()
+    drop_doc = json.loads((src / "drop_reasons.json").read_text(encoding="utf-8"))
+    assert "realpr-solve-all-x" in drop_doc["drop_reasons"]
+    keep_tasks = sorted(p.name for p in (src / "tasks").iterdir() if p.is_dir())
+    assert "realpr-solve-all-x" not in keep_tasks
+    # Residual hardness keeps (nominal dual-truth hard without solve-all).
+    assert result.pack_count >= 5
+    assert "realpr-itemadapter-101" in result.keep_ids

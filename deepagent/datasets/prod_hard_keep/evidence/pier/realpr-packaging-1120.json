@@ -106,7 +106,7 @@
     "stdout_tail": "scripted pier ok",
     "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-packaging-1120/scripted-trial-oracle"
   },
-  "pack_dir": "/tmp/work_generate_n10/staging/realpr-packaging-1120",
+  "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-packaging-1120",
   "pack_meta": {
     "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
     "language": "python",
@@ -129,6 +129,7 @@
       "errors": [],
       "harbor_version": "0.18.0",
       "listed": [
+        "realpr-httpx-2252",
         "realpr-packaging-1120"
       ],
       "metadata_language": "python",
@@ -150,7 +151,7 @@
     },
     "missing_relpaths": [],
     "notes": [],
-    "pack_dir": "/tmp/work_generate_n10/staging/realpr-packaging-1120",
+    "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-packaging-1120",
     "pier_job_prefix": "/tmp/harbor-deepagent-jobs-ship",
     "required_relpaths_ok": true,
     "structural_ok": true

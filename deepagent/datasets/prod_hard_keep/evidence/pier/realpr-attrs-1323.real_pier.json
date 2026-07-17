@@ -16,13 +16,13 @@
   "disposition": "accept",
   "evidence_files": {
     "backend": "docker",
-    "combined_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.pier_evidence.json",
+    "combined_path": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-attrs-1323.pier_evidence.json",
     "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
-    "null_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.null.reward.json",
+    "null_path": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-attrs-1323.null.reward.json",
     "null_reward": 0,
     "oracle_mode": "docker",
     "pier_path_class": "scripted",
-    "sol_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-attrs-1323.sol.reward.json",
+    "sol_path": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-attrs-1323.sol.reward.json",
     "sol_reward": 1
   },
   "isolation": {
@@ -120,7 +120,7 @@
     "stdout_tail": "scripted pier ok",
     "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-attrs-1323/scripted-trial-oracle"
   },
-  "pack_dir": "/tmp/work_generate_n10/staging/realpr-attrs-1323",
+  "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-attrs-1323",
   "pack_meta": {
     "base_commit_hash": "dbb25ce34787a30e2ffa65685f6c689a269c3521",
     "language": "python",
@@ -242,7 +242,7 @@
       "stdout_tail": "scripted pier ok",
       "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-attrs-1323/scripted-trial-oracle"
     },
-    "pack_dir": "/tmp/work_generate_n10/staging/realpr-attrs-1323",
+    "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-attrs-1323",
     "pack_meta": {
       "base_commit_hash": "dbb25ce34787a30e2ffa65685f6c689a269c3521",
       "language": "python",
@@ -266,10 +266,10 @@
         "harbor_version": "0.18.0",
         "listed": [
           "realpr-attrs-1323",
-          "realpr-cachetools-385",
-          "realpr-charset-normalizer-715",
+          "realpr-httpx-2252",
           "realpr-itemadapter-101",
-          "realpr-packaging-1120"
+          "realpr-packaging-1120",
+          "realpr-packaging-1267"
         ],
         "metadata_language": "python",
         "ok": true,
@@ -290,7 +290,7 @@
       },
       "missing_relpaths": [],
       "notes": [],
-      "pack_dir": "/tmp/work_generate_n10/staging/realpr-attrs-1323",
+      "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-attrs-1323",
       "pier_job_prefix": "/tmp/harbor-deepagent-jobs-ship",
       "required_relpaths_ok": true,
       "structural_ok": true

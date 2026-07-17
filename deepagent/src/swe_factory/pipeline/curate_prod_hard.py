@@ -874,9 +874,13 @@ def materialize_prod_hard_keep(
 
     Raises ``ProdHardCurationError`` if residual keep count < *min_keep*
     (caller must re-mine with new floors — never fixture pad).
+
+    When *src* and *out* resolve to the same path (in-place curate), pack trees
+    are first staged under a sibling temporary directory so ``clean_out`` cannot
+    rmtree the keep source mid-copy (canonical ``curate-hardness --src X --out X``).
     """
     src_path = Path(src).resolve()
-    out_path = Path(out)
+    out_path = Path(out).resolve()
     if not src_path.is_dir():
         raise ProdHardCurationError(f"src missing: {src_path}")
 
@@ -913,148 +917,203 @@ def materialize_prod_hard_keep(
             "Re-mine with new floors until N≥5 (never fixture pad). VAL-DHARD-004."
         )
 
-    if clean_out and out_path.exists():
-        shutil.rmtree(out_path)
-    out_path.mkdir(parents=True, exist_ok=True)
-    tasks_out = out_path / "tasks"
-    tasks_out.mkdir(parents=True, exist_ok=True)
-
-    # Copy keep pack trees (full dual-truth Harbor layout)
-    for tid in keep_ids:
-        s = src_path / "tasks" / tid
-        d = tasks_out / tid
-        if d.exists():
-            shutil.rmtree(d)
-        shutil.copytree(s, d)
-        missing = verify_pack_tree(d)
-        if missing:
-            raise ProdHardCurationError(f"copied pack tree invalid for {tid}: missing={missing}")
-
-    # Manifest
-    manifest_src = src_path / "pack_manifest.json"
-    manifest_in = _load_json(manifest_src) if manifest_src.is_file() else {"packs": []}
-    if not isinstance(manifest_in, dict):
-        raise ProdHardCurationError("pack_manifest.json must be an object")
+    # Preserve a callable relative surface for reports (cli args), not only resolve().
     out_rel = str(out)
-    filtered = _filter_manifest(
-        manifest_in,
-        keep_ids=keep_ids,
-        dispositions=dispositions,
-        out_rel=out_rel,
-    )
-    _write_json(out_path / "pack_manifest.json", filtered)
+    src_rel = str(src)
 
-    # Corpus metadata
-    _write_json(
-        out_path / "drop_reasons.json",
-        {
-            "schema": CURSOR_SCHEMA,
-            "source": str(src),
-            "out": out_rel,
-            "dropped_count": len(drop_reasons),
-            "keep_ids": list(keep_ids),
-            "drop_reasons": drop_reasons,
-            "assertions": ["VAL-DHARD-004"],
-            "generated_at": _utc_now_iso(),
-        },
-    )
-    _write_json(
-        out_path / "curation_report.json",
-        {
-            "schema": CURSOR_SCHEMA,
-            "ok": True,
-            "source": str(src),
-            "out": out_rel,
-            "pack_count": len(keep_ids),
-            "min_keep": min_keep,
-            "keep_ids": list(keep_ids),
-            "drop_ids": list(drop_ids),
-            "drop_reasons": drop_reasons,
-            "dispositions": [d.to_dict() for d in dispositions],
-            "assertions": ["VAL-DHARD-002", "VAL-DHARD-003", "VAL-DHARD-004"],
-            "generated_at": _utc_now_iso(),
-        },
-    )
+    same_path = src_path == out_path
+    staging_path: Path | None = None
+    write_root = out_path
+    read_src = src_path
+    if same_path:
+        # Stage side-by-side so we never rmtree keep packs before copy.
+        parent = out_path.parent if out_path.parent.exists() else Path(".")
+        staging_path = parent / f".{out_path.name}.curate_stage"
+        if staging_path.exists():
+            shutil.rmtree(staging_path)
+        staging_path.mkdir(parents=True, exist_ok=True)
+        write_root = staging_path
 
-    keep_set = set(keep_ids)
-    # Oracle / pier evidence aggregates
-    for name in (
-        "oracle_evidence.json",
-        "pier_evidence.json",
-        "ship_summary.json",
-        "gate_audit_summary.json",
-        "ledger_summary.json",
-    ):
-        p = src_path / name
-        if not p.is_file():
-            continue
-        try:
-            blob = _load_json(p)
-        except json.JSONDecodeError:
-            continue
-        if name == "ship_summary.json" and isinstance(blob, dict):
-            blob = dict(blob)
-            blob["certified_count"] = len(keep_ids)
-            blob["product_surface"] = out_rel
-            blob["curated_hardness"] = True
-            blob["drop_reasons"] = drop_reasons
-            blob["keep_ids"] = list(keep_ids)
-            if isinstance(blob.get("languages"), dict):
-                # recompute naive python count
-                blob["languages"] = {"python": len(keep_ids)}
-            blob["ok"] = True
-            blob["curated_at"] = _utc_now_iso()
-        elif name in {"oracle_evidence.json", "pier_evidence.json"}:
-            blob = _filter_list_records(blob, keep_ids=keep_set)
-            if isinstance(blob, dict):
-                blob["curated_hardness"] = True
-                blob["product_surface"] = out_rel
-        _write_json(out_path / name, blob)
+    try:
+        if clean_out and write_root.exists() and not same_path:
+            shutil.rmtree(write_root)
+        write_root.mkdir(parents=True, exist_ok=True)
+        tasks_out = write_root / "tasks"
+        tasks_out.mkdir(parents=True, exist_ok=True)
 
-    # gate_audit.jsonl + e2e drip (filtered)
-    for name in ("gate_audit.jsonl", "e2e_drip.jsonl"):
-        rows = _filter_jsonl(src_path / name, keep_ids=keep_set)
-        if rows or (src_path / name).is_file():
-            (out_path / name).write_text(
-                "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
-                encoding="utf-8",
-            )
+        # Copy keep pack trees (full dual-truth Harbor layout)
+        for tid in keep_ids:
+            s = read_src / "tasks" / tid
+            if not s.is_dir():
+                raise ProdHardCurationError(f"keep pack missing under src tasks/: {tid}")
+            d = tasks_out / tid
+            if d.exists():
+                shutil.rmtree(d)
+            shutil.copytree(s, d)
+            missing = verify_pack_tree(d)
+            if missing:
+                raise ProdHardCurationError(
+                    f"copied pack tree invalid for {tid}: missing={missing}"
+                )
 
-    _copy_evidence_dirs(src_path, out_path, keep_ids=keep_set)
-
-    raw_filt_identity = filtered.get("identity")
-    identity: Mapping[str, Mapping[str, Any]] = (
-        raw_filt_identity if isinstance(raw_filt_identity, dict) else {}
-    )
-    (out_path / "PROVENANCE.md").write_text(
-        _render_provenance(
+        # Manifest (load from original src before any replace)
+        manifest_src = read_src / "pack_manifest.json"
+        manifest_in = _load_json(manifest_src) if manifest_src.is_file() else {"packs": []}
+        if not isinstance(manifest_in, dict):
+            raise ProdHardCurationError("pack_manifest.json must be an object")
+        filtered = _filter_manifest(
+            manifest_in,
             keep_ids=keep_ids,
-            identity=identity,
-            drop_reasons=drop_reasons,
-            n=len(keep_ids),
-        ),
-        encoding="utf-8",
-    )
-    keep_disp = tuple(d for d in dispositions if d.keep)
-    (out_path / "report.md").write_text(
-        _render_report(
-            keep_ids=keep_ids,
-            drop_reasons=drop_reasons,
-            keep_dispositions=keep_disp,
-            n=len(keep_ids),
-            src_rel=str(src),
+            dispositions=dispositions,
             out_rel=out_rel,
-        ),
-        encoding="utf-8",
-    )
-    (out_path / "PRODUCT_README.md").write_text(
-        _render_product_readme(n=len(keep_ids), drop_n=len(drop_ids)),
-        encoding="utf-8",
-    )
+        )
+        _write_json(write_root / "pack_manifest.json", filtered)
+
+        # Corpus metadata
+        deasy_assertions = [
+            "VAL-DHARD-004",
+            "VAL-DEASY-002",
+            "VAL-DEASY-003",
+        ]
+        _write_json(
+            write_root / "drop_reasons.json",
+            {
+                "schema": CURSOR_SCHEMA,
+                "source": src_rel,
+                "out": out_rel,
+                "scoreboard": str(scoreboard) if scoreboard is not None else None,
+                "dropped_count": len(drop_reasons),
+                "keep_ids": list(keep_ids),
+                "drop_ids": list(drop_ids),
+                "drop_reasons": drop_reasons,
+                "assertions": deasy_assertions,
+                "generated_at": _utc_now_iso(),
+            },
+        )
+        _write_json(
+            write_root / "curation_report.json",
+            {
+                "schema": CURSOR_SCHEMA,
+                "ok": True,
+                "source": src_rel,
+                "out": out_rel,
+                "scoreboard": str(scoreboard) if scoreboard is not None else None,
+                "pack_count": len(keep_ids),
+                "min_keep": min_keep,
+                "keep_ids": list(keep_ids),
+                "drop_ids": list(drop_ids),
+                "drop_reasons": drop_reasons,
+                "dispositions": [d.to_dict() for d in dispositions],
+                "assertions": [
+                    "VAL-DHARD-002",
+                    "VAL-DHARD-003",
+                    "VAL-DHARD-004",
+                    "VAL-DEASY-002",
+                    "VAL-DEASY-003",
+                ],
+                "generated_at": _utc_now_iso(),
+            },
+        )
+
+        keep_set = set(keep_ids)
+        # Oracle / pier evidence aggregates
+        for name in (
+            "oracle_evidence.json",
+            "pier_evidence.json",
+            "ship_summary.json",
+            "gate_audit_summary.json",
+            "ledger_summary.json",
+        ):
+            p = read_src / name
+            if not p.is_file():
+                continue
+            try:
+                blob = _load_json(p)
+            except json.JSONDecodeError:
+                continue
+            if name == "ship_summary.json" and isinstance(blob, dict):
+                blob = dict(blob)
+                blob["certified_count"] = len(keep_ids)
+                blob["pack_count"] = len(keep_ids)
+                blob["count"] = len(keep_ids)
+                blob["product_surface"] = out_rel
+                blob["curated_hardness"] = True
+                blob["drop_reasons"] = drop_reasons
+                blob["keep_ids"] = list(keep_ids)
+                blob["drop_ids"] = list(drop_ids)
+                if isinstance(blob.get("languages"), dict):
+                    # recompute naive python count
+                    blob["languages"] = {"python": len(keep_ids)}
+                blob["ok"] = True
+                blob["curated_at"] = _utc_now_iso()
+                if scoreboard is not None:
+                    blob["easy_scoreboard"] = str(scoreboard)
+            elif name in {"oracle_evidence.json", "pier_evidence.json"}:
+                blob = _filter_list_records(blob, keep_ids=keep_set)
+                if isinstance(blob, dict):
+                    blob["curated_hardness"] = True
+                    blob["product_surface"] = out_rel
+            _write_json(write_root / name, blob)
+
+        # gate_audit.jsonl + e2e drip (filtered)
+        for name in ("gate_audit.jsonl", "e2e_drip.jsonl"):
+            rows = _filter_jsonl(read_src / name, keep_ids=keep_set)
+            if rows or (read_src / name).is_file():
+                (write_root / name).write_text(
+                    "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                    encoding="utf-8",
+                )
+
+        _copy_evidence_dirs(read_src, write_root, keep_ids=keep_set)
+
+        raw_filt_identity = filtered.get("identity")
+        identity: Mapping[str, Mapping[str, Any]] = (
+            raw_filt_identity if isinstance(raw_filt_identity, dict) else {}
+        )
+        (write_root / "PROVENANCE.md").write_text(
+            _render_provenance(
+                keep_ids=keep_ids,
+                identity=identity,
+                drop_reasons=drop_reasons,
+                n=len(keep_ids),
+            ),
+            encoding="utf-8",
+        )
+        keep_disp = tuple(d for d in dispositions if d.keep)
+        (write_root / "report.md").write_text(
+            _render_report(
+                keep_ids=keep_ids,
+                drop_reasons=drop_reasons,
+                keep_dispositions=keep_disp,
+                n=len(keep_ids),
+                src_rel=src_rel,
+                out_rel=out_rel,
+            ),
+            encoding="utf-8",
+        )
+        (write_root / "PRODUCT_README.md").write_text(
+            _render_product_readme(n=len(keep_ids), drop_n=len(drop_ids)),
+            encoding="utf-8",
+        )
+
+        # Atomic-ish replace for in-place curate: swap staging onto out_path.
+        if same_path and staging_path is not None:
+            backup = out_path.parent / f".{out_path.name}.curate_prev"
+            if backup.exists():
+                shutil.rmtree(backup)
+            if out_path.exists():
+                out_path.rename(backup)
+            staging_path.rename(out_path)
+            staging_path = None  # owned by out_path now
+            shutil.rmtree(backup, ignore_errors=True)
+    finally:
+        if staging_path is not None and staging_path.exists():
+            # Failed mid-stage; leave original src intact.
+            shutil.rmtree(staging_path, ignore_errors=True)
 
     return CurationResult(
         ok=True,
-        src=str(src),
+        src=src_rel,
         out=out_rel,
         keep_ids=keep_ids,
         drop_ids=drop_ids,
@@ -1066,6 +1125,7 @@ def materialize_prod_hard_keep(
         meta={
             "min_f2p_nodes": min_f2p_nodes,
             "scoreboard": str(scoreboard) if scoreboard is not None else None,
+            "in_place": same_path,
             "explicit_drops": sorted(
                 merge_force_drops(
                     EXPLICIT_DROP if include_explicit_drops else None,

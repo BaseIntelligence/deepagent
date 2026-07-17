@@ -16,13 +16,13 @@
   "disposition": "accept",
   "evidence_files": {
     "backend": "docker",
-    "combined_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.pier_evidence.json",
+    "combined_path": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-httpx-3672.pier_evidence.json",
     "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
-    "null_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.null.reward.json",
+    "null_path": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-httpx-3672.null.reward.json",
     "null_reward": 0,
     "oracle_mode": "docker",
     "pier_path_class": "scripted",
-    "sol_path": "/tmp/work_generate_n10/product_stage/evidence/pier/realpr-httpx-3672.sol.reward.json",
+    "sol_path": "/tmp/work_prod_hard_m22/product_stage/evidence/pier/realpr-httpx-3672.sol.reward.json",
     "sol_reward": 1
   },
   "isolation": {
@@ -120,7 +120,7 @@
     "stdout_tail": "scripted pier ok",
     "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-httpx-3672/scripted-trial-oracle"
   },
-  "pack_dir": "/tmp/work_generate_n10/staging/realpr-httpx-3672",
+  "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-httpx-3672",
   "pack_meta": {
     "base_commit_hash": "4acf5c2c37714cc63b5cf71b3e284fca83c90311",
     "language": "python",
@@ -242,7 +242,7 @@
       "stdout_tail": "scripted pier ok",
       "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-httpx-3672/scripted-trial-oracle"
     },
-    "pack_dir": "/tmp/work_generate_n10/staging/realpr-httpx-3672",
+    "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-httpx-3672",
     "pack_meta": {
       "base_commit_hash": "4acf5c2c37714cc63b5cf71b3e284fca83c90311",
       "language": "python",
@@ -265,20 +265,23 @@
         "errors": [],
         "harbor_version": "0.18.0",
         "listed": [
+          "realpr-attrs-1267",
           "realpr-attrs-1323",
-          "realpr-attrs-1407",
-          "realpr-attrs-1454",
           "realpr-attrs-1457",
+          "realpr-boltons-173",
           "realpr-boltons-362",
-          "realpr-cachetools-385",
-          "realpr-charset-normalizer-715",
+          "realpr-charset-normalizer-581",
+          "realpr-httpx-2252",
           "realpr-httpx-3022",
+          "realpr-httpx-3314",
           "realpr-httpx-3319",
+          "realpr-httpx-3394",
+          "realpr-httpx-3670",
           "realpr-httpx-3672",
           "realpr-itemadapter-101",
           "realpr-packaging-1120",
-          "realpr-packaging-1311",
-          "realpr-rich-3486"
+          "realpr-packaging-1259",
+          "realpr-packaging-1267"
         ],
         "metadata_language": "python",
         "ok": true,
@@ -299,7 +302,7 @@
       },
       "missing_relpaths": [],
       "notes": [],
-      "pack_dir": "/tmp/work_generate_n10/staging/realpr-httpx-3672",
+      "pack_dir": "/tmp/work_prod_hard_m22/staging/realpr-httpx-3672",
       "pier_job_prefix": "/tmp/harbor-deepagent-jobs-ship",
       "required_relpaths_ok": true,
       "structural_ok": true
