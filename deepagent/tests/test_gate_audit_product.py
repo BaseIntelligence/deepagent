@@ -25,11 +25,13 @@ def test_audit_keep_accepts_live_dual_truth() -> None:
         materials_root="datasets/live_materials",
         live_mine=True,
         label_method=LABEL_METHOD_LIVE,
-        # VAL-DHARD-002: product floor requires F2P ≥ MIN_F2P_NODES (default 3)
+        # VAL-DMED-001: product floor requires F2P ≥ MIN_F2P_NODES (default 5)
         f2p_node_ids=[
             "tests.test_x::test_a",
             "tests.test_x::test_b",
             "tests.test_x::test_c",
+            "tests.test_x::test_d",
+            "tests.test_x::test_e",
         ],
         p2p_node_ids=["tests.test_x::test_p2p"],
         backend_class="HarborDockerVerifier",
@@ -38,7 +40,7 @@ def test_audit_keep_accepts_live_dual_truth() -> None:
         solution_reward=1,
         null_reward=0,
         source_track="real_pr",
-        source_hunk_count=12,
+        source_hunk_count=16,
         discovery_path="list_pulls",
     )
     assert row.accepted
@@ -74,14 +76,14 @@ def test_write_and_require_gate_audit(tmp_path: Path) -> None:
         materials_root="datasets/live_materials",
         live_mine=True,
         label_method=LABEL_METHOD_LIVE,
-        f2p_node_ids=["n1", "n2", "n3"],
+        f2p_node_ids=["n1", "n2", "n3", "n4", "n5"],
         p2p_node_ids=["p1"],
         backend_class="HarborDockerVerifier",
         agent_image="a:tag",
         tests_image="t:tag",
         solution_reward=1,
         null_reward=0,
-        source_hunk_count=10,
+        source_hunk_count=16,
         discovery_path="search",
     )
     path = tmp_path / "gate_audit.jsonl"
@@ -141,7 +143,7 @@ def _seed_product_keep(
     tests_image: str,
     f2p: list[str],
     p2p: list[str] | None = None,
-    source_hunk_count: int = 12,
+    source_hunk_count: int = 16,
     repo: str = "example/repo",
     base: str = "a" * 40,
     discovery_path: str = "list_pulls",
@@ -252,9 +254,11 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
                 f"tests.t::test_{i}_a",
                 f"tests.t::test_{i}_b",
                 f"tests.t::test_{i}_c",
+                f"tests.t::test_{i}_d",
+                f"tests.t::test_{i}_e",
             ],
             materials_root=mats,
-            source_hunk_count=15 + i,
+            source_hunk_count=16 + i,
             repo=f"py/pkg{i}",
         )
     _seed_product_keep(
@@ -263,9 +267,16 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
         language="javascript",
         agent_image="harbor-sdf-agent-ml300:oracle",
         tests_image="harbor-sdf-tests-ml300:oracle",
-        f2p=["should be deeply equivalent", "should be strictly equal", "should throw"],
+        # Synthetic gate_audit fixtures must clear M27 floors (real qs-487 is thin).
+        f2p=[
+            "should be deeply equivalent",
+            "should be strictly equal",
+            "should throw",
+            "should encode nested",
+            "should decode nested",
+        ],
         materials_root=mats,
-        source_hunk_count=11,
+        source_hunk_count=16,
         repo="ljharb/qs",
         base="04f422fe91985103d2fdca0280ee362ecf5e43f2",
     )
@@ -279,9 +290,11 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
             "should be strictly equal",
             "should throw",
             "should coerce undefined",
+            "should encode nested",
+            "should decode nested",
         ],
         materials_root=mats,
-        source_hunk_count=12,
+        source_hunk_count=16,
         repo="ljharb/qs",
         base="5f0449fff1d9fb236d297cd0d3650b42d2d93b8a",
     )
@@ -295,10 +308,12 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
             "pass",
             "tests/compile-pass/bitflags_flag_name.rs",
             "tests/compile-fail/flag_value.rs",
+            "tests/compile-pass/extra_a.rs",
+            "tests/compile-pass/extra_b.rs",
         ],
         p2p=[],
         materials_root=mats,
-        source_hunk_count=10,
+        source_hunk_count=16,
         repo="bitflags/bitflags",
         base="4ed9ffa949970239cd2d87c775e9fdcf9c438fb5",
     )
@@ -318,7 +333,7 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
                     "solution_reward": 1,
                     "null_reward": 0,
                     "label_method": LABEL_METHOD_LIVE,
-                    "source_hunk_count": 15,
+                    "source_hunk_count": 16,
                 },
                 "stage": "gate_audit_dual_truth",
             }
@@ -387,13 +402,15 @@ def test_rebuild_product_dual_truth_from_tasks_full_rewrite(tmp_path: Path) -> N
                             "language": "javascript",
                             "sol": 1,
                             "null": 0,
-                            "source_hunk_count": 11,
+                            "source_hunk_count": 16,
                             "docker_ok": True,
                             "label_method": LABEL_METHOD_LIVE,
                             "f2p": [
                                 "should be deeply equivalent",
                                 "should be strictly equal",
                                 "should throw",
+                                "should encode nested",
+                                "should decode nested",
                             ],
                             "agent_image": "harbor-sdf-agent-ml300:oracle",
                             "tests_image": "harbor-sdf-tests-ml300:oracle",
@@ -490,8 +507,15 @@ def test_gate_audit_product_cli_smoke(tmp_path: Path) -> None:
         language="python",
         agent_image="harbor-sdf-agent-rpr00:oracle",
         tests_image="harbor-sdf-tests-rpr00:oracle",
-        f2p=["tests.t::test_a", "tests.t::test_b", "tests.t::test_c"],
+        f2p=[
+            "tests.t::test_a",
+            "tests.t::test_b",
+            "tests.t::test_c",
+            "tests.t::test_d",
+            "tests.t::test_e",
+        ],
         materials_root=mats,
+        source_hunk_count=16,
     )
     runner = CliRunner()
     result = runner.invoke(
@@ -527,13 +551,35 @@ def test_audit_keep_refuses_thin_f2p_below_floor() -> None:
         solution_reward=1,
         null_reward=0,
         source_track="real_pr",
-        source_hunk_count=12,
+        source_hunk_count=16,
         discovery_path="list_pulls",
     )
     assert not row.accepted
     joined = " ".join(row.reasons)
     assert "f2p_nodes_below_floor" in joined
     assert "thin_f2p_easy_class" in joined
+
+
+def test_audit_keep_refuses_hunks_below_m27_floor() -> None:
+    """VAL-DMED-001: source_hunk_count=13 refuse (floor 14)."""
+    row = audit_keep_dual_truth(
+        task_id="thin-hunks",
+        materials_root="datasets/live_materials",
+        live_mine=True,
+        label_method=LABEL_METHOD_LIVE,
+        f2p_node_ids=["a", "b", "c", "d", "e"],
+        p2p_node_ids=["p"],
+        backend_class="HarborDockerVerifier",
+        agent_image="a:tag",
+        tests_image="t:tag",
+        solution_reward=1,
+        null_reward=0,
+        source_track="real_pr",
+        source_hunk_count=13,
+        discovery_path="list_pulls",
+    )
+    assert not row.accepted
+    assert any("source_hunks_below_floor" in r for r in row.reasons)
 
 
 def test_audit_keep_engineering_opt_out_skips_f2p_floor() -> None:

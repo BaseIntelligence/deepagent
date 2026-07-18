@@ -1,11 +1,11 @@
-"""Product hard filter for live-mined real_pr keeps (M14).
+"""Product hard filter for live-mined real_pr keeps (M14 + M27 DeepSWE-median).
 
 Product keep requires **all** of:
 
 - ``merged_at`` present (merged PR only)
 - Full 40-char hex base commit SHA
-- ``source_hunk_count >= PRODUCT_SOURCE_HUNK_FLOOR`` (default **10**)
-- Multi-file product source (≥ ``PRODUCT_MULTI_FILE_FLOOR``, still ≥ soft offline 2)
+- ``source_hunk_count >= PRODUCT_SOURCE_HUNK_FLOOR`` (default **14**, DeepSWE p50)
+- Multi-file product source ≥ ``PRODUCT_MULTI_FILE_FLOOR`` (default **4**, DeepSWE p25)
 - ≥1 real test path change
 - Suite reporter detectability for the PR language
 - Permissive license (fail-closed on missing / copyleft / unknown)
@@ -19,6 +19,10 @@ Source-hunk definition (fixed + unit-tested):
 count of unified-diff ``@@`` hunk headers across product source file patches
 only (non-test, non-docs/chore paths with a code extension). Path renames or
 patch-less metadata rows do not contribute hunks.
+
+M27 DeepSWE-median band (public sample N≈48): files p50≈6 / p25≈4, hunks
+p50≈14. Gold added-lines floor (≥400) is enforced post-materialize by
+:mod:`swe_factory.pipeline.hardness_floors` (VAL-DMED-001).
 """
 
 from __future__ import annotations
@@ -101,11 +105,11 @@ def is_motor_or_hybrid_identity(
 # Product floors (hard keep). Soft MULTI_FILE_FLOOR stays for offline only.
 # ---------------------------------------------------------------------------
 
-#: Product keep minimum unified-diff source hunks (VAL-LHARD-001).
-PRODUCT_SOURCE_HUNK_FLOOR: int = 10
+#: Product keep minimum unified-diff source hunks (M27 DeepSWE p50; VAL-DMED-001).
+PRODUCT_SOURCE_HUNK_FLOOR: int = 14
 
-#: Product keep minimum distinct product-source files (multi-file floor).
-PRODUCT_MULTI_FILE_FLOOR: int = max(2, MULTI_FILE_FLOOR)
+#: Product keep minimum distinct product-source files (M27 DeepSWE p25; VAL-DMED-001).
+PRODUCT_MULTI_FILE_FLOOR: int = 4
 
 #: Soft offline engineering floor re-export (never promote product below hard).
 SOFT_MULTI_FILE_FLOOR: int = MULTI_FILE_FLOOR
@@ -554,9 +558,10 @@ def measure_source_hunk_count(
 ) -> int:
     """Sum unified-diff hunks across **product source** paths only.
 
-    Definition was fixed for product keep (VAL-LHARD-001): each ``@@`` header in
-    a product-source file patch counts as one source hunk. Test, docs, chore, and
-    vendor patches do not count. Boundary: 9 → reject, 10 → keep-eligible.
+    Definition was fixed for product keep (VAL-LHARD-001 / VAL-DMED-001): each
+    ``@@`` header in a product-source file patch counts as one source hunk. Test,
+    docs, chore, and vendor patches do not count. Boundary (M27): 13 → reject,
+    14 → keep-eligible.
     """
     total = 0
     for raw in files:

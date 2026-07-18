@@ -1,16 +1,21 @@
-"""Intrinsic request+patch difficulty scoring (M25 / VAL-DINTR-002).
+"""Intrinsic request+patch difficulty scoring (M25 / M27 DeepSWE-median retune).
 
 Score hardness from **agent-visible instruction** + **gold solution patch**
 (+ optional F2P count / source file list) only. Model dual-success is **not**
 an input — pair with :mod:`easy_detect` labels for scoreboard reporting without
 implicit ``should_drop_hardness``.
 
+M27 (VAL-DMED-002) raises structural thresholds so qs-487-class thin gold
+(~20 added lines, 2 files, F2P=3) is high-confidence ``EASY_REQUEST`` with
+``should_drop_hardness=True`` when the drop gate is used, while DeepSWE-median
+multi-file large gold (files≥4, hunks≥14, added≥400) stays ``HARD_REQUEST``.
+
 Classes
 -------
-* ``EASY_REQUEST`` — short/thin contract request, tiny multi-file gold, low F2P,
-  single-module touch, few constraints/outcomes. ``easily_approachable=True``.
+* ``EASY_REQUEST`` — thin API / small gold, low F2P / few modules. Droppable at
+  high confidence.
 * ``HARD_REQUEST`` — multi-module / large patch / multi-constraint agenda /
-  large F2P. ``easily_approachable=False``.
+  large F2P / DeepSWE-median size. ``easily_approachable=False``.
 * ``UNCERTAIN`` — mixed signals; default **keep** for hardness product
   (only high-confidence ``EASY_REQUEST`` is an optional drop reason).
 
@@ -38,22 +43,26 @@ REASON_EASY_REQUEST: str = "intrinsic_easy_request"
 REASON_HARD_REQUEST: str = "intrinsic_hard_request"
 REASON_UNCERTAIN: str = "intrinsic_uncertain"
 
-# Thresholds (unit-tested). Tuned for product "thin contract vs multi-outcome"
-# discrimination without needing model scores.
-EASY_INSTR_CHARS_MAX: int = 700
-HARD_INSTR_CHARS_MIN: int = 1200
-EASY_OUTCOME_MAX: int = 2
-HARD_OUTCOME_MIN: int = 4
-EASY_CONSTRAINT_MAX: int = 1
-HARD_CONSTRAINT_MIN: int = 3
-EASY_HUNK_MAX: int = 4
-HARD_HUNK_MIN: int = 10
+# Thresholds (unit-tested). M27 retune: qs-class thin gold → EASY drop;
+# DeepSWE-median multi-file large gold → HARD. No model scores.
+EASY_INSTR_CHARS_MAX: int = 900
+HARD_INSTR_CHARS_MIN: int = 1600
+EASY_OUTCOME_MAX: int = 3
+HARD_OUTCOME_MIN: int = 5
+EASY_CONSTRAINT_MAX: int = 3
+HARD_CONSTRAINT_MIN: int = 4
+# qs-class often has ~11 hunks; treat ≤12 as easy-side structural thinness.
+EASY_HUNK_MAX: int = 12
+# DeepSWE-median rungs for hard-side confidence (floor band).
+HARD_HUNK_MIN: int = 14
 EASY_SOURCE_FILES_MAX: int = 2
-HARD_SOURCE_FILES_MIN: int = 3
-EASY_F2P_MAX: int = 2
-HARD_F2P_MIN: int = 4
-EASY_ADDED_LINES_MAX: int = 25
-HARD_ADDED_LINES_MIN: int = 60
+HARD_SOURCE_FILES_MIN: int = 4
+# F2P=3 (qs-class) is still easy under M27 F2P floor 5.
+EASY_F2P_MAX: int = 3
+HARD_F2P_MIN: int = 5
+# Added-line band: qs~21 easy; median ≥400 hard.
+EASY_ADDED_LINES_MAX: int = 80
+HARD_ADDED_LINES_MIN: int = 400
 #: Require this many easy / hard structural signals for confident class.
 EASY_SIGNAL_CONFIDENCE: int = 3
 HARD_SIGNAL_CONFIDENCE: int = 3
@@ -252,8 +261,11 @@ def score_request_patch_difficulty(
     if hunks >= HARD_HUNK_MIN:
         hard_reasons.append(f"large_gold_hunks={hunks}>={HARD_HUNK_MIN}")
 
-    if n_files <= EASY_SOURCE_FILES_MAX and n_modules <= 1:
-        easy_reasons.append(f"single_module_or_thin_files=files:{n_files}/modules:{n_modules}")
+    # Thin file count is easy even across 2 sibling dirs (qs-class parse/stringify).
+    if n_files <= EASY_SOURCE_FILES_MAX:
+        easy_reasons.append(f"thin_source_files={n_files}<={EASY_SOURCE_FILES_MAX}")
+    if n_modules <= 1 and n_files <= EASY_SOURCE_FILES_MAX:
+        easy_reasons.append(f"single_module_touch=modules:{n_modules}")
     if n_files >= HARD_SOURCE_FILES_MIN or n_modules >= HARD_SOURCE_FILES_MIN:
         hard_reasons.append(f"multi_module_touch=files:{n_files}/modules:{n_modules}")
 
@@ -263,14 +275,32 @@ def score_request_patch_difficulty(
         if f2p >= HARD_F2P_MIN:
             hard_reasons.append(f"large_f2p={f2p}>={HARD_F2P_MIN}")
 
-    if added <= EASY_ADDED_LINES_MAX and deleted <= EASY_ADDED_LINES_MAX:
-        easy_reasons.append(f"tiny_delta_lines=+{added}/-{deleted}")
+    # Gold size dominates classification for M27 (thin API vs median band).
+    if added <= EASY_ADDED_LINES_MAX:
+        easy_reasons.append(f"tiny_delta_lines=+{added}/-{deleted}<={EASY_ADDED_LINES_MAX}")
     if added >= HARD_ADDED_LINES_MIN or deleted >= HARD_ADDED_LINES_MIN:
-        hard_reasons.append(f"large_delta_lines=+{added}/-{deleted}")
+        hard_reasons.append(f"large_delta_lines=+{added}/-{deleted}>={HARD_ADDED_LINES_MIN}")
 
     # empty / missing gold is a thin-request smell only when instruction also thin
     if not patch:
         easy_reasons.append("empty_solution_patch")
+
+    # Structural dominance bonus: very thin gold with few files forces easy-side
+    # weight so a medium-length DeepSWE-style prompt cannot redeem qs-class packs.
+    if (
+        added <= EASY_ADDED_LINES_MAX
+        and n_files <= EASY_SOURCE_FILES_MAX
+        and (f2p is None or f2p <= EASY_F2P_MAX)
+    ):
+        easy_reasons.append("thin_gold_api_class")
+
+    # Median-band gold forces hard-side weight even with shorter prompts.
+    if (
+        added >= HARD_ADDED_LINES_MIN
+        and n_files >= HARD_SOURCE_FILES_MIN
+        and hunks >= HARD_HUNK_MIN
+    ):
+        hard_reasons.append("deepswe_median_structural_band")
 
     n_easy = len(easy_reasons)
     n_hard = len(hard_reasons)
@@ -314,10 +344,19 @@ def score_request_patch_difficulty(
         conf = "high" if n_easy >= EASY_SIGNAL_CONFIDENCE + 1 and n_hard == 0 else "medium"
         if n_easy >= EASY_SIGNAL_CONFIDENCE + 1 and n_hard <= 1:
             conf = "high"
+        # M27: qs-class thin gold dominates prompt length / outcome lists. When
+        # structural thin_gold_api_class fires and easy clearly beat hard, treat
+        # as high-confidence EASY_REQUEST (VAL-DMED-002).
+        thin_gold_api = "thin_gold_api_class" in easy_reasons
+        if thin_gold_api and n_easy >= EASY_SIGNAL_CONFIDENCE + 2 and n_easy > n_hard:
+            conf = "high"
         approachable = True
         drop = bool(drop_on_easy_request) and (conf == "high" if high_confidence_only else True)
         # Redeem if strong hard signals coexist — never auto-easy then.
-        if n_hard >= HARD_SIGNAL_CONFIDENCE:
+        # Exception: thin_gold_api with dominant easy signals still drops (M27).
+        if n_hard >= HARD_SIGNAL_CONFIDENCE and not (
+            thin_gold_api and n_easy >= n_hard + 2 and added <= EASY_ADDED_LINES_MAX
+        ):
             cls = CLASS_UNCERTAIN
             approachable = False
             drop = False

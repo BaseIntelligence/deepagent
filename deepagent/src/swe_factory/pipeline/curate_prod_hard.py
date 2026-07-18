@@ -1,10 +1,12 @@
-"""Curate production hardness panel from test_n10 (M21c + M25 intrinsic).
+"""Curate production hardness panel from test_n10 (M21c + M25 + M27 median).
 
 Policy
 ------
 * DROP misaligned packs (e.g. more-itertools-1136 and same-class).
-* DROP structural floors fails (thin F2P, multi-file/hunk shortfalls).
-* DROP high-confidence **intrinsic** ``EASY_REQUEST`` (prompt + gold only).
+* DROP structural floors fails (M27 DeepSWE-median: files<4, hunks<14,
+  F2P<5, gold added_lines<400).
+* DROP high-confidence **intrinsic** ``EASY_REQUEST`` (prompt + gold only;
+  M27 retune catches qs-487-class thin gold).
 * **Do NOT** drop solely because dual-model eval solve-all (M25 / VAL-DINTR-001).
   EASY_SOLVE_ALL remains a scoreboard label via :mod:`easy_detect`.
 * KEEP panel hard keep-band **when** dual-truth + alignment + floors + not
@@ -521,7 +523,7 @@ def recover_solve_all_only_drops(
       archives + deepagent_v1)
     * Dual-truth sol=1/null=0 from archive manifest row
     * Prompt–verifier alignment OK
-    * Hardness floors OK (F2P≥3, multi-file, hunks)
+    * Hardness floors OK (F2P≥5, files≥4, hunks≥14, added≥400)
     * Intrinsic **not** high-confidence EASY_REQUEST
 
     Materials-only skeletons (patch+meta without Harbor layout) are skipped
@@ -737,7 +739,7 @@ def decide_pack(
     * explicit force_drop / EXPLICIT table (misalign, structural thin F2P names)
     * incomplete tree / dual-truth fail
     * prompt–verifier misalignment
-    * hardness floors (F2P<3, multi-file, hunks)
+    * hardness floors (F2P<5, files<4, hunks<14, added<400)
     * high-confidence intrinsic ``EASY_REQUEST`` (prompt+gold only)
 
     Model solve-all / panel rule=solve-all / frontier=1.0 do **not** auto-drop.
@@ -1301,7 +1303,7 @@ def _render_provenance(
             "## Notes",
             "",
             "- Source wave: `datasets/test_n10` live-mine dual-truth packs.",
-            "- Gates: prompt–verifier alignment, MIN_F2P≥3, ≥10 hunks, multi-file, dual-truth.",
+            "- Gates: alignment + F2P≥5 + hunks≥14 + files≥4 + added≥400 + dual-truth.",
             "- Intrinsic EASY_REQUEST (high confidence, prompt+gold) dropped from hardness.",
             "- Model dual success is **not** a hardness drop gate (M25 / VAL-DINTR-001).",
             (
@@ -1335,7 +1337,8 @@ def _render_report(
         f"- Certified hardness packs N: **{n}** (floor ≥{MIN_HARD_KEEP})",
         "- Docker oracle: dual-truth sol=1 / null=0 retained on every keep",
         "- Prompt–verifier alignment: required on every keep",
-        f"- Hardness floors: F2P≥{DEFAULT_MIN_F2P_NODES}, multi-file, source hunks≥10",
+        f"- Hardness floors (M27 DeepSWE-median): F2P≥{DEFAULT_MIN_F2P_NODES}, "
+        "files≥4, hunks≥14, gold added_lines≥400",
         "- Status: `OK` — curated production hardness panel (no fixture pad)",
         "",
         "## Drop reasons",

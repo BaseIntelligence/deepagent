@@ -4,8 +4,9 @@ Classify packs as **EASY_SOLVE_ALL** when **every** model in the open panel matr
 has ``pass_at_1 == 1.0`` (frontier pass@k ≥ 1.0 / solve-all). This is a
 **reporting / scoreboard label only** under M25: ``should_drop_hardness`` is
 ``False`` by default for model solve-all (VAL-DINTR-001). Hardness drops come
-from misalign, structural floors (F2P<3, …), and high-confidence intrinsic
-``EASY_REQUEST`` (see :mod:`intrinsic_difficulty`) — never solely model outcomes.
+from misalign, structural floors (F2P<5 / DeepSWE-median band, …), and
+high-confidence intrinsic ``EASY_REQUEST`` (see :mod:`intrinsic_difficulty`) —
+never solely model outcomes.
 
 Thin F2P still reuses :mod:`hardness_floors` reason codes and **does** set
 ``should_drop_hardness=True`` (structural floor, not model score).

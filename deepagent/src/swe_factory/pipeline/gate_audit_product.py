@@ -5,7 +5,7 @@ allowed only after a recorded **gate_audit** pass confirming, for every
 intended keep:
 
 - live materials provenance (non-fixture)
-- hard floors (≥10 source hunks when recorded)
+- hard floors (DeepSWE-median: hunks≥14, files≥4, F2P≥5, added≥400 when known)
 - real dual-run (not synthetic / test_always_ok)
 - HarborDockerVerifier sol=1 / null=0 with non-empty images
 
@@ -24,8 +24,13 @@ from typing import Any
 
 from swe_factory.pipeline.hardness_floors import (
     DEFAULT_MIN_F2P_NODES,
+    PRODUCT_MIN_ADDED_LINES,
+    PRODUCT_MULTI_FILE_FLOOR,
+    PRODUCT_SOURCE_HUNK_FLOOR,
+    REASON_ADDED_LINES_BELOW_FLOOR,
     REASON_F2P_BELOW_FLOOR,
     REASON_THIN_F2P_EASY,
+    count_gold_added_lines,
     resolve_min_f2p_nodes,
 )
 from swe_factory.producers.materialize_from_pr import is_fixture_materials_root
@@ -38,8 +43,8 @@ SYNTHETIC_MARKERS = (
     "synthetic_patch_seed",
 )
 PRODUCT_BACKEND = "HarborDockerVerifier"
-PRODUCT_SOURCE_HUNK_FLOOR = 10
-# M21 product hardness F2P floor (VAL-DHARD-002); env MIN_F2P_NODES overrides.
+# Re-export M27 product floors (single source: hardness_floors / hard_filter).
+# M21/M27 product hardness F2P floor (VAL-DMED-001); env MIN_F2P_NODES overrides.
 PRODUCT_MIN_F2P_NODES = DEFAULT_MIN_F2P_NODES
 
 
@@ -130,20 +135,30 @@ def audit_keep_dual_truth(
     null_reward: int | float | None,
     source_track: str | None = "real_pr",
     source_hunk_count: int | None = None,
+    added_lines: int | None = None,
+    source_file_count: int | None = None,
+    solution_patch: str | None = None,
     discovery_path: str | None = None,
     offline_only: bool = False,
     require_hunk_floor: bool = True,
     require_f2p_floor: bool = True,
+    require_added_floor: bool = True,
+    require_multi_file_floor: bool = True,
     min_f2p_nodes: int | None = None,
     engineering_opt_out: bool = False,
 ) -> GateAuditRow:
     """Audit one intended keep for dual-truth product promote.
 
-    VAL-DHARD-002: when *require_f2p_floor* (default True for product) and not
-    *engineering_opt_out*, refuse F2P node count below MIN_F2P_NODES (default 3).
+    VAL-DMED-001 / VAL-DHARD-002: when *require_f2p_floor* (default True for
+    product) and not *engineering_opt_out*, refuse F2P node count below
+    MIN_F2P_NODES (default 5). Also refuse below DeepSWE-median hunk/file/added
+    floors when those stats are known.
     """
     min_f2p = resolve_min_f2p_nodes(override=min_f2p_nodes)
     f2p_list = _as_list(f2p_node_ids)
+    added = added_lines
+    if added is None and solution_patch is not None:
+        added = count_gold_added_lines(solution_patch)
     reasons: list[str] = []
     fields: dict[str, Any] = {
         "label_method": label_method,
@@ -156,10 +171,15 @@ def audit_keep_dual_truth(
         "null_reward": null_reward,
         "source_track": source_track,
         "source_hunk_count": source_hunk_count,
+        "added_lines": added,
+        "source_file_count": source_file_count,
         "discovery_path": discovery_path,
         "materials_root": str(materials_root) if materials_root is not None else None,
         "live_mine": live_mine,
         "min_f2p_nodes": min_f2p,
+        "min_source_hunks": PRODUCT_SOURCE_HUNK_FLOOR,
+        "min_source_files": PRODUCT_MULTI_FILE_FLOOR,
+        "min_added_lines": PRODUCT_MIN_ADDED_LINES,
         "engineering_opt_out": engineering_opt_out,
     }
 
@@ -213,6 +233,16 @@ def audit_keep_dual_truth(
         and int(source_hunk_count) < PRODUCT_SOURCE_HUNK_FLOOR
     ):
         reasons.append(f"source_hunks_below_floor:{source_hunk_count}<{PRODUCT_SOURCE_HUNK_FLOOR}")
+
+    if (
+        require_multi_file_floor
+        and source_file_count is not None
+        and int(source_file_count) < PRODUCT_MULTI_FILE_FLOOR
+    ):
+        reasons.append(f"multi_file_floor_rejected:{source_file_count}<{PRODUCT_MULTI_FILE_FLOOR}")
+
+    if require_added_floor and added is not None and int(added) < PRODUCT_MIN_ADDED_LINES:
+        reasons.append(f"{REASON_ADDED_LINES_BELOW_FLOOR}:{added}<{PRODUCT_MIN_ADDED_LINES}")
 
     if (
         live_mine
@@ -1129,7 +1159,9 @@ def rebuild_product_dual_truth_from_tasks(
 __all__ = [
     "LABEL_METHOD_LIVE",
     "PRODUCT_BACKEND",
+    "PRODUCT_MIN_ADDED_LINES",
     "PRODUCT_MIN_F2P_NODES",
+    "PRODUCT_MULTI_FILE_FLOOR",
     "PRODUCT_SOURCE_HUNK_FLOOR",
     "GateAuditRow",
     "ProductGateAuditError",

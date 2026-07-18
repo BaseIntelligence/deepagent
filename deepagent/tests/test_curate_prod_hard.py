@@ -86,16 +86,17 @@ def _misaligned_instruction() -> str:
 
 
 def _multi_file_gold() -> str:
-    return (
-        "diff --git a/pkg/a.py b/pkg/a.py\n"
-        "--- a/pkg/a.py\n+++ b/pkg/a.py\n"
-        "@@ -1,1 +1,3 @@\n"
-        " x=1\n+def f():\n+    return 2\n"
-        "diff --git a/pkg/b.py b/pkg/b.py\n"
-        "--- a/pkg/b.py\n+++ b/pkg/b.py\n"
-        "@@ -1,1 +1,2 @@\n"
-        " y=1\n+z=3\n"
-    )
+    """DeepSWE-median structural gold: ≥4 files, ≥14 hunks, ≥400 added lines."""
+    parts: list[str] = []
+    for fi in range(4):
+        path = f"pkg/mod_{fi}.py"
+        hunks: list[str] = []
+        for h in range(4):
+            plus = "\n".join(f"+added_{fi}_{h}_{k}" for k in range(26))
+            hunks.append(f"@@ -{1 + h * 5},1 +{1 + h * 5},27 @@\n context\n-old_{fi}_{h}\n{plus}\n")
+        body = "".join(hunks)
+        parts.append(f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{body}")
+    return "".join(parts)
 
 
 def _behavioral_test_patch() -> str:
@@ -129,10 +130,10 @@ def _build_src_corpus(tmp: Path) -> Path:
         },
         "realpr-attrs-1323": {
             "instr": _aligned_instruction(),
-            "f2p": ["a", "b", "c", "d"],
+            "f2p": ["a", "b", "c", "d", "e"],
             "sol": 1,
             "null": 0,
-            "hunks": 14,
+            "hunks": 16,
         },
         "realpr-httpx-3672": {
             "instr": _aligned_instruction(),
@@ -677,7 +678,7 @@ def test_recover_solve_all_only_drops_restores_hard_not_intrinsic_easy(
         dest,
         keep_id,
         instruction=_hard_instruction(),
-        f2p=["k1", "k2", "k3", "k4"],
+        f2p=["k1", "k2", "k3", "k4", "k5"],
         solution_diff=_multi_file_gold(),
         test_patch=_behavioral_test_patch(),
     )
@@ -687,7 +688,7 @@ def test_recover_solve_all_only_drops_restores_hard_not_intrinsic_easy(
             "certified": True,
             "solution_reward": 1,
             "null_reward": 0,
-            "source_hunk_count": 15,
+            "source_hunk_count": 16,
             "source_track": "real_pr",
         }
     ]
@@ -696,7 +697,7 @@ def test_recover_solve_all_only_drops_restores_hard_not_intrinsic_easy(
             dest,
             extra,
             instruction=_hard_instruction(),
-            f2p=["e1", "e2", "e3", "e4"],
+            f2p=["e1", "e2", "e3", "e4", "e5"],
             solution_diff=_multi_file_gold(),
             test_patch=_behavioral_test_patch(),
         )
@@ -706,7 +707,7 @@ def test_recover_solve_all_only_drops_restores_hard_not_intrinsic_easy(
                 "certified": True,
                 "solution_reward": 1,
                 "null_reward": 0,
-                "source_hunk_count": 14,
+                "source_hunk_count": 16,
                 "source_track": "real_pr",
             }
         )

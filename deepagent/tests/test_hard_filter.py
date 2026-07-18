@@ -1,7 +1,8 @@
-"""Product hard filter unit tests (M14 VAL-LHARD / VAL-LMINE).
+"""Product hard filter unit tests (M14 + M27 DeepSWE-median floors).
 
 Covers:
-- Boundary source_hunk_count 9 reject / 10 accept (VAL-LHARD-001)
+- Boundary source_hunk_count 13 reject / 14 accept (VAL-DMED-001 / VAL-LHARD-001)
+- Multi-file product floor ≥4
 - docs/chore refuse (VAL-LHARD-003)
 - multi-file + test path floor (VAL-LHARD-004)
 - merged_at + 40-char base SHA (VAL-LMINE-002)
@@ -74,22 +75,24 @@ def _test(path: str = "tests/test_mod.py") -> dict[str, Any]:
     }
 
 
-def _hard_eligible_files(*, source_hunks: int) -> list[dict[str, Any]]:
-    """Two product source files totaling exactly ``source_hunks`` hunks + one test."""
-    if source_hunks < 2:
-        raise ValueError("need at least 2 hunks to split across two source files")
-    left = source_hunks // 2
-    right = source_hunks - left
-    return [
-        _src("pkg/a.py", left),
-        _src("pkg/b.py", right),
-        _test(),
-    ]
+def _hard_eligible_files(*, source_hunks: int, n_source_files: int = 4) -> list[dict[str, Any]]:
+    """n product source files totaling exactly ``source_hunks`` hunks + one test."""
+    n = max(n_source_files, 1)
+    if source_hunks < n:
+        raise ValueError(f"need at least {n} hunks to split across {n} source files")
+    base = source_hunks // n
+    rem = source_hunks % n
+    files: list[dict[str, Any]] = []
+    for i in range(n):
+        h = base + (1 if i < rem else 0)
+        files.append(_src(f"pkg/mod_{i}.py", h))
+    files.append(_test())
+    return files
 
 
-def test_product_floors_constants() -> None:
-    assert PRODUCT_SOURCE_HUNK_FLOOR == 10
-    assert PRODUCT_MULTI_FILE_FLOOR >= 2
+def test_product_floors_constants_m27() -> None:
+    assert PRODUCT_SOURCE_HUNK_FLOOR == 14
+    assert PRODUCT_MULTI_FILE_FLOOR == 4
     assert SOFT_MULTI_FILE_FLOOR == MULTI_FILE_FLOOR == 2
     # Soft floor still available for offline engineering filters.
     soft_ok = multi_file_source_filter(
@@ -108,8 +111,8 @@ def test_count_unified_diff_hunks() -> None:
     assert count_unified_diff_hunks(None) == 0
     assert count_unified_diff_hunks("") == 0
     assert count_unified_diff_hunks(_hunk(1)) == 1
-    assert count_unified_diff_hunks(_hunk(9)) == 9
-    assert count_unified_diff_hunks(_hunk(10)) == 10
+    assert count_unified_diff_hunks(_hunk(13)) == 13
+    assert count_unified_diff_hunks(_hunk(14)) == 14
     assert count_unified_diff_hunks(_hunk(3) + "\n" + _hunk(2)) == 5
 
 
@@ -133,10 +136,10 @@ def test_measure_source_hunks_ignores_tests_and_docs() -> None:
     assert measure_source_hunk_count(files) == 7
 
 
-def test_rejects_9_source_hunks() -> None:
-    """VAL-LHARD-001 boundary: 9 source hunks hard-reject."""
-    files = _hard_eligible_files(source_hunks=9)
-    assert measure_source_hunks_sum(files) == 9
+def test_rejects_13_source_hunks() -> None:
+    """VAL-DMED-001 boundary: 13 source hunks hard-reject (floor 14)."""
+    files = _hard_eligible_files(source_hunks=13)
+    assert measure_source_hunk_count(files) == 13
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -147,14 +150,14 @@ def test_rejects_9_source_hunks() -> None:
     )
     assert result.accepted is False
     assert REASON_SOURCE_HUNKS_BELOW_FLOOR in result.reason_codes
-    assert result.stats.source_hunk_count == 9
+    assert result.stats.source_hunk_count == 13
     assert result.stats.source_hunk_count < PRODUCT_SOURCE_HUNK_FLOOR
 
 
-def test_accepts_10_source_hunks() -> None:
-    """VAL-LHARD-001 boundary: 10 source hunks keep-eligible."""
-    files = _hard_eligible_files(source_hunks=10)
-    assert measure_source_hunk_count(files) == 10
+def test_accepts_14_source_hunks() -> None:
+    """VAL-DMED-001 boundary: 14 source hunks keep-eligible with ≥4 files."""
+    files = _hard_eligible_files(source_hunks=14, n_source_files=4)
+    assert measure_source_hunk_count(files) == 14
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -165,18 +168,14 @@ def test_accepts_10_source_hunks() -> None:
     )
     assert result.accepted is True
     assert result.reason_code == REASON_OK
-    assert result.stats.source_hunk_count == 10
-    assert result.stats.source_file_count >= 2
+    assert result.stats.source_hunk_count == 14
+    assert result.stats.source_file_count >= 4
     assert result.stats.test_file_count >= 1
     assert result.stats.license.lower() == "mit"
 
 
-def measure_source_hunks_sum(files: list[dict[str, Any]]) -> int:
-    return measure_source_hunk_count(files)
-
-
 def test_rejects_not_merged() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -191,7 +190,7 @@ def test_rejects_not_merged() -> None:
 
 
 def test_rejects_short_base_sha() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit="deadbeef",  # not 40-char
@@ -257,9 +256,25 @@ def test_chore_only_rejected() -> None:
     assert REASON_DOCS_CHORE_ONLY in result.reason_codes
 
 
+def test_three_source_files_rejected_under_m27() -> None:
+    """M27 multi-file floor is 4; 3 product sources + enough hunks still rejects."""
+    files = _hard_eligible_files(source_hunks=14, n_source_files=3)
+    result = evaluate_product_hard_filter(
+        files=files,
+        base_commit=_BASE,
+        merged_at="2026-01-01T00:00:00Z",
+        language="python",
+        license="MIT",
+        repo="owner/demo",
+    )
+    assert result.accepted is False
+    assert REASON_MULTI_FILE_FLOOR in result.reason_codes
+    assert result.stats.source_file_count == 3
+
+
 def test_single_source_file_rejected() -> None:
     files = [
-        _src("pkg/only.py", 12),
+        _src("pkg/only.py", 16),
         _test(),
     ]
     result = evaluate_product_hard_filter(
@@ -277,8 +292,10 @@ def test_single_source_file_rejected() -> None:
 
 def test_missing_tests_rejected() -> None:
     files = [
-        _src("pkg/a.py", 6),
-        _src("pkg/b.py", 6),
+        _src("pkg/a.py", 4),
+        _src("pkg/b.py", 4),
+        _src("pkg/c.py", 3),
+        _src("pkg/d.py", 3),
     ]
     result = evaluate_product_hard_filter(
         files=files,
@@ -293,7 +310,7 @@ def test_missing_tests_rejected() -> None:
 
 
 def test_copyleft_license_rejected() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -307,7 +324,7 @@ def test_copyleft_license_rejected() -> None:
 
 
 def test_missing_license_fail_closed() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -321,7 +338,7 @@ def test_missing_license_fail_closed() -> None:
 
 
 def test_unknown_license_fail_closed() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -335,7 +352,7 @@ def test_unknown_license_fail_closed() -> None:
 
 
 def test_motor_hybrid_identity_rejected() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -351,7 +368,7 @@ def test_motor_hybrid_identity_rejected() -> None:
 
 
 def test_suite_reporter_required() -> None:
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -365,7 +382,7 @@ def test_suite_reporter_required() -> None:
 
 
 def test_reject_ledger_row_includes_hunks_and_license() -> None:
-    files = _hard_eligible_files(source_hunks=9)
+    files = _hard_eligible_files(source_hunks=13)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -380,18 +397,18 @@ def test_reject_ledger_row_includes_hunks_and_license() -> None:
         pr_number=42,
         discovery_path="search",
     )
-    assert row["source_hunk_count"] == 9
+    assert row["source_hunk_count"] == 13
     assert row["license"]
     assert "apache" in row["license"].lower() or row["license"] == "Apache-2.0"
     assert row["disposition"] == "reject"
     assert row["reason_code"] == REASON_SOURCE_HUNKS_BELOW_FLOOR
     assert row["discovery_path"] == "search"
     assert row["base_commit"] == _BASE
-    assert row["product_source_hunk_floor"] == 10
+    assert row["product_source_hunk_floor"] == 14
 
 
 def test_accept_ledger_row_includes_hunks_and_license() -> None:
-    files = _hard_eligible_files(source_hunks=12)
+    files = _hard_eligible_files(source_hunks=16)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,
@@ -402,7 +419,7 @@ def test_accept_ledger_row_includes_hunks_and_license() -> None:
     )
     assert result.accepted is True
     row = reject_ledger_row(result, repo="owner/demo", pr_number=7, discovery_path="list_pulls")
-    assert row["source_hunk_count"] >= 10
+    assert row["source_hunk_count"] >= 14
     assert row["license"]
     assert row["disposition"] == "accept"
     assert row["hard_filter_accepted"] is True
@@ -420,13 +437,14 @@ def test_path_classifiers() -> None:
 
 
 def test_soft_floor_does_not_equal_product_hunk_floor() -> None:
-    """Soft MULTI_FILE_FLOOR=2 must not be confused with product 10-hunk hard floor."""
+    """Soft MULTI_FILE_FLOOR=2 must not be confused with product 14-hunk hard floor."""
     assert SOFT_MULTI_FILE_FLOOR == 2
-    assert PRODUCT_SOURCE_HUNK_FLOOR == 10
+    assert PRODUCT_SOURCE_HUNK_FLOOR == 14
+    assert PRODUCT_MULTI_FILE_FLOOR == 4
     assert PRODUCT_SOURCE_HUNK_FLOOR > SOFT_MULTI_FILE_FLOOR
 
 
-def test_pr_miner_product_mode_rejects_9_accepts_10() -> None:
+def test_pr_miner_product_mode_rejects_13_accepts_14() -> None:
     """PrMiner product_mode applies hard floor with fixed source_hunk definition."""
     from swe_factory.producers.pr_miner import PrMineError, PrMiner
     from swe_factory.sources.github import DictGitHubTransport, GitHubClient
@@ -453,14 +471,14 @@ def test_pr_miner_product_mode_rejects_9_accepts_10() -> None:
         )
 
     with pytest.raises(PrMineError, match="source_hunk|hard filter"):
-        _select(9)
+        _select(13)
 
-    pr = _select(10)
-    assert pr.source_hunk_count == 10
+    pr = _select(14)
+    assert pr.source_hunk_count == 14
     assert pr.license == "MIT"
     assert pr.merged_at
-    candidate = miner.produce(pr, instance_suffix="hard10", run_stub_oracle=True)
-    assert candidate.provenance["source_hunk_count"] == 10
+    candidate = miner.produce(pr, instance_suffix="hard14", run_stub_oracle=True)
+    assert candidate.provenance["source_hunk_count"] == 14
     assert candidate.provenance["license"] == "MIT"
 
 
@@ -480,7 +498,7 @@ def test_pr_miner_product_mode_rejects_missing_merged_at() -> None:
             base_commit=_BASE,
             merge_commit_sha=None,
             html_url="https://github.com/owner/demo/pull/501",
-            files_payload=_hard_eligible_files(source_hunks=10),
+            files_payload=_hard_eligible_files(source_hunks=14),
             language="python",
             license="MIT",
             require_full_base_sha=True,
@@ -510,7 +528,7 @@ def test_pr_miner_product_mode_rejects_empty_merged_at() -> None:
                 base_commit=_BASE,
                 merge_commit_sha=None,
                 html_url="https://github.com/owner/demo/pull/502",
-                files_payload=_hard_eligible_files(source_hunks=10),
+                files_payload=_hard_eligible_files(source_hunks=14),
                 language="python",
                 license="MIT",
                 require_full_base_sha=True,
@@ -522,7 +540,7 @@ def test_pr_miner_product_mode_rejects_empty_merged_at() -> None:
 
 def test_evaluate_product_require_merged_true_rejects_missing() -> None:
     """Direct hard-filter path: require_merged=True + missing merge → NOT_MERGED."""
-    files = _hard_eligible_files(source_hunks=10)
+    files = _hard_eligible_files(source_hunks=14)
     result = evaluate_product_hard_filter(
         files=files,
         base_commit=_BASE,

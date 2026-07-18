@@ -184,8 +184,9 @@ through Oxylabs (`source=universal` only) when credentials are configured.
 - Docker oracle only on the certified path (`HarborDockerVerifier`); fake
   backends are refused.
 - Dual-truth required: solution reward = 1, null reward = 0.
-- Multi-file gold from a merged public PR; hard floors include **≥10 source
-  hunks** and real-suite F2P/P2P labels where product cert applies.
+- Multi-file gold from a merged public PR; hard floors follow the
+  **DeepSWE-median band** (files≥4, hunks≥14, gold added≥400, F2P≥5) and
+  real-suite F2P/P2P labels where product cert applies.
 - Panel / eval spend stops under the hard budget (default **$600**); never invent
   panel spend. Default eval models: **grok-4.5** + **kimi-k2.6**.
 - Secrets (HF / OpenRouter / GitHub) stay in env / `.env` only — never in help
@@ -309,7 +310,7 @@ Focused suites:
 |---|---|---|
 | Operators | this README | install, CLI, HF, honesty floors |
 | Implementers | [docs/architecture.md](docs/architecture.md) | pipeline stages and gates |
-| Hardness policy | [docs/PRODUCT_HARDNESS.md](docs/PRODUCT_HARDNESS.md) | F2P≥3 floors, anti-easy, opt-out |
+| Hardness policy | [docs/PRODUCT_HARDNESS.md](docs/PRODUCT_HARDNESS.md) | DeepSWE-median floors, intrinsic, opt-out |
 | Wave consumers | `datasets/test_n10/report.md` | M16 N=10 mix and honesty notes |
 | Product archive | `datasets/deepagent_v1/report.md` | N=20 corpus and provenance |
 

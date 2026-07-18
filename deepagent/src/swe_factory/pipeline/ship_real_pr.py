@@ -92,6 +92,9 @@ from swe_factory.pipeline.gate_audit_product import (
 )
 from swe_factory.pipeline.hardness_floors import (
     DEFAULT_MIN_F2P_NODES,
+    PRODUCT_MIN_ADDED_LINES,
+    PRODUCT_MULTI_FILE_FLOOR,
+    PRODUCT_SOURCE_HUNK_FLOOR,
     ProductHardnessFloorRejected,
     refuse_product_hardness_floors,
     resolve_min_f2p_nodes,
@@ -164,8 +167,8 @@ _GIT_DIFF_TEST_RE = re.compile(r"^diff --git a/(?P<path>.+?) b/(?P<path_b>.+)$",
 _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _PRODUCT_DEST_MARKERS = ("deepagent_v1",)
 # M16 live generate dest (VAL-DGEN): dual-truth honesty, not deepagent_v1 product wipe.
-# M16 live generate + M21 prod hardness curate dest (VAL-DGEN / VAL-DHARD).
-_LIVE_GENERATE_DEST_MARKERS = ("test_n10", "prod_hard_keep")
+# M16/M21/M27 live generate + prod hardness dests (VAL-DGEN / VAL-DHARD / VAL-DMED).
+_LIVE_GENERATE_DEST_MARKERS = ("test_n10", "prod_hard_keep", "prod_hard_deepswe_med")
 _OFFLINE_DEST_MARKERS = ("offline", "offline_only", "_ut_", "fixture", "sandbox", "unit")
 
 
@@ -1294,12 +1297,13 @@ def _label_dual_run_for_material(
         suite_command=result.suite_command,
         require_suite_path=True,
     )
-    # VAL-DHARD-002: F2P≥MIN_F2P_NODES (default 3) + multi-file + hunk floors.
+    # VAL-DMED-001 / VAL-DHARD-002: DeepSWE-median floors (files/hunks/f2p/added).
     try:
         refuse_product_hardness_floors(
             f2p_node_ids=f2p,
             source_files=list(material.source_files),
             source_hunk_count=material.source_hunk_count,
+            solution_patch=getattr(material, "solution_patch", None),
             dest=dest,
             offline_only=False,
             task_id=material.task_id,
@@ -2812,13 +2816,14 @@ def run_ship_deepagent_real_pr(
                 ),
                 require_suite_path=honesty_dest,
             )
-            # VAL-DHARD-002/003/005: hardness floors fail-closed on product path.
+            # VAL-DMED-001 / VAL-DHARD-002/003/005: hardness floors fail-closed.
             # Offline engineering dests skip unless honesty_dest (test_n10/product).
             try:
                 refuse_product_hardness_floors(
                     f2p_node_ids=list(dual_detail.get("f2p_node_ids") or []),
                     source_files=list(material.source_files),
                     source_hunk_count=material.source_hunk_count,
+                    solution_patch=getattr(material, "solution_patch", None),
                     dest=dest,
                     offline_only=offline_only or not honesty_dest,
                     live_mine=bool(live_mine),
@@ -3833,10 +3838,14 @@ def run_ship_deepagent_real_pr(
                 "Docker oracle: HarborDockerVerifier sol=1 / null=0; pier mode honest;",
                 "gate_audit dual-truth pass required before overwrite (VAL-LSHIP-007 / VAL-DGEN).",
                 (
-                    f"Hardness floors (VAL-DHARD-002): F2P≥{resolve_min_f2p_nodes()} "
+                    f"Hardness floors (VAL-DMED-001 / VAL-DHARD-002): "
+                    f"F2P≥{resolve_min_f2p_nodes()} "
                     f"(default MIN_F2P_NODES={DEFAULT_MIN_F2P_NODES}), "
-                    "source hunks≥10, multi-file sources; thin F2P=1 refused; "
-                    "solve-all class dropped from hardness promote (VAL-DHARD-003). "
+                    f"source files≥{PRODUCT_MULTI_FILE_FLOOR}, "
+                    f"source hunks≥{PRODUCT_SOURCE_HUNK_FLOOR}, "
+                    f"gold added_lines≥{PRODUCT_MIN_ADDED_LINES} "
+                    "(DeepSWE-median band); thin gold/F2P refused; "
+                    "model dual-success alone never drops (M25 intrinsic). "
                     "See docs/PRODUCT_HARDNESS.md."
                 ),
                 "",
