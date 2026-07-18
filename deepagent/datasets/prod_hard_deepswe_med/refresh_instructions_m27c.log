@@ -1,0 +1,39 @@
+{
+  "failed": 0,
+  "fetched_bodies": 0,
+  "materials_root": "datasets/live_materials_m27c_priority_cert",
+  "message": "refreshed 2/2 packs prompt_style=deepswe_style_v1",
+  "ok": true,
+  "packs": [
+    {
+      "body_chars": 1023,
+      "body_source": "meta",
+      "chars_after": 3157,
+      "chars_before": 3157,
+      "error": "",
+      "leak_hits": [],
+      "ok": true,
+      "pack_dir": "datasets/prod_hard_deepswe_med/tasks/realpr-itemadapter-101",
+      "prompt_style": "deepswe_style_v1",
+      "sections_ok": true,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "body_chars": 1460,
+      "body_source": "meta",
+      "chars_after": 3085,
+      "chars_before": 3085,
+      "error": "",
+      "leak_hits": [],
+      "ok": true,
+      "pack_dir": "datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-3116",
+      "prompt_style": "deepswe_style_v1",
+      "sections_ok": true,
+      "task_id": "realpr-werkzeug-3116"
+    }
+  ],
+  "prompt_style": "deepswe_style_v1",
+  "refreshed": 2,
+  "root": "datasets/prod_hard_deepswe_med",
+  "stamped_manifest": true
+}

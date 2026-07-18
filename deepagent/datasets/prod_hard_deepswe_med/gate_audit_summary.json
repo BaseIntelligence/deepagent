@@ -12,9 +12,9 @@
   "gate": "product_dual_truth",
   "intended_count": 2,
   "live_mine": true,
-  "materials_root": "datasets/live_materials_m27_pass4",
+  "materials_root": "datasets/live_materials_m27c_cert2",
   "ok": true,
-  "path": "datasets/_m27_work_pass4/product_stage/gate_audit.jsonl",
+  "path": "datasets/_m27c_work_cert2/product_stage/gate_audit.jsonl",
   "reason": "gate_audit dual-truth PASS accepted=2/2 (HarborDocker sol=1/null=0 + live dual-run; seed5_archived=True)",
   "rejected_ids": [],
   "rows": [
@@ -29,7 +29,7 @@
         "f2p_count": 43,
         "label_method": "real_pr_dual_run_base_vs_gold",
         "live_mine": true,
-        "materials_root": "datasets/live_materials_m27_pass4",
+        "materials_root": "datasets/live_materials_m27c_cert2",
         "min_added_lines": 400,
         "min_f2p_nodes": 5,
         "min_source_files": 4,
@@ -57,7 +57,7 @@
         "f2p_count": 28,
         "label_method": "real_pr_dual_run_base_vs_gold",
         "live_mine": true,
-        "materials_root": "datasets/live_materials_m27_pass4",
+        "materials_root": "datasets/live_materials_m27c_cert2",
         "min_added_lines": 400,
         "min_f2p_nodes": 5,
         "min_source_files": 4,
@@ -76,5 +76,5 @@
     }
   ],
   "seed5_archived": true,
-  "timestamp_utc": "2026-07-18T19:42:18.534886+00:00"
+  "timestamp_utc": "2026-07-18T23:17:45.140318+00:00"
 }

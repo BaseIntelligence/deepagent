@@ -2,7 +2,7 @@
   "band": "deepswe_median_m27",
   "product_root": "datasets/prod_hard_deepswe_med",
   "historical_soft_band": "datasets/prod_hard_keep",
-  "generated_at_utc": "2026-07-18T19:44:17Z",
+  "generated_at_utc": "2026-07-18T23:54:47Z",
   "certified_n": 2,
   "target_n": 10,
   "min_packs": 5,
@@ -20,72 +20,92 @@
     "source_files": 10.0,
     "source_hunks": 44.5,
     "gold_added_lines": 654.0,
-    "f2p_count": 35.5
-  },
-  "product_p50_vs_deepswe_sample": {
-    "files_p50_product": 10.0,
-    "files_p50_deepswe": 6,
-    "files_p50_meets_product_floor_ge4": true,
-    "hunks_p50_product": 44.5,
-    "hunks_p50_deepswe": 14,
-    "added_p50_product": 654.0,
-    "added_p50_deepswe": 640,
-    "added_p50_meets_product_goal_ge400": true
+    "f2p_nodes": 35.5
   },
   "deepswe_sample_reference": {
-    "sample_n_approx": 48,
-    "files_p50": 6,
-    "hunks_p50": 14,
-    "added_p50": 640,
-    "added_min_approx": 438,
-    "notes": "Public DeepSWE sample N\u224848 packs (mission M27 reference)"
+    "n_approx": 48,
+    "source_files_p50": 6,
+    "source_hunks_p50": 14,
+    "gold_added_lines_p50": 640,
+    "note": "Public DeepSWE sample band from mission AGENTS.md"
   },
-  "packs": [
+  "keeps": [
     {
       "task_id": "realpr-itemadapter-101",
       "source_files": 4,
       "source_hunks": 15,
       "gold_added_lines": 726,
-      "f2p_count": 43,
+      "f2p_nodes": 43,
       "floors_ok": true,
-      "floor_reason": "hardness_floors_ok",
-      "materials_is_fixture": false,
-      "source_track": "real_pr"
+      "reason": "hardness_floors_ok"
     },
     {
       "task_id": "realpr-werkzeug-3116",
       "source_files": 16,
       "source_hunks": 74,
       "gold_added_lines": 582,
-      "f2p_count": 28,
+      "f2p_nodes": 28,
       "floors_ok": true,
-      "floor_reason": "hardness_floors_ok",
-      "materials_is_fixture": false,
-      "source_track": "real_pr"
+      "reason": "hardness_floors_ok"
     }
   ],
-  "keep_ids": [
-    "realpr-itemadapter-101",
-    "realpr-werkzeug-3116"
-  ],
-  "funnel_summary": {
-    "materials_sources": [
+  "p50_vs_deepswe": {
+    "files_delta_vs_6": 4.0,
+    "hunks_delta_vs_14": 30.5,
+    "added_delta_vs_640": 14.0,
+    "p50_added_meets_400": true,
+    "p50_files_meets_4": true
+  },
+  "campaign": {
+    "approach": "priority dual-truth densification then expanded live mine",
+    "priority_materials_roots": [
       "datasets/live_materials_m22",
+      "datasets/live_materials_m27*",
       "datasets/live_materials",
-      "sibling factory live_materials",
-      "fresh materialize-from-pr into live_materials_m27*"
+      "datasets/live_materials_m27c_expand",
+      "datasets/live_materials_m27c_recent",
+      "datasets/live_materials_m27c_priority_cert",
+      "datasets/live_materials_m27c_cert2"
     ],
-    "generate_passes": [
-      "pass1 live_materials_m27_priority -> N=2",
-      "pass2 expanded priority -> N=2",
-      "pass3 live_materials_m27_wave3 -> N=2",
-      "pass4 live_materials_m27_pass4 FULL-only -> N=2"
+    "existing_keeps_retained": [
+      "realpr-itemadapter-101",
+      "realpr-werkzeug-3116"
+    ],
+    "packaging_1120": {
+      "considered": true,
+      "admitted": false,
+      "reason": "multi_file_floor_rejected: product source files 3 < multi-file floor 4 (added=882 hunks=24 floors fail files>=4)"
+    },
+    "struct_ok_materials_seen_approx": 24,
+    "expanded_materialized_struct_ok": [
+      "realpr-werkzeug-2005",
+      "realpr-werkzeug-2003",
+      "realpr-flask-4692",
+      "realpr-jinja-*",
+      "realpr-httpx-3068",
+      "realpr-rq-2385",
+      "realpr-rq-2350",
+      "realpr-pydantic-13339",
+      "realpr-tornado-3596",
+      "realpr-rq-1874",
+      "realpr-marshmallow-2733",
+      "realpr-paramiko-2166"
+    ],
+    "dual_truth_cert_passes": [
+      "generate_m27c_retry on live_materials_m27c_priority_cert -> N=2",
+      "generate_m27c_cert2 on live_materials_m27c_cert2 -> N=2",
+      "smoke dual after host-env fix: only itemadapter-101 + werkzeug-3116 dual-OK of expanded family"
     ],
     "dominant_reject_modes": [
-      "dual_run empty_f2p",
-      "dual_run green suite unclean or zero passers",
-      "hardness_floors below M27 band"
+      "dual_run green suite unclean / green0 (missing host deps historically; empty F2P cohort after green pass)",
+      "legacy suite base green flake (werkzeug RequestRedirect)",
+      "package-specific install/runtime needs (pydantic-core native, rq redis hang, attrs version skew)",
+      "hardness_floors (packaging-1120 files=3; charset F2P=1)"
     ],
-    "note": "Honest under-yield after live mine + dual-truth exhaust. No fixture pad. FAIL-CLOSED N<5."
+    "note": "Honest under-yield after priority dual-truth densification + expanded live mine. No fixture pad. FAIL-CLOSED N=2 < min=5. Historical prod_hard_keep left untouched as soft archive."
+  },
+  "host_env_fix": {
+    "path": "src/swe_factory/pipeline/ship_real_pr.py:_prepare_host_suite_env",
+    "change": "Stop pip -U mass upgrade (factory venv poison); only-if-needed install; add simplejson/dateutil/redis/pytest-xprocess; refuse VCS/path requirements dumps."
   }
 }

@@ -1,0 +1,3354 @@
+START CERT 2026-07-18T21:52:41Z
+/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/harbor/models/task/config.py:834: UserWarning: Artifact sources overlap: '/logs/artifacts' (service 'main') and '/logs/artifacts/model.patch' (service 'main') map to the same location under the shared artifacts dir; on collision the first is kept and the rest are skipped at collection time.
+  validate_artifact_entries(
+/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/harbor/models/task/config.py:834: UserWarning: Artifact sources overlap: '/logs/artifacts' (service 'main') and '/logs/artifacts/model.patch' (service 'main') map to the same location under the shared artifacts dir; on collision the first is kept and the rest are skipped at collection time.
+  validate_artifact_entries(
+/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/harbor/models/task/config.py:834: UserWarning: Artifact sources overlap: '/logs/artifacts' (service 'main') and '/logs/artifacts/model.patch' (service 'main') map to the same location under the shared artifacts dir; on collision the first is kept and the rest are skipped at collection time.
+  validate_artifact_entries(
+/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/harbor/models/task/config.py:834: UserWarning: Artifact sources overlap: '/logs/artifacts' (service 'main') and '/logs/artifacts/model.patch' (service 'main') map to the same location under the shared artifacts dir; on collision the first is kept and the rest are skipped at collection time.
+  validate_artifact_entries(
+/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/harbor/models/task/config.py:834: UserWarning: Artifact sources overlap: '/logs/artifacts' (service 'main') and '/logs/artifacts/model.patch' (service 'main') map to the same location under the shared artifacts dir; on collision the first is kept and the rest are skipped at collection time.
+  validate_artifact_entries(
+{
+  "budget_stop": false,
+  "certified_count": 2,
+  "e2e_drip_path": "datasets/prod_hard_deepswe_med/e2e_drip.jsonl",
+  "fixture_note": "Historical / engineering only (not Real-PR product N): datasets/deepagent_v1_hybrid_archive (hybrid_curated motors), datasets/harbor_v1 (synth motors), datasets/v1 (boltons), fixtures/real_pr_ship (unit shortlist). Product N uses live-mined real_pr materials under datasets/deepagent_v1 only.",
+  "harbor_load_smoke": {
+    "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+    "cli_version_exit": 1,
+    "cli_version_out": "",
+    "environment_mode": "VerifierEnvironmentMode.SEPARATE",
+    "errors": [],
+    "harbor_version": "0.18.0",
+    "listed": [
+      "realpr-itemadapter-101",
+      "realpr-werkzeug-3116"
+    ],
+    "metadata_language": "python",
+    "ok": true,
+    "paths": {
+      "environment/": true,
+      "instruction.md": true,
+      "solution/": true,
+      "task.toml": true,
+      "tests/": true
+    },
+    "paths_ok": true,
+    "schema_version": "1.1",
+    "task_config_ok": true,
+    "task_id": "realpr-itemadapter-101",
+    "task_object": "Task",
+    "task_short_name": "realpr-itemadapter-101",
+    "tool": "harbor"
+  },
+  "historical_fixtures_only": [
+    "datasets/harbor_v1",
+    "datasets/v1"
+  ],
+  "languages": {
+    "python": 2
+  },
+  "ledger_summary_path": "datasets/prod_hard_deepswe_med/ledger_summary.json",
+  "max_packs": 15,
+  "min_packs": 5,
+  "mode": "docker",
+  "ok": false,
+  "oracle_evidence_path": "datasets/prod_hard_deepswe_med/oracle_evidence.json",
+  "out_dir": "datasets/prod_hard_deepswe_med",
+  "pack_manifest_path": "datasets/prod_hard_deepswe_med/pack_manifest.json",
+  "panel_mode": "offline",
+  "pier_evidence_path": "datasets/prod_hard_deepswe_med/pier_evidence.json",
+  "pier_mode": "scripted",
+  "product_surface": "datasets/deepagent_v1",
+  "provenance_path": "datasets/prod_hard_deepswe_med/PROVENANCE.md",
+  "provider_calls": 0,
+  "reason": "under-yield real_pr certified=2 < min=5; live-mine materials=datasets/live_materials_m27c_priority_cert (no fixture pad)",
+  "records": [
+    {
+      "agent_isolated": true,
+      "certified": true,
+      "docker_evidence_path": "datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-itemadapter-101.json",
+      "docker_oracle_certified": true,
+      "drip": [
+        {
+          "at": "2026-07-18T21:52:41.992005+00:00",
+          "detail": {
+            "agent_instruction": "# Add JSON Schema generation for item classes\n\n`itemadapter` supports several item types (dictionaries, `scrapy.Item`, `dataclass`-based classes, `attrs`-based classes, and Pydantic models). We want a way to introspect an item class and produce a JSON Schema document describing its structure. This is useful for validation, documentation, and interoperability tooling.\n\nAdd a `get_json_schema()` function that, given a supported item class, returns a JSON Schema (`dict`) describing that class's fields and their types.\n\n## Expected outcomes\n\n1. A public `get_json_schema(item_class)` callable is available from `itemadapter.utils` (and re-exported at package level) that accepts a supported item class and returns a JSON Schema as a plain `dict`.\n2. The result has `\"type\": \"object\"` at the top level, with a `\"properties\"` mapping keyed by field name.\n3. Field Python types are mapped to their JSON Schema equivalents where determinable (e.g. `str` \u2192 `{\"type\": \"string\"}`, `int` \u2192 `{\"type\": \"integer\"}`, `float` \u2192 `{\"type\": \"number\"}`, `bool` \u2192 `{\"type\": \"boolean\"}`, `list`/sequence types \u2192 `{\"type\": \"array\"}`, `dict`/mapping types \u2192 `{\"type\": \"object\"}`, `None`/`Optional` handled appropriately).\n4. Container types with parameterized element types (e.g. `list[int]`) populate the corresponding nested schema (e.g. `\"items\"`).\n5. Field metadata that maps naturally onto JSON Schema keywords is honored \u2014 e.g. per-field constraints such as minimum/maximum, min/max length, enum choices, descriptions, titles, and default values are emitted where available from the underlying item definition.\n6. Required fields (those without defaults) are collected into a top-level `\"required\"` list.\n7. The function works consistently across all supported item types, deriving field information via the appropriate adapter for each class.\n\n## Constraints\n\n- Do not raise on field types that cannot be represented in JSON Schema; skip or fall back gracefully to a permissive schema for those fields rather than failing the whole call.\n- Regular-expression patterns that cannot be safely represented as JSON Schema `pattern` strings should be ignored rather than emitted incorrectly.\n- Recursive or self-referential type definitions (a class with a field of its own type) do not need full `$ref` support in this iteration; avoid infinite recursion by handling such cases defensively.\n- Keep type-detection imports isolated so the feature degrades gracefully when optional dependencies (attrs, pydantic, scrapy) are not installed.\n- Do not change existing public adapter behavior; this is additive.\n\n## Implementation notes\n\n- Centralize the schema-building logic (e.g. in a dedicated module) and expose it through the existing adapter/utility layer so each supported item type reuses the same conversion code.\n- Reuse the existing adapter machinery to enumerate fields and read per-field metadata rather than special-casing each item type inline.\n- Add tests covering each supported item type and the mapping of primitive, container, optional, and constrained fields.\n\nIMPORTANT: Please work on this in a new branch from main and commit everything when you are done.",
+            "base_commit": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+            "body": "Post-merge work:\r\n\r\n- [x] Create issues to eventually address the following:\r\n  - [x] [Support converting Python regexp patterns to JSON Schema patterns where possible, instead of ignoring any incompatible pattern however easy it would be to convert it](https://github.com/scrapy/itemadapter/issues/102).\r\n  - [x] [Support recursive type definition (e.g. an item class has a field of its same type) by implementing $refs support, and use $refs as well when a given type is used more than once in the schema](https://github.com/scrapy/itemadapter/issues/103).\r\n  - [x] [Improve JSON Schema generation](https://github.com/scrapy/itemadapter/issues/104).\r\n    We can take some notes from https://github.com/pydantic/pydantic/blob/d156ba08c140ee1e2b931120cb150080843476fe/pydantic/json_schema.py#L1064.\r\n    Maybe we can come up with an implementation that is flexible enough to support itemadapter and pydantic cases and split it into a separate library? Maybe learn lessons from JSON serializers out there, or even reuse one?",
+            "discovery_path": "",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-itemadapter-101",
+            "pr_number": 101,
+            "repository_url": "https://github.com/scrapy/itemadapter.git",
+            "solution_bytes": 34835,
+            "source_files": [
+              "itemadapter/_imports.py",
+              "itemadapter/_json_schema.py",
+              "itemadapter/adapter.py",
+              "itemadapter/utils.py"
+            ],
+            "source_hunk_count": 15,
+            "source_track": "real_pr",
+            "task_id": "realpr-itemadapter-101",
+            "test_bytes": 58523,
+            "test_files": [
+              "tests/__init__.py",
+              "tests/requirements.txt",
+              "tests/test_adapter.py",
+              "tests/test_adapter_attrs.py",
+              "tests/test_adapter_pydantic.py",
+              "tests/test_adapter_pydantic_v1.py",
+              "tests/test_json_schema.py"
+            ],
+            "title": "Add get_json_schema()"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:42.015797+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-itemadapter-101",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:42.015805+00:00",
+          "detail": {
+            "base_commit": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/scrapy/itemadapter.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:43.582822+00:00",
+          "detail": {
+            "agent_isolation": "test.patch verifier-only",
+            "f2p_node_ids": [
+              "tests.test_adapter.AttrsItemTestCase.test_json_schema",
+              "tests.test_adapter.AttrsItemTestCase.test_json_schema_empty",
+              "tests.test_adapter.DataClassItemTestCase.test_json_schema",
+              "tests.test_adapter.DataClassItemTestCase.test_json_schema_empty",
+              "tests.test_adapter.DictTestCase.test_json_schema",
+              "tests.test_adapter.DictTestCase.test_json_schema_empty",
+              "tests.test_adapter.PydanticModelTestCase.test_json_schema",
+              "tests.test_adapter.PydanticModelTestCase.test_json_schema_empty",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_get_field_meta_defined_fields",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_json_schema",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_json_schema_empty",
+              "tests.test_adapter_attrs.AttrsTestCase.test_json_schema_validators",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_json_schema_field_deprecated_bool",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_json_schema_field_deprecated_str",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_json_schema_forbid",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_json_schema_validators",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_true",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_json_schema_field_default_factory",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_json_schema_field_deprecated_bool",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_json_schema_field_deprecated_str",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_json_schema_forbid",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_json_schema_validators",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_true",
+              "tests.test_json_schema.CrossNestingTestCase.test_attrs_pydantic2",
+              "tests.test_json_schema.CrossNestingTestCase.test_dataclass_pydantic1",
+              "tests.test_json_schema.CrossNestingTestCase.test_pydantic_dataclass",
+              "tests.test_json_schema.CrossNestingTestCase.test_pydantics",
+              "tests.test_json_schema.JsonSchemaTestCase.test_attrs_pydantic_enum",
+              "tests.test_json_schema.JsonSchemaTestCase.test_custom_any_of",
+              "tests.test_json_schema.JsonSchemaTestCase.test_custom_items",
+              "tests.test_json_schema.JsonSchemaTestCase.test_custom_mapping",
+              "tests.test_json_schema.JsonSchemaTestCase.test_item_without_attributes",
+              "tests.test_json_schema.JsonSchemaTestCase.test_mapping_untyped",
+              "tests.test_json_schema.JsonSchemaTestCase.test_modern_optional_annotations",
+              "tests.test_json_schema.JsonSchemaTestCase.test_nested_dict",
+              "tests.test_json_schema.JsonSchemaTestCase.test_optional_item_list",
+              "tests.test_json_schema.JsonSchemaTestCase.test_recursion",
+              "tests.test_json_schema.JsonSchemaTestCase.test_sequence_untyped",
+              "tests.test_json_schema.JsonSchemaTestCase.test_set_untyped",
+              "tests.test_json_schema.JsonSchemaTestCase.test_tuple_ellipsis",
+              "tests.test_json_schema.JsonSchemaTestCase.test_tuple_multiple_types",
+              "tests.test_json_schema.JsonSchemaTestCase.test_typing_sequence_untyped",
+              "tests.test_json_schema.JsonSchemaTestCase.test_union_single"
+            ],
+            "held_out_test_patch": true,
+            "label_method": "real_pr_dual_run_base_vs_gold",
+            "offline_only": false,
+            "p2p_node_ids": [
+              "tests.test_adapter.AttrsItemTestCase.test_as_dict",
+              "tests.test_adapter.AttrsItemTestCase.test_as_dict_nested",
+              "tests.test_adapter.AttrsItemTestCase.test_delitem_len_iter",
+              "tests.test_adapter.AttrsItemTestCase.test_field_names",
+              "tests.test_adapter.AttrsItemTestCase.test_field_names_from_class",
+              "tests.test_adapter.AttrsItemTestCase.test_field_names_from_class_empty",
+              "tests.test_adapter.AttrsItemTestCase.test_field_names_from_class_nested",
+              "tests.test_adapter.AttrsItemTestCase.test_get_field_meta_defined_fields",
+              "tests.test_adapter.AttrsItemTestCase.test_get_set_value",
+              "tests.test_adapter.AttrsItemTestCase.test_get_value_keyerror",
+              "tests.test_adapter.AttrsItemTestCase.test_metadata_common",
+              "tests.test_adapter.AttrsItemTestCase.test_set_value_keyerror",
+              "tests.test_adapter.DataClassItemTestCase.test_as_dict",
+              "tests.test_adapter.DataClassItemTestCase.test_as_dict_nested",
+              "tests.test_adapter.DataClassItemTestCase.test_delitem_len_iter",
+              "tests.test_adapter.DataClassItemTestCase.test_field_names",
+              "tests.test_adapter.DataClassItemTestCase.test_field_names_from_class",
+              "tests.test_adapter.DataClassItemTestCase.test_field_names_from_class_empty",
+              "tests.test_adapter.DataClassItemTestCase.test_field_names_from_class_nested",
+              "tests.test_adapter.DataClassItemTestCase.test_get_field_meta_defined_fields",
+              "tests.test_adapter.DataClassItemTestCase.test_get_set_value",
+              "tests.test_adapter.DataClassItemTestCase.test_get_value_keyerror",
+              "tests.test_adapter.DataClassItemTestCase.test_metadata_common",
+              "tests.test_adapter.DataClassItemTestCase.test_set_value_keyerror",
+              "tests.test_adapter.DictTestCase.test_as_dict",
+              "tests.test_adapter.DictTestCase.test_as_dict_nested",
+              "tests.test_adapter.DictTestCase.test_empty_metadata",
+              "tests.test_adapter.DictTestCase.test_field_names",
+              "tests.test_adapter.DictTestCase.test_field_names_from_class",
+              "tests.test_adapter.DictTestCase.test_field_names_updated",
+              "tests.test_adapter.DictTestCase.test_get_set_value",
+              "tests.test_adapter.DictTestCase.test_get_value_keyerror",
+              "tests.test_adapter.DictTestCase.test_get_value_keyerror_item_dict",
+              "tests.test_adapter.PydanticModelTestCase.test_as_dict",
+              "tests.test_adapter.PydanticModelTestCase.test_as_dict_nested",
+              "tests.test_adapter.PydanticModelTestCase.test_delitem_len_iter",
+              "tests.test_adapter.PydanticModelTestCase.test_field_names",
+              "tests.test_adapter.PydanticModelTestCase.test_field_names_from_class",
+              "tests.test_adapter.PydanticModelTestCase.test_field_names_from_class_empty",
+              "tests.test_adapter.PydanticModelTestCase.test_field_names_from_class_nested",
+              "tests.test_adapter.PydanticModelTestCase.test_get_field_meta_defined_fields",
+              "tests.test_adapter.PydanticModelTestCase.test_get_set_value",
+              "tests.test_adapter.PydanticModelTestCase.test_get_value_keyerror",
+              "tests.test_adapter.PydanticModelTestCase.test_metadata_common",
+              "tests.test_adapter.PydanticModelTestCase.test_set_value_keyerror",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_as_dict",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_as_dict_nested",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_delitem_len_iter",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_field_names",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_field_names_from_class",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_field_names_from_class_empty",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_field_names_from_class_nested",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_get_set_value",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_get_value_keyerror",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_metadata_common",
+              "tests.test_adapter.PydanticV1ModelTestCase.test_set_value_keyerror",
+              "tests.test_adapter_attrs.AttrsTestCase.test_false",
+              "tests.test_adapter_attrs.AttrsTestCase.test_module_import_error",
+              "tests.test_adapter_attrs.AttrsTestCase.test_module_not_available",
+              "tests.test_adapter_attrs.AttrsTestCase.test_true",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_false",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_module_import_error",
+              "tests.test_adapter_pydantic.PydanticTestCase.test_module_not_available",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_false",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_module_import_error",
+              "tests.test_adapter_pydantic_v1.PydanticTestCase.test_module_not_available"
+            ],
+            "reporter": {
+              "language": "python",
+              "node_id_form": "mod.name",
+              "reporter_id": "python_pytest_v1",
+              "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+              "tool_label": "pytest"
+            },
+            "suite": "pytest",
+            "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+            "workspace": "datasets/_m27c_work_cert/clones/realpr-itemadapter-101"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:43.585028+00:00",
+          "detail": {
+            "ok": true,
+            "reason_codes": [],
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "real_pack",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:48.555199+00:00",
+          "detail": {
+            "agent_image": "harbor-sdf-agent-rpr00:oracle",
+            "backend": "docker",
+            "backend_class": "HarborDockerVerifier",
+            "certified": true,
+            "error": null,
+            "evidence": "datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-itemadapter-101.json",
+            "null_reward": 0,
+            "oracle_mode": "docker",
+            "sol_null_files": {
+              "backend": "docker",
+              "combined_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-itemadapter-101.oracle_evidence.json",
+              "null_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-itemadapter-101.null.reward.json",
+              "null_reward": 0,
+              "sol_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-itemadapter-101.sol.reward.json",
+              "sol_reward": 1
+            },
+            "solution_reward": 1,
+            "tests_image": "harbor-sdf-tests-rpr00:oracle"
+          },
+          "source_track": "real_pr",
+          "stage": "docker_oracle",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:48.614316+00:00",
+          "detail": {
+            "certified": true,
+            "error": null,
+            "evidence": "datasets/_m27c_work_cert/product_stage/evidence/pier/realpr-itemadapter-101.json",
+            "live_fallback_to_scripted": false,
+            "mode": "scripted",
+            "null_reward": 0,
+            "oracle_reward": 1,
+            "pier_mode": "scripted"
+          },
+          "source_track": "real_pr",
+          "stage": "pier_cert",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:48.698499+00:00",
+          "detail": {
+            "budget_stop": false,
+            "completed_rollouts": 4,
+            "decision": {
+              "band_high": 0.5,
+              "discrimination": 2.0,
+              "discrimination_floor": 1.0,
+              "frontier_pass_at_k": 0.25,
+              "per_model_pass_at_k": {
+                "moonshotai/kimi-k2.6": 0.5,
+                "x-ai/grok-4.5": 0.0
+              },
+              "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+              "rule": "in-band-high-discrimination",
+              "total_solves": 1,
+              "total_trials": 4,
+              "verdict": "keep"
+            },
+            "hardness": {
+              "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+              "band_rule": "in-band-high-discrimination",
+              "band_verdict": "keep",
+              "discrimination": 2.0,
+              "grok_4_5": 0.0,
+              "kimi_k2_6": 0.5,
+              "opus_4_8": null,
+              "pass_at_k": 0.25
+            },
+            "is_keep": true,
+            "mode": "offline",
+            "models": [
+              {
+                "completed_rollouts": 2,
+                "incomplete": false,
+                "k": 2,
+                "model": "x-ai/grok-4.5",
+                "pass_at_k": 0.0,
+                "rollouts": [
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 0,
+                    "model": "x-ai/grok-4.5",
+                    "physical_call_id": "40482664433e43d7a618ffc5e40b76b3",
+                    "skipped_budget": false,
+                    "solved": false,
+                    "text_bytes": 22,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  },
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 1,
+                    "model": "x-ai/grok-4.5",
+                    "physical_call_id": "6c09e93941cb466e96072c4bf46237b1",
+                    "skipped_budget": false,
+                    "solved": false,
+                    "text_bytes": 22,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  }
+                ],
+                "solves": 0
+              },
+              {
+                "completed_rollouts": 2,
+                "incomplete": false,
+                "k": 2,
+                "model": "moonshotai/kimi-k2.6",
+                "pass_at_k": 0.5,
+                "rollouts": [
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 0,
+                    "model": "moonshotai/kimi-k2.6",
+                    "physical_call_id": "557add1019c94b5cab24ce0ba7a7f0fe",
+                    "skipped_budget": false,
+                    "solved": true,
+                    "text_bytes": 29,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  },
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 1,
+                    "model": "moonshotai/kimi-k2.6",
+                    "physical_call_id": "cbbec9044ebd4c18acecbd14105ae578",
+                    "skipped_budget": false,
+                    "solved": false,
+                    "text_bytes": 29,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  }
+                ],
+                "solves": 1
+              }
+            ],
+            "panel_complete": true,
+            "planned_rollouts": 4,
+            "reserved_models": [
+              "x-ai/grok-4.5",
+              "moonshotai/kimi-k2.6"
+            ],
+            "scaffold": "pier/mini-swe-agent",
+            "scaffold_meta": {
+              "agent": "mini-swe-agent",
+              "name": "pier/mini-swe-agent",
+              "pack_id": "realpr-itemadapter-101",
+              "pack_path": "datasets/_m27c_work_cert/staging/realpr-itemadapter-101",
+              "runtime": "pier",
+              "scaffold": "pier/mini-swe-agent",
+              "version": "fixed-v3-real-pr"
+            },
+            "stage": "deepagent-panel-realpr",
+            "stop_reason": null,
+            "task_id": "realpr-itemadapter-101",
+            "total_cost_usd": "0"
+          },
+          "source_track": "real_pr",
+          "stage": "panel",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:52:48.699053+00:00",
+          "detail": {
+            "dest": "datasets/_m27c_work_cert/product_stage/tasks/realpr-itemadapter-101",
+            "pending_gate_audit": true,
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "stage_promote",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570033+00:00",
+          "detail": {
+            "dest": "datasets/prod_hard_deepswe_med/tasks/realpr-itemadapter-101",
+            "gate_audit": "pass",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "ok",
+          "task_id": "realpr-itemadapter-101"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/scrapy/itemadapter.git",
+        "seed_id": "pr:101",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/scrapy/itemadapter.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": 0,
+      "pack_dir": "datasets/prod_hard_deepswe_med/tasks/realpr-itemadapter-101",
+      "panel": {
+        "budget_stop": false,
+        "completed_rollouts": 4,
+        "decision": {
+          "band_high": 0.5,
+          "discrimination": 2.0,
+          "discrimination_floor": 1.0,
+          "frontier_pass_at_k": 0.25,
+          "per_model_pass_at_k": {
+            "moonshotai/kimi-k2.6": 0.5,
+            "x-ai/grok-4.5": 0.0
+          },
+          "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+          "rule": "in-band-high-discrimination",
+          "total_solves": 1,
+          "total_trials": 4,
+          "verdict": "keep"
+        },
+        "hardness": {
+          "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+          "band_rule": "in-band-high-discrimination",
+          "band_verdict": "keep",
+          "discrimination": 2.0,
+          "grok_4_5": 0.0,
+          "kimi_k2_6": 0.5,
+          "opus_4_8": null,
+          "pass_at_k": 0.25
+        },
+        "is_keep": true,
+        "mode": "offline",
+        "models": [
+          {
+            "completed_rollouts": 2,
+            "incomplete": false,
+            "k": 2,
+            "model": "x-ai/grok-4.5",
+            "pass_at_k": 0.0,
+            "rollouts": [
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 0,
+                "model": "x-ai/grok-4.5",
+                "physical_call_id": "40482664433e43d7a618ffc5e40b76b3",
+                "skipped_budget": false,
+                "solved": false,
+                "text_bytes": 22,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              },
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 1,
+                "model": "x-ai/grok-4.5",
+                "physical_call_id": "6c09e93941cb466e96072c4bf46237b1",
+                "skipped_budget": false,
+                "solved": false,
+                "text_bytes": 22,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              }
+            ],
+            "solves": 0
+          },
+          {
+            "completed_rollouts": 2,
+            "incomplete": false,
+            "k": 2,
+            "model": "moonshotai/kimi-k2.6",
+            "pass_at_k": 0.5,
+            "rollouts": [
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 0,
+                "model": "moonshotai/kimi-k2.6",
+                "physical_call_id": "557add1019c94b5cab24ce0ba7a7f0fe",
+                "skipped_budget": false,
+                "solved": true,
+                "text_bytes": 29,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              },
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 1,
+                "model": "moonshotai/kimi-k2.6",
+                "physical_call_id": "cbbec9044ebd4c18acecbd14105ae578",
+                "skipped_budget": false,
+                "solved": false,
+                "text_bytes": 29,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              }
+            ],
+            "solves": 1
+          }
+        ],
+        "panel_complete": true,
+        "planned_rollouts": 4,
+        "reserved_models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "scaffold": "pier/mini-swe-agent",
+        "scaffold_meta": {
+          "agent": "mini-swe-agent",
+          "name": "pier/mini-swe-agent",
+          "pack_id": "realpr-itemadapter-101",
+          "pack_path": "datasets/_m27c_work_cert/staging/realpr-itemadapter-101",
+          "runtime": "pier",
+          "scaffold": "pier/mini-swe-agent",
+          "version": "fixed-v3-real-pr"
+        },
+        "stage": "deepagent-panel-realpr",
+        "stop_reason": null,
+        "task_id": "realpr-itemadapter-101",
+        "total_cost_usd": "0"
+      },
+      "panel_keep": true,
+      "pier_certified": true,
+      "pier_evidence_path": "datasets/_m27c_work_cert/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "pier_null_reward": 0,
+      "pier_oracle_reward": 1,
+      "provider_calls": 0,
+      "real_pack": {
+        "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
+        "base_object_ok": null,
+        "config_ok": true,
+        "details": {
+          "multi_file_floor": 2,
+          "require_clone_dockerfile": true,
+          "require_real_pr_track": true,
+          "source_track": "real_pr"
+        },
+        "f2p_count": 43,
+        "instruction_leak_hits": [],
+        "instruction_ok": true,
+        "isolation_clean": true,
+        "isolation_hits": [],
+        "missing_relpaths": [],
+        "multi_file_ok": true,
+        "ok": true,
+        "p2p_count": 66,
+        "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/staging/realpr-itemadapter-101",
+        "real_sha_ok": true,
+        "real_url_ok": true,
+        "reason_codes": [],
+        "reasons": [],
+        "repository_url": "https://github.com/scrapy/itemadapter.git",
+        "schema_version": "1.1",
+        "separate_verifier": true,
+        "solution_files": [
+          "itemadapter/_imports.py",
+          "itemadapter/_json_schema.py",
+          "itemadapter/adapter.py",
+          "itemadapter/utils.py"
+        ],
+        "task_id": "realpr-itemadapter-101",
+        "test_patch_ok": true,
+        "tree_complete": true
+      },
+      "real_pack_ok": true,
+      "reason_codes": [
+        "ORCD_SOL_1",
+        "G3_NULL_NOT_RESOLVE",
+        "G5_LEAK_CLEAN",
+        "ORACLE_PASS",
+        "RORC_ISOLATION_CLEAN",
+        "RORC_SOL_1",
+        "RORC_NULL_0",
+        "RORC_PASS",
+        "RPIER_SCRIPTED_PATH",
+        "PIER_STRUCTURAL_OK",
+        "PIER_ORACLE_REWARD_1",
+        "PIER_NULL_REWARD_0",
+        "PIER_CERT_PASS",
+        "RPIER_STRUCTURAL_OK",
+        "RPIER_SOL_1",
+        "RPIER_NULL_0",
+        "RPIER_PASS"
+      ],
+      "reasons": [],
+      "seed_id": "pr:101",
+      "solution_files": [
+        "itemadapter/_imports.py",
+        "itemadapter/_json_schema.py",
+        "itemadapter/adapter.py",
+        "itemadapter/utils.py"
+      ],
+      "solution_reward": 1,
+      "task_id": "realpr-itemadapter-101",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:52:48.699195+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "4f6edf36e93fd9f83ff95b065718fd6bd0c4d3c5",
+            "body": "Follow up uvicorn and starlette",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-httpx-3068",
+            "pr_number": 3068,
+            "repository_url": "https://github.com/encode/httpx.git",
+            "solution_bytes": 114605,
+            "source_files": [
+              "httpx/_api.py",
+              "httpx/_auth.py",
+              "httpx/_client.py",
+              "httpx/_config.py",
+              "httpx/_content.py",
+              "httpx/_decoders.py",
+              "httpx/_exceptions.py",
+              "httpx/_main.py",
+              "httpx/_models.py",
+              "httpx/_multipart.py",
+              "httpx/_status_codes.py",
+              "httpx/_transports/asgi.py",
+              "httpx/_transports/base.py",
+              "httpx/_transports/default.py",
+              "httpx/_transports/mock.py",
+              "httpx/_transports/wsgi.py",
+              "httpx/_urlparse.py",
+              "httpx/_urls.py",
+              "httpx/_utils.py"
+            ],
+            "source_hunk_count": 203,
+            "source_track": "real_pr",
+            "task_id": "realpr-httpx-3068",
+            "test_bytes": 5731,
+            "test_files": [
+              "tests/client/test_async_client.py",
+              "tests/client/test_client.py",
+              "tests/test_decoders.py",
+              "tests/test_exceptions.py",
+              "tests/test_multipart.py",
+              "tests/test_wsgi.py"
+            ],
+            "title": "Use `__future__.annotations`"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-httpx-3068"
+        },
+        {
+          "at": "2026-07-18T21:53:02.386539+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-httpx-3068",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-httpx-3068"
+        },
+        {
+          "at": "2026-07-18T21:53:02.386552+00:00",
+          "detail": {
+            "base_commit": "4f6edf36e93fd9f83ff95b065718fd6bd0c4d3c5",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/encode/httpx.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-httpx-3068"
+        },
+        {
+          "at": "2026-07-18T21:53:08.797619+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-httpx-3068: green suite must be clean for labeling; failed=['tests.client.test_async_client.test_get', 'tests.client.test_async_client.test_get_invalid_url[scheme-not-http(s)]', 'tests.client.test_async_client.test_get_invalid_url[no-scheme]', 'tests.client.test_async_client.test_get_invalid_url[no-host]', 'tests.client.test_async_client.test_build_request', 'tests.client.test_async_client.test_post', 'tests.client.test_async_client.test_post_json', 'tests.client.test_async_client.test_stream_response', 'tests.client.test_async_client.test_access_content_stream_response', 'tests.client.test_async_client.test_stream_request', 'tests.client.test_async_client.test_cannot_stream_sync_request', 'tests.client.test_async_client.test_raise_for_status', 'tests.client.test_async_client.test_options', 'tests.client.test_async_client.test_head', 'tests.client.test_async_client.test_put', 'tests.client.test_async_client.test_patch', 'tests.client.test_async_client.test_delete', 'tests.client.test_async_client.test_100_continue', 'tests.client.test_async_client.test_context_managed_transport', 'tests.client.test_async_client.test_context_managed_transport_and_mount', 'tests.client.test_async_client.test_client_closed_state_using_implicit_open', 'tests.client.test_async_client.test_client_closed_state_using_with_block', 'tests.client.test_async_client.test_mounted_transport', 'tests.client.test_async_client.test_async_mock_transport', 'tests.client.test_async_client.test_cancellation_during_stream', 'tests.client.test_async_client.test_server_extensions', 'tests.test_decoders.test_streaming', 'tests.test_decoders.test_text_decoder_with_autodetect[data0-ascii]', 'tests.test_decoders.test_text_decoder_with_autodetect[data1-utf-8]', 'tests.test_decoders.test_text_decoder_with_autodetect[data2-cp1252]', 'tests.test_decoders.test_text_decoder_with_autodetect[data3-iso-8859-1]', 'tests.test_decoders.test_text_decoder_known_encoding']",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-httpx-3068"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570039+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-httpx-3068: green suite must be clean for labeling; failed=['tests.client.test_async_client.test_get', 'tests.client.test_async_client.test_get_invalid_url[scheme-not-http(s)]', 'tests.client.test_async_client.test_get_invalid_url[no-scheme]', 'tests.client.test_async_client.test_get_invalid_url[no-host]', 'tests.client.test_async_client.test_build_request', 'tests.client.test_async_client.test_post', 'tests.client.test_async_client.test_post_json', 'tests.client.test_async_client.test_stream_response', 'tests.client.test_async_client.test_access_content_stream_response', 'tests.client.test_async_client.test_stream_request', 'tests.client.test_async_client.test_cannot_stream_sync_request', 'tests.client.test_async_client.test_raise_for_status', 'tests.client.test_async_client.test_options', 'tests.client.test_async_client.test_head', 'tests.client.test_async_client.test_put', 'tests.client.test_async_client.test_patch', 'tests.client.test_async_client.test_delete', 'tests.client.test_async_client.test_100_continue', 'tests.client.test_async_client.test_context_managed_transport', 'tests.client.test_async_client.test_context_managed_transport_and_mount', 'tests.client.test_async_client.test_client_closed_state_using_implicit_open', 'tests.client.test_async_client.test_client_closed_state_using_with_block', 'tests.client.test_async_client.test_mounted_transport', 'tests.client.test_async_client.test_async_mock_transport', 'tests.client.test_async_client.test_cancellation_during_stream', 'tests.client.test_async_client.test_server_extensions', 'tests.test_decoders.test_streaming', 'tests.test_decoders.test_text_decoder_with_autodetect[data0-ascii]', 'tests.test_decoders.test_text_decoder_with_autodetect[data1-utf-8]', 'tests.test_decoders.test_text_decoder_with_autodetect[data2-cp1252]', 'tests.test_decoders.test_text_decoder_with_autodetect[data3-iso-8859-1]', 'tests.test_decoders.test_text_decoder_known_encoding']"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-httpx-3068"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "4f6edf36e93fd9f83ff95b065718fd6bd0c4d3c5",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/encode/httpx.git",
+        "seed_id": "pr:3068",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/encode/httpx.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-httpx-3068",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-httpx-3068: green suite must be clean for labeling; failed=['tests.client.test_async_client.test_get', 'tests.client.test_async_client.test_get_invalid_url[scheme-not-http(s)]', 'tests.client.test_async_client.test_get_invalid_url[no-scheme]', 'tests.client.test_async_client.test_get_invalid_url[no-host]', 'tests.client.test_async_client.test_build_request', 'tests.client.test_async_client.test_post', 'tests.client.test_async_client.test_post_json', 'tests.client.test_async_client.test_stream_response', 'tests.client.test_async_client.test_access_content_stream_response', 'tests.client.test_async_client.test_stream_request', 'tests.client.test_async_client.test_cannot_stream_sync_request', 'tests.client.test_async_client.test_raise_for_status', 'tests.client.test_async_client.test_options', 'tests.client.test_async_client.test_head', 'tests.client.test_async_client.test_put', 'tests.client.test_async_client.test_patch', 'tests.client.test_async_client.test_delete', 'tests.client.test_async_client.test_100_continue', 'tests.client.test_async_client.test_context_managed_transport', 'tests.client.test_async_client.test_context_managed_transport_and_mount', 'tests.client.test_async_client.test_client_closed_state_using_implicit_open', 'tests.client.test_async_client.test_client_closed_state_using_with_block', 'tests.client.test_async_client.test_mounted_transport', 'tests.client.test_async_client.test_async_mock_transport', 'tests.client.test_async_client.test_cancellation_during_stream', 'tests.client.test_async_client.test_server_extensions', 'tests.test_decoders.test_streaming', 'tests.test_decoders.test_text_decoder_with_autodetect[data0-ascii]', 'tests.test_decoders.test_text_decoder_with_autodetect[data1-utf-8]', 'tests.test_decoders.test_text_decoder_with_autodetect[data2-cp1252]', 'tests.test_decoders.test_text_decoder_with_autodetect[data3-iso-8859-1]', 'tests.test_decoders.test_text_decoder_known_encoding']"
+      ],
+      "seed_id": "pr:3068",
+      "solution_files": [
+        "httpx/_api.py",
+        "httpx/_auth.py",
+        "httpx/_client.py",
+        "httpx/_config.py",
+        "httpx/_content.py",
+        "httpx/_decoders.py",
+        "httpx/_exceptions.py",
+        "httpx/_main.py",
+        "httpx/_models.py",
+        "httpx/_multipart.py",
+        "httpx/_status_codes.py",
+        "httpx/_transports/asgi.py",
+        "httpx/_transports/base.py",
+        "httpx/_transports/default.py",
+        "httpx/_transports/mock.py",
+        "httpx/_transports/wsgi.py",
+        "httpx/_urlparse.py",
+        "httpx/_urls.py",
+        "httpx/_utils.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-httpx-3068",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:53:08.797730+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "43d422893065b3672b4c771edef02c50fd1c3866",
+            "body": "Add type annotations to filter and test functions. #1255 started adding annotations for filters, but had a number of missing or less accurate annotations. I'm not sure how useful this is, but I wanted to be thorough.\r\n\r\n<!--\r\nLink to relevant issues or previous PRs, one per line. Use \"fixes\" to automatically close an issue.\r\n-->\r\n\r\n- closes #1255",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-jinja-1384",
+            "pr_number": 1384,
+            "repository_url": "https://github.com/pallets/jinja.git",
+            "solution_bytes": 43655,
+            "source_files": [
+              "src/jinja2/asyncfilters.py",
+              "src/jinja2/environment.py",
+              "src/jinja2/filters.py",
+              "src/jinja2/runtime.py",
+              "src/jinja2/utils.py"
+            ],
+            "source_hunk_count": 54,
+            "source_track": "real_pr",
+            "task_id": "realpr-jinja-1384",
+            "test_bytes": 5363,
+            "test_files": [
+              "src/jinja2/tests.py"
+            ],
+            "title": "add type annotations to filters and tests"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-jinja-1384"
+        },
+        {
+          "at": "2026-07-18T21:53:22.844950+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1384",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-jinja-1384"
+        },
+        {
+          "at": "2026-07-18T21:53:22.844963+00:00",
+          "detail": {
+            "base_commit": "43d422893065b3672b4c771edef02c50fd1c3866",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/jinja.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-jinja-1384"
+        },
+        {
+          "at": "2026-07-18T21:53:24.719675+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-jinja-1384: python suite produced no JSON outcome: rc=1 stderr='ify_hook(hook, hookimpl)\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/pluggy/_manager.py\", line 343, in _verify_hook\\n    raise PluginValidationError(\\npluggy._manager.PluginValidationError: Plugin \\'/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/dual_run/realpr-jinja-1384/base/tests/conftest.py\\' for hook \\'pytest_ignore_collect\\'\\nhookimpl definition: pytest_ignore_collect(path)\\nArgument(s) {\\'path\\'} are declared in the hookimpl but can not be found in the hookspec\\n'",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-jinja-1384"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570041+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-jinja-1384: python suite produced no JSON outcome: rc=1 stderr='ify_hook(hook, hookimpl)\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/pluggy/_manager.py\", line 343, in _verify_hook\\n    raise PluginValidationError(\\npluggy._manager.PluginValidationError: Plugin \\'/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/dual_run/realpr-jinja-1384/base/tests/conftest.py\\' for hook \\'pytest_ignore_collect\\'\\nhookimpl definition: pytest_ignore_collect(path)\\nArgument(s) {\\'path\\'} are declared in the hookimpl but can not be found in the hookspec\\n'"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-jinja-1384"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "43d422893065b3672b4c771edef02c50fd1c3866",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/jinja.git",
+        "seed_id": "pr:1384",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/jinja.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1384",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-jinja-1384: python suite produced no JSON outcome: rc=1 stderr='ify_hook(hook, hookimpl)\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/pluggy/_manager.py\", line 343, in _verify_hook\\n    raise PluginValidationError(\\npluggy._manager.PluginValidationError: Plugin \\'/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/dual_run/realpr-jinja-1384/base/tests/conftest.py\\' for hook \\'pytest_ignore_collect\\'\\nhookimpl definition: pytest_ignore_collect(path)\\nArgument(s) {\\'path\\'} are declared in the hookimpl but can not be found in the hookspec\\n'"
+      ],
+      "seed_id": "pr:1384",
+      "solution_files": [
+        "src/jinja2/asyncfilters.py",
+        "src/jinja2/environment.py",
+        "src/jinja2/filters.py",
+        "src/jinja2/runtime.py",
+        "src/jinja2/utils.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-jinja-1384",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:53:24.719784+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "4fa37123b93c25de6f6596825df8b297a0433eee",
+            "body": "This experimental branch adds support for async generators in most places\r\nin Jinja2.  This means that filters now work with async iterators just as\r\nmuch as the entirety of Jinja2 can now render to an async generator.\r\n\r\nMore importantly this also means that you can now call things that return\r\ncoroutines in templates and Jinja2 will automatically await the call.\r\n\r\nThe implementation is based on an internal monkeypatch which is not the\r\nnicest in the book but seems to work good enough to make the code\r\nmaintainable for different Python versions.\r\n\r\nThe intro to the feature is here: https://github.com/pallets/jinja/blob/2b03052c9b6f7028e5cb79fb96440a0560bc4340/docs/api.rst#async-support",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-jinja-634",
+            "pr_number": 634,
+            "repository_url": "https://github.com/pallets/jinja.git",
+            "solution_bytes": 36693,
+            "source_files": [
+              "jinja2/__init__.py",
+              "jinja2/asyncfilters.py",
+              "jinja2/asyncsupport.py",
+              "jinja2/compiler.py",
+              "jinja2/environment.py",
+              "jinja2/filters.py",
+              "jinja2/runtime.py",
+              "jinja2/utils.py"
+            ],
+            "source_hunk_count": 41,
+            "source_track": "real_pr",
+            "task_id": "realpr-jinja-634",
+            "test_bytes": 24031,
+            "test_files": [
+              "tests/conftest.py",
+              "tests/test_async.py",
+              "tests/test_asyncfilters.py",
+              "tests/test_filters.py"
+            ],
+            "title": "Add async Support to Jinja 2"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-jinja-634"
+        },
+        {
+          "at": "2026-07-18T21:53:42.590392+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-634",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-jinja-634"
+        },
+        {
+          "at": "2026-07-18T21:53:42.590403+00:00",
+          "detail": {
+            "base_commit": "4fa37123b93c25de6f6596825df8b297a0433eee",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/jinja.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-jinja-634"
+        },
+        {
+          "at": "2026-07-18T21:53:44.689718+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-jinja-634: python suite produced no JSON outcome: rc=1 stderr='^^^^^^^^^^^^^^^^^^^^\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/_pytest/config/findpaths.py\", line 91, in load_config_dict_from_file\\n    fail(CFG_PYTEST_SECTION.format(filename=\"setup.cfg\"), pytrace=False)\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/_pytest/outcomes.py\", line 162, in __call__\\n    raise Failed(msg=reason, pytrace=pytrace)\\nFailed: [pytest] section in setup.cfg files is no longer supported, change to [tool:pytest] instead.\\n'",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-jinja-634"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570043+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-jinja-634: python suite produced no JSON outcome: rc=1 stderr='^^^^^^^^^^^^^^^^^^^^\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/_pytest/config/findpaths.py\", line 91, in load_config_dict_from_file\\n    fail(CFG_PYTEST_SECTION.format(filename=\"setup.cfg\"), pytrace=False)\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/_pytest/outcomes.py\", line 162, in __call__\\n    raise Failed(msg=reason, pytrace=pytrace)\\nFailed: [pytest] section in setup.cfg files is no longer supported, change to [tool:pytest] instead.\\n'"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-jinja-634"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "4fa37123b93c25de6f6596825df8b297a0433eee",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/jinja.git",
+        "seed_id": "pr:634",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/jinja.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-634",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-jinja-634: python suite produced no JSON outcome: rc=1 stderr='^^^^^^^^^^^^^^^^^^^^\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/_pytest/config/findpaths.py\", line 91, in load_config_dict_from_file\\n    fail(CFG_PYTEST_SECTION.format(filename=\"setup.cfg\"), pytrace=False)\\n  File \"/projects/Agent-SWE/deepagent/.venv/lib/python3.12/site-packages/_pytest/outcomes.py\", line 162, in __call__\\n    raise Failed(msg=reason, pytrace=pytrace)\\nFailed: [pytest] section in setup.cfg files is no longer supported, change to [tool:pytest] instead.\\n'"
+      ],
+      "seed_id": "pr:634",
+      "solution_files": [
+        "jinja2/__init__.py",
+        "jinja2/asyncfilters.py",
+        "jinja2/asyncsupport.py",
+        "jinja2/compiler.py",
+        "jinja2/environment.py",
+        "jinja2/filters.py",
+        "jinja2/runtime.py",
+        "jinja2/utils.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-jinja-634",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:53:44.689827+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "ebed13eb2b0995d015ddcaacca72fadc829b09e6",
+            "body": "This branch implements correct identifier tracking through aliasing. This basically solves Jinja's oldest bug which is that it tries to trivially map identifiers onto Python scoping which cannot work because Python scoping is not expressive enough to support all of Jinja's features.\r\n\r\nThis will also fix a ton of other issues and open up heavily improved includes.\r\n\r\nThe main breakage this causes which is known is that code that overrides Context now needs to override `resolve_or_missing` instead of `resolve` if it wants custom resolve support.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-jinja-637",
+            "pr_number": 637,
+            "repository_url": "https://github.com/pallets/jinja.git",
+            "solution_bytes": 65042,
+            "source_files": [
+              "jinja2/compiler.py",
+              "jinja2/debug.py",
+              "jinja2/environment.py",
+              "jinja2/idtracking.py",
+              "jinja2/meta.py",
+              "jinja2/nodes.py",
+              "jinja2/runtime.py"
+            ],
+            "source_hunk_count": 48,
+            "source_track": "real_pr",
+            "task_id": "realpr-jinja-637",
+            "test_bytes": 13134,
+            "test_files": [
+              "tests/test_api.py",
+              "tests/test_core_tags.py",
+              "tests/test_debug.py",
+              "tests/test_ext.py",
+              "tests/test_idtracking.py",
+              "tests/test_imports.py",
+              "tests/test_regression.py"
+            ],
+            "title": "WIP: Correct Identifier Tracking"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-jinja-637"
+        },
+        {
+          "at": "2026-07-18T21:54:00.173432+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-637",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-jinja-637"
+        },
+        {
+          "at": "2026-07-18T21:54:00.173445+00:00",
+          "detail": {
+            "base_commit": "ebed13eb2b0995d015ddcaacca72fadc829b09e6",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/jinja.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-jinja-637"
+        },
+        {
+          "at": "2026-07-18T21:54:02.790724+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-jinja-637: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-jinja-637"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570045+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-jinja-637: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-jinja-637"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "ebed13eb2b0995d015ddcaacca72fadc829b09e6",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/jinja.git",
+        "seed_id": "pr:637",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/jinja.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-637",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-jinja-637: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:637",
+      "solution_files": [
+        "jinja2/compiler.py",
+        "jinja2/debug.py",
+        "jinja2/environment.py",
+        "jinja2/idtracking.py",
+        "jinja2/meta.py",
+        "jinja2/nodes.py",
+        "jinja2/runtime.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-jinja-637",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:54:02.790819+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "8342180f3913daea28fcd6644a0ba4c69391b189",
+            "body": "Apply reorder-python-imports, black, and flake8. Update test config with Python 3.8 and style checks. Remove old scripts.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-jinja-1125",
+            "pr_number": 1125,
+            "repository_url": "https://github.com/pallets/jinja.git",
+            "solution_bytes": 384929,
+            "source_files": [
+              "docs/examples/cache_extension.py",
+              "docs/examples/inline_gettext_extension.py",
+              "examples/basic/cycle.py",
+              "examples/basic/debugger.py",
+              "examples/basic/inheritance.py",
+              "examples/basic/test.py",
+              "examples/basic/translate.py",
+              "examples/bench.py",
+              "examples/profile.py",
+              "examples/rwbench/djangoext.py",
+              "examples/rwbench/rwbench.py",
+              "ext/django2jinja/django2jinja.py",
+              "ext/django2jinja/example.py",
+              "ext/djangojinja2.py",
+              "ext/inlinegettext.py",
+              "jinja2/__init__.py",
+              "jinja2/_identifier.py",
+              "jinja2/defaults.py",
+              "scripts/generate_identifier_pattern.py",
+              "scripts/jinja2-debug.py",
+              "scripts/make-release.py",
+              "setup.py",
+              "src/jinja2/__init__.py",
+              "src/jinja2/_compat.py",
+              "src/jinja2/_identifier.py",
+              "src/jinja2/asyncfilters.py",
+              "src/jinja2/asyncsupport.py",
+              "src/jinja2/bccache.py",
+              "src/jinja2/compiler.py",
+              "src/jinja2/constants.py",
+              "src/jinja2/debug.py",
+              "src/jinja2/defaults.py",
+              "src/jinja2/environment.py",
+              "src/jinja2/exceptions.py",
+              "src/jinja2/ext.py",
+              "src/jinja2/filters.py",
+              "src/jinja2/idtracking.py",
+              "src/jinja2/lexer.py",
+              "src/jinja2/loaders.py",
+              "src/jinja2/meta.py",
+              "src/jinja2/nativetypes.py",
+              "src/jinja2/nodes.py",
+              "src/jinja2/optimizer.py",
+              "src/jinja2/parser.py",
+              "src/jinja2/runtime.py",
+              "src/jinja2/sandbox.py",
+              "src/jinja2/utils.py",
+              "src/jinja2/visitor.py"
+            ],
+            "source_hunk_count": 386,
+            "source_track": "real_pr",
+            "task_id": "realpr-jinja-1125",
+            "test_bytes": 236655,
+            "test_files": [
+              "examples/basic/test_filter_and_linestatements.py",
+              "examples/basic/test_loop_filter.py",
+              "src/jinja2/tests.py",
+              "tests/conftest.py",
+              "tests/res/templates/mojibake.txt",
+              "tests/res/templates/variable_encoding.txt",
+              "tests/test_api.py",
+              "tests/test_async.py",
+              "tests/test_asyncfilters.py",
+              "tests/test_bytecode_cache.py",
+              "tests/test_core_tags.py",
+              "tests/test_debug.py",
+              "tests/test_ext.py",
+              "tests/test_features.py",
+              "tests/test_filters.py",
+              "tests/test_idtracking.py",
+              "tests/test_imports.py",
+              "tests/test_inheritance.py",
+              "tests/test_lexnparse.py",
+              "tests/test_loader.py",
+              "tests/test_nativetypes.py",
+              "tests/test_regression.py",
+              "tests/test_runtime.py",
+              "tests/test_security.py",
+              "tests/test_tests.py",
+              "tests/test_utils.py"
+            ],
+            "title": "move to src directory, add pre-commit"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-jinja-1125"
+        },
+        {
+          "at": "2026-07-18T21:54:15.909955+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1125",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-jinja-1125"
+        },
+        {
+          "at": "2026-07-18T21:54:15.909970+00:00",
+          "detail": {
+            "base_commit": "8342180f3913daea28fcd6644a0ba4c69391b189",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/jinja.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-jinja-1125"
+        },
+        {
+          "at": "2026-07-18T21:54:17.940436+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-jinja-1125: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-jinja-1125"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570046+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-jinja-1125: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-jinja-1125"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "8342180f3913daea28fcd6644a0ba4c69391b189",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/jinja.git",
+        "seed_id": "pr:1125",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/jinja.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1125",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-jinja-1125: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:1125",
+      "solution_files": [
+        "docs/examples/cache_extension.py",
+        "docs/examples/inline_gettext_extension.py",
+        "examples/basic/cycle.py",
+        "examples/basic/debugger.py",
+        "examples/basic/inheritance.py",
+        "examples/basic/test.py",
+        "examples/basic/translate.py",
+        "examples/bench.py",
+        "examples/profile.py",
+        "examples/rwbench/djangoext.py",
+        "examples/rwbench/rwbench.py",
+        "ext/django2jinja/django2jinja.py",
+        "ext/django2jinja/example.py",
+        "ext/djangojinja2.py",
+        "ext/inlinegettext.py",
+        "jinja2/__init__.py",
+        "jinja2/_identifier.py",
+        "jinja2/defaults.py",
+        "scripts/generate_identifier_pattern.py",
+        "scripts/jinja2-debug.py",
+        "scripts/make-release.py",
+        "setup.py",
+        "src/jinja2/__init__.py",
+        "src/jinja2/_compat.py",
+        "src/jinja2/_identifier.py",
+        "src/jinja2/asyncfilters.py",
+        "src/jinja2/asyncsupport.py",
+        "src/jinja2/bccache.py",
+        "src/jinja2/compiler.py",
+        "src/jinja2/constants.py",
+        "src/jinja2/debug.py",
+        "src/jinja2/defaults.py",
+        "src/jinja2/environment.py",
+        "src/jinja2/exceptions.py",
+        "src/jinja2/ext.py",
+        "src/jinja2/filters.py",
+        "src/jinja2/idtracking.py",
+        "src/jinja2/lexer.py",
+        "src/jinja2/loaders.py",
+        "src/jinja2/meta.py",
+        "src/jinja2/nativetypes.py",
+        "src/jinja2/nodes.py",
+        "src/jinja2/optimizer.py",
+        "src/jinja2/parser.py",
+        "src/jinja2/runtime.py",
+        "src/jinja2/sandbox.py",
+        "src/jinja2/utils.py",
+        "src/jinja2/visitor.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-jinja-1125",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:54:17.940547+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "a9b06f4bd271de7f56347f602dd90b41c3db8327",
+            "body": "The patching is not required, `async def` is valid in all supported Python versions. Moves the async/patched sync functions from `asyncsupport` into the regular code. Moves the async filters from `asyncfilters` to `filters`. This does mess with the signature arguments in the docs for the filters, I think that can be fixed in Pallets-Sphinx-Theme's Jinja support.\r\n\r\n`import asyncio` is done inside `render` and `generate` to avoid importing it at the top, which would slow down import time.\r\n\r\n<!--\r\nLink to relevant issues or previous PRs, one per line. Use \"fixes\" to automatically close an issue.\r\n-->\r\n\r\n- fixes #1390 \r\n\r\n<!--\r\nEnsure each step in CONTRIBUTING.rst is complete by adding an \"x\" to each box below.\r\n\r\nIf only docs were changed, these aren't relevant and can be removed.\r\n-->\r\n\r\nChecklist:\r\n\r\n- [x] Add tests that demonstrate the correct behavior of the change. Tests should fail without the change.\r\n- [x] Add or update relevant docs, in the docs folder and in code.\r\n- [x] Add an entry in `CHANGES.rst` summarizing the change and linking to the issue.\r\n- [x] Add `.. versionchanged::` entries in any relevant code docs.\r\n- [x] Run `pre-commit` hooks and fix any issues.\r\n- [x] Run `pytest` and `tox`, no tests failed.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-jinja-1392",
+            "pr_number": 1392,
+            "repository_url": "https://github.com/pallets/jinja.git",
+            "solution_bytes": 26704,
+            "source_files": [
+              "src/jinja2/async_utils.py",
+              "src/jinja2/asyncfilters.py",
+              "src/jinja2/asyncsupport.py",
+              "src/jinja2/compiler.py",
+              "src/jinja2/environment.py",
+              "src/jinja2/filters.py",
+              "src/jinja2/nativetypes.py",
+              "src/jinja2/runtime.py",
+              "src/jinja2/utils.py"
+            ],
+            "source_hunk_count": 37,
+            "source_track": "real_pr",
+            "task_id": "realpr-jinja-1392",
+            "test_bytes": 1220,
+            "test_files": [
+              "tests/conftest.py",
+              "tests/test_async.py",
+              "tests/test_async_filters.py"
+            ],
+            "title": "async support doesn't require patching"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-jinja-1392"
+        },
+        {
+          "at": "2026-07-18T21:54:30.287113+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1392",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-jinja-1392"
+        },
+        {
+          "at": "2026-07-18T21:54:30.287124+00:00",
+          "detail": {
+            "base_commit": "a9b06f4bd271de7f56347f602dd90b41c3db8327",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/jinja.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-jinja-1392"
+        },
+        {
+          "at": "2026-07-18T21:54:33.006705+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-jinja-1392: dual-run produced empty F2P cohort (broken_failed=[] green_passed=['tests.test_async.test_basic_async', 'tests.test_async.test_await_on_calls', 'tests.test_async.test_await_on_calls_normal_render', 'tests.test_async.test_await_and_macros', 'tests.test_async.test_async_blocks', 'tests.test_async.test_async_generate', 'tests.test_async.test_async_iteration_in_templates', 'tests.test_async.test_async_iteration_in_templates_extended', 'tests.test_async.TestAsyncImports.test_context_imports', 'tests.test_async.TestAsyncImports.test_trailing_comma', 'tests.test_async.TestAsyncImports.test_exports', 'tests.test_async.TestAsyncIncludes.test_context_include', 'tests.test_async.TestAsyncIncludes.test_choice_includes', 'tests.test_async.TestAsyncIncludes.test_include_ignoring_missing', 'tests.test_async.TestAsyncIncludes.test_context_include_with_overrides', 'tests.test_async.TestAsyncIncludes.test_unoptimized_scopes', 'tests.test_async.TestAsyncIncludes.test_unoptimized_scopes_autoescape', 'tests.test_async.TestAsyncForLoop.test_simple', 'tests.test_async.TestAsyncForLoop.test_else', 'tests.test_async.TestAsyncForLoop.test_empty_blocks', 'tests.test_async.TestAsyncForLoop.test_context_vars[<lambda>0]', 'tests.test_async.TestAsyncForLoop.test_context_vars[iter]', 'tests.test_async.TestAsyncForLoop.test_context_vars[reversed]', 'tests.test_async.TestAsyncForLoop.test_context_vars[<lambda>1]', 'tests.test_async.TestAsyncForLoop.test_context_vars[auto_aiter]', 'tests.test_async.TestAsyncForLoop.test_cycling', 'tests.test_async.TestAsyncForLoop.test_lookaround', 'tests.test_async.TestAsyncForLoop.test_changed', 'tests.test_async.TestAsyncForLoop.test_scope', 'tests.test_async.TestAsyncForLoop.test_varlen', 'tests.test_async.TestAsyncForLoop.test_noniter', 'tests.test_async.TestAsyncForLoop.test_recursive', 'tests.test_async.TestAsyncForLoop.test_recursive_lookaround', 'tests.test_async.TestAsyncForLoop.test_recursive_depth0', 'tests.test_async.TestAsyncForLoop.test_recursive_depth', 'tests.test_async.TestAsyncForLoop.test_looploop', 'tests.test_async.TestAsyncForLoop.test_reversed_bug', 'tests.test_async.TestAsyncForLoop.test_loop_errors', 'tests.test_async.TestAsyncForLoop.test_loop_filter', 'tests.test_async.TestAsyncForLoop.test_scoped_special_var', 'tests.test_async.TestAsyncForLoop.test_scoped_loop_var', 'tests.test_async.TestAsyncForLoop.test_recursive_empty_loop_iter', 'tests.test_async.TestAsyncForLoop.test_call_in_loop', 'tests.test_async.TestAsyncForLoop.test_scoping_bug', 'tests.test_async.TestAsyncForLoop.test_unpacking', 'tests.test_async.TestAsyncForLoop.test_recursive_loop_filter', 'tests.test_async.TestAsyncForLoop.test_nonrecursive_loop_filter', 'tests.test_async.TestAsyncForLoop.test_bare_async', 'tests.test_async.TestAsyncForLoop.test_awaitable_property_slicing', 'tests.test_async.test_namespace_awaitable', 'tests.test_async.test_chainable_undefined_aiter', 'tests.test_async.test_native_async', 'tests.test_async.test_native_list_async'])",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-jinja-1392"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570048+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-jinja-1392: dual-run produced empty F2P cohort (broken_failed=[] green_passed=['tests.test_async.test_basic_async', 'tests.test_async.test_await_on_calls', 'tests.test_async.test_await_on_calls_normal_render', 'tests.test_async.test_await_and_macros', 'tests.test_async.test_async_blocks', 'tests.test_async.test_async_generate', 'tests.test_async.test_async_iteration_in_templates', 'tests.test_async.test_async_iteration_in_templates_extended', 'tests.test_async.TestAsyncImports.test_context_imports', 'tests.test_async.TestAsyncImports.test_trailing_comma', 'tests.test_async.TestAsyncImports.test_exports', 'tests.test_async.TestAsyncIncludes.test_context_include', 'tests.test_async.TestAsyncIncludes.test_choice_includes', 'tests.test_async.TestAsyncIncludes.test_include_ignoring_missing', 'tests.test_async.TestAsyncIncludes.test_context_include_with_overrides', 'tests.test_async.TestAsyncIncludes.test_unoptimized_scopes', 'tests.test_async.TestAsyncIncludes.test_unoptimized_scopes_autoescape', 'tests.test_async.TestAsyncForLoop.test_simple', 'tests.test_async.TestAsyncForLoop.test_else', 'tests.test_async.TestAsyncForLoop.test_empty_blocks', 'tests.test_async.TestAsyncForLoop.test_context_vars[<lambda>0]', 'tests.test_async.TestAsyncForLoop.test_context_vars[iter]', 'tests.test_async.TestAsyncForLoop.test_context_vars[reversed]', 'tests.test_async.TestAsyncForLoop.test_context_vars[<lambda>1]', 'tests.test_async.TestAsyncForLoop.test_context_vars[auto_aiter]', 'tests.test_async.TestAsyncForLoop.test_cycling', 'tests.test_async.TestAsyncForLoop.test_lookaround', 'tests.test_async.TestAsyncForLoop.test_changed', 'tests.test_async.TestAsyncForLoop.test_scope', 'tests.test_async.TestAsyncForLoop.test_varlen', 'tests.test_async.TestAsyncForLoop.test_noniter', 'tests.test_async.TestAsyncForLoop.test_recursive', 'tests.test_async.TestAsyncForLoop.test_recursive_lookaround', 'tests.test_async.TestAsyncForLoop.test_recursive_depth0', 'tests.test_async.TestAsyncForLoop.test_recursive_depth', 'tests.test_async.TestAsyncForLoop.test_looploop', 'tests.test_async.TestAsyncForLoop.test_reversed_bug', 'tests.test_async.TestAsyncForLoop.test_loop_errors', 'tests.test_async.TestAsyncForLoop.test_loop_filter', 'tests.test_async.TestAsyncForLoop.test_scoped_special_var', 'tests.test_async.TestAsyncForLoop.test_scoped_loop_var', 'tests.test_async.TestAsyncForLoop.test_recursive_empty_loop_iter', 'tests.test_async.TestAsyncForLoop.test_call_in_loop', 'tests.test_async.TestAsyncForLoop.test_scoping_bug', 'tests.test_async.TestAsyncForLoop.test_unpacking', 'tests.test_async.TestAsyncForLoop.test_recursive_loop_filter', 'tests.test_async.TestAsyncForLoop.test_nonrecursive_loop_filter', 'tests.test_async.TestAsyncForLoop.test_bare_async', 'tests.test_async.TestAsyncForLoop.test_awaitable_property_slicing', 'tests.test_async.test_namespace_awaitable', 'tests.test_async.test_chainable_undefined_aiter', 'tests.test_async.test_native_async', 'tests.test_async.test_native_list_async'])"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-jinja-1392"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "a9b06f4bd271de7f56347f602dd90b41c3db8327",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/jinja.git",
+        "seed_id": "pr:1392",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/jinja.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1392",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-jinja-1392: dual-run produced empty F2P cohort (broken_failed=[] green_passed=['tests.test_async.test_basic_async', 'tests.test_async.test_await_on_calls', 'tests.test_async.test_await_on_calls_normal_render', 'tests.test_async.test_await_and_macros', 'tests.test_async.test_async_blocks', 'tests.test_async.test_async_generate', 'tests.test_async.test_async_iteration_in_templates', 'tests.test_async.test_async_iteration_in_templates_extended', 'tests.test_async.TestAsyncImports.test_context_imports', 'tests.test_async.TestAsyncImports.test_trailing_comma', 'tests.test_async.TestAsyncImports.test_exports', 'tests.test_async.TestAsyncIncludes.test_context_include', 'tests.test_async.TestAsyncIncludes.test_choice_includes', 'tests.test_async.TestAsyncIncludes.test_include_ignoring_missing', 'tests.test_async.TestAsyncIncludes.test_context_include_with_overrides', 'tests.test_async.TestAsyncIncludes.test_unoptimized_scopes', 'tests.test_async.TestAsyncIncludes.test_unoptimized_scopes_autoescape', 'tests.test_async.TestAsyncForLoop.test_simple', 'tests.test_async.TestAsyncForLoop.test_else', 'tests.test_async.TestAsyncForLoop.test_empty_blocks', 'tests.test_async.TestAsyncForLoop.test_context_vars[<lambda>0]', 'tests.test_async.TestAsyncForLoop.test_context_vars[iter]', 'tests.test_async.TestAsyncForLoop.test_context_vars[reversed]', 'tests.test_async.TestAsyncForLoop.test_context_vars[<lambda>1]', 'tests.test_async.TestAsyncForLoop.test_context_vars[auto_aiter]', 'tests.test_async.TestAsyncForLoop.test_cycling', 'tests.test_async.TestAsyncForLoop.test_lookaround', 'tests.test_async.TestAsyncForLoop.test_changed', 'tests.test_async.TestAsyncForLoop.test_scope', 'tests.test_async.TestAsyncForLoop.test_varlen', 'tests.test_async.TestAsyncForLoop.test_noniter', 'tests.test_async.TestAsyncForLoop.test_recursive', 'tests.test_async.TestAsyncForLoop.test_recursive_lookaround', 'tests.test_async.TestAsyncForLoop.test_recursive_depth0', 'tests.test_async.TestAsyncForLoop.test_recursive_depth', 'tests.test_async.TestAsyncForLoop.test_looploop', 'tests.test_async.TestAsyncForLoop.test_reversed_bug', 'tests.test_async.TestAsyncForLoop.test_loop_errors', 'tests.test_async.TestAsyncForLoop.test_loop_filter', 'tests.test_async.TestAsyncForLoop.test_scoped_special_var', 'tests.test_async.TestAsyncForLoop.test_scoped_loop_var', 'tests.test_async.TestAsyncForLoop.test_recursive_empty_loop_iter', 'tests.test_async.TestAsyncForLoop.test_call_in_loop', 'tests.test_async.TestAsyncForLoop.test_scoping_bug', 'tests.test_async.TestAsyncForLoop.test_unpacking', 'tests.test_async.TestAsyncForLoop.test_recursive_loop_filter', 'tests.test_async.TestAsyncForLoop.test_nonrecursive_loop_filter', 'tests.test_async.TestAsyncForLoop.test_bare_async', 'tests.test_async.TestAsyncForLoop.test_awaitable_property_slicing', 'tests.test_async.test_namespace_awaitable', 'tests.test_async.test_chainable_undefined_aiter', 'tests.test_async.test_native_async', 'tests.test_async.test_native_list_async'])"
+      ],
+      "seed_id": "pr:1392",
+      "solution_files": [
+        "src/jinja2/async_utils.py",
+        "src/jinja2/asyncfilters.py",
+        "src/jinja2/asyncsupport.py",
+        "src/jinja2/compiler.py",
+        "src/jinja2/environment.py",
+        "src/jinja2/filters.py",
+        "src/jinja2/nativetypes.py",
+        "src/jinja2/runtime.py",
+        "src/jinja2/utils.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-jinja-1392",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:54:33.006808+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "f418f719c14e2509f8a35282334f1d17716c3c48",
+            "body": "Things I noticed while going through the code:\r\n\r\n* `Node.fields` and `Node.attributes` could be dataclasses / annotations instead of a tuple of strings. I already added annotations for all the names to each class, so that type checking the parser and compiler was useful. No nodes add extra `attributes`.\r\n* Various objects have a `copy` method which uses `object.__new__` and other \"magic\" to create a copy. This code seems to be from 2008, when Python's `copy` module might not have been available? In most cases it should be replaceable with a call to `copy.copy()`, except many of the classes also do `__copy__ = copy`.\r\n* Various things in the compiler could be context managers instead of calling before and after functions: `indent`, `enter_frame`, `push_parameter_definitions`, `push_context_reference`, `push_assign_tracking`, `_output_child_pre`.\r\n* It would be nice to remove our `LRUCache` in favor of `functools.lru_cache`. I replaced `get_spontaneous_environment`, but the other uses are a bit trickier.\r\n* `environment.overlay` is not used anywhere. It seems it was intended to be used with extensions, but the documentation about it is unclear and there are no examples of its use.\r\n* `environment.handle_exception` should be deprecated. It says it can be used to \"return a value or raise a rewritten exception\", but it's only used for the later and there are no examples of overriding it. It's called by various functions that have different return types, as well as in some places where returning instead of raising would be ignored and silence fatal errors. So overriding it wouldn't work as expected.\r\n* The top-level `compiler.generate` function is not public, is only called from `Environment._generate` (confusingly named), and has an inconvenient return signature. If a file object is passed in (never used or documented), it doesn't return anything, but it seems it would only be useful for it to return a string. Could either remove stream argument, or make it two separate functions or class methods.\r\n* Replaced most metaclasses with `__init_subclass__`. Only one left is `NodeType`, which should probably be reexamined anyway.\r\n* `async_variant` decorator (internal only) needs work, I tried to type it but caused mypy to crash. It's generally messy and I already had to reconfigure it a bit when removing the async patching.\r\n* `runtime.Macro` can be called from Python code with `template.module`, in which case it won't have an eval context to look for `autoescape`, so it falls back to `environment.autoescape`. However, it wasn't accounting for the fact that that could be a callable.\r\n\r\n<!--\r\nEnsure each step in CONTRIBUTING.rst is complete by adding an \"x\" to each box below.\r\n\r\nIf only docs were changed, these aren't relevant and can be removed.\r\n-->\r\n\r\nChecklist:\r\n\r\n- [x] Add tests that demonstrate the correct behavior of the change. Tests should fail without the change.\r\n- [x] Add or update relevant docs, in the docs folder and in code.\r\n- [x] Add an entry in `CHANGES.rst` summarizing the change and linking to the issue.\r\n- [x] Add `.. versionchanged::` entries in any relevant code docs.\r\n- [x] Run `pre-commit` hooks and fix any issues.\r\n- [x] Run `pytest` and `tox`, no tests failed.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-jinja-1412",
+            "pr_number": 1412,
+            "repository_url": "https://github.com/pallets/jinja.git",
+            "solution_bytes": 335477,
+            "source_files": [
+              "docs/examples/inline_gettext_extension.py",
+              "src/jinja2/async_utils.py",
+              "src/jinja2/bccache.py",
+              "src/jinja2/compiler.py",
+              "src/jinja2/debug.py",
+              "src/jinja2/defaults.py",
+              "src/jinja2/environment.py",
+              "src/jinja2/exceptions.py",
+              "src/jinja2/ext.py",
+              "src/jinja2/filters.py",
+              "src/jinja2/idtracking.py",
+              "src/jinja2/lexer.py",
+              "src/jinja2/loaders.py",
+              "src/jinja2/meta.py",
+              "src/jinja2/nativetypes.py",
+              "src/jinja2/nodes.py",
+              "src/jinja2/optimizer.py",
+              "src/jinja2/parser.py",
+              "src/jinja2/runtime.py",
+              "src/jinja2/sandbox.py",
+              "src/jinja2/utils.py",
+              "src/jinja2/visitor.py"
+            ],
+            "source_hunk_count": 443,
+            "source_track": "real_pr",
+            "task_id": "realpr-jinja-1412",
+            "test_bytes": 380,
+            "test_files": [
+              "tests/test_ext.py"
+            ],
+            "title": "add type annotations"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-jinja-1412"
+        },
+        {
+          "at": "2026-07-18T21:54:49.658291+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1412",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-jinja-1412"
+        },
+        {
+          "at": "2026-07-18T21:54:49.658301+00:00",
+          "detail": {
+            "base_commit": "f418f719c14e2509f8a35282334f1d17716c3c48",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/jinja.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-jinja-1412"
+        },
+        {
+          "at": "2026-07-18T21:54:51.818623+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-jinja-1412: dual-run produced empty F2P cohort (broken_failed=[] green_passed=['tests.test_ext.TestExtensions.test_extend_late', 'tests.test_ext.TestExtensions.test_loop_controls', 'tests.test_ext.TestExtensions.test_do', 'tests.test_ext.TestExtensions.test_extension_nodes', 'tests.test_ext.TestExtensions.test_contextreference_node_passes_context', 'tests.test_ext.TestExtensions.test_contextreference_node_can_pass_locals', 'tests.test_ext.TestExtensions.test_identifier', 'tests.test_ext.TestExtensions.test_rebinding', 'tests.test_ext.TestExtensions.test_preprocessor_extension', 'tests.test_ext.TestExtensions.test_streamfilter_extension', 'tests.test_ext.TestExtensions.test_extension_ordering', 'tests.test_ext.TestExtensions.test_debug', 'tests.test_ext.TestInternationalization.test_trans', 'tests.test_ext.TestInternationalization.test_trans_plural', 'tests.test_ext.TestInternationalization.test_trans_plural_with_functions', 'tests.test_ext.TestInternationalization.test_complex_plural', 'tests.test_ext.TestInternationalization.test_trans_stringformatting', 'tests.test_ext.TestInternationalization.test_trimmed', 'tests.test_ext.TestInternationalization.test_trimmed_policy', 'tests.test_ext.TestInternationalization.test_trimmed_policy_override', 'tests.test_ext.TestInternationalization.test_trimmed_vars', 'tests.test_ext.TestInternationalization.test_trimmed_varname_trimmed', 'tests.test_ext.TestInternationalization.test_extract', 'tests.test_ext.TestInternationalization.test_extract_trimmed', 'tests.test_ext.TestInternationalization.test_extract_trimmed_option', 'tests.test_ext.TestInternationalization.test_comment_extract', 'tests.test_ext.TestInternationalization.test_extract_context', 'tests.test_ext.TestScope.test_basic_scope_behavior', 'tests.test_ext.TestNewstyleInternationalization.test_trans', 'tests.test_ext.TestNewstyleInternationalization.test_trans_plural', 'tests.test_ext.TestNewstyleInternationalization.test_complex_plural', 'tests.test_ext.TestNewstyleInternationalization.test_trans_stringformatting', 'tests.test_ext.TestNewstyleInternationalization.test_newstyle_plural', 'tests.test_ext.TestNewstyleInternationalization.test_autoescape_support', 'tests.test_ext.TestNewstyleInternationalization.test_autoescape_macros', 'tests.test_ext.TestNewstyleInternationalization.test_num_used_twice', 'tests.test_ext.TestNewstyleInternationalization.test_num_called_num', 'tests.test_ext.TestNewstyleInternationalization.test_trans_vars', 'tests.test_ext.TestNewstyleInternationalization.test_novars_vars_escaping', 'tests.test_ext.TestNewstyleInternationalization.test_context', 'tests.test_ext.TestNewstyleInternationalization.test_context_newstyle_plural', 'tests.test_ext.TestAutoEscape.test_scoped_setting', 'tests.test_ext.TestAutoEscape.test_nonvolatile', 'tests.test_ext.TestAutoEscape.test_volatile', 'tests.test_ext.TestAutoEscape.test_scoping', 'tests.test_ext.TestAutoEscape.test_volatile_scoping', 'tests.test_ext.TestAutoEscape.test_overlay_scopes'])",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-jinja-1412"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570049+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-jinja-1412: dual-run produced empty F2P cohort (broken_failed=[] green_passed=['tests.test_ext.TestExtensions.test_extend_late', 'tests.test_ext.TestExtensions.test_loop_controls', 'tests.test_ext.TestExtensions.test_do', 'tests.test_ext.TestExtensions.test_extension_nodes', 'tests.test_ext.TestExtensions.test_contextreference_node_passes_context', 'tests.test_ext.TestExtensions.test_contextreference_node_can_pass_locals', 'tests.test_ext.TestExtensions.test_identifier', 'tests.test_ext.TestExtensions.test_rebinding', 'tests.test_ext.TestExtensions.test_preprocessor_extension', 'tests.test_ext.TestExtensions.test_streamfilter_extension', 'tests.test_ext.TestExtensions.test_extension_ordering', 'tests.test_ext.TestExtensions.test_debug', 'tests.test_ext.TestInternationalization.test_trans', 'tests.test_ext.TestInternationalization.test_trans_plural', 'tests.test_ext.TestInternationalization.test_trans_plural_with_functions', 'tests.test_ext.TestInternationalization.test_complex_plural', 'tests.test_ext.TestInternationalization.test_trans_stringformatting', 'tests.test_ext.TestInternationalization.test_trimmed', 'tests.test_ext.TestInternationalization.test_trimmed_policy', 'tests.test_ext.TestInternationalization.test_trimmed_policy_override', 'tests.test_ext.TestInternationalization.test_trimmed_vars', 'tests.test_ext.TestInternationalization.test_trimmed_varname_trimmed', 'tests.test_ext.TestInternationalization.test_extract', 'tests.test_ext.TestInternationalization.test_extract_trimmed', 'tests.test_ext.TestInternationalization.test_extract_trimmed_option', 'tests.test_ext.TestInternationalization.test_comment_extract', 'tests.test_ext.TestInternationalization.test_extract_context', 'tests.test_ext.TestScope.test_basic_scope_behavior', 'tests.test_ext.TestNewstyleInternationalization.test_trans', 'tests.test_ext.TestNewstyleInternationalization.test_trans_plural', 'tests.test_ext.TestNewstyleInternationalization.test_complex_plural', 'tests.test_ext.TestNewstyleInternationalization.test_trans_stringformatting', 'tests.test_ext.TestNewstyleInternationalization.test_newstyle_plural', 'tests.test_ext.TestNewstyleInternationalization.test_autoescape_support', 'tests.test_ext.TestNewstyleInternationalization.test_autoescape_macros', 'tests.test_ext.TestNewstyleInternationalization.test_num_used_twice', 'tests.test_ext.TestNewstyleInternationalization.test_num_called_num', 'tests.test_ext.TestNewstyleInternationalization.test_trans_vars', 'tests.test_ext.TestNewstyleInternationalization.test_novars_vars_escaping', 'tests.test_ext.TestNewstyleInternationalization.test_context', 'tests.test_ext.TestNewstyleInternationalization.test_context_newstyle_plural', 'tests.test_ext.TestAutoEscape.test_scoped_setting', 'tests.test_ext.TestAutoEscape.test_nonvolatile', 'tests.test_ext.TestAutoEscape.test_volatile', 'tests.test_ext.TestAutoEscape.test_scoping', 'tests.test_ext.TestAutoEscape.test_volatile_scoping', 'tests.test_ext.TestAutoEscape.test_overlay_scopes'])"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-jinja-1412"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "f418f719c14e2509f8a35282334f1d17716c3c48",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/jinja.git",
+        "seed_id": "pr:1412",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/jinja.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-jinja-1412",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-jinja-1412: dual-run produced empty F2P cohort (broken_failed=[] green_passed=['tests.test_ext.TestExtensions.test_extend_late', 'tests.test_ext.TestExtensions.test_loop_controls', 'tests.test_ext.TestExtensions.test_do', 'tests.test_ext.TestExtensions.test_extension_nodes', 'tests.test_ext.TestExtensions.test_contextreference_node_passes_context', 'tests.test_ext.TestExtensions.test_contextreference_node_can_pass_locals', 'tests.test_ext.TestExtensions.test_identifier', 'tests.test_ext.TestExtensions.test_rebinding', 'tests.test_ext.TestExtensions.test_preprocessor_extension', 'tests.test_ext.TestExtensions.test_streamfilter_extension', 'tests.test_ext.TestExtensions.test_extension_ordering', 'tests.test_ext.TestExtensions.test_debug', 'tests.test_ext.TestInternationalization.test_trans', 'tests.test_ext.TestInternationalization.test_trans_plural', 'tests.test_ext.TestInternationalization.test_trans_plural_with_functions', 'tests.test_ext.TestInternationalization.test_complex_plural', 'tests.test_ext.TestInternationalization.test_trans_stringformatting', 'tests.test_ext.TestInternationalization.test_trimmed', 'tests.test_ext.TestInternationalization.test_trimmed_policy', 'tests.test_ext.TestInternationalization.test_trimmed_policy_override', 'tests.test_ext.TestInternationalization.test_trimmed_vars', 'tests.test_ext.TestInternationalization.test_trimmed_varname_trimmed', 'tests.test_ext.TestInternationalization.test_extract', 'tests.test_ext.TestInternationalization.test_extract_trimmed', 'tests.test_ext.TestInternationalization.test_extract_trimmed_option', 'tests.test_ext.TestInternationalization.test_comment_extract', 'tests.test_ext.TestInternationalization.test_extract_context', 'tests.test_ext.TestScope.test_basic_scope_behavior', 'tests.test_ext.TestNewstyleInternationalization.test_trans', 'tests.test_ext.TestNewstyleInternationalization.test_trans_plural', 'tests.test_ext.TestNewstyleInternationalization.test_complex_plural', 'tests.test_ext.TestNewstyleInternationalization.test_trans_stringformatting', 'tests.test_ext.TestNewstyleInternationalization.test_newstyle_plural', 'tests.test_ext.TestNewstyleInternationalization.test_autoescape_support', 'tests.test_ext.TestNewstyleInternationalization.test_autoescape_macros', 'tests.test_ext.TestNewstyleInternationalization.test_num_used_twice', 'tests.test_ext.TestNewstyleInternationalization.test_num_called_num', 'tests.test_ext.TestNewstyleInternationalization.test_trans_vars', 'tests.test_ext.TestNewstyleInternationalization.test_novars_vars_escaping', 'tests.test_ext.TestNewstyleInternationalization.test_context', 'tests.test_ext.TestNewstyleInternationalization.test_context_newstyle_plural', 'tests.test_ext.TestAutoEscape.test_scoped_setting', 'tests.test_ext.TestAutoEscape.test_nonvolatile', 'tests.test_ext.TestAutoEscape.test_volatile', 'tests.test_ext.TestAutoEscape.test_scoping', 'tests.test_ext.TestAutoEscape.test_volatile_scoping', 'tests.test_ext.TestAutoEscape.test_overlay_scopes'])"
+      ],
+      "seed_id": "pr:1412",
+      "solution_files": [
+        "docs/examples/inline_gettext_extension.py",
+        "src/jinja2/async_utils.py",
+        "src/jinja2/bccache.py",
+        "src/jinja2/compiler.py",
+        "src/jinja2/debug.py",
+        "src/jinja2/defaults.py",
+        "src/jinja2/environment.py",
+        "src/jinja2/exceptions.py",
+        "src/jinja2/ext.py",
+        "src/jinja2/filters.py",
+        "src/jinja2/idtracking.py",
+        "src/jinja2/lexer.py",
+        "src/jinja2/loaders.py",
+        "src/jinja2/meta.py",
+        "src/jinja2/nativetypes.py",
+        "src/jinja2/nodes.py",
+        "src/jinja2/optimizer.py",
+        "src/jinja2/parser.py",
+        "src/jinja2/runtime.py",
+        "src/jinja2/sandbox.py",
+        "src/jinja2/utils.py",
+        "src/jinja2/visitor.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-jinja-1412",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:54:51.818729+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "df29cf63550a253fe7b7161235b8f66be68e95d4",
+            "body": "",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-rq-2350",
+            "pr_number": 2350,
+            "repository_url": "https://github.com/rq/rq.git",
+            "solution_bytes": 35466,
+            "source_files": [
+              "rq/executions.py",
+              "rq/job.py",
+              "rq/worker/__init__.py",
+              "rq/worker/base.py",
+              "rq/worker/worker_classes.py"
+            ],
+            "source_hunk_count": 20,
+            "source_track": "real_pr",
+            "task_id": "realpr-rq-2350",
+            "test_bytes": 9980,
+            "test_files": [
+              "tests/test_callbacks.py",
+              "tests/test_executions.py",
+              "tests/test_queue.py",
+              "tests/test_worker.py"
+            ],
+            "title": "Pyright cleanups"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-rq-2350"
+        },
+        {
+          "at": "2026-07-18T21:55:04.855884+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-rq-2350",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-rq-2350"
+        },
+        {
+          "at": "2026-07-18T21:55:04.855897+00:00",
+          "detail": {
+            "base_commit": "df29cf63550a253fe7b7161235b8f66be68e95d4",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/rq/rq.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-rq-2350"
+        },
+        {
+          "at": "2026-07-18T21:55:06.855451+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-rq-2350: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-rq-2350"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570051+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-rq-2350: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-rq-2350"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "df29cf63550a253fe7b7161235b8f66be68e95d4",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/rq/rq.git",
+        "seed_id": "pr:2350",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/rq/rq.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-rq-2350",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-rq-2350: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:2350",
+      "solution_files": [
+        "rq/executions.py",
+        "rq/job.py",
+        "rq/worker/__init__.py",
+        "rq/worker/base.py",
+        "rq/worker/worker_classes.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-rq-2350",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:55:06.855543+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "7c9ab81c100a1595f0d94b1e1d4139299978a17c",
+            "body": "## Summary\n- Replace `Optional[X]` with `X | None` and `Union[X, Y]` with `X | Y` in annotations\n- Replace `typing.List`, `Dict`, `Tuple`, `Type` with builtin equivalents (`list`, `dict`, `tuple`, `type`)\n- Move `Callable` imports from `typing` to `collections.abc`\n- Add `from __future__ import annotations` for forward reference support (also enables `X | None` syntax on Python 3.9)\n- Remove unused `ObjOrStr` type alias\n- Remove stale TODO comments about Python 3.8 compatibility\n\n**Note:** Python 3.9 support is preserved. The `X | None` annotation syntax works on 3.9 thanks to `from __future__ import annotations`. The two `isinstance()` calls keep tuple syntax since those are runtime expressions.\n\n## Test plan\n- [x] All pre-commit hooks pass (ruff check, ruff format, pyproject-fmt, mypy)\n- [x] Python 3.9 compatibility preserved (`isinstance` calls use tuple syntax)\n\n\ud83e\udd16 Generated with [Claude Code](https://claude.com/claude-code)",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-rq-2385",
+            "pr_number": 2385,
+            "repository_url": "https://github.com/rq/rq.git",
+            "solution_bytes": 124338,
+            "source_files": [
+              "rq/cron.py",
+              "rq/cron_scheduler_registry.py",
+              "rq/decorators.py",
+              "rq/executions.py",
+              "rq/group.py",
+              "rq/intermediate_queue.py",
+              "rq/job.py",
+              "rq/logutils.py",
+              "rq/queue.py",
+              "rq/registry.py",
+              "rq/repeat.py",
+              "rq/results.py",
+              "rq/scheduler.py",
+              "rq/serializers.py",
+              "rq/suspension.py",
+              "rq/types.py",
+              "rq/utils.py",
+              "rq/worker/base.py",
+              "rq/worker/worker_classes.py",
+              "rq/worker_pool.py",
+              "rq/worker_registration.py"
+            ],
+            "source_hunk_count": 242,
+            "source_track": "real_pr",
+            "task_id": "realpr-rq-2385",
+            "test_bytes": 814,
+            "test_files": [
+              "tests/fixtures.py"
+            ],
+            "title": "Modernize typing syntax using PEP 604 and builtin generics"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-rq-2385"
+        },
+        {
+          "at": "2026-07-18T21:55:17.080742+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-rq-2385",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-rq-2385"
+        },
+        {
+          "at": "2026-07-18T21:55:17.080753+00:00",
+          "detail": {
+            "base_commit": "7c9ab81c100a1595f0d94b1e1d4139299978a17c",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/rq/rq.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-rq-2385"
+        },
+        {
+          "at": "2026-07-18T21:55:19.095023+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-rq-2385: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-rq-2385"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570052+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-rq-2385: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-rq-2385"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "7c9ab81c100a1595f0d94b1e1d4139299978a17c",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/rq/rq.git",
+        "seed_id": "pr:2385",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/rq/rq.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-rq-2385",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-rq-2385: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:2385",
+      "solution_files": [
+        "rq/cron.py",
+        "rq/cron_scheduler_registry.py",
+        "rq/decorators.py",
+        "rq/executions.py",
+        "rq/group.py",
+        "rq/intermediate_queue.py",
+        "rq/job.py",
+        "rq/logutils.py",
+        "rq/queue.py",
+        "rq/registry.py",
+        "rq/repeat.py",
+        "rq/results.py",
+        "rq/scheduler.py",
+        "rq/serializers.py",
+        "rq/suspension.py",
+        "rq/types.py",
+        "rq/utils.py",
+        "rq/worker/base.py",
+        "rq/worker/worker_classes.py",
+        "rq/worker_pool.py",
+        "rq/worker_registration.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-rq-2385",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:55:19.095126+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "c356c6da5f25ba70bd53448ff1d1bf6ad6967fd5",
+            "body": "This adds the ability to fully customize the JSON implementation used by a Flask application. Using a different JSON implementation can greatly speed up API applications that need to work with JSON in most requests.\r\n\r\n`app.json` is an instance of `Flask.json_provider_class`. `flask.json.provider.JSONProvider` is the base class that defines `dumps`, `dump`, `loads`, `load`, and `response` methods, of which only `dumps` and `loads` need to be implemented.  For example, here's a provider for [orjson](https://github.com/ijl/orjson):\r\n\r\n```python\r\nfrom flask.json.provider import JSONProvider\r\nimport orjson\r\n\r\nclass OrJSONProvider(JSONProvider):\r\n    def dumps(self, obj, *, option=None, **kwargs):\r\n        if option is None:\r\n            option = orjson.OPT_APPEND_NEWLINE | orjson.OPT_NAIVE_UTC\r\n        \r\n        return orjson.dumps(obj, option=option).decode()\r\n\r\n    def loads(self, s, **kwargs):\r\n        return orjson.loads(s)\r\n\r\n# assign to an app instance\r\napp.json = OrJSONProvider(app)\r\n\r\n# or assign in a subclass\r\nclass MyFlask(Flask):\r\n    json_provider_class = OrJSONProvider\r\n\r\napp = MyFlask(__name__)\r\n```\r\n\r\nThe methods in `flask.json` call the methods on `app.json` if an app context is active, or fall back to the `json` library. `jsonify` calls `app.json.response`. The `|tojson` filter uses `app.json.dumps`. `Request.json` uses `app.json.loads` and `Response.json` uses `app.json.dumps`; the test client uses these as well.\r\n\r\nCustomizing `json_encoder` or `json_decoder` on an app or blueprint, and the `JSONEncoder` and `JSONDecoder` classes, are deprecated. This was not an effective way to use other libraries. Customizing per blueprint was requested by an API extension that is no longer maintained and didn't appear to use the feature. It's not clear how it would work with the new provider interface and added overhead to every request. Instead, API frameworks should be using a dedicated object serialization library, then taking advantage of a fast JSON serializer at the application level.\r\n\r\nThe `DefaultJSONProvider` is the existing implementation using the built-in `json` library. The `app.config` keys `JSON_AS_ASCII`, `JSON_SORT_KEYS`, `JSONIFY_MIMETYPE`, and `JSONIFY_PRETTYPRINT_REGULAR` are deprecated and have moved to attributes on the default provider. Other providers are not required to support these options.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-flask-4692",
+            "pr_number": 4692,
+            "repository_url": "https://github.com/pallets/flask.git",
+            "solution_bytes": 36589,
+            "source_files": [
+              "src/flask/app.py",
+              "src/flask/blueprints.py",
+              "src/flask/ctx.py",
+              "src/flask/json/__init__.py",
+              "src/flask/json/provider.py",
+              "src/flask/scaffold.py",
+              "src/flask/testing.py"
+            ],
+            "source_hunk_count": 20,
+            "source_track": "real_pr",
+            "task_id": "realpr-flask-4692",
+            "test_bytes": 6702,
+            "test_files": [
+              "tests/test_basic.py",
+              "tests/test_json.py",
+              "tests/test_testing.py"
+            ],
+            "title": "add JSON provider interface"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-flask-4692"
+        },
+        {
+          "at": "2026-07-18T21:55:35.048312+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-flask-4692",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-flask-4692"
+        },
+        {
+          "at": "2026-07-18T21:55:35.048326+00:00",
+          "detail": {
+            "base_commit": "c356c6da5f25ba70bd53448ff1d1bf6ad6967fd5",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/flask.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-flask-4692"
+        },
+        {
+          "at": "2026-07-18T21:55:37.193701+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-flask-4692: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-flask-4692"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570053+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-flask-4692: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-flask-4692"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "c356c6da5f25ba70bd53448ff1d1bf6ad6967fd5",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/flask.git",
+        "seed_id": "pr:4692",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/flask.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-flask-4692",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-flask-4692: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:4692",
+      "solution_files": [
+        "src/flask/app.py",
+        "src/flask/blueprints.py",
+        "src/flask/ctx.py",
+        "src/flask/json/__init__.py",
+        "src/flask/json/provider.py",
+        "src/flask/scaffold.py",
+        "src/flask/testing.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-flask-4692",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:55:37.193809+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "8606f8616e7d96211d3dfac54b6ccfa8da75613d",
+            "body": "* `base_request.py` and `base_response.py` were renamed to `request.py` and `response.py`. `BaseRequest` became `Request`, and `BaseResponse` became `Response`. All mixin code was moved into the classes.\r\n* All mixins show a deprecation warning in `__init__`.\r\n* `BaseRequest` and `BaseResponse` can still be used in `isinstance` and `issubclass`, they will show a deprecation warning and actually check against `Request` and `Response`.\r\n* `PlainRequest` is deprecated in favor of passing `shallow=True`, since that's just as effective at preventing reading the input stream.\r\n* Rewrote the docstrings for `Request` and `Response`.\r\n* `ETagResponseMixin` provided an overridden `freeze` method, but it wasn't active on the `Response` class due to the inheritance order. It adds an `ETag` header if one is not already set. I kept/added this behavior during the merge, since it made about as much sense as setting the `Content-Length` header. I also deprecated the `no_etag` parameter (that wasn't visible in `Response` either), since I didn't see a clear reason to allow choosing this during `freeze` and didn't want to open up the door to more such parameters if `freeze` is updated in the future.\r\n* Merged `JSONMixin` and adapted it to be specific to request vs response behavior. Removed caching for `response.get_json` (#1698) as it caused issues if the data changed. Removed special exception handling for response. For some reason the mixin was written to use `json_module`, even though only `loads` is called. I left it as-is because it avoids having to wrap `staticmethod(json.loads)`, and having `dumps` as well might be useful in the future. The request and response now have `json`, `get_json`, and related methods by default.\r\n* Using `git blame`, git doesn't see that `response.py` was actually `base_response.py`, and so the history doesn't look very interesting. Using `git blame -M -C` will tell it to figure out that the file moved instead, so it correctly sees the history from `base_response.py` and the mixin modules (and `wrappers.py` further back in history). PyCharm can also do this by selecting the \"Detect movements across files\" option when right clicking in the annotation sidebar.\r\n\r\n- fixes #1963\r\n- fixes #1698\r\n\r\nChecklist:\r\n\r\n- [x] Add tests that demonstrate the correct behavior of the change. Tests should fail without the change.\r\n- [x] Add or update relevant docs, in the docs folder and in code.\r\n- [x] Add an entry in `CHANGES.rst` summarizing the change and linking to the issue.\r\n- [x] Add `.. versionchanged::` entries in any relevant code docs.\r\n- [x] Run `pre-commit` hooks and fix any issues.\r\n- [x] Run `pytest` and `tox`, no tests failed.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-werkzeug-2003",
+            "pr_number": 2003,
+            "repository_url": "https://github.com/pallets/werkzeug.git",
+            "solution_bytes": 218981,
+            "source_files": [
+              "examples/coolmagic/utils.py",
+              "examples/i18nurls/application.py",
+              "examples/simplewiki/utils.py",
+              "examples/upload.py",
+              "examples/webpylike/webpylike.py",
+              "src/werkzeug/_internal.py",
+              "src/werkzeug/debug/__init__.py",
+              "src/werkzeug/exceptions.py",
+              "src/werkzeug/formparser.py",
+              "src/werkzeug/test.py",
+              "src/werkzeug/testapp.py",
+              "src/werkzeug/wrappers/accept.py",
+              "src/werkzeug/wrappers/auth.py",
+              "src/werkzeug/wrappers/base_request.py",
+              "src/werkzeug/wrappers/base_response.py",
+              "src/werkzeug/wrappers/common_descriptors.py",
+              "src/werkzeug/wrappers/cors.py",
+              "src/werkzeug/wrappers/etag.py",
+              "src/werkzeug/wrappers/json.py",
+              "src/werkzeug/wrappers/request.py",
+              "src/werkzeug/wrappers/response.py",
+              "src/werkzeug/wrappers/user_agent.py",
+              "src/werkzeug/wsgi.py"
+            ],
+            "source_hunk_count": 39,
+            "source_track": "real_pr",
+            "task_id": "realpr-werkzeug-2003",
+            "test_bytes": 17243,
+            "test_files": [
+              "tests/test_test.py",
+              "tests/test_utils.py",
+              "tests/test_wrappers.py",
+              "tests/test_wsgi.py"
+            ],
+            "title": "unsplit the wrapper mixins"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-2003"
+        },
+        {
+          "at": "2026-07-18T21:55:52.190214+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-werkzeug-2003",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-2003"
+        },
+        {
+          "at": "2026-07-18T21:55:52.190224+00:00",
+          "detail": {
+            "base_commit": "8606f8616e7d96211d3dfac54b6ccfa8da75613d",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/werkzeug.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-2003"
+        },
+        {
+          "at": "2026-07-18T21:55:54.447040+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-werkzeug-2003: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-werkzeug-2003"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570054+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-werkzeug-2003: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-werkzeug-2003"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "8606f8616e7d96211d3dfac54b6ccfa8da75613d",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/werkzeug.git",
+        "seed_id": "pr:2003",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/werkzeug.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-werkzeug-2003",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-werkzeug-2003: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:2003",
+      "solution_files": [
+        "examples/coolmagic/utils.py",
+        "examples/i18nurls/application.py",
+        "examples/simplewiki/utils.py",
+        "examples/upload.py",
+        "examples/webpylike/webpylike.py",
+        "src/werkzeug/_internal.py",
+        "src/werkzeug/debug/__init__.py",
+        "src/werkzeug/exceptions.py",
+        "src/werkzeug/formparser.py",
+        "src/werkzeug/test.py",
+        "src/werkzeug/testapp.py",
+        "src/werkzeug/wrappers/accept.py",
+        "src/werkzeug/wrappers/auth.py",
+        "src/werkzeug/wrappers/base_request.py",
+        "src/werkzeug/wrappers/base_response.py",
+        "src/werkzeug/wrappers/common_descriptors.py",
+        "src/werkzeug/wrappers/cors.py",
+        "src/werkzeug/wrappers/etag.py",
+        "src/werkzeug/wrappers/json.py",
+        "src/werkzeug/wrappers/request.py",
+        "src/werkzeug/wrappers/response.py",
+        "src/werkzeug/wrappers/user_agent.py",
+        "src/werkzeug/wsgi.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-werkzeug-2003",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": false,
+      "certified": false,
+      "docker_evidence_path": null,
+      "docker_oracle_certified": false,
+      "drip": [
+        {
+          "at": "2026-07-18T21:55:54.447150+00:00",
+          "detail": {
+            "agent_instruction": "",
+            "base_commit": "553576cf6f92820ae03b97ad97509f95eda013c8",
+            "body": "This might be clearer if you consider the names as `BaseRequest`/`BaseResponse` and `WSGIRequest`/`WSGIResponse` (although these names aren't possible for compatibility reasons). The `SansIORequest`/`SansIOResponse` contains all the information that is not WSGI or IO dependent thereby allowing it to be used in ASGI projects, notably Quart.\r\n\r\nDoes this need specific docs? (At this stage?)\r\n\r\nChecklist:\r\n\r\n- [x] Add tests that demonstrate the correct behavior of the change. Tests should fail without the change.\r\n- [x] Add or update relevant docs, in the docs folder and in code.\r\n- [x] Add an entry in `CHANGES.rst` summarizing the change and linking to the issue.\r\n- [x] Add `.. versionchanged::` entries in any relevant code docs.\r\n- [x] Run `pre-commit` hooks and fix any issues.\r\n- [x] Run `pytest` and `tox`, no tests failed.",
+            "discovery_path": "list_pulls",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-werkzeug-2005",
+            "pr_number": 2005,
+            "repository_url": "https://github.com/pallets/werkzeug.git",
+            "solution_bytes": 89139,
+            "source_files": [
+              "src/werkzeug/http.py",
+              "src/werkzeug/sansio/__init__.py",
+              "src/werkzeug/sansio/request.py",
+              "src/werkzeug/sansio/response.py",
+              "src/werkzeug/urls.py",
+              "src/werkzeug/wrappers/request.py",
+              "src/werkzeug/wrappers/response.py"
+            ],
+            "source_hunk_count": 27,
+            "source_track": "real_pr",
+            "task_id": "realpr-werkzeug-2005",
+            "test_bytes": 818,
+            "test_files": [
+              "tests/test_wrappers.py"
+            ],
+            "title": "SansIO Wrappers"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-2005"
+        },
+        {
+          "at": "2026-07-18T21:56:09.573249+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-werkzeug-2005",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-2005"
+        },
+        {
+          "at": "2026-07-18T21:56:09.573262+00:00",
+          "detail": {
+            "base_commit": "553576cf6f92820ae03b97ad97509f95eda013c8",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/werkzeug.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-2005"
+        },
+        {
+          "at": "2026-07-18T21:56:12.441274+00:00",
+          "detail": {
+            "error": "product live dual-run failed for realpr-werkzeug-2005: green suite produced zero passing node ids",
+            "label_method": "synthetic_patch_seed",
+            "ok": false,
+            "reason_code": "dual_run_rejected"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "reject",
+          "task_id": "realpr-werkzeug-2005"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570056+00:00",
+          "detail": {
+            "gate_audit": "not_accepted",
+            "reasons": [
+              "dual_run rejected: product live dual-run failed for realpr-werkzeug-2005: green suite produced zero passing node ids"
+            ]
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "reject",
+          "task_id": "realpr-werkzeug-2005"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "553576cf6f92820ae03b97ad97509f95eda013c8",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/werkzeug.git",
+        "seed_id": "pr:2005",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/werkzeug.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": null,
+      "pack_dir": "datasets/_m27c_work_cert/staging/realpr-werkzeug-2005",
+      "panel": {},
+      "panel_keep": false,
+      "pier_certified": false,
+      "pier_evidence_path": null,
+      "pier_null_reward": null,
+      "pier_oracle_reward": null,
+      "provider_calls": 0,
+      "real_pack": {},
+      "real_pack_ok": false,
+      "reason_codes": [],
+      "reasons": [
+        "dual_run rejected: product live dual-run failed for realpr-werkzeug-2005: green suite produced zero passing node ids"
+      ],
+      "seed_id": "pr:2005",
+      "solution_files": [
+        "src/werkzeug/http.py",
+        "src/werkzeug/sansio/__init__.py",
+        "src/werkzeug/sansio/request.py",
+        "src/werkzeug/sansio/response.py",
+        "src/werkzeug/urls.py",
+        "src/werkzeug/wrappers/request.py",
+        "src/werkzeug/wrappers/response.py"
+      ],
+      "solution_reward": null,
+      "task_id": "realpr-werkzeug-2005",
+      "tree_complete": true
+    },
+    {
+      "agent_isolated": true,
+      "certified": true,
+      "docker_evidence_path": "datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-werkzeug-3116.json",
+      "docker_oracle_certified": true,
+      "drip": [
+        {
+          "at": "2026-07-18T21:56:12.441374+00:00",
+          "detail": {
+            "agent_instruction": "# Move structured HTTP header parsing into the header classes\n\nThe structured header types in `werkzeug.datastructures` (things like `Accept`, `RequestCacheControl`, `ContentRange`, `ContentSecurityPolicy`, `ETags`, `IfRange`, `Range`, `HeaderSet`) currently rely on standalone `parse_*_header` functions living in `werkzeug.http`. This split creates circular imports between `http` and the datastructures modules and complicates type annotations, since those parse functions only ever return the header classes themselves \u2014 there's no simpler intermediate representation that justifies keeping the logic separate.\n\n`Authorization` already follows the better pattern: it owns a `from_header` classmethod and a `to_header` method. Bring the remaining structured header classes in line with that design.\n\n## Expected outcomes\n\n1. Each of the following structured header classes gains a `from_header` classmethod that parses a raw header string (returning `None` for empty/absent input where the old function did) and produces an instance of that class:\n   - `Accept` (replacing `parse_accept_header`)\n   - `RequestCacheControl` (replacing `parse_cache_control_header`)\n   - `ContentRange` (replacing `parse_content_range_header`)\n   - `ContentSecurityPolicy` (replacing `parse_csp_header`)\n   - `ETags` (replacing `parse_etags`)\n   - `IfRange` (replacing `parse_if_range_header`)\n   - `Range` (replacing `parse_range_header`)\n   - `HeaderSet` (replacing `parse_set_header`)\n2. `ContentSecurityPolicy` gains a `to_header` method, replacing `dump_csp_header`.\n3. All internal callers \u2014 including `sansio.request`, `sansio.response`, `sansio.http`, `wrappers.response`, `serving`, and the datastructures modules themselves \u2014 use the new class methods instead of the old module-level functions.\n4. The parsing/dumping behavior is preserved exactly: the same inputs yield the same parsed values and the same serialized header strings as before.\n5. Circular imports between `werkzeug.http` and the datastructures modules are eliminated as a result of the move.\n\n## Constraints\n\n- Public access through `Request` and `Response` attributes must continue to work unchanged; do not alter those attribute APIs or their return types.\n- Where an `Accept` subtype or specific cache-control variant was returned before (e.g. request vs. response cache control), preserve that same behavior via the appropriate class's `from_header`.\n- Keep argument names and semantics consistent with the previous parse functions (e.g. optional `on_update` callbacks, class selection for `Accept`).\n- Do not change the serialized output format of any `to_header` implementation.\n\n## Implementation notes\n\n- The old `parse_*` functions were thin wrappers that constructed and returned these classes, so the logic can move directly onto the classes with minimal transformation.\n- Prefer classmethods that accept the raw header value as their first parameter, mirroring the existing `Authorization.from_header` signature.\n\nIMPORTANT: Please work on this in a new branch from main and commit everything when you are done.",
+            "base_commit": "a792bc2d1ebd52abfd285db847ef0fd42a911df9",
+            "body": "Some header classes, such as `Authorization`, already had `from_header` class method and `to_header` method. Many were missing the `from_header` class method. These all had corresponding `parse_thing_header` methods in `http`, which created a lot of circular imports and made type annotations more complicated. Given that the parse functions only returned the classes anyway (not some simpler representation like a plain list or dict), there was not really a benefit to keeping the parsing logic in one place while all the other logic was in another.\r\n\r\nSearching with sourcegraph doesn't turn up much of anything, either old projects or copies of things. I have a feeling the vast majority of uses are through `Request` and `Response` attributes (which doesn't change with this).\r\n\r\n- `dump_csp_header` -> `ContentSecurityPolicy.to_header`\r\n- `parse_accept_header` -> `Accept.from_header`\r\n- `parse_cache_control_header` -> `RequestCacheControl.from_header`\r\n- `parse_content_range_header` -> `ContentRange.from_header`\r\n- `parse_csp_header` -> `ContentSecurityPolicy.from_header`\r\n- `parse_etags` -> `ETags.from_header`\r\n- `parse_if_range_header` -> `IfRange.from_header`\r\n- `parse_range_header` -> `Range.from_header`\r\n- `parse_set_header` -> `HeaderSet.from_header`\r\n\r\nSee https://github.com/pallets/werkzeug/pull/2619 for the precursor to this, `Authorization` was updated in 2023 with the plan that it would continue on to these other structured headers.",
+            "discovery_path": "",
+            "language": "python",
+            "license": "MIT",
+            "materials_dir": "/projects/Agent-SWE/deepagent/datasets/live_materials_m27c_priority_cert/realpr-werkzeug-3116",
+            "pr_number": 3116,
+            "repository_url": "https://github.com/pallets/werkzeug.git",
+            "solution_bytes": 59400,
+            "source_files": [
+              "src/werkzeug/datastructures/accept.py",
+              "src/werkzeug/datastructures/auth.py",
+              "src/werkzeug/datastructures/cache_control.py",
+              "src/werkzeug/datastructures/csp.py",
+              "src/werkzeug/datastructures/etag.py",
+              "src/werkzeug/datastructures/file_storage.py",
+              "src/werkzeug/datastructures/headers.py",
+              "src/werkzeug/datastructures/range.py",
+              "src/werkzeug/datastructures/structures.py",
+              "src/werkzeug/http.py",
+              "src/werkzeug/sansio/http.py",
+              "src/werkzeug/sansio/request.py",
+              "src/werkzeug/sansio/response.py",
+              "src/werkzeug/sansio/utils.py",
+              "src/werkzeug/serving.py",
+              "src/werkzeug/wrappers/response.py"
+            ],
+            "source_hunk_count": 74,
+            "source_track": "real_pr",
+            "task_id": "realpr-werkzeug-3116",
+            "test_bytes": 12514,
+            "test_files": [
+              "tests/test_datastructures.py",
+              "tests/test_http.py"
+            ],
+            "title": "move structured header parsing to class methods"
+          },
+          "source_track": "real_pr",
+          "stage": "mine",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:12.460453+00:00",
+          "detail": {
+            "pack_dir": "datasets/_m27c_work_cert/staging/realpr-werkzeug-3116",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "export",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:12.460459+00:00",
+          "detail": {
+            "base_commit": "a792bc2d1ebd52abfd285db847ef0fd42a911df9",
+            "dockerfile": "environment/Dockerfile clone@SHA",
+            "repository_url": "https://github.com/pallets/werkzeug.git"
+          },
+          "source_track": "real_pr",
+          "stage": "envbuild_clone_sha",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:14.389716+00:00",
+          "detail": {
+            "agent_isolation": "test.patch verifier-only",
+            "f2p_node_ids": [
+              "tests.test_datastructures.test_range_to_header[ranges0]",
+              "tests.test_datastructures.test_range_to_header[ranges1]",
+              "tests.test_http.TestHTTPUtility.test_accept",
+              "tests.test_http.TestHTTPUtility.test_accept_matches",
+              "tests.test_http.TestHTTPUtility.test_accept_mime_specificity",
+              "tests.test_http.TestHTTPUtility.test_accept_parameter_with_space",
+              "tests.test_http.TestHTTPUtility.test_cache_control_header",
+              "tests.test_http.TestHTTPUtility.test_csp_header",
+              "tests.test_http.TestHTTPUtility.test_etags",
+              "tests.test_http.TestHTTPUtility.test_etags_nonzero",
+              "tests.test_http.TestHTTPUtility.test_language_accept",
+              "tests.test_http.TestHTTPUtility.test_mime_accept",
+              "tests.test_http.TestHTTPUtility.test_set_header",
+              "tests.test_http.TestRange.test_content_range_parsing",
+              "tests.test_http.TestRange.test_if_range_parsing",
+              "tests.test_http.TestRange.test_range_parsing",
+              "tests.test_http.TestRegression.test_best_match_works",
+              "tests.test_http.test_accept_invalid_float[+0.5]",
+              "tests.test_http.test_accept_invalid_float[.5]",
+              "tests.test_http.test_accept_invalid_float[0.5_1]",
+              "tests.test_http.test_accept_invalid_float[\\U0001fbf0.\\U0001fbf5]",
+              "tests.test_http.test_accept_valid_int_one_zero",
+              "tests.test_http.test_content_range_invalid_int[*/\\U0001fbf1\\U0001fbf2\\U0001fbf3]",
+              "tests.test_http.test_content_range_invalid_int[1-+2/3]",
+              "tests.test_http.test_content_range_invalid_int[1_23-125/*]",
+              "tests.test_http.test_range_invalid_int[+1-]",
+              "tests.test_http.test_range_invalid_int[1-1_23]",
+              "tests.test_http.test_range_invalid_int[\\U0001fbf1\\U0001fbf2\\U0001fbf3]"
+            ],
+            "held_out_test_patch": true,
+            "label_method": "real_pr_dual_run_base_vs_gold",
+            "offline_only": false,
+            "p2p_node_ids": [
+              "tests.test_datastructures.TestAccept.test_accept_basic",
+              "tests.test_datastructures.TestAccept.test_accept_equal_quality",
+              "tests.test_datastructures.TestAccept.test_accept_keep_order",
+              "tests.test_datastructures.TestAccept.test_accept_wildcard",
+              "tests.test_datastructures.TestAccept.test_accept_wildcard_specificity",
+              "tests.test_datastructures.TestCacheControl.test_min_fresh",
+              "tests.test_datastructures.TestCacheControl.test_must_understand",
+              "tests.test_datastructures.TestCacheControl.test_no_transform",
+              "tests.test_datastructures.TestCacheControl.test_repr",
+              "tests.test_datastructures.TestCacheControl.test_set_none",
+              "tests.test_datastructures.TestCacheControl.test_stale_if_error",
+              "tests.test_datastructures.TestCacheControl.test_stale_while_revalidate",
+              "tests.test_datastructures.TestCallbackDict.test_callback_dict_reads",
+              "tests.test_datastructures.TestCallbackDict.test_callback_dict_writes",
+              "tests.test_datastructures.TestCombinedMultiDict.test_basic_interface",
+              "tests.test_datastructures.TestCombinedMultiDict.test_length",
+              "tests.test_datastructures.TestContentSecurityPolicy.test_construct",
+              "tests.test_datastructures.TestContentSecurityPolicy.test_properties",
+              "tests.test_datastructures.TestEnvironHeaders.test_basic_interface",
+              "tests.test_datastructures.TestEnvironHeaders.test_ior",
+              "tests.test_datastructures.TestEnvironHeaders.test_or",
+              "tests.test_datastructures.TestEnvironHeaders.test_return_type_is_str",
+              "tests.test_datastructures.TestEnvironHeaders.test_skip_empty_special_vars",
+              "tests.test_datastructures.TestEnvironHeaders.test_str",
+              "tests.test_datastructures.TestFileStorage.test_bytes_proper_sentinel[data0]",
+              "tests.test_datastructures.TestFileStorage.test_bytes_proper_sentinel[data1]",
+              "tests.test_datastructures.TestFileStorage.test_mimetype_always_lowercase",
+              "tests.test_datastructures.TestFileStorage.test_proxy_can_access_stream_attrs[BytesIO]",
+              "tests.test_datastructures.TestFileStorage.test_proxy_can_access_stream_attrs[SpooledTemporaryFile]",
+              "tests.test_datastructures.TestFileStorage.test_save_to_bytes_io",
+              "tests.test_datastructures.TestFileStorage.test_save_to_file",
+              "tests.test_datastructures.TestFileStorage.test_save_to_pathlib_dst",
+              "tests.test_datastructures.TestHeaderSet.test_basic_interface",
+              "tests.test_datastructures.TestHeaders.test_basic_interface",
+              "tests.test_datastructures.TestHeaders.test_copying",
+              "tests.test_datastructures.TestHeaders.test_defaults_and_conversion",
+              "tests.test_datastructures.TestHeaders.test_equality",
+              "tests.test_datastructures.TestHeaders.test_extend",
+              "tests.test_datastructures.TestHeaders.test_ior",
+              "tests.test_datastructures.TestHeaders.test_or",
+              "tests.test_datastructures.TestHeaders.test_popping",
+              "tests.test_datastructures.TestHeaders.test_reject_newlines",
+              "tests.test_datastructures.TestHeaders.test_set_arguments",
+              "tests.test_datastructures.TestHeaders.test_setlist",
+              "tests.test_datastructures.TestHeaders.test_setlistdefault",
+              "tests.test_datastructures.TestHeaders.test_slicing",
+              "tests.test_datastructures.TestHeaders.test_to_wsgi_list",
+              "tests.test_datastructures.TestHeaders.test_update",
+              "tests.test_datastructures.TestImmutableDict.test_copies_are_mutable",
+              "tests.test_datastructures.TestImmutableDict.test_dict_is_hashable",
+              "tests.test_datastructures.TestImmutableDict.test_follows_dict_interface",
+              "tests.test_datastructures.TestImmutableDict.test_ior",
+              "tests.test_datastructures.TestImmutableDict.test_or",
+              "tests.test_datastructures.TestImmutableList.test_list_hashable",
+              "tests.test_datastructures.TestImmutableMultiDict.test_copies_are_mutable",
+              "tests.test_datastructures.TestImmutableMultiDict.test_dict_is_hashable",
+              "tests.test_datastructures.TestImmutableMultiDict.test_follows_dict_interface",
+              "tests.test_datastructures.TestImmutableMultiDict.test_ior",
+              "tests.test_datastructures.TestImmutableMultiDict.test_multidict_is_hashable",
+              "tests.test_datastructures.TestImmutableMultiDict.test_or",
+              "tests.test_datastructures.TestImmutableTypeConversionDict.test_copies_are_mutable",
+              "tests.test_datastructures.TestImmutableTypeConversionDict.test_dict_is_hashable",
+              "tests.test_datastructures.TestImmutableTypeConversionDict.test_follows_dict_interface",
+              "tests.test_datastructures.TestImmutableTypeConversionDict.test_ior",
+              "tests.test_datastructures.TestImmutableTypeConversionDict.test_or",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values0-matches0-None-en]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values1-matches1-None-en_US]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values10-matches10-None-aus]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values11-matches11-None-aus-EN]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values2-matches2-None-None]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values3-matches3-None-None]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values4-matches4-None-de]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values5-matches5-None-en]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values6-matches6-None-en-us]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values7-matches7-None-en-us]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values8-matches8-en-US-en]",
+              "tests.test_datastructures.TestLanguageAccept.test_best_match_fallback[values9-matches9-en-US-en-US]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values0-matches0-None-text/html]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values1-matches1-text/plain-text/plain]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values2-matches2-None-None]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values3-matches3-None-text/html]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values4-matches4-None-image/png]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values5-matches5-None-text/html]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values6-matches6-None-image/png]",
+              "tests.test_datastructures.TestMIMEAccept.test_mime_accept[values7-matches7-None-text/html;level=1]",
+              "tests.test_datastructures.TestMultiDict.test_basic_interface",
+              "tests.test_datastructures.TestMultiDict.test_getitem_raise_badrequestkeyerror_for_empty_list_value",
+              "tests.test_datastructures.TestMultiDict.test_ior",
+              "tests.test_datastructures.TestMultiDict.test_iter_interfaces",
+              "tests.test_datastructures.TestMultiDict.test_multidict_dict_interop",
+              "tests.test_datastructures.TestMultiDict.test_multidict_pop",
+              "tests.test_datastructures.TestMultiDict.test_multidict_pop_raise_badrequestkeyerror_for_empty_list_value",
+              "tests.test_datastructures.TestMultiDict.test_multidict_popitem_raise_badrequestkeyerror_for_empty_list_value",
+              "tests.test_datastructures.TestMultiDict.test_or",
+              "tests.test_datastructures.TestMultiDict.test_pickle",
+              "tests.test_datastructures.TestMultiDict.test_setlistdefault",
+              "tests.test_datastructures.TestTypeConversionDict.test_propagate_exceptions_in_conversion",
+              "tests.test_datastructures.TestTypeConversionDict.test_return_default_when_conversion_is_not_possible",
+              "tests.test_datastructures.TestTypeConversionDict.test_value_conversion",
+              "tests.test_datastructures.test_iter_multi_data[value0-expect0]",
+              "tests.test_datastructures.test_iter_multi_data[value1-expect1]",
+              "tests.test_datastructures.test_iter_multi_data[value2-expect2]",
+              "tests.test_datastructures.test_range_validates_ranges[ranges0]",
+              "tests.test_datastructures.test_range_validates_ranges[ranges1]",
+              "tests.test_datastructures.test_range_validates_ranges[ranges2]",
+              "tests.test_datastructures.test_range_validates_ranges[ranges3]",
+              "tests.test_http.TestHTTPUtility.test_authorization_basic_incorrect_padding",
+              "tests.test_http.TestHTTPUtility.test_authorization_eq",
+              "tests.test_http.TestHTTPUtility.test_authorization_header",
+              "tests.test_http.TestHTTPUtility.test_authorization_ignore_invalid_parameters",
+              "tests.test_http.TestHTTPUtility.test_authorization_token_padding",
+              "tests.test_http.TestHTTPUtility.test_bad_authorization_header_encoding",
+              "tests.test_http.TestHTTPUtility.test_bad_cookies",
+              "tests.test_http.TestHTTPUtility.test_cookie_domain_encoding",
+              "tests.test_http.TestHTTPUtility.test_cookie_domain_resolving",
+              "tests.test_http.TestHTTPUtility.test_cookie_maxsize",
+              "tests.test_http.TestHTTPUtility.test_cookie_partitioned",
+              "tests.test_http.TestHTTPUtility.test_cookie_partitioned_sets_secure",
+              "tests.test_http.TestHTTPUtility.test_cookie_quoting",
+              "tests.test_http.TestHTTPUtility.test_cookie_samesite_attribute[None-foo=bar]",
+              "tests.test_http.TestHTTPUtility.test_cookie_samesite_attribute[lax-foo=bar; SameSite=Lax]",
+              "tests.test_http.TestHTTPUtility.test_cookie_samesite_attribute[none-foo=bar; SameSite=None]",
+              "tests.test_http.TestHTTPUtility.test_cookie_samesite_attribute[strict-foo=bar; SameSite=Strict]",
+              "tests.test_http.TestHTTPUtility.test_cookie_samesite_invalid",
+              "tests.test_http.TestHTTPUtility.test_cookie_unicode_dumping",
+              "tests.test_http.TestHTTPUtility.test_cookie_unicode_keys",
+              "tests.test_http.TestHTTPUtility.test_cookie_unicode_parsing",
+              "tests.test_http.TestHTTPUtility.test_dict_header[=foo, =-expect2]",
+              "tests.test_http.TestHTTPUtility.test_dict_header[a=1, b=\"2, 3\", c=\"4, d=5-expect3]",
+              "tests.test_http.TestHTTPUtility.test_dict_header[foo, bar=-expect1]",
+              "tests.test_http.TestHTTPUtility.test_dict_header[foo=\"bar baz\", blah=42-expect0]",
+              "tests.test_http.TestHTTPUtility.test_dump_cookie",
+              "tests.test_http.TestHTTPUtility.test_dump_header",
+              "tests.test_http.TestHTTPUtility.test_dump_options_header",
+              "tests.test_http.TestHTTPUtility.test_empty_keys_are_ignored",
+              "tests.test_http.TestHTTPUtility.test_is_resource_modified",
+              "tests.test_http.TestHTTPUtility.test_is_resource_modified_for_range_requests",
+              "tests.test_http.TestHTTPUtility.test_list_header[\"a\\\\\"b\", c-expect3]",
+              "tests.test_http.TestHTTPUtility.test_list_header[a b, \"c, d\"-expect2]",
+              "tests.test_http.TestHTTPUtility.test_list_header[a b, c-expect1]",
+              "tests.test_http.TestHTTPUtility.test_list_header[a b-expect0]",
+              "tests.test_http.TestHTTPUtility.test_list_header[a\"b,c\", \"d e\"-expect4]",
+              "tests.test_http.TestHTTPUtility.test_list_header[a, \"b, c\", \"d, e-expect6]",
+              "tests.test_http.TestHTTPUtility.test_list_header[a, ,,b,-expect5]",
+              "tests.test_http.TestHTTPUtility.test_parse_cookie",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;  ; a=b ; -expect1]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;=b-expect4]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*0*=UTF-8''b;a*1=c;a*2*=%C2%B5-expect24]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*0*=b-expect23]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*0=b;a*1=c;d=e-expect22]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=ASCII'en'b-expect15]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=BAD''%62-expect19]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=US-ASCII''%62-expect16]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=US-ASCII''%C2%B5-expect18]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=UTF-8''%C2%B5-expect17]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=UTF-8'''%F0%9F%90%8D'.txt-expect20]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a*=b-expect14]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a-expect2]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"';'\";b=\"\\xb5\";-expect7]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"\\U0001f40d.txt\"-expect21]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\-expect25]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"b c\"-expect8]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"b\"-expect5]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"b%22c\"-expect13]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"b\\\\\"c\";d=e-expect9]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"b\\\\\\\\\\\\\"c\"-expect12]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"c:\\\\\"-expect11]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\"c:\\\\\\\\\"-expect10]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=-expect3]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=\\xb5-expect6]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header[v;a=b;c=d;-expect0]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_broken_values",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_case_insensitive",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_empty[-]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_empty[;a=b-]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_empty[None-]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_empty[v-v]",
+              "tests.test_http.TestHTTPUtility.test_parse_options_header_empty[v;-v]",
+              "tests.test_http.TestHTTPUtility.test_parse_set_cookie_directive",
+              "tests.test_http.TestHTTPUtility.test_remove_entity_headers",
+              "tests.test_http.TestHTTPUtility.test_remove_hop_by_hop_headers",
+              "tests.test_http.TestHTTPUtility.test_www_authenticate_eq",
+              "tests.test_http.TestHTTPUtility.test_www_authenticate_header",
+              "tests.test_http.TestHTTPUtility.test_www_authenticate_token_padding",
+              "tests.test_http.test_authorization_to_header[Basic V2Vya3pldWc6V2VrcnpldWc=]",
+              "tests.test_http.test_authorization_to_header[Digest username=Mufasa, realm=\"testrealm@host.invalid\", nonce=dcd98b7102dd2f0e8b11d0f600bfb0c093, uri=\"/dir/index.html\", qop=auth, nc=00000001, cnonce=0a4f113b, response=6629fae49393a05397450978507c4ef1, opaque=5ccc069c403ebaf9f0171e9517f40e41]",
+              "tests.test_http.test_http_date[0-Thu, 01 Jan 1970 00:00:00 GMT]",
+              "tests.test_http.test_http_date[value0-Sun, 06 Nov 1994 08:49:37 GMT]",
+              "tests.test_http.test_http_date[value1-Sun, 06 Nov 1994 16:49:37 GMT]",
+              "tests.test_http.test_http_date[value2-Sun, 06 Nov 1994 08:49:37 GMT]",
+              "tests.test_http.test_http_date[value4-Thu, 01 Jan 1970 00:00:00 GMT]",
+              "tests.test_http.test_http_date[value5-Mon, 01 Jan 0001 00:00:00 GMT]",
+              "tests.test_http.test_http_date[value6-Tue, 01 Jan 0999 00:00:00 GMT]",
+              "tests.test_http.test_http_date[value7-Wed, 01 Jan 1000 00:00:00 GMT]",
+              "tests.test_http.test_http_date[value8-Wed, 01 Jan 2020 00:00:00 GMT]",
+              "tests.test_http.test_http_date[value9-Wed, 01 Jan 2020 00:00:00 GMT]",
+              "tests.test_http.test_parse_date[ Sun 02 Feb 1343 08:49:37 GMT-expect4]",
+              "tests.test_http.test_parse_date[ Sun Nov  6 08:49:37 1994-expect2]",
+              "tests.test_http.test_parse_date[Sun, 06 Nov 1994 08:49:37 GMT    -expect0]",
+              "tests.test_http.test_parse_date[Sunday, 06-Nov-94 08:49:37 GMT-expect1]",
+              "tests.test_http.test_parse_date[Thu, 01 Jan 1970 00:00:00 GMT-expect5]",
+              "tests.test_http.test_parse_date[Thu, 33 Jan 1970 00:00:00 GMT-None]",
+              "tests.test_http.test_parse_date[foo-None]"
+            ],
+            "reporter": {
+              "language": "python",
+              "node_id_form": "mod.name",
+              "reporter_id": "python_pytest_v1",
+              "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+              "tool_label": "pytest"
+            },
+            "suite": "pytest",
+            "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+            "workspace": "datasets/_m27c_work_cert/clones/realpr-werkzeug-3116"
+          },
+          "source_track": "real_pr",
+          "stage": "dual_run",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:14.392603+00:00",
+          "detail": {
+            "ok": true,
+            "reason_codes": [],
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "real_pack",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:19.417213+00:00",
+          "detail": {
+            "agent_image": "harbor-sdf-agent-rpr13:oracle",
+            "backend": "docker",
+            "backend_class": "HarborDockerVerifier",
+            "certified": true,
+            "error": null,
+            "evidence": "datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-werkzeug-3116.json",
+            "null_reward": 0,
+            "oracle_mode": "docker",
+            "sol_null_files": {
+              "backend": "docker",
+              "combined_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-werkzeug-3116.oracle_evidence.json",
+              "null_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-werkzeug-3116.null.reward.json",
+              "null_reward": 0,
+              "sol_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/product_stage/evidence/docker/realpr-werkzeug-3116.sol.reward.json",
+              "sol_reward": 1
+            },
+            "solution_reward": 1,
+            "tests_image": "harbor-sdf-tests-rpr13:oracle"
+          },
+          "source_track": "real_pr",
+          "stage": "docker_oracle",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:19.476216+00:00",
+          "detail": {
+            "certified": true,
+            "error": null,
+            "evidence": "datasets/_m27c_work_cert/product_stage/evidence/pier/realpr-werkzeug-3116.json",
+            "live_fallback_to_scripted": false,
+            "mode": "scripted",
+            "null_reward": 0,
+            "oracle_reward": 1,
+            "pier_mode": "scripted"
+          },
+          "source_track": "real_pr",
+          "stage": "pier_cert",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:19.567900+00:00",
+          "detail": {
+            "budget_stop": false,
+            "completed_rollouts": 4,
+            "decision": {
+              "band_high": 0.5,
+              "discrimination": 2.0,
+              "discrimination_floor": 1.0,
+              "frontier_pass_at_k": 0.25,
+              "per_model_pass_at_k": {
+                "moonshotai/kimi-k2.6": 0.5,
+                "x-ai/grok-4.5": 0.0
+              },
+              "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+              "rule": "in-band-high-discrimination",
+              "total_solves": 1,
+              "total_trials": 4,
+              "verdict": "keep"
+            },
+            "hardness": {
+              "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+              "band_rule": "in-band-high-discrimination",
+              "band_verdict": "keep",
+              "discrimination": 2.0,
+              "grok_4_5": 0.0,
+              "kimi_k2_6": 0.5,
+              "opus_4_8": null,
+              "pass_at_k": 0.25
+            },
+            "is_keep": true,
+            "mode": "offline",
+            "models": [
+              {
+                "completed_rollouts": 2,
+                "incomplete": false,
+                "k": 2,
+                "model": "x-ai/grok-4.5",
+                "pass_at_k": 0.0,
+                "rollouts": [
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 0,
+                    "model": "x-ai/grok-4.5",
+                    "physical_call_id": "a1d2aabeedfa4dac8e2f57f9d0736bf0",
+                    "skipped_budget": false,
+                    "solved": false,
+                    "text_bytes": 22,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  },
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 1,
+                    "model": "x-ai/grok-4.5",
+                    "physical_call_id": "b36f611b698842cab931afb48be3a9d7",
+                    "skipped_budget": false,
+                    "solved": false,
+                    "text_bytes": 22,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  }
+                ],
+                "solves": 0
+              },
+              {
+                "completed_rollouts": 2,
+                "incomplete": false,
+                "k": 2,
+                "model": "moonshotai/kimi-k2.6",
+                "pass_at_k": 0.5,
+                "rollouts": [
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 0,
+                    "model": "moonshotai/kimi-k2.6",
+                    "physical_call_id": "bfd468f642cb468387a01a5735ad0e16",
+                    "skipped_budget": false,
+                    "solved": true,
+                    "text_bytes": 29,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  },
+                  {
+                    "cost_usd": "0",
+                    "error": null,
+                    "index": 1,
+                    "model": "moonshotai/kimi-k2.6",
+                    "physical_call_id": "81a41085547d4ebf81d069143eba29e3",
+                    "skipped_budget": false,
+                    "solved": false,
+                    "text_bytes": 29,
+                    "usage": {
+                      "completion_tokens": 5,
+                      "prompt_tokens": 10,
+                      "total_tokens": 15
+                    }
+                  }
+                ],
+                "solves": 1
+              }
+            ],
+            "panel_complete": true,
+            "planned_rollouts": 4,
+            "reserved_models": [
+              "x-ai/grok-4.5",
+              "moonshotai/kimi-k2.6"
+            ],
+            "scaffold": "pier/mini-swe-agent",
+            "scaffold_meta": {
+              "agent": "mini-swe-agent",
+              "name": "pier/mini-swe-agent",
+              "pack_id": "realpr-werkzeug-3116",
+              "pack_path": "datasets/_m27c_work_cert/staging/realpr-werkzeug-3116",
+              "runtime": "pier",
+              "scaffold": "pier/mini-swe-agent",
+              "version": "fixed-v3-real-pr"
+            },
+            "stage": "deepagent-panel-realpr",
+            "stop_reason": null,
+            "task_id": "realpr-werkzeug-3116",
+            "total_cost_usd": "0"
+          },
+          "source_track": "real_pr",
+          "stage": "panel",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:19.568521+00:00",
+          "detail": {
+            "dest": "datasets/_m27c_work_cert/product_stage/tasks/realpr-werkzeug-3116",
+            "pending_gate_audit": true,
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "stage_promote",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        },
+        {
+          "at": "2026-07-18T21:56:19.570380+00:00",
+          "detail": {
+            "dest": "datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-3116",
+            "gate_audit": "pass",
+            "source_track": "real_pr"
+          },
+          "source_track": "real_pr",
+          "stage": "promote",
+          "status": "ok",
+          "task_id": "realpr-werkzeug-3116"
+        }
+      ],
+      "hybrid": {
+        "base_commit": "a792bc2d1ebd52abfd285db847ef0fd42a911df9",
+        "language": "python",
+        "license": "MIT",
+        "repository_url": "https://github.com/pallets/werkzeug.git",
+        "seed_id": "pr:3116",
+        "source_track": "real_pr",
+        "upstream_label": "https://github.com/pallets/werkzeug.git"
+      },
+      "language": "python",
+      "multi_file_ok": true,
+      "null_reward": 0,
+      "pack_dir": "datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-3116",
+      "panel": {
+        "budget_stop": false,
+        "completed_rollouts": 4,
+        "decision": {
+          "band_high": 0.5,
+          "discrimination": 2.0,
+          "discrimination_floor": 1.0,
+          "frontier_pass_at_k": 0.25,
+          "per_model_pass_at_k": {
+            "moonshotai/kimi-k2.6": 0.5,
+            "x-ai/grok-4.5": 0.0
+          },
+          "reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+          "rule": "in-band-high-discrimination",
+          "total_solves": 1,
+          "total_trials": 4,
+          "verdict": "keep"
+        },
+        "hardness": {
+          "band_reason": "keep: frontier pass@k 0.2500 is in the low-but-nonzero band (0, 0.5000], discrimination 2.0000 >= 1.0000, and solves are nonzero",
+          "band_rule": "in-band-high-discrimination",
+          "band_verdict": "keep",
+          "discrimination": 2.0,
+          "grok_4_5": 0.0,
+          "kimi_k2_6": 0.5,
+          "opus_4_8": null,
+          "pass_at_k": 0.25
+        },
+        "is_keep": true,
+        "mode": "offline",
+        "models": [
+          {
+            "completed_rollouts": 2,
+            "incomplete": false,
+            "k": 2,
+            "model": "x-ai/grok-4.5",
+            "pass_at_k": 0.0,
+            "rollouts": [
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 0,
+                "model": "x-ai/grok-4.5",
+                "physical_call_id": "a1d2aabeedfa4dac8e2f57f9d0736bf0",
+                "skipped_budget": false,
+                "solved": false,
+                "text_bytes": 22,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              },
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 1,
+                "model": "x-ai/grok-4.5",
+                "physical_call_id": "b36f611b698842cab931afb48be3a9d7",
+                "skipped_budget": false,
+                "solved": false,
+                "text_bytes": 22,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              }
+            ],
+            "solves": 0
+          },
+          {
+            "completed_rollouts": 2,
+            "incomplete": false,
+            "k": 2,
+            "model": "moonshotai/kimi-k2.6",
+            "pass_at_k": 0.5,
+            "rollouts": [
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 0,
+                "model": "moonshotai/kimi-k2.6",
+                "physical_call_id": "bfd468f642cb468387a01a5735ad0e16",
+                "skipped_budget": false,
+                "solved": true,
+                "text_bytes": 29,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              },
+              {
+                "cost_usd": "0",
+                "error": null,
+                "index": 1,
+                "model": "moonshotai/kimi-k2.6",
+                "physical_call_id": "81a41085547d4ebf81d069143eba29e3",
+                "skipped_budget": false,
+                "solved": false,
+                "text_bytes": 29,
+                "usage": {
+                  "completion_tokens": 5,
+                  "prompt_tokens": 10,
+                  "total_tokens": 15
+                }
+              }
+            ],
+            "solves": 1
+          }
+        ],
+        "panel_complete": true,
+        "planned_rollouts": 4,
+        "reserved_models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "scaffold": "pier/mini-swe-agent",
+        "scaffold_meta": {
+          "agent": "mini-swe-agent",
+          "name": "pier/mini-swe-agent",
+          "pack_id": "realpr-werkzeug-3116",
+          "pack_path": "datasets/_m27c_work_cert/staging/realpr-werkzeug-3116",
+          "runtime": "pier",
+          "scaffold": "pier/mini-swe-agent",
+          "version": "fixed-v3-real-pr"
+        },
+        "stage": "deepagent-panel-realpr",
+        "stop_reason": null,
+        "task_id": "realpr-werkzeug-3116",
+        "total_cost_usd": "0"
+      },
+      "panel_keep": true,
+      "pier_certified": true,
+      "pier_evidence_path": "datasets/_m27c_work_cert/product_stage/evidence/pier/realpr-werkzeug-3116.json",
+      "pier_null_reward": 0,
+      "pier_oracle_reward": 1,
+      "provider_calls": 0,
+      "real_pack": {
+        "base_commit_hash": "a792bc2d1ebd52abfd285db847ef0fd42a911df9",
+        "base_object_ok": null,
+        "config_ok": true,
+        "details": {
+          "multi_file_floor": 2,
+          "require_clone_dockerfile": true,
+          "require_real_pr_track": true,
+          "source_track": "real_pr"
+        },
+        "f2p_count": 28,
+        "instruction_leak_hits": [],
+        "instruction_ok": true,
+        "isolation_clean": true,
+        "isolation_hits": [],
+        "missing_relpaths": [],
+        "multi_file_ok": true,
+        "ok": true,
+        "p2p_count": 203,
+        "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert/staging/realpr-werkzeug-3116",
+        "real_sha_ok": true,
+        "real_url_ok": true,
+        "reason_codes": [],
+        "reasons": [],
+        "repository_url": "https://github.com/pallets/werkzeug.git",
+        "schema_version": "1.1",
+        "separate_verifier": true,
+        "solution_files": [
+          "src/werkzeug/datastructures/accept.py",
+          "src/werkzeug/datastructures/auth.py",
+          "src/werkzeug/datastructures/cache_control.py",
+          "src/werkzeug/datastructures/csp.py",
+          "src/werkzeug/datastructures/etag.py",
+          "src/werkzeug/datastructures/file_storage.py",
+          "src/werkzeug/datastructures/headers.py",
+          "src/werkzeug/datastructures/range.py",
+          "src/werkzeug/datastructures/structures.py",
+          "src/werkzeug/http.py",
+          "src/werkzeug/sansio/http.py",
+          "src/werkzeug/sansio/request.py",
+          "src/werkzeug/sansio/response.py",
+          "src/werkzeug/sansio/utils.py",
+          "src/werkzeug/serving.py",
+          "src/werkzeug/wrappers/response.py"
+        ],
+        "task_id": "realpr-werkzeug-3116",
+        "test_patch_ok": true,
+        "tree_complete": true
+      },
+      "real_pack_ok": true,
+      "reason_codes": [
+        "ORCD_SOL_1",
+        "G3_NULL_NOT_RESOLVE",
+        "G5_LEAK_CLEAN",
+        "ORACLE_PASS",
+        "RORC_ISOLATION_CLEAN",
+        "RORC_SOL_1",
+        "RORC_NULL_0",
+        "RORC_PASS",
+        "RPIER_SCRIPTED_PATH",
+        "PIER_STRUCTURAL_OK",
+        "PIER_ORACLE_REWARD_1",
+        "PIER_NULL_REWARD_0",
+        "PIER_CERT_PASS",
+        "RPIER_STRUCTURAL_OK",
+        "RPIER_SOL_1",
+        "RPIER_NULL_0",
+        "RPIER_PASS"
+      ],
+      "reasons": [],
+      "seed_id": "pr:3116",
+      "solution_files": [
+        "src/werkzeug/datastructures/accept.py",
+        "src/werkzeug/datastructures/auth.py",
+        "src/werkzeug/datastructures/cache_control.py",
+        "src/werkzeug/datastructures/csp.py",
+        "src/werkzeug/datastructures/etag.py",
+        "src/werkzeug/datastructures/file_storage.py",
+        "src/werkzeug/datastructures/headers.py",
+        "src/werkzeug/datastructures/range.py",
+        "src/werkzeug/datastructures/structures.py",
+        "src/werkzeug/http.py",
+        "src/werkzeug/sansio/http.py",
+        "src/werkzeug/sansio/request.py",
+        "src/werkzeug/sansio/response.py",
+        "src/werkzeug/sansio/utils.py",
+        "src/werkzeug/serving.py",
+        "src/werkzeug/wrappers/response.py"
+      ],
+      "solution_reward": 1,
+      "task_id": "realpr-werkzeug-3116",
+      "tree_complete": true
+    }
+  ],
+  "remaining_usd": "600.0",
+  "report_path": "datasets/prod_hard_deepswe_med/report.md",
+  "source_track": "real_pr",
+  "spend_total_usd": "0",
+  "target_packs": 10,
+  "under_cap": true,
+  "under_supply_reasons": [
+    "certified=2 < min=5: real_pr funnel did not promote enough merged-PR packs (honest under-yield; never pad with hybrid motors)",
+    "go=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
+    "typescript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
+    "javascript=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)",
+    "rust=0 best-effort under-supply on Real-PR wave: no certified merged-PR keep announced for this language (honest shortfall; not hybrid fill-in)"
+  ]
+}

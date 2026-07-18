@@ -1,6 +1,6 @@
 # DeepAgent v1 ship report (Real-PR product surface)
 
-- Generated (UTC): `2026-07-18T19:42:18.984815+00:00`
+- Generated (UTC): `2026-07-18T23:17:45.598645+00:00`
 - Product path: `datasets/prod_hard_deepswe_med`
 - Source track (product): **`real_pr` only** (hybrid not certified product)
 - Certified packs N: **2** (wave target ≥5, target=10, cap 15)
@@ -9,7 +9,7 @@
 - Panel mode: `offline` (budget_stop=False)
 - Provider calls this wave: `0`
 - Project spend commit: `$0` (remaining `$600.0`, under_cap=True)
-- Status: `FAIL` — under-yield real_pr certified=2 < min=5; live-mine materials=datasets/live_materials_m27_pass4 (no fixture pad)
+- Status: `FAIL` — under-yield real_pr certified=2 < min=5; live-mine materials=datasets/live_materials_m27c_cert2 (no fixture pad)
 
 ## Hybrid archive vs product honesty
 
@@ -81,7 +81,7 @@ Historical / engineering only (not Real-PR product N): datasets/deepagent_v1_hyb
 {
   "cap_usd": "600.0",
   "remaining_usd": "600.0",
-  "settled_call_count": 34760,
+  "settled_call_count": 34776,
   "settled_exact_usd": "0",
   "total_commit_usd": "0",
   "under_cap": true

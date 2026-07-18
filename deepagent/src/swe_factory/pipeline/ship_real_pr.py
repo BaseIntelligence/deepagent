@@ -1019,14 +1019,19 @@ def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
     # (pallets/*, encode/*, pypa/packaging, jaraco-style, httpx-family).
     # Includes high-frequency collection deps from reject_ledger green=0 waves:
     # pretend (packaging), anyio/httpx/trio markers (httpcore), werkzeug/blinker
-    # (flask), attrs (many pure-lib suites).
+    # (flask), attrs (many pure-lib suites), simplejson (marshmallow), redis (rq).
+    #
+    # NEVER use pip -U here: dual-run dep fills previously poisoned the factory
+    # venv (pydantic/typing_extensions/werkzeug), breaking subsequent product
+    # cert + `import swe_factory`. only-if-needed keeps factory pins stable.
     subprocess.run(
         [
             py,
             "-m",
             "pip",
             "install",
-            "-U",
+            "--upgrade-strategy",
+            "only-if-needed",
             "-q",
             "httpx==0.28.1",
             "pytest",
@@ -1064,8 +1069,18 @@ def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
             "packaging",
             "platformdirs",
             "attrs",
-            "pydantic",
+            # dual-run green suite deps seen on hard-median packs
+            "simplejson",
+            "python-dateutil",
+            "pytz",
+            "redis",
+            "croniter",
+            "click-plugins",
             "dataclasses-json",
+            # werkzeug/flask conftest ProcessStarter plugin
+            "pytest-xprocess",
+            # NOTE: intentionally no bare "pydantic"/"pydantic-core" force install —
+            # editable-adjacent upgrades poisoned the factory CLI.
         ],
         cwd=str(repo),
         capture_output=True,
@@ -1077,10 +1092,39 @@ def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
     # editable install poisons site-packages with ephemeral /tmp paths and
     # makes subsequent dual-runs (and the warehouse itself) fail.
     # Optional non-editable deps for poorly declared package metadata only.
-    req = repo / "requirements.txt"
-    if req.is_file():
+    # Prefer requirements that look like pure dep lists; skip local path pins.
+    for req_name in (
+        "requirements.txt",
+        "requirements-test.txt",
+        "requirements_dev.txt",
+        "dev-requirements.txt",
+        "tests/requirements.txt",
+    ):
+        req = repo / req_name
+        if not req.is_file():
+            continue
+        try:
+            body = req.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        # Refuse requirements that look like path/VCS installs into the factory.
+        if any(
+            tok in body
+            for tok in ("-e ", "file:", "git+", "http://", "https://", "path =")
+        ):
+            continue
         subprocess.run(
-            [py, "-m", "pip", "install", "-q", "-r", str(req)],
+            [
+                py,
+                "-m",
+                "pip",
+                "install",
+                "--upgrade-strategy",
+                "only-if-needed",
+                "-q",
+                "-r",
+                str(req),
+            ],
             cwd=str(repo),
             capture_output=True,
             text=True,

@@ -68,7 +68,7 @@
   "live_generate_dest": true,
   "live_mine": true,
   "materials_is_fixture": false,
-  "materials_root": "datasets/live_materials_m27_pass4",
+  "materials_root": "datasets/live_materials_m27c_cert2",
   "mode": "ship_deepagent_real_pr_docker",
   "multi_file": {
     "realpr-itemadapter-101": [
@@ -101,7 +101,7 @@
   "oracle": {
     "realpr-itemadapter-101": {
       "agent_isolated": true,
-      "evidence": "datasets/_m27_work_pass4/product_stage/evidence/docker/realpr-itemadapter-101.json",
+      "evidence": "datasets/_m27c_work_cert2/product_stage/evidence/docker/realpr-itemadapter-101.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
@@ -109,7 +109,7 @@
     },
     "realpr-werkzeug-3116": {
       "agent_isolated": true,
-      "evidence": "datasets/_m27_work_pass4/product_stage/evidence/docker/realpr-werkzeug-3116.json",
+      "evidence": "datasets/_m27c_work_cert2/product_stage/evidence/docker/realpr-werkzeug-3116.json",
       "mode": "docker",
       "null_reward": 0,
       "oracle_mode": "docker",
@@ -191,7 +191,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "223f334461ae4289b9714039d7e0ed9f",
+              "physical_call_id": "17a7fda9d7e34c76a4944337fda60acb",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -206,7 +206,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "ceefe633d04845d092583d8177957467",
+              "physical_call_id": "bae83c3c13c64a76a062ad995fcf3ae3",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -231,7 +231,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "7c82f0abac04495fbf79454c38dde091",
+              "physical_call_id": "d1695dc525f74014ab1d92e53614ef41",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -246,7 +246,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "216b3067e4274956bcd4cb4a33e9bb8b",
+              "physical_call_id": "7855490b53db4f48966f7f737620183a",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -271,7 +271,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-itemadapter-101",
-        "pack_path": "datasets/_m27_work_pass4/staging/realpr-itemadapter-101",
+        "pack_path": "datasets/_m27c_work_cert2/staging/realpr-itemadapter-101",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -324,7 +324,7 @@
               "error": null,
               "index": 0,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "f6f37ff01f4e4fd3944e8c8eabbd29ba",
+              "physical_call_id": "2edd2acba1ff439c939a0fe52059bd90",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -339,7 +339,7 @@
               "error": null,
               "index": 1,
               "model": "x-ai/grok-4.5",
-              "physical_call_id": "7fda6f56fea24bbb82213f5a856334be",
+              "physical_call_id": "2e4c566afd2b4e43b0e1971eaf2840db",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 22,
@@ -364,7 +364,7 @@
               "error": null,
               "index": 0,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "ff370b44124245fea284b8f8fc4e1175",
+              "physical_call_id": "570b0b4050624611a4f836d0f9c32747",
               "skipped_budget": false,
               "solved": true,
               "text_bytes": 29,
@@ -379,7 +379,7 @@
               "error": null,
               "index": 1,
               "model": "moonshotai/kimi-k2.6",
-              "physical_call_id": "05c13051505f4005a4221f5ff2a70d95",
+              "physical_call_id": "e1a4aa8798e0432d894ee060d97e4f03",
               "skipped_budget": false,
               "solved": false,
               "text_bytes": 29,
@@ -404,7 +404,7 @@
         "agent": "mini-swe-agent",
         "name": "pier/mini-swe-agent",
         "pack_id": "realpr-werkzeug-3116",
-        "pack_path": "datasets/_m27_work_pass4/staging/realpr-werkzeug-3116",
+        "pack_path": "datasets/_m27c_work_cert2/staging/realpr-werkzeug-3116",
         "runtime": "pier",
         "scaffold": "pier/mini-swe-agent",
         "version": "fixed-v3-real-pr"
@@ -419,13 +419,13 @@
   "pier": {
     "realpr-itemadapter-101": {
       "certified": true,
-      "evidence": "datasets/_m27_work_pass4/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "evidence": "datasets/_m27c_work_cert2/product_stage/evidence/pier/realpr-itemadapter-101.json",
       "null_reward": 0,
       "oracle_reward": 1
     },
     "realpr-werkzeug-3116": {
       "certified": true,
-      "evidence": "datasets/_m27_work_pass4/product_stage/evidence/pier/realpr-werkzeug-3116.json",
+      "evidence": "datasets/_m27c_work_cert2/product_stage/evidence/pier/realpr-werkzeug-3116.json",
       "null_reward": 0,
       "oracle_reward": 1
     }
@@ -436,7 +436,7 @@
   "product_surface": "datasets/prod_hard_deepswe_med",
   "product_track": "real_pr",
   "prompt_style": "deepswe_style_v1",
-  "prompt_style_refreshed_at": "2026-07-18T19:44:16Z",
+  "prompt_style_refreshed_at": "2026-07-18T23:54:47Z",
   "provider_calls": 0,
   "refuse_fake": true,
   "refuse_fixture_materials_default": true,
