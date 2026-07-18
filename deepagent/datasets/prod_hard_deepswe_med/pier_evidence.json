@@ -1,0 +1,56 @@
+{
+  "certified_count": 2,
+  "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
+  "product_track": "real_pr",
+  "records": [
+    {
+      "certified": true,
+      "evidence_path": "datasets/_m27_work_pass4/product_stage/evidence/pier/realpr-itemadapter-101.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpcore-420"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-werkzeug-2608"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpcore-296"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-httpcore-353"
+    },
+    {
+      "certified": false,
+      "evidence_path": null,
+      "null_reward": null,
+      "oracle_reward": null,
+      "task_id": "realpr-structlog-285"
+    },
+    {
+      "certified": true,
+      "evidence_path": "datasets/_m27_work_pass4/product_stage/evidence/pier/realpr-werkzeug-3116.json",
+      "null_reward": 0,
+      "oracle_reward": 1,
+      "task_id": "realpr-werkzeug-3116"
+    }
+  ]
+}

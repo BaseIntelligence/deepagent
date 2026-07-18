@@ -1,0 +1,152 @@
+[
+  {
+    "repo": "pallets/werkzeug",
+    "pr": 2608,
+    "task_id": "realpr-werkzeug-2608",
+    "title": "replace calls to `werkzeug.urls` with `urllib.parse`",
+    "additions": 530,
+    "source_files": 12,
+    "hunks": 73,
+    "base": "b2cdf1743790e7fe2799d95de966103607bb9b82"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "pr": 2641,
+    "task_id": "realpr-werkzeug-2641",
+    "title": "deprecate bytes and charset",
+    "additions": 566,
+    "source_files": 21,
+    "hunks": 85,
+    "base": "67d870b9039e69df6e7ff4e8b9f6bdb51189b004"
+  },
+  {
+    "repo": "pallets/werkzeug",
+    "pr": 2637,
+    "task_id": "realpr-werkzeug-2637",
+    "title": "refactor cookie functions and test client",
+    "additions": 520,
+    "source_files": 5,
+    "hunks": 24,
+    "base": "4f8fddd2ec527d70331e35440fa14edb377dcff0"
+  },
+  {
+    "repo": "python-attrs/attrs",
+    "pr": 887,
+    "task_id": "realpr-attrs-887",
+    "title": "Add attrs namespace",
+    "additions": 820,
+    "source_files": 14,
+    "hunks": 35,
+    "base": "a23fe5f8c802e01190a2894ac33130c691b97358"
+  },
+  {
+    "repo": "python-attrs/attrs",
+    "pr": 653,
+    "task_id": "realpr-attrs-653",
+    "title": "Improve (de)serialization and validation capabilities",
+    "additions": 432,
+    "source_files": 4,
+    "hunks": 21,
+    "base": "0343927ecd1fb35df96d6edcd0be65e9d59f5894"
+  },
+  {
+    "repo": "python-attrs/attrs",
+    "pr": 660,
+    "task_id": "realpr-attrs-660",
+    "title": "Add on_setattr hooks to attr.s and attr.ib",
+    "additions": 728,
+    "source_files": 6,
+    "hunks": 43,
+    "base": "428bbcf0d3901b83f96951157351e3716df3a04f"
+  },
+  {
+    "repo": "encode/httpx",
+    "pr": 3068,
+    "task_id": "realpr-httpx-3068",
+    "title": "Use `__future__.annotations`",
+    "additions": 623,
+    "source_files": 19,
+    "hunks": 203,
+    "base": "4f6edf36e93fd9f83ff95b065718fd6bd0c4d3c5"
+  },
+  {
+    "repo": "encode/httpcore",
+    "pr": 699,
+    "task_id": "realpr-httpcore-699",
+    "title": "Documenting the network backend API",
+    "additions": 406,
+    "source_files": 21,
+    "hunks": 28,
+    "base": "bfd235f5eccc71a9ced42e841ea6283b8676fbd5"
+  },
+  {
+    "repo": "encode/httpcore",
+    "pr": 420,
+    "task_id": "realpr-httpcore-420",
+    "title": "httpcore 0.14 redesign",
+    "additions": 7793,
+    "source_files": 31,
+    "hunks": 47,
+    "base": "85a1f9ecab09e65d4299b5e2676964c43ac2c02d"
+  },
+  {
+    "repo": "encode/httpcore",
+    "pr": 353,
+    "task_id": "realpr-httpcore-353",
+    "title": "Better encapsulation for connection instances",
+    "additions": 558,
+    "source_files": 12,
+    "hunks": 66,
+    "base": "1e403bace48f313f67645e9002804a7266725028"
+  },
+  {
+    "repo": "encode/httpcore",
+    "pr": 296,
+    "task_id": "realpr-httpcore-296",
+    "title": "Update httpcore interface",
+    "additions": 996,
+    "source_files": 15,
+    "hunks": 56,
+    "base": "666cccc6d46212ef7fda83009208e9792217e01e"
+  },
+  {
+    "repo": "oauthlib/oauthlib",
+    "pr": 416,
+    "task_id": "realpr-oauthlib-416",
+    "title": "Openid connect",
+    "additions": 1329,
+    "source_files": 15,
+    "hunks": 40,
+    "base": "8d35dc007fea413b37ec96e90a6380746ec39773"
+  },
+  {
+    "repo": "oauthlib/oauthlib",
+    "pr": 56,
+    "task_id": "realpr-oauthlib-56",
+    "title": "Support Python 3",
+    "additions": 794,
+    "source_files": 12,
+    "hunks": 77,
+    "base": "dcbc028f2af02cb1a9c54faedf0defca9841c048"
+  },
+  {
+    "repo": "hynek/structlog",
+    "pr": 285,
+    "task_id": "realpr-structlog-285",
+    "title": "Implement native log levels though an optimized bound logger",
+    "additions": 436,
+    "source_files": 6,
+    "hunks": 14,
+    "base": "0faeacafb27d000e07806e9586b90d93530d7f5a"
+  },
+  {
+    "repo": "hynek/structlog",
+    "pr": 282,
+    "task_id": "realpr-structlog-282",
+    "title": "Add types",
+    "additions": 1278,
+    "source_files": 18,
+    "hunks": 125,
+    "base": "45ce4e0e7a05c5786ca8baa63b162ebe9eafb808"
+  }
+]

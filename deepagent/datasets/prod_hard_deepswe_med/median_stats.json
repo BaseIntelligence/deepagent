@@ -1,0 +1,91 @@
+{
+  "band": "deepswe_median_m27",
+  "product_root": "datasets/prod_hard_deepswe_med",
+  "historical_soft_band": "datasets/prod_hard_keep",
+  "generated_at_utc": "2026-07-18T19:44:17Z",
+  "certified_n": 2,
+  "target_n": 10,
+  "min_packs": 5,
+  "max_packs": 15,
+  "fail_closed_n_lt_5": true,
+  "ok_for_product_wave": false,
+  "fixture_pad": false,
+  "floors": {
+    "source_files_min": 4,
+    "source_hunks_min": 14,
+    "gold_added_lines_min": 400,
+    "f2p_nodes_min": 5
+  },
+  "product_p50": {
+    "source_files": 10.0,
+    "source_hunks": 44.5,
+    "gold_added_lines": 654.0,
+    "f2p_count": 35.5
+  },
+  "product_p50_vs_deepswe_sample": {
+    "files_p50_product": 10.0,
+    "files_p50_deepswe": 6,
+    "files_p50_meets_product_floor_ge4": true,
+    "hunks_p50_product": 44.5,
+    "hunks_p50_deepswe": 14,
+    "added_p50_product": 654.0,
+    "added_p50_deepswe": 640,
+    "added_p50_meets_product_goal_ge400": true
+  },
+  "deepswe_sample_reference": {
+    "sample_n_approx": 48,
+    "files_p50": 6,
+    "hunks_p50": 14,
+    "added_p50": 640,
+    "added_min_approx": 438,
+    "notes": "Public DeepSWE sample N\u224848 packs (mission M27 reference)"
+  },
+  "packs": [
+    {
+      "task_id": "realpr-itemadapter-101",
+      "source_files": 4,
+      "source_hunks": 15,
+      "gold_added_lines": 726,
+      "f2p_count": 43,
+      "floors_ok": true,
+      "floor_reason": "hardness_floors_ok",
+      "materials_is_fixture": false,
+      "source_track": "real_pr"
+    },
+    {
+      "task_id": "realpr-werkzeug-3116",
+      "source_files": 16,
+      "source_hunks": 74,
+      "gold_added_lines": 582,
+      "f2p_count": 28,
+      "floors_ok": true,
+      "floor_reason": "hardness_floors_ok",
+      "materials_is_fixture": false,
+      "source_track": "real_pr"
+    }
+  ],
+  "keep_ids": [
+    "realpr-itemadapter-101",
+    "realpr-werkzeug-3116"
+  ],
+  "funnel_summary": {
+    "materials_sources": [
+      "datasets/live_materials_m22",
+      "datasets/live_materials",
+      "sibling factory live_materials",
+      "fresh materialize-from-pr into live_materials_m27*"
+    ],
+    "generate_passes": [
+      "pass1 live_materials_m27_priority -> N=2",
+      "pass2 expanded priority -> N=2",
+      "pass3 live_materials_m27_wave3 -> N=2",
+      "pass4 live_materials_m27_pass4 FULL-only -> N=2"
+    ],
+    "dominant_reject_modes": [
+      "dual_run empty_f2p",
+      "dual_run green suite unclean or zero passers",
+      "hardness_floors below M27 band"
+    ],
+    "note": "Honest under-yield after live mine + dual-truth exhaust. No fixture pad. FAIL-CLOSED N<5."
+  }
+}

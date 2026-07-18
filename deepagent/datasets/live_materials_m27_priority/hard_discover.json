@@ -1,0 +1,90 @@
+[
+  {
+    "repo": "pallets/jinja",
+    "pr": 2096,
+    "task_id": "realpr-jinja-2096",
+    "title": "drop end of life python versions",
+    "additions": 412,
+    "source_files": 21,
+    "hunks": 218,
+    "base": "05f5d74849f8b65d28e1f36e349c2da10061d413",
+    "test_files": 1
+  },
+  {
+    "repo": "rq/rq",
+    "pr": 2386,
+    "task_id": "realpr-rq-2386",
+    "title": "Rate limit",
+    "additions": 1535,
+    "source_files": 7,
+    "hunks": 44,
+    "base": "43ba1b048cd3a7d659dd061eec629ff6f877580f",
+    "test_files": 8
+  },
+  {
+    "repo": "rq/rq",
+    "pr": 2406,
+    "task_id": "realpr-rq-2406",
+    "title": "Refactor how deferred jobs are enqueued",
+    "additions": 596,
+    "source_files": 4,
+    "hunks": 17,
+    "base": "1dde2cb99f0f0c8d0d897d823ec81973a3bf6846",
+    "test_files": 4
+  },
+  {
+    "repo": "rq/rq",
+    "pr": 2420,
+    "task_id": "realpr-rq-2420",
+    "title": "Webhook notifications",
+    "additions": 747,
+    "source_files": 7,
+    "hunks": 52,
+    "base": "741f0fd3af2869acacb1cd979c727e8f2263382e",
+    "test_files": 7
+  },
+  {
+    "repo": "pallets/quart",
+    "pr": 386,
+    "task_id": "realpr-quart-386",
+    "title": "refresh to match pallets",
+    "additions": 2168,
+    "source_files": 32,
+    "hunks": 145,
+    "base": "a80358bbe27a10f5ec709760e62ac3930bbedee7",
+    "test_files": 33
+  },
+  {
+    "repo": "scrapy/scrapy",
+    "pr": 7524,
+    "task_id": "realpr-scrapy-7524",
+    "title": "Add BaseStreamingDownloadHandler and migrate HttpxDownloadHandler to it.",
+    "additions": 528,
+    "source_files": 7,
+    "hunks": 15,
+    "base": "a8a8f20d9c49ae7f611cbdc90676b64f6349dba2",
+    "test_files": 5
+  },
+  {
+    "repo": "scrapy/scrapy",
+    "pr": 6546,
+    "task_id": "realpr-scrapy-6546",
+    "title": "Add settings for TLS min/max version as a replacement for the TLS method",
+    "additions": 454,
+    "source_files": 5,
+    "hunks": 23,
+    "base": "58af57a3ea3a109f05c5b3e9f7b6e1e24adc9834",
+    "test_files": 12
+  },
+  {
+    "repo": "jaraco/path",
+    "pr": 235,
+    "task_id": "realpr-path-235",
+    "title": "Fill in gaps in type annotations.",
+    "additions": 623,
+    "source_files": 4,
+    "hunks": 74,
+    "base": "87792b7d0127fb1845b50ab92a8041508d1080b3",
+    "test_files": 1
+  }
+]
