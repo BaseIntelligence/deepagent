@@ -1,0 +1,842 @@
+{
+  "assertion": "VAL-DMED-003",
+  "feature_id": "m27b-offline-curate-bite-thin-prod",
+  "n_packs": 10,
+  "note": "Historical prod_hard_keep pack trees are snapshotted read-only. This report never deletes or moves them.",
+  "pack_ids": [
+    "realpr-attrs-1323",
+    "realpr-attrs-1457",
+    "realpr-httpx-3672",
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-qs-487",
+    "realpr-qs-488",
+    "realpr-werkzeug-2979",
+    "realpr-werkzeug-3006",
+    "realpr-werkzeug-3101"
+  ],
+  "packs": [
+    {
+      "floors": {
+        "added_lines": 37,
+        "detail": "f2p_count=4 < MIN_F2P_NODES=5 (thin F2P refused on product hardness path); product source files 3 < multi-file floor 4; gold_added_lines=37 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 4,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "f2p_nodes_below_floor",
+        "reasons": [
+          "f2p_nodes_below_floor",
+          "multi_file_floor_rejected",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 3,
+        "source_hunk_count": 14
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=4 dominate easy_signals=1",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 37,
+          "constraints": 4,
+          "deleted_lines": 13,
+          "easy_signal_count": 1,
+          "f2p_count": 4,
+          "hard_signal_count": 4,
+          "hunk_count": 14,
+          "instruction_chars": 2148,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 3
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=2148>=1600",
+          "many_outcomes=5>=5",
+          "many_constraints=4>=4",
+          "large_gold_hunks=14>=14"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "keep",
+        "dual_model_solve": false,
+        "frontier": 0.5,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 0.0,
+          "kimi-k2.6": 1.0
+        }
+      },
+      "task_id": "realpr-attrs-1323",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 58,
+        "detail": "product source files 2 < multi-file floor 4; gold_added_lines=58 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 14,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "gold_added_lines_below_floor",
+        "reasons": [
+          "multi_file_floor_rejected",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 2,
+        "source_hunk_count": 21
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=5 dominate easy_signals=3",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 58,
+          "constraints": 5,
+          "deleted_lines": 11,
+          "easy_signal_count": 3,
+          "f2p_count": 14,
+          "hard_signal_count": 5,
+          "hunk_count": 21,
+          "instruction_chars": 3333,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 6,
+          "source_file_count": 2
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=3333>=1600",
+          "many_outcomes=6>=5",
+          "many_constraints=5>=4",
+          "large_gold_hunks=21>=14",
+          "large_f2p=14>=5"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": false,
+        "frontier": 0.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 0.0,
+          "kimi-k2.6": 0.0
+        }
+      },
+      "task_id": "realpr-attrs-1457",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 57,
+        "detail": "gold_added_lines=57 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 5,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "gold_added_lines_below_floor",
+        "reasons": [
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 7,
+        "source_hunk_count": 18
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=6 dominate easy_signals=1",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 57,
+          "constraints": 4,
+          "deleted_lines": 22,
+          "easy_signal_count": 1,
+          "f2p_count": 5,
+          "hard_signal_count": 6,
+          "hunk_count": 18,
+          "instruction_chars": 2528,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 7
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=2528>=1600",
+          "many_outcomes=5>=5",
+          "many_constraints=4>=4",
+          "large_gold_hunks=18>=14",
+          "multi_module_touch=files:7/modules:1",
+          "large_f2p=5>=5"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": false,
+        "frontier": 0.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 0.0,
+          "kimi-k2.6": 0.0
+        }
+      },
+      "task_id": "realpr-httpx-3672",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 726,
+        "detail": "product hardness floors ok (f2p=43>=5, sources=4, hunks=15, added=726>=400)",
+        "f2p_count": 43,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": true,
+        "reason_code": "hardness_floors_ok",
+        "reasons": [
+          "hardness_floors_ok"
+        ],
+        "source_file_count": 4,
+        "source_hunk_count": 15
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=8 dominate easy_signals=0",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 726,
+          "constraints": 5,
+          "deleted_lines": 47,
+          "easy_signal_count": 0,
+          "f2p_count": 43,
+          "hard_signal_count": 8,
+          "hunk_count": 15,
+          "instruction_chars": 3156,
+          "module_count": 1,
+          "modules": [
+            "itemadapter"
+          ],
+          "outcomes": 7,
+          "source_file_count": 4
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=3156>=1600",
+          "many_outcomes=7>=5",
+          "many_constraints=5>=4",
+          "large_gold_hunks=15>=14",
+          "multi_module_touch=files:4/modules:1",
+          "large_f2p=43>=5",
+          "large_delta_lines=+726/-47>=400",
+          "deepswe_median_structural_band"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "keep",
+        "dual_model_solve": false,
+        "frontier": 0.5,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 1.0,
+          "kimi-k2.6": 0.0
+        }
+      },
+      "task_id": "realpr-itemadapter-101",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 882,
+        "detail": "product source files 3 < multi-file floor 4",
+        "f2p_count": 9,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "multi_file_floor_rejected",
+        "reasons": [
+          "multi_file_floor_rejected"
+        ],
+        "source_file_count": 3,
+        "source_hunk_count": 24
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=6 dominate easy_signals=0",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 882,
+          "constraints": 5,
+          "deleted_lines": 789,
+          "easy_signal_count": 0,
+          "f2p_count": 9,
+          "hard_signal_count": 6,
+          "hunk_count": 24,
+          "instruction_chars": 2723,
+          "module_count": 2,
+          "modules": [
+            "benchmarks",
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 3
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=2723>=1600",
+          "many_outcomes=5>=5",
+          "many_constraints=5>=4",
+          "large_gold_hunks=24>=14",
+          "large_f2p=9>=5",
+          "large_delta_lines=+882/-789>=400"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": false,
+        "frontier": 0.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 0.0,
+          "kimi-k2.6": 0.0
+        }
+      },
+      "task_id": "realpr-packaging-1120",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 21,
+        "detail": "f2p_count=3 < MIN_F2P_NODES=5 (thin F2P refused on product hardness path); product source files 2 < multi-file floor 4; source_hunk_count=11 < product floor 14; gold_added_lines=21 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 3,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "f2p_nodes_below_floor",
+        "reasons": [
+          "f2p_nodes_below_floor",
+          "multi_file_floor_rejected",
+          "source_hunks_below_floor",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 2,
+        "source_hunk_count": 11
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "EASY_REQUEST (confidence=high): thin contract / tiny gold signals=6 hard_signals=2; should_drop_hardness=True (intrinsic only, never model scores)",
+        "easily_approachable": true,
+        "intrinsic_class": "EASY_REQUEST",
+        "meta": {
+          "drop_gate": "intrinsic_easy_high_confidence",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 21,
+          "constraints": 5,
+          "deleted_lines": 2,
+          "easy_signal_count": 6,
+          "f2p_count": 3,
+          "hard_signal_count": 2,
+          "hunk_count": 11,
+          "instruction_chars": 2589,
+          "module_count": 1,
+          "modules": [
+            "lib"
+          ],
+          "outcomes": 4,
+          "source_file_count": 2
+        },
+        "reason_code": "intrinsic_easy_request",
+        "reasons": [
+          "tiny_gold_hunks=11<=12",
+          "thin_source_files=2<=2",
+          "single_module_touch=modules:1",
+          "low_f2p=3<=3",
+          "tiny_delta_lines=+21/-2<=80",
+          "thin_gold_api_class"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": true
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": true,
+        "frontier": 1.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 1.0,
+          "kimi-k2.6": 1.0
+        }
+      },
+      "task_id": "realpr-qs-487",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 34,
+        "detail": "product source files 2 < multi-file floor 4; source_hunk_count=12 < product floor 14; gold_added_lines=34 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 7,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "gold_added_lines_below_floor",
+        "reasons": [
+          "multi_file_floor_rejected",
+          "source_hunks_below_floor",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 2,
+        "source_hunk_count": 12
+      },
+      "intrinsic": {
+        "confidence": "medium",
+        "detail": "UNCERTAIN: easy_signals=4 co-present with hard_signals=3; default keep for hardness product",
+        "easily_approachable": false,
+        "intrinsic_class": "UNCERTAIN",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 34,
+          "constraints": 5,
+          "deleted_lines": 11,
+          "easy_signal_count": 4,
+          "f2p_count": 7,
+          "hard_signal_count": 3,
+          "hunk_count": 12,
+          "instruction_chars": 2506,
+          "module_count": 1,
+          "modules": [
+            "lib"
+          ],
+          "outcomes": 4,
+          "source_file_count": 2
+        },
+        "reason_code": "intrinsic_uncertain",
+        "reasons": [
+          "tiny_gold_hunks=12<=12",
+          "thin_source_files=2<=2",
+          "single_module_touch=modules:1",
+          "tiny_delta_lines=+34/-11<=80",
+          "long_instruction_chars=2506>=1600",
+          "many_constraints=5>=4",
+          "large_f2p=7>=5"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": false,
+        "frontier": 0.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 0.0,
+          "kimi-k2.6": 0.0
+        }
+      },
+      "task_id": "realpr-qs-488",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 77,
+        "detail": "product source files 3 < multi-file floor 4; source_hunk_count=11 < product floor 14; gold_added_lines=77 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 9,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "gold_added_lines_below_floor",
+        "reasons": [
+          "multi_file_floor_rejected",
+          "source_hunks_below_floor",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 3,
+        "source_hunk_count": 11
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=4 dominate easy_signals=2",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 77,
+          "constraints": 4,
+          "deleted_lines": 0,
+          "easy_signal_count": 2,
+          "f2p_count": 9,
+          "hard_signal_count": 4,
+          "hunk_count": 11,
+          "instruction_chars": 2416,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 5,
+          "source_file_count": 3
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=2416>=1600",
+          "many_outcomes=5>=5",
+          "many_constraints=4>=4",
+          "large_f2p=9>=5"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": true,
+        "frontier": 1.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 1.0,
+          "kimi-k2.6": 1.0
+        }
+      },
+      "task_id": "realpr-werkzeug-2979",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 142,
+        "detail": "product source files 2 < multi-file floor 4; gold_added_lines=142 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 6,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "gold_added_lines_below_floor",
+        "reasons": [
+          "multi_file_floor_rejected",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 2,
+        "source_hunk_count": 14
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=4 dominate easy_signals=2",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 142,
+          "constraints": 4,
+          "deleted_lines": 107,
+          "easy_signal_count": 2,
+          "f2p_count": 6,
+          "hard_signal_count": 4,
+          "hunk_count": 14,
+          "instruction_chars": 2642,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 4,
+          "source_file_count": 2
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=2642>=1600",
+          "many_constraints=4>=4",
+          "large_gold_hunks=14>=14",
+          "large_f2p=6>=5"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": true,
+        "frontier": 1.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 1.0,
+          "kimi-k2.6": 1.0
+        }
+      },
+      "task_id": "realpr-werkzeug-3006",
+      "tree_preserved": true
+    },
+    {
+      "floors": {
+        "added_lines": 188,
+        "detail": "f2p_count=4 < MIN_F2P_NODES=5 (thin F2P refused on product hardness path); gold_added_lines=188 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+        "f2p_count": 4,
+        "meta": {
+          "anti_easy_policy": "deepswe_median_structural_floors_and_intrinsic_easy",
+          "band": "deepswe_median_m27",
+          "default_min_f2p_nodes": 5,
+          "min_added_lines": 400,
+          "min_f2p_nodes": 5,
+          "min_source_files": 4,
+          "min_source_hunks": 14,
+          "product_min_added_lines": 400
+        },
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "ok": false,
+        "reason_code": "f2p_nodes_below_floor",
+        "reasons": [
+          "f2p_nodes_below_floor",
+          "gold_added_lines_below_floor"
+        ],
+        "source_file_count": 4,
+        "source_hunk_count": 29
+      },
+      "intrinsic": {
+        "confidence": "high",
+        "detail": "HARD_REQUEST (confidence=high): multi-outcome / multi-module / large gold signals=5 dominate easy_signals=0",
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "meta": {
+          "drop_gate": "model_independent",
+          "schema": "deepagent.intrinsic_difficulty.v1"
+        },
+        "metrics": {
+          "added_lines": 188,
+          "constraints": 4,
+          "deleted_lines": 178,
+          "easy_signal_count": 0,
+          "f2p_count": 4,
+          "hard_signal_count": 5,
+          "hunk_count": 29,
+          "instruction_chars": 3257,
+          "module_count": 1,
+          "modules": [
+            "src"
+          ],
+          "outcomes": 8,
+          "source_file_count": 4
+        },
+        "reason_code": "intrinsic_hard_request",
+        "reasons": [
+          "long_instruction_chars=3257>=1600",
+          "many_outcomes=8>=5",
+          "many_constraints=4>=4",
+          "large_gold_hunks=29>=14",
+          "multi_module_touch=files:4/modules:1"
+        ],
+        "schema": "deepagent.intrinsic_difficulty.v1",
+        "should_drop_hardness": false
+      },
+      "pack_dir_exists": true,
+      "scoreboard": {
+        "decision": "drop",
+        "dual_model_solve": true,
+        "frontier": 1.0,
+        "models": [
+          "x-ai/grok-4.5",
+          "moonshotai/kimi-k2.6"
+        ],
+        "per_model_pass_at_k": {
+          "grok-4.5": 1.0,
+          "kimi-k2.6": 1.0
+        }
+      },
+      "task_id": "realpr-werkzeug-3101",
+      "tree_preserved": true
+    }
+  ],
+  "schema": "deepagent.m27_floor_bite.v1.snapshot",
+  "scoreboard": "datasets/panel_prod_hard_m26_n5/scoreboard.json",
+  "snapshotted_at": "2026-07-18T17:42:30.220174+00:00",
+  "src": "datasets/prod_hard_keep"
+}

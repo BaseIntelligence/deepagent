@@ -1,0 +1,231 @@
+{
+  "dispositions": [
+    {
+      "alignment_ok": true,
+      "detail": "f2p_count=4 < MIN_F2P_NODES=5 (thin F2P refused on product hardness path); product source files 3 < multi-file floor 4; gold_added_lines=37 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 4,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "dual_detail": "sol=1 null=0",
+        "explicit_policy_drop": true
+      },
+      "null_reward": 0,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "f2p_nodes_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 14,
+      "task_id": "realpr-attrs-1323"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "product source files 2 < multi-file floor 4; gold_added_lines=58 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 14,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "gate": "hardness_floors"
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "gold_added_lines_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 21,
+      "task_id": "realpr-attrs-1457"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "gold_added_lines=57 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 5,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "gate": "hardness_floors"
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "gold_added_lines_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 18,
+      "task_id": "realpr-httpx-3672"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "production hardness keep: dual-truth sol=1/null=0, prompt–verifier aligned, hardness floors ok (F2P≥5, multi-file/hunk floors); intrinsic not high-confidence EASY_REQUEST. Panel keep-band rule='in-band-high-discrimination' frontier_pass_at_k=0.5.",
+      "dual_truth_ok": true,
+      "f2p_count": 43,
+      "frontier_pass_at_k": 0.5,
+      "hardness_ok": true,
+      "keep": true,
+      "meta": {
+        "easily_approachable": false,
+        "intrinsic_class": "HARD_REQUEST",
+        "intrinsic_confidence": "high",
+        "intrinsic_metrics": {
+          "added_lines": 726,
+          "constraints": 5,
+          "deleted_lines": 47,
+          "easy_signal_count": 0,
+          "f2p_count": 43,
+          "hard_signal_count": 8,
+          "hunk_count": 15,
+          "instruction_chars": 3156,
+          "module_count": 1,
+          "modules": [
+            "itemadapter"
+          ],
+          "outcomes": 7,
+          "source_file_count": 4
+        },
+        "intrinsic_reason_code": "intrinsic_hard_request",
+        "nominal_keep_candidate": true,
+        "policy": "m25_intrinsic_hardness",
+        "required_paths_checked": [
+          "task.toml",
+          "instruction.md",
+          "pre_artifacts.sh",
+          "environment/Dockerfile",
+          "tests/Dockerfile",
+          "tests/test.sh",
+          "tests/grader.py",
+          "tests/config.json",
+          "tests/test.patch",
+          "solution/solution.patch",
+          "solution/solve.sh"
+        ]
+      },
+      "null_reward": 0,
+      "panel_rule": "in-band-high-discrimination",
+      "panel_verdict": "keep",
+      "reason_code": "keep_hard_panel_band",
+      "solution_reward": 1,
+      "source_hunk_count": 15,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "product source files 3 < multi-file floor 4",
+      "dual_truth_ok": true,
+      "f2p_count": 9,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "gate": "hardness_floors"
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "multi_file_floor_rejected",
+      "solution_reward": 1,
+      "source_hunk_count": 24,
+      "task_id": "realpr-packaging-1120"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "f2p_count=3 < MIN_F2P_NODES=5 (thin F2P refused on product hardness path); product source files 2 < multi-file floor 4; source_hunk_count=11 < product floor 14; gold_added_lines=21 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 3,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "dual_detail": "sol=1 null=0",
+        "explicit_policy_drop": true
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "f2p_nodes_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 11,
+      "task_id": "realpr-qs-487"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "product source files 2 < multi-file floor 4; source_hunk_count=12 < product floor 14; gold_added_lines=34 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 7,
+      "frontier_pass_at_k": 0.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "gate": "hardness_floors"
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-none",
+      "panel_verdict": "drop",
+      "reason_code": "gold_added_lines_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 12,
+      "task_id": "realpr-qs-488"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "product source files 3 < multi-file floor 4; source_hunk_count=11 < product floor 14; gold_added_lines=77 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 9,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "gate": "hardness_floors"
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "gold_added_lines_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 11,
+      "task_id": "realpr-werkzeug-2979"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "product source files 2 < multi-file floor 4; gold_added_lines=142 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 6,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "gate": "hardness_floors"
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "gold_added_lines_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 14,
+      "task_id": "realpr-werkzeug-3006"
+    },
+    {
+      "alignment_ok": true,
+      "detail": "f2p_count=4 < MIN_F2P_NODES=5 (thin F2P refused on product hardness path); gold_added_lines=188 < PRODUCT_MIN_ADDED_LINES=400 (DeepSWE-median gold size floor)",
+      "dual_truth_ok": true,
+      "f2p_count": 4,
+      "frontier_pass_at_k": 1.0,
+      "hardness_ok": false,
+      "keep": false,
+      "meta": {
+        "dual_detail": "sol=1 null=0",
+        "explicit_policy_drop": true
+      },
+      "null_reward": 0,
+      "panel_rule": "solve-all",
+      "panel_verdict": "drop",
+      "reason_code": "f2p_nodes_below_floor",
+      "solution_reward": 1,
+      "source_hunk_count": 29,
+      "task_id": "realpr-werkzeug-3101"
+    }
+  ]
+}
