@@ -959,18 +959,173 @@ def _ensure_dynamic_version_stubs(repo: Path) -> None:
                 target.write_text(stub_body, encoding="utf-8")
 
 
-def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
-    """Best-effort install so host dual-run reporters can import the package."""
+# ---------------------------------------------------------------------------
+# Dual-run host suite isolation (VAL-DMED-010)
+# ---------------------------------------------------------------------------
+
+#: Common dual-run suite deps installed into the **isolated** host venv only.
+#: NEVER pip install these with -U into the factory site-packages.
+HOST_SUITE_COMMON_DEPS: tuple[str, ...] = (
+    "httpx==0.28.1",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-mock",
+    "freezegun",
+    "hypothesis",
+    "pretend",
+    "anyio",
+    "trio",
+    "sniffio",
+    "httpcore",
+    "h11",
+    "werkzeug>=3.0",
+    "blinker>=1.8",
+    "itsdangerous",
+    "jinja2",
+    "markupsafe",
+    "click",
+    "attrs",
+    "idna",
+    "ephemeral-port-reserve",
+    "cloudpickle",
+    "tomli_w",
+    "tomli",
+    "appdirs",
+    "inflect",
+    "jaraco.itertools",
+    "jaraco.functools",
+    "jaraco.context",
+    "jaraco.collections",
+    "jaraco.test",
+    "more_itertools",
+    "packaging",
+    "platformdirs",
+    # dual-run green suite deps seen on hard-median packs
+    "simplejson",
+    "python-dateutil",
+    "pytz",
+    "redis",
+    "croniter",
+    "click-plugins",
+    "dataclasses-json",
+    # werkzeug/flask conftest ProcessStarter plugin
+    "pytest-xprocess",
+    # NOTE: intentionally no bare "pydantic"/"pydantic-core" force install —
+    # editable-adjacent upgrades poisoned the factory CLI.
+)
+
+FORBIDDEN_FACTORY_PIP_FLAGS: frozenset[str] = frozenset({"-U", "--upgrade"})
+
+HOST_VENV_DIRNAME = ".sdf_host_venv"
+
+
+@dataclass(frozen=True, slots=True)
+class HostSuiteEnv:
+    """Isolated (or passthrough) host dual-run suite environment."""
+
+    python: str
+    language: str
+    isolated: bool
+    venv_path: str | None = None
+    factory_site_packages_untouched: bool = True
+    notes: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "python": self.python,
+            "language": self.language,
+            "isolated": self.isolated,
+            "venv_path": self.venv_path,
+            "factory_site_packages_untouched": self.factory_site_packages_untouched,
+            "notes": dict(self.notes or {}),
+        }
+
+
+def assert_host_suite_pip_safe(
+    cmd: Sequence[str],
+    *,
+    factory_python: str | None = None,
+) -> None:
+    """Refuse ``pip install -U`` (or --upgrade) aimed at the factory interpreter.
+
+    Isolated host-suite installs must target a non-factory python. Factory
+    python may never receive upgrade flags (VAL-DMED-010).
+    """
+    import sys
+
+    factory = str(factory_python or sys.executable)
+    parts = [str(x) for x in cmd]
+    if not parts:
+        return
+    target_py = parts[0]
+    has_upgrade = any(p in FORBIDDEN_FACTORY_PIP_FLAGS for p in parts)
+    # Normalize paths for comparison
+    try:
+        same = Path(target_py).resolve() == Path(factory).resolve()
+    except OSError:
+        same = str(target_py) == str(factory)
+    if same and has_upgrade:
+        raise ValueError(
+            "refuse pip install --upgrade / -U into factory python "
+            f"({factory}); use isolated host suite venv (VAL-DMED-010)"
+        )
+    if same and "pip" in parts and "install" in parts:
+        # Soft-allow non-upgrade factory installs is still discouraged; unit
+        # gate focuses on upgrade ban. Isolation path avoids factory entirely.
+        pass
+
+
+def build_host_suite_pip_command(
+    python: str,
+    *,
+    packages: Sequence[str] = (),
+    requirements: Path | str | None = None,
+) -> list[str]:
+    """Build a factory-safe pip install argv (no -U / --upgrade)."""
+    cmd = [
+        str(python),
+        "-m",
+        "pip",
+        "install",
+        "--upgrade-strategy",
+        "only-if-needed",
+        "-q",
+    ]
+    if requirements is not None:
+        cmd.extend(["-r", str(requirements)])
+    cmd.extend(str(p) for p in packages if str(p).strip())
+    return cmd
+
+
+def _prepare_host_suite_env(
+    repo: Path,
+    *,
+    language: str = "python",
+    work_root: Path | str | None = None,
+) -> HostSuiteEnv:
+    """Prepare an **isolated** host dual-run suite env (VAL-DMED-010).
+
+    Python path creates a per-pack/work_root venv under ``.sdf_host_venv`` and
+    installs suite deps (pytest-xprocess, simplejson, redis, …) **there only**.
+    Never ``pip install -U`` into the factory site-packages. Non-python languages
+    return a passthrough HostSuiteEnv.
+    """
+    import os
     import subprocess
     import sys
 
     lang = (language or "python").strip().lower()
-    if lang in {"javascript", "js", "typescript", "ts"}:
-        # Live JS/TS dual-run needs package install + local bins on subsequent PATH.
-        import shutil
+    factory_py = sys.executable
 
+    if lang in {"javascript", "js", "typescript", "ts"}:
         if shutil.which("npm") is None or not (repo / "package.json").is_file():
-            return
+            return HostSuiteEnv(
+                python=factory_py,
+                language=lang,
+                isolated=False,
+                factory_site_packages_untouched=True,
+                notes={"reason": "npm_or_package_json_missing"},
+            )
         subprocess.run(
             ["npm", "install", "--no-audit", "--no-fund"],
             cwd=str(repo),
@@ -981,21 +1136,27 @@ def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
         try:
             from swe_factory.producers.harbor_labeling import ensure_local_node_bin_on_path
 
-            # Best-effort: put local bins on this process PATH for subprocess children
-            # that inherit os.environ (runner also sets env per suite call).
             env = ensure_local_node_bin_on_path(repo)
-            import os
-
             if env.get("PATH"):
                 os.environ["PATH"] = env["PATH"]
         except Exception:  # noqa: BLE001
             pass
-        return
-    if lang in {"rust", "rs"}:
-        # No host install-beyond cargo; reporter runs cargo test in workspace copy.
-        return
-    if lang != "python":
-        return
+        return HostSuiteEnv(
+            python=factory_py,
+            language=lang,
+            isolated=False,
+            factory_site_packages_untouched=True,
+            notes={"npm_install": True},
+        )
+    if lang in {"rust", "rs"} or lang != "python":
+        return HostSuiteEnv(
+            python=factory_py,
+            language=lang,
+            isolated=False,
+            factory_site_packages_untouched=True,
+            notes={"reason": "non_python_passthrough"},
+        )
+
     from swe_factory.producers.harbor_labeling import (
         _rewrite_legacy_pytest_conf_hooks,
         _soft_relax_pytest_ini,
@@ -1008,91 +1169,63 @@ def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
     # pure-python packages (platformdirs.version, urllib3._version, ...).
     _ensure_dynamic_version_stubs(repo)
 
-    if (
-        not (repo / "pyproject.toml").is_file()
-        and not (repo / "setup.py").is_file()
-        and not (repo / "setup.cfg").is_file()
-    ):
-        return
-    py = sys.executable
-    # Common test/runtime helpers across dual-run-survivable python seeds
-    # (pallets/*, encode/*, pypa/packaging, jaraco-style, httpx-family).
-    # Includes high-frequency collection deps from reject_ledger green=0 waves:
-    # pretend (packaging), anyio/httpx/trio markers (httpcore), werkzeug/blinker
-    # (flask), attrs (many pure-lib suites), simplejson (marshmallow), redis (rq).
-    #
-    # NEVER use pip -U here: dual-run dep fills previously poisoned the factory
-    # venv (pydantic/typing_extensions/werkzeug), breaking subsequent product
-    # cert + `import swe_factory`. only-if-needed keeps factory pins stable.
+    # Resolve isolated venv root: prefer dual-run work_root, else under repo.
+    if work_root is not None:
+        venv_root = Path(work_root) / HOST_VENV_DIRNAME
+    else:
+        venv_root = Path(repo) / HOST_VENV_DIRNAME
+    venv_root.parent.mkdir(parents=True, exist_ok=True)
+    iso_py = venv_root / "bin" / "python"
+    if not iso_py.is_file():
+        # Create isolated venv; do not touch factory.
+        subprocess.run(
+            [factory_py, "-m", "venv", str(venv_root)],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    if not iso_py.is_file():
+        # Fallback dirs (Windows layout) — still refuse factory poison if missing.
+        alt = venv_root / "Scripts" / "python.exe"
+        if alt.is_file():
+            iso_py = alt
+        else:
+            return HostSuiteEnv(
+                python=factory_py,
+                language=lang,
+                isolated=False,
+                factory_site_packages_untouched=True,
+                notes={
+                    "reason": "venv_create_failed",
+                    "venv_root": str(venv_root),
+                    "factory_poison_avoided": True,
+                },
+            )
+
+    iso_python = str(iso_py)
+
+    # Ensure pip exists in the isolated venv.
     subprocess.run(
-        [
-            py,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade-strategy",
-            "only-if-needed",
-            "-q",
-            "httpx==0.28.1",
-            "pytest",
-            "pytest-asyncio",
-            "pytest-mock",
-            "freezegun",
-            "hypothesis",
-            "pretend",
-            "anyio",
-            "trio",
-            "sniffio",
-            "httpcore",
-            "h11",
-            "werkzeug>=3.0",
-            "blinker>=1.8",
-            "itsdangerous",
-            "jinja2",
-            "markupsafe",
-            "click",
-            "attrs",
-            "idna",
-            "ephemeral-port-reserve",
-            "cloudpickle",
-            "tomli_w",
-            "tomli",
-            "appdirs",
-            # jaraco / pallets transitive helpers
-            "inflect",
-            "jaraco.itertools",
-            "jaraco.functools",
-            "jaraco.context",
-            "jaraco.collections",
-            "jaraco.test",
-            "more_itertools",
-            "packaging",
-            "platformdirs",
-            "attrs",
-            # dual-run green suite deps seen on hard-median packs
-            "simplejson",
-            "python-dateutil",
-            "pytz",
-            "redis",
-            "croniter",
-            "click-plugins",
-            "dataclasses-json",
-            # werkzeug/flask conftest ProcessStarter plugin
-            "pytest-xprocess",
-            # NOTE: intentionally no bare "pydantic"/"pydantic-core" force install —
-            # editable-adjacent upgrades poisoned the factory CLI.
-        ],
+        [iso_python, "-m", "ensurepip", "--upgrade"],
         cwd=str(repo),
         capture_output=True,
         text=True,
         check=False,
     )
-    # IMPORTANT: do NOT pip install -e the clone into the factory venv.
-    # Host dual-run reporters already put the workspace on PYTHONPATH; an
-    # editable install poisons site-packages with ephemeral /tmp paths and
-    # makes subsequent dual-runs (and the warehouse itself) fail.
-    # Optional non-editable deps for poorly declared package metadata only.
-    # Prefer requirements that look like pure dep lists; skip local path pins.
+
+    # Install common suite deps into isolated venv only (no -U).
+    pip_cmd = build_host_suite_pip_command(iso_python, packages=HOST_SUITE_COMMON_DEPS)
+    assert_host_suite_pip_safe(pip_cmd, factory_python=factory_py)
+    subprocess.run(
+        pip_cmd,
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # Optional non-editable pure dep lists into isolated venv only.
     for req_name in (
         "requirements.txt",
         "requirements-test.txt",
@@ -1107,29 +1240,34 @@ def _prepare_host_suite_env(repo: Path, *, language: str = "python") -> None:
             body = req.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        # Refuse requirements that look like path/VCS installs into the factory.
-        if any(
-            tok in body
-            for tok in ("-e ", "file:", "git+", "http://", "https://", "path =")
-        ):
+        # Refuse path/VCS installs.
+        if any(tok in body for tok in ("-e ", "file:", "git+", "http://", "https://", "path =")):
             continue
+        rcmd = build_host_suite_pip_command(iso_python, requirements=req)
+        assert_host_suite_pip_safe(rcmd, factory_python=factory_py)
         subprocess.run(
-            [
-                py,
-                "-m",
-                "pip",
-                "install",
-                "--upgrade-strategy",
-                "only-if-needed",
-                "-q",
-                "-r",
-                str(req),
-            ],
+            rcmd,
             cwd=str(repo),
             capture_output=True,
             text=True,
             check=False,
         )
+
+    # Never editable-install the clone into factory or isolated env as site poison
+    # for subsequent packs; dual-run puts workspace on PYTHONPATH.
+    return HostSuiteEnv(
+        python=iso_python,
+        language=lang,
+        isolated=True,
+        venv_path=str(venv_root),
+        factory_site_packages_untouched=True,
+        notes={
+            "factory_python": factory_py,
+            "install_target": "isolated_host_venv",
+            "no_pip_upgrade_factory": True,
+            "common_deps": list(HOST_SUITE_COMMON_DEPS),
+        },
+    )
 
 
 def _materialize_base_worktree(
@@ -1299,24 +1437,41 @@ def _label_dual_run_for_material(
     dual_work = prepare_fresh_dual_run_work_root(
         work, material.task_id, dest=dest, offline_only=False
     )
-    # Host dual-run needs the package importable (deps + editable install).
-    _prepare_host_suite_env(base_repo, language=material.language or "python")
+    # VAL-DMED-010: isolated host suite env (never pip -U factory site-packages).
+    host_env = _prepare_host_suite_env(
+        base_repo,
+        language=material.language or "python",
+        work_root=dual_work,
+    )
     try:
         agent_ctx = pack_dir / "environment"
-        result = dual_fn(
-            language=material.language or "python",
-            base_repo=base_repo,
-            solution_patch=material.solution_patch,
-            test_patch=material.test_patch,
-            base_commit=material.base_commit,
-            config_dest=config_path,
-            work_root=dual_work,
-            agent_context=agent_ctx if agent_ctx.is_dir() else None,
-            held_out_relative_paths=list(material.test_files),
-            require_nonempty_f2p=True,
-            dual_runs=1,
-            source_track=REAL_PR_SOURCE_TRACK,
-        )
+        dual_kwargs: dict[str, Any] = {
+            "language": material.language or "python",
+            "base_repo": base_repo,
+            "solution_patch": material.solution_patch,
+            "test_patch": material.test_patch,
+            "base_commit": material.base_commit,
+            "config_dest": config_path,
+            "work_root": dual_work,
+            "agent_context": agent_ctx if agent_ctx.is_dir() else None,
+            "held_out_relative_paths": list(material.test_files),
+            "require_nonempty_f2p": True,
+            "dual_runs": 1,
+            "source_track": REAL_PR_SOURCE_TRACK,
+            "allow_green_flake": True,
+            "min_f2p_nodes": resolve_min_f2p_nodes(),
+        }
+        # Pass isolated python when caller supports it (label_real_pr_dual_run).
+        try:
+            import inspect
+
+            sig = inspect.signature(dual_fn)
+            if "python_executable" in sig.parameters and host_env.python:
+                dual_kwargs["python_executable"] = host_env.python
+        except (TypeError, ValueError):
+            if host_env.isolated:
+                dual_kwargs["python_executable"] = host_env.python
+        result = dual_fn(**dual_kwargs)
     except (RealDualRunError, Exception) as exc:  # noqa: BLE001
         mark_dual_run_work_root_burnt(dual_work, reason=str(exc)[:200])
         raise ProductDualRunRejected(
@@ -1368,6 +1523,29 @@ def _label_dual_run_for_material(
         offline_only=False,
         require_workspace_head=bool((Path(base_repo) / ".git").exists()),
     )
+    green_flake_meta: dict[str, Any] = {}
+    try:
+        notes = getattr(result, "notes", None) or {}
+        if isinstance(notes, Mapping) and notes.get("green_flake_soft_continue"):
+            green_flake_meta = {
+                "green_flake_soft_continue": True,
+                "green_flake_reason_code": notes.get("green_flake_reason_code"),
+                "green_flake_ignored": notes.get("green_flake_ignored"),
+            }
+        payload_notes = (
+            (result.config_payload or {}).get("notes")
+            if hasattr(result, "config_payload")
+            else None
+        )
+        if isinstance(payload_notes, Mapping) and payload_notes.get("green_flake_soft_continue"):
+            green_flake_meta = {
+                "green_flake_soft_continue": True,
+                "green_flake_reason_code": payload_notes.get("green_flake_reason_code"),
+                "green_flake_ignored": payload_notes.get("green_flake_ignored"),
+            }
+    except Exception:  # noqa: BLE001
+        green_flake_meta = {}
+
     return {
         "ok": True,
         "offline_only": False,
@@ -1385,6 +1563,8 @@ def _label_dual_run_for_material(
         "work_root_fresh": True,
         "config_path": str(config_path),
         "apply_log": list(result.apply_log),
+        "host_suite_env": host_env.to_dict(),
+        **green_flake_meta,
     }
 
 

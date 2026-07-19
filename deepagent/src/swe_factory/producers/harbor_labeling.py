@@ -594,14 +594,19 @@ def run_python_suite(
     repo: Path,
     *,
     test_paths: Sequence[str] | None = None,
+    python_executable: str | None = None,
 ) -> SuiteOutcome:
     """Execute pytest under ``repo/tests`` (or *test_paths*) and collect node ids.
 
     ``test_paths`` lets Real-PR dual-run scope the host suite to held-out
     test files so ambient unrelated base-suite failures (not part of this PR)
     do not block green labeling.
+
+    ``python_executable`` selects the interpreter for the suite subprocess
+    (isolated host-suite venv from VAL-DMED-010). Defaults to ``sys.executable``.
     """
     env = dict(os.environ)
+    py_exe = str(python_executable).strip() if python_executable else sys.executable
     # Prefer src/ layout (click/itsdangerous/markupsafe) then flat (zipp) packages.
     # Do NOT inherit ambient PYTHONPATH (factory editable install / agent worktrees
     # can poison pytest collection on product dual-run packages).
@@ -751,7 +756,7 @@ print(
 """
     try:
         proc = subprocess.run(
-            [sys.executable, "-c", code, *targets],
+            [py_exe, "-c", code, *targets],
             cwd=str(repo),
             capture_output=True,
             text=True,
@@ -767,7 +772,7 @@ print(
     if not lines:
         raise HarborLabelError(
             "python suite produced no JSON outcome: "
-            f"rc={proc.returncode} stderr={proc.stderr[-500:]!r}"
+            f"rc={proc.returncode} stderr={proc.stderr[-500:]!r} python={py_exe!r}"
         )
     data = json.loads(lines[-1])
     return SuiteOutcome(

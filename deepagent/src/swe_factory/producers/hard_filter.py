@@ -111,6 +111,11 @@ PRODUCT_SOURCE_HUNK_FLOOR: int = 14
 #: Product keep minimum distinct product-source files (M27 DeepSWE p25; VAL-DMED-001).
 PRODUCT_MULTI_FILE_FLOOR: int = 4
 
+#: Hybrid multi-file DeepSWE-min branch (VAL-DMED-012): files≥3 admits when
+#: source additions ≥ 500 and hunks ≥ PRODUCT_SOURCE_HUNK_FLOOR.
+PRODUCT_HYBRID_MIN_SOURCE_FILES: int = 3
+PRODUCT_HYBRID_MIN_ADDED_LINES: int = 500
+
 #: Soft offline engineering floor re-export (never promote product below hard).
 SOFT_MULTI_FILE_FLOOR: int = MULTI_FILE_FLOOR
 
@@ -379,6 +384,7 @@ class HardFilterStats:
     source_files: tuple[str, ...] = ()
     test_files: tuple[str, ...] = ()
     docs_chore_files: tuple[str, ...] = ()
+    source_added_lines: int = 0
     license: str = ""
     language: str = ""
     base_commit: str = ""
@@ -583,6 +589,7 @@ def classify_pr_files(
     docs_chore: list[str] = []
     other = 0
     hunks = 0
+    added = 0
     for raw in files:
         change = _as_file_change(raw)
         path = change.path
@@ -599,6 +606,15 @@ def classify_pr_files(
             if path not in sources:
                 sources.append(path)
             hunks += count_unified_diff_hunks(change.patch)
+            # Prefer GitHub additions when present; fall back to plus-line count.
+            if change.additions > 0:
+                added += int(change.additions)
+            elif change.patch:
+                added += sum(
+                    1
+                    for ln in str(change.patch).splitlines()
+                    if ln.startswith("+") and not ln.startswith("+++")
+                )
         else:
             other += 1
     return HardFilterStats(
@@ -610,6 +626,7 @@ def classify_pr_files(
         source_files=tuple(sorted(sources)),
         test_files=tuple(sorted(tests)),
         docs_chore_files=tuple(sorted(docs_chore)),
+        source_added_lines=added,
     )
 
 
@@ -719,6 +736,7 @@ def evaluate_product_hard_filter(
         source_files=stats.source_files,
         test_files=stats.test_files,
         docs_chore_files=stats.docs_chore_files,
+        source_added_lines=stats.source_added_lines,
         license=lic_raw or lic_norm,
         language=lang,
         base_commit=pin.lower() if is_full_sha(pin) else pin,
@@ -729,6 +747,7 @@ def evaluate_product_hard_filter(
 
     reasons: list[str] = []
     details: list[str] = []
+    hybrid_admit = False
 
     if refuse_motor_hybrid:
         banned, ban_detail = is_motor_or_hybrid_identity(
@@ -767,9 +786,25 @@ def evaluate_product_hard_filter(
         reasons.append(REASON_DOCS_CHORE_ONLY)
         details.append("no product source files after docs/chore/vendor exclusion")
 
-    if stats.source_file_count < min_source_files and REASON_DOCS_CHORE_ONLY not in reasons:
-        reasons.append(REASON_MULTI_FILE_FLOOR)
-        details.append(f"product source files {stats.source_file_count} < floor {min_source_files}")
+    # Multi-file DeepSWE-min hybrid (VAL-DMED-012):
+    # files ≥ min_source_files OR (files ≥ 3 AND added ≥ 500 AND hunks ≥ floor).
+    if REASON_DOCS_CHORE_ONLY not in reasons:
+        if stats.source_file_count >= min_source_files:
+            pass
+        elif (
+            stats.source_file_count >= PRODUCT_HYBRID_MIN_SOURCE_FILES
+            and stats.source_added_lines >= PRODUCT_HYBRID_MIN_ADDED_LINES
+            and stats.source_hunk_count >= min_source_hunks
+        ):
+            hybrid_admit = True
+        else:
+            reasons.append(REASON_MULTI_FILE_FLOOR)
+            details.append(
+                f"product source files {stats.source_file_count} < floor {min_source_files} "
+                f"and hybrid branch failed (need files≥{PRODUCT_HYBRID_MIN_SOURCE_FILES} AND "
+                f"added≥{PRODUCT_HYBRID_MIN_ADDED_LINES} AND hunks≥{min_source_hunks}; "
+                f"got added={stats.source_added_lines}, hunks={stats.source_hunk_count})"
+            )
 
     if require_tests and stats.test_file_count < 1:
         reasons.append(REASON_TESTS_MISSING)
@@ -787,17 +822,24 @@ def evaluate_product_hard_filter(
             f"no suite reporter for language {lang!r}; supported={list(list_reporter_languages())}"
         )
 
+    multi_meta = {
+        "product_source_hunk_floor": min_source_hunks,
+        "product_multi_file_floor": min_source_files,
+        "soft_multi_file_floor": SOFT_MULTI_FILE_FLOOR,
+        "multi_file_rule": "files_ge_4_or_hybrid_3",
+        "multi_file_hybrid_admit": hybrid_admit,
+        "hybrid_min_source_files": PRODUCT_HYBRID_MIN_SOURCE_FILES,
+        "hybrid_min_added_lines": PRODUCT_HYBRID_MIN_ADDED_LINES,
+        "source_added_lines": stats.source_added_lines,
+    }
+
     if reasons:
         return HardFilterResult(
             accepted=False,
             reason_codes=tuple(dict.fromkeys(reasons)),
             detail="; ".join(details),
             stats=stats,
-            meta={
-                "product_source_hunk_floor": min_source_hunks,
-                "product_multi_file_floor": min_source_files,
-                "soft_multi_file_floor": SOFT_MULTI_FILE_FLOOR,
-            },
+            meta=multi_meta,
         )
 
     return HardFilterResult(
@@ -805,11 +847,7 @@ def evaluate_product_hard_filter(
         reason_codes=(REASON_OK,),
         detail="product hard filter accepted",
         stats=stats,
-        meta={
-            "product_source_hunk_floor": min_source_hunks,
-            "product_multi_file_floor": min_source_files,
-            "soft_multi_file_floor": SOFT_MULTI_FILE_FLOOR,
-        },
+        meta=multi_meta,
     )
 
 
@@ -868,6 +906,8 @@ def reject_ledger_row(
 
 
 __all__ = [
+    "PRODUCT_HYBRID_MIN_ADDED_LINES",
+    "PRODUCT_HYBRID_MIN_SOURCE_FILES",
     "PRODUCT_MULTI_FILE_FLOOR",
     "PRODUCT_SOURCE_HUNK_FLOOR",
     "REASON_BASE_SHA_INVALID",

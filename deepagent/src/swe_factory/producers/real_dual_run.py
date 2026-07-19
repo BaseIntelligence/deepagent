@@ -71,9 +71,156 @@ RDUAL_EMPTY_TEST_PATCH = "RDUAL_EMPTY_TEST_PATCH"
 RDUAL_PATCH_APPLY = "RDUAL_PATCH_APPLY"
 RDUAL_FLAKE = LABEL_FLAKE_REJECT
 
+# Green-base flake soft-continue (VAL-DMED-011). Documented non-held-out /
+# P2P-class noise that fails green0 on some SHAs while dual-run F2P still forms.
+REASON_GREEN_FLAKE_SOFT_CONTINUE = "green_base_flake_soft_continue"
+REASON_GREEN_FLAKE_REFUSED = "green_base_flake_refused"
+
+#: Exact or substring patterns for documented green flakes (non-held-out).
+#: Never use this for held-out F2P cohort nodes — see evaluate_green_base_flakes.
+DEFAULT_GREEN_FLAKE_ALLOWLIST: tuple[str, ...] = (
+    # werkzeug Exceptions / response body param matrix (RequestRedirect is
+    # ambient on some base SHAs and unrelated to typical PR F2P suites).
+    "tests.test_exceptions.test_response_body[RequestRedirect]",
+    "test_response_body[RequestRedirect]",
+)
+
 
 class RealDualRunError(HarborLabelError):
     """Raised when Real-PR dual-run labeling / isolation fails."""
+
+
+@dataclass(frozen=True, slots=True)
+class GreenFlakeDecision:
+    """Outcome of green-base flake policy evaluation (VAL-DMED-011)."""
+
+    soft_continue: bool
+    reason_code: str
+    detail: str
+    ignored_nodes: tuple[str, ...] = ()
+    f2p_count: int = 0
+    residual_failures: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "soft_continue": self.soft_continue,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "ignored_nodes": list(self.ignored_nodes),
+            "f2p_count": self.f2p_count,
+            "residual_failures": list(self.residual_failures),
+        }
+
+
+def match_green_flake_allowlist(
+    nodes: Sequence[str],
+    *,
+    allowlist: Sequence[str] = DEFAULT_GREEN_FLAKE_ALLOWLIST,
+) -> list[str]:
+    """Return nodes that match documented green-flake allowlist patterns."""
+    patterns = [str(p).strip() for p in allowlist if str(p).strip()]
+    matched: list[str] = []
+    for node in nodes:
+        n = str(node).strip()
+        if not n:
+            continue
+        for pat in patterns:
+            if n == pat or pat in n:
+                matched.append(n)
+                break
+    return list(dict.fromkeys(matched))
+
+
+def evaluate_green_base_flakes(
+    *,
+    green_failed: Sequence[str],
+    green_errors: Sequence[str] = (),
+    green_passed: Sequence[str] = (),
+    broken_failed: Sequence[str] = (),
+    broken_passed: Sequence[str] = (),
+    min_f2p: int = 5,
+    allowlist: Sequence[str] = DEFAULT_GREEN_FLAKE_ALLOWLIST,
+) -> GreenFlakeDecision:
+    """Decide whether green0 noise may soft-continue (VAL-DMED-011).
+
+    Soft-continue only when:
+    1. Every green fail/error is allowlisted
+    2. Allowlisted nodes are **not** potential F2P (fail@base) — never mask
+       held-out / PR-cohort tests
+    3. Projected F2P cohort size (broken_fail ∩ green_pass) ≥ min_f2p
+    """
+    g_fail = {str(x).strip() for x in green_failed if str(x).strip()}
+    g_err = {str(x).strip() for x in green_errors if str(x).strip()}
+    green_issues = sorted(g_fail | g_err)
+    if not green_issues:
+        return GreenFlakeDecision(
+            soft_continue=True,
+            reason_code="green_clean",
+            detail="green suite has no failed/error nodes",
+            ignored_nodes=(),
+            f2p_count=0,
+        )
+
+    matched = match_green_flake_allowlist(green_issues, allowlist=allowlist)
+    matched_set = set(matched)
+    residual = sorted(set(green_issues) - matched_set)
+    if residual:
+        return GreenFlakeDecision(
+            soft_continue=False,
+            reason_code=REASON_GREEN_FLAKE_REFUSED,
+            detail=f"non-allowlisted green failures: {residual}",
+            residual_failures=tuple(residual),
+            f2p_count=0,
+        )
+
+    # Abuse guard: never soft-ignore nodes that fail on broken (potential F2P /
+    # held-out cohort). Gold failing those means dual-truth is broken, not flaky.
+    b_fail = {str(x).strip() for x in broken_failed if str(x).strip()}
+    held_out_hits = sorted(matched_set & b_fail)
+    if held_out_hits:
+        return GreenFlakeDecision(
+            soft_continue=False,
+            reason_code=REASON_GREEN_FLAKE_REFUSED,
+            detail=(
+                "green-flake allowlist abuse refused: nodes also fail@base "
+                f"(potential F2P / held-out): {held_out_hits}"
+            ),
+            residual_failures=tuple(held_out_hits),
+            ignored_nodes=tuple(matched),
+            f2p_count=0,
+        )
+
+    g_pass = {str(x).strip() for x in green_passed if str(x).strip()}
+    # Projected F2P after ignoring allowlisted green noise (noise not in g_pass).
+    f2p = sorted(b_fail & g_pass)
+    f2p_count = len(f2p)
+    try:
+        min_n = int(min_f2p)
+    except (TypeError, ValueError):
+        min_n = 5
+    if min_n < 1:
+        min_n = 1
+    if f2p_count < min_n:
+        return GreenFlakeDecision(
+            soft_continue=False,
+            reason_code=REASON_GREEN_FLAKE_REFUSED,
+            detail=(
+                f"projected F2P count {f2p_count} < MIN_F2P={min_n} "
+                "after green-flake filter; soft-continue refused"
+            ),
+            ignored_nodes=tuple(matched),
+            f2p_count=f2p_count,
+        )
+
+    return GreenFlakeDecision(
+        soft_continue=True,
+        reason_code=REASON_GREEN_FLAKE_SOFT_CONTINUE,
+        detail=(
+            f"soft-continue green flakes {matched} (F2P={f2p_count}≥{min_n}; non-held-out only)"
+        ),
+        ignored_nodes=tuple(matched),
+        f2p_count=f2p_count,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -661,12 +808,18 @@ def labels_from_real_suite_outcomes(
     *,
     require_nonempty_f2p: bool = True,
     require_green_clean: bool = True,
+    allow_green_flake: bool = False,
+    min_f2p_nodes: int | None = None,
+    green_flake_allowlist: Sequence[str] = DEFAULT_GREEN_FLAKE_ALLOWLIST,
     notes: Mapping[str, Any] | None = None,
 ) -> DualRunLabels:
     """F2P/P2P from real suite outcomes; broken fail side = failed ∪ errors.
 
     Setup/collection errors on base (common when held-out tests import missing
     gold symbols) count as F2P when gold is green (VAL-RDUAL-002).
+
+    When *allow_green_flake* is True (VAL-DMED-011), documented non-held-out green
+    fails may soft-continue if projected F2P still meets *min_f2p_nodes*.
     """
     from swe_factory.producers.harbor_labeling import (  # local: avoid cycle
         LABEL_EMPTY_F2P as _EMPTY,
@@ -684,21 +837,68 @@ def labels_from_real_suite_outcomes(
     green_product_failed = list(filter_suite_product_nodes(green.failed))
     green_product_errors = list(filter_suite_product_nodes(green.errors))
     green_product_passed = list(filter_suite_product_nodes(green.passed))
-    if require_green_clean and green_product_failed:
-        raise _HLE(f"green suite must be clean for labeling; failed={green_product_failed}")
-    if green_product_errors:
+
+    # Union failed + errors on the broken/base side early (flake policy needs it).
+    broken_fail = set(filter_suite_product_nodes(tuple(set(broken.failed) | set(broken.errors))))
+    broken_pass = set(filter_suite_product_nodes(broken.passed)) - broken_fail
+    green_pass = set(filter_suite_product_nodes(green.passed))
+    green_fail = set(filter_suite_product_nodes(green.failed))
+
+    flake_notes: dict[str, Any] = {}
+    flake_reason_codes: list[str] = []
+    if require_green_clean and (green_product_failed or green_product_errors):
+        if allow_green_flake:
+            try:
+                from swe_factory.pipeline.hardness_floors import resolve_min_f2p_nodes
+
+                min_f2p = (
+                    int(min_f2p_nodes) if min_f2p_nodes is not None else resolve_min_f2p_nodes()
+                )
+            except Exception:  # noqa: BLE001
+                min_f2p = int(min_f2p_nodes) if min_f2p_nodes is not None else 5
+                min_f2p = min_f2p if min_f2p >= 1 else 5
+            decision = evaluate_green_base_flakes(
+                green_failed=green_product_failed,
+                green_errors=green_product_errors,
+                green_passed=green_product_passed,
+                broken_failed=sorted(broken_fail),
+                broken_passed=sorted(broken_pass),
+                min_f2p=min_f2p,
+                allowlist=green_flake_allowlist,
+            )
+            if not decision.soft_continue:
+                raise _HLE(
+                    f"green suite must be clean for labeling; "
+                    f"flake_policy={decision.reason_code}: {decision.detail}; "
+                    f"failed={green_product_failed} errors={green_product_errors}",
+                    reason_codes=(decision.reason_code,),
+                    details=decision.to_dict(),
+                )
+            # Soft-continue: drop allowlisted green noise from failed set.
+            ignore = set(decision.ignored_nodes)
+            green_fail = green_fail - ignore
+            green_product_failed = [n for n in green_product_failed if n not in ignore]
+            green_product_errors = [n for n in green_product_errors if n not in ignore]
+            flake_notes = {
+                "green_flake_soft_continue": True,
+                "green_flake_reason_code": decision.reason_code,
+                "green_flake_ignored": list(decision.ignored_nodes),
+                "green_flake_detail": decision.detail,
+            }
+            flake_reason_codes.append(decision.reason_code)
+        else:
+            if green_product_failed:
+                raise _HLE(f"green suite must be clean for labeling; failed={green_product_failed}")
+            if green_product_errors:
+                raise _HLE(f"green suite collection errors: {green_product_errors}")
+    elif green_product_errors and not allow_green_flake:
         raise _HLE(f"green suite collection errors: {green_product_errors}")
+
     if not green_product_passed:
         raise _HLE("green suite produced zero passing node ids")
 
-    # Union failed + errors on the broken/base side (VAL-RDUAL / library note).
-    # Strip lint-plugin node ids (ruff/mypy) so dual-run labels stay product tests.
-    green_pass = set(filter_suite_product_nodes(green.passed))
-    green_fail = set(filter_suite_product_nodes(green.failed))
-    broken_fail = set(filter_suite_product_nodes(tuple(set(broken.failed) | set(broken.errors))))
     # Prefer fail over pass when a reporter emits both for the same node id
     # (param re-collection / multi-report edges can double-list rare cases).
-    broken_pass = set(filter_suite_product_nodes(broken.passed)) - broken_fail
     f2p, p2p = _cohorts(
         green_passed=green_pass,
         green_failed=green_fail,
@@ -738,6 +938,8 @@ def labels_from_real_suite_outcomes(
         "p2p_count": len(p2p),
         "broken_errors_unioned": True,
     }
+    if flake_notes:
+        note_blob.update(flake_notes)
     if notes:
         note_blob.update(dict(notes))
     # Store broken with errors folded into failed for audit parity.
@@ -757,7 +959,7 @@ def labels_from_real_suite_outcomes(
         all_nodes=all_nodes,
         notes=note_blob,
         accepted=True,
-        reason_codes=(),
+        reason_codes=tuple(flake_reason_codes),
     )
 
 
@@ -767,21 +969,29 @@ def run_real_suite(
     *,
     offline_outcome: SuiteOutcome | None = None,
     test_paths: Sequence[str] = (),
+    python_executable: str | None = None,
 ) -> SuiteOutcome:
     """Execute the real suite reporter (or inject locked offline outcome).
 
     ``test_paths`` scopes Python dual-run to held-out files when present so
     unrelated ambient suite fails (other modules) do not block green labeling.
+
+    ``python_executable`` selects an isolated host-suite interpreter (VAL-DMED-010)
+    so dual-run pytest never depends on factory site-packages.
     """
     lang = normalize_reporter_lang(language)
     rep_meta = assert_real_suite_reporter(lang)
     if offline_outcome is not None:
         # Offline / fixture: trust caller-provided real-reporter-shaped outcome.
         return offline_outcome
-    if lang == "python" and test_paths:
+    if lang == "python":
         from swe_factory.producers.harbor_labeling import run_python_suite
 
-        out = run_python_suite(Path(repo), test_paths=list(test_paths))
+        out = run_python_suite(
+            Path(repo),
+            test_paths=list(test_paths) if test_paths else None,
+            python_executable=python_executable,
+        )
     else:
         out = run_language_suite(Path(repo), lang)
     # Annotate identity for logs
@@ -806,6 +1016,10 @@ def label_real_pr_dual_run(
     offline_gold_outcome: SuiteOutcome | None = None,
     grade: Mapping[str, Any] | None = None,
     source_track: str = REAL_PR_SOURCE_TRACK,
+    allow_green_flake: bool = True,
+    min_f2p_nodes: int | None = None,
+    green_flake_allowlist: Sequence[str] = DEFAULT_GREEN_FLAKE_ALLOWLIST,
+    python_executable: str | None = None,
 ) -> RealDualRunResult:
     """Dual-run base vs gold on the **real** language suite (VAL-RDUAL-001..004).
 
@@ -893,8 +1107,18 @@ def label_real_pr_dual_run(
                 base_out = offline_base_outcome
                 gold_out = offline_gold_outcome
             else:
-                base_out = run_real_suite(prep.base_workspace, lang, test_paths=scoped_test_paths)
-                gold_out = run_real_suite(prep.gold_workspace, lang, test_paths=scoped_test_paths)
+                base_out = run_real_suite(
+                    prep.base_workspace,
+                    lang,
+                    test_paths=scoped_test_paths,
+                    python_executable=python_executable,
+                )
+                gold_out = run_real_suite(
+                    prep.gold_workspace,
+                    lang,
+                    test_paths=scoped_test_paths,
+                    python_executable=python_executable,
+                )
             base_outcomes.append(base_out)
             gold_outcomes.append(gold_out)
             labels = labels_from_real_suite_outcomes(
@@ -902,6 +1126,9 @@ def label_real_pr_dual_run(
                 base_out,  # broken = base
                 require_nonempty_f2p=require_nonempty_f2p,
                 require_green_clean=True,
+                allow_green_flake=allow_green_flake,
+                min_f2p_nodes=min_f2p_nodes,
+                green_flake_allowlist=green_flake_allowlist,
                 notes={
                     "method": "real_pr_dual_run_base_vs_gold",
                     "suite_command": cmd,
@@ -909,6 +1136,7 @@ def label_real_pr_dual_run(
                     "held_out": "test.patch",
                     "source_track": source_track,
                     "apply_log": list(prep.apply_log),
+                    "host_python": python_executable or "",
                 },
             )
             label_runs.append(labels)
@@ -1025,6 +1253,29 @@ def label_real_pr_dual_run(
                 extra=extra_cfg,
             )
 
+        result_notes: dict[str, Any] = {
+            "apply_log": list(prep.apply_log),
+            "test_patch_paths": list(prep.test_patch_paths),
+            "solution_paths": list(prep.solution_paths),
+            "agent_isolation_hits": agent_hits,
+            "dual_runs": n,
+            "host_python": python_executable or "",
+        }
+        # Surface green-flake soft-continue stamps (VAL-DMED-011).
+        for key in (
+            "green_flake_soft_continue",
+            "green_flake_reason_code",
+            "green_flake_ignored",
+            "green_flake_detail",
+        ):
+            if isinstance(labels.notes, Mapping) and key in labels.notes:
+                result_notes[key] = labels.notes[key]
+        if labels.reason_codes:
+            result_notes["label_reason_codes"] = list(labels.reason_codes)
+        if labels.notes.get("green_flake_soft_continue"):
+            config_payload["green_flake_soft_continue"] = True
+            config_payload["green_flake_reason_code"] = labels.notes.get("green_flake_reason_code")
+
         return RealDualRunResult(
             labels=labels,
             f2p_node_ids=labels.f2p_node_ids,
@@ -1038,14 +1289,8 @@ def label_real_pr_dual_run(
             apply_log=prep.apply_log,
             test_patch_applied=True,
             accepted=True,
-            reason_codes=(),
-            notes={
-                "apply_log": list(prep.apply_log),
-                "test_patch_paths": list(prep.test_patch_paths),
-                "solution_paths": list(prep.solution_paths),
-                "agent_isolation_hits": agent_hits,
-                "dual_runs": n,
-            },
+            reason_codes=tuple(labels.reason_codes),
+            notes=result_notes,
         )
     finally:
         if prep.owned_temp:
@@ -1197,13 +1442,17 @@ def flake_reject_on_disagreement(
 
 
 __all__ = [
+    "DEFAULT_GREEN_FLAKE_ALLOWLIST",
     "REAL_PR_SOURCE_TRACK",
     "REAL_SUITE_COMMANDS",
+    "REASON_GREEN_FLAKE_REFUSED",
+    "REASON_GREEN_FLAKE_SOFT_CONTINUE",
     "RDUAL_AGENT_LEAK",
     "RDUAL_EMPTY_TEST_PATCH",
     "RDUAL_FLAKE",
     "RDUAL_PATCH_APPLY",
     "RDUAL_STUB_CONFIG",
+    "GreenFlakeDecision",
     "RealDualRunError",
     "RealDualRunResult",
     "VerifierPrepareResult",
@@ -1211,16 +1460,18 @@ __all__ = [
     "apply_unified_patch",
     "assert_real_suite_reporter",
     "assert_verifier_prepare_applies_test_patch",
+    "evaluate_green_base_flakes",
     "filter_suite_product_nodes",
-    "suite_paths_from_node_ids",
     "flake_reject_on_disagreement",
     "is_lint_plugin_node",
     "label_real_pr_dual_run",
     "label_real_pr_from_outcomes",
     "labels_from_real_suite_outcomes",
+    "match_green_flake_allowlist",
     "paths_touched_by_unified_diff",
     "prepare_verifier_dual_workspaces",
     "refuse_stub_only_config",
     "run_real_suite",
     "suite_command_for",
+    "suite_paths_from_node_ids",
 ]

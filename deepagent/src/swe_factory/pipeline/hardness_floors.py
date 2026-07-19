@@ -1,8 +1,9 @@
 """Product hardness floors + anti-easy policy (M21 / M27 DeepSWE-median).
 
-Fail-closed floors for product and live-generate dests (VAL-DMED-001):
+Fail-closed floors for product and live-generate dests (VAL-DMED-001 / VAL-DMED-012):
 
-* source files ≥ ``PRODUCT_MULTI_FILE_FLOOR`` (default **4**, DeepSWE p25)
+* multi-file: files ≥ **4** **OR** (files ≥ **3** AND added ≥ **500** AND hunks ≥ **14**)
+  (packaging-class hybrid admit; qs/thin 2-file still refuse)
 * source hunks ≥ ``PRODUCT_SOURCE_HUNK_FLOOR`` (default **14**, DeepSWE p50)
 * gold added lines ≥ ``PRODUCT_MIN_ADDED_LINES`` (default **400**, DeepSWE min≈438)
 * F2P node count ≥ ``MIN_F2P_NODES`` / ``DEFAULT_MIN_F2P_NODES`` (default **5**)
@@ -48,6 +49,12 @@ DEFAULT_MIN_F2P_NODES: int = 5
 
 #: Minimum gold solution.patch plus-lines (unified diff, excluding ``+++`` headers).
 PRODUCT_MIN_ADDED_LINES: int = 400
+
+#: Hybrid multi-file DeepSWE-min branch (VAL-DMED-012): files≥3 admits when
+#: gold_added ≥ this floor **and** hunks ≥ PRODUCT_SOURCE_HUNK_FLOOR.
+#: packaging-1120 class (3 files, added≈882, hunks=24) qualifies; thin 3-file does not.
+PRODUCT_HYBRID_MIN_SOURCE_FILES: int = 3
+PRODUCT_HYBRID_MIN_ADDED_LINES: int = 500
 
 #: Env keys for MIN_F2P_NODES override (first positive wins).
 _MIN_F2P_ENV_KEYS: tuple[str, ...] = (
@@ -141,6 +148,43 @@ def count_gold_added_lines(solution_patch: str | None) -> int:
     if not solution_patch or not str(solution_patch).strip():
         return 0
     return len(_PLUS_LINE_RE.findall(str(solution_patch)))
+
+
+def multi_file_floor_ok(
+    *,
+    source_files: int,
+    added_lines: int | None = None,
+    hunks: int | None = None,
+    min_source_files: int = PRODUCT_MULTI_FILE_FLOOR,
+    hybrid_min_files: int = PRODUCT_HYBRID_MIN_SOURCE_FILES,
+    hybrid_min_added: int = PRODUCT_HYBRID_MIN_ADDED_LINES,
+    hybrid_min_hunks: int = PRODUCT_SOURCE_HUNK_FLOOR,
+) -> bool:
+    """DeepSWE-min hybrid multi-file admit (VAL-DMED-012).
+
+    True when ``source_files ≥ min_source_files`` (default 4) **or** the hybrid
+    branch holds: ``files ≥ 3 AND added ≥ 500 AND hunks ≥ 14``.
+
+    packaging-class large refactors (3 files, large gold) pass; qs-class thin
+    2-file APIs and thin 3-file packs fail.
+    """
+    try:
+        n_files = int(source_files)
+    except (TypeError, ValueError):
+        return False
+    if n_files >= int(min_source_files):
+        return True
+    if n_files < int(hybrid_min_files):
+        return False
+    try:
+        added = int(added_lines) if added_lines is not None else -1
+    except (TypeError, ValueError):
+        added = -1
+    try:
+        n_hunks = int(hunks) if hunks is not None else -1
+    except (TypeError, ValueError):
+        n_hunks = -1
+    return added >= int(hybrid_min_added) and n_hunks >= int(hybrid_min_hunks)
 
 
 def resolve_min_f2p_nodes(
@@ -374,10 +418,34 @@ def check_product_hardness_floors(
                 details.append("thin F2P≈1 classified as easy; anti-easy policy drop")
 
     # Only when source file list was provided or scraped (unknown → skip soft).
+    # Hybrid multi-file (VAL-DMED-012): files≥4 OR (files≥3 AND added≥500 AND hunks≥14).
     have_source_signal = source_files is not None or (solution_patch is not None and bool(sources))
-    if require_multi_file and have_source_signal and src_count < min_source_files:
-        reasons.append(REASON_MULTI_FILE_FLOOR)
-        details.append(f"product source files {src_count} < multi-file floor {min_source_files}")
+    hybrid_admit = False
+    if require_multi_file and have_source_signal:
+        if multi_file_floor_ok(
+            source_files=src_count,
+            added_lines=added,
+            hunks=hunk,
+            min_source_files=min_source_files,
+            hybrid_min_files=PRODUCT_HYBRID_MIN_SOURCE_FILES,
+            hybrid_min_added=PRODUCT_HYBRID_MIN_ADDED_LINES,
+            hybrid_min_hunks=min_source_hunks,
+        ):
+            if src_count < min_source_files:
+                hybrid_admit = True
+                meta["multi_file_hybrid_admit"] = True
+                meta["multi_file_rule"] = "files_ge_4_or_hybrid_3"
+        else:
+            reasons.append(REASON_MULTI_FILE_FLOOR)
+            details.append(
+                f"product source files {src_count} < multi-file floor {min_source_files} "
+                f"and hybrid branch failed "
+                f"(need files≥{PRODUCT_HYBRID_MIN_SOURCE_FILES} AND "
+                f"added≥{PRODUCT_HYBRID_MIN_ADDED_LINES} AND hunks≥{min_source_hunks}; "
+                f"got added={added}, hunks={hunk})"
+            )
+    meta.setdefault("multi_file_rule", "files_ge_4_or_hybrid_3")
+    meta["multi_file_hybrid_admit"] = bool(hybrid_admit)
 
     if require_hunk_floor and hunk is not None and hunk < min_source_hunks:
         reasons.append(REASON_SOURCE_HUNKS_BELOW_FLOOR)
@@ -604,9 +672,12 @@ def anti_easy_policy_summary() -> dict[str, Any]:
             "min_f2p_env_keys": list(_MIN_F2P_ENV_KEYS),
             "source_hunk_floor": PRODUCT_SOURCE_HUNK_FLOOR,
             "multi_file_floor": PRODUCT_MULTI_FILE_FLOOR,
+            "hybrid_min_source_files": PRODUCT_HYBRID_MIN_SOURCE_FILES,
+            "hybrid_min_added_lines": PRODUCT_HYBRID_MIN_ADDED_LINES,
             "min_added_lines": PRODUCT_MIN_ADDED_LINES,
             "min_added_env_keys": list(_MIN_ADDED_ENV_KEYS),
             "band": "deepswe_median_m27",
+            "multi_file_rule": "files_ge_4_or_hybrid_3",
         },
         "refuse_reason_codes": {
             REASON_F2P_BELOW_FLOOR: (
@@ -615,7 +686,11 @@ def anti_easy_policy_summary() -> dict[str, Any]:
             REASON_THIN_F2P_EASY: "thin F2P≈1 fingerprint (easy class)",
             REASON_EMPTY_F2P: "empty F2P node ids",
             REASON_SOURCE_HUNKS_BELOW_FLOOR: f"source hunks < {PRODUCT_SOURCE_HUNK_FLOOR}",
-            REASON_MULTI_FILE_FLOOR: f"product sources < {PRODUCT_MULTI_FILE_FLOOR}",
+            REASON_MULTI_FILE_FLOOR: (
+                f"product sources < {PRODUCT_MULTI_FILE_FLOOR} and hybrid "
+                f"(files≥{PRODUCT_HYBRID_MIN_SOURCE_FILES}+added≥{PRODUCT_HYBRID_MIN_ADDED_LINES}"
+                f"+hunks≥{PRODUCT_SOURCE_HUNK_FLOOR}) failed"
+            ),
             REASON_ADDED_LINES_BELOW_FLOOR: (
                 f"gold solution.patch plus-lines < {PRODUCT_MIN_ADDED_LINES}"
             ),
@@ -626,7 +701,10 @@ def anti_easy_policy_summary() -> dict[str, Any]:
             "never the product / live_generate default."
         ),
         "notes": [
-            "M27 DeepSWE-median: files≥4, hunks≥14, added≥400, F2P≥5.",
+            "M27 DeepSWE-median: files≥4 OR (files≥3 & added≥500 & hunks≥14); "
+            "hunks≥14, added≥400, F2P≥5 otherwise.",
+            "packaging-1120 class (3 files, large added) hybrid-admits structural.",
+            "qs/thin 2-file packs still refuse.",
             "Thin F2P / thin gold packs refuse product dest by default.",
             "Intrinsic EASY_REQUEST (prompt+gold) may drop via curate (M25/M27).",
             "Model dual-success alone never drops hardness (M25).",
@@ -638,6 +716,8 @@ def anti_easy_policy_summary() -> dict[str, Any]:
 
 __all__ = [
     "DEFAULT_MIN_F2P_NODES",
+    "PRODUCT_HYBRID_MIN_ADDED_LINES",
+    "PRODUCT_HYBRID_MIN_SOURCE_FILES",
     "PRODUCT_MIN_ADDED_LINES",
     "PRODUCT_MULTI_FILE_FLOOR",
     "PRODUCT_SOURCE_HUNK_FLOOR",
@@ -657,6 +737,7 @@ __all__ = [
     "count_gold_added_lines",
     "hardness_result_from_pack_dir",
     "is_hardness_enforced_dest",
+    "multi_file_floor_ok",
     "refuse_product_hardness_floors",
     "resolve_min_added_lines",
     "resolve_min_f2p_nodes",
