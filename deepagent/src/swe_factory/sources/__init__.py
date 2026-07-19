@@ -28,16 +28,22 @@ from swe_factory.sources.discover import (
     sanitize_api_candidate,
     validate_hybrid_curated,
 )
+
+# Funnel / monorepo / clone cache are importable as submodules to avoid cycles:
+#   swe_factory.sources.funnel, .monorepo, .clone_cache
+# Re-export primary symbols for package consumers after skip_reasons is loaded.
+from swe_factory.sources.gh_archive import (
+    DISCOVERY_PATH_GH_ARCHIVE,
+    discover_from_gh_archive_lines,
+    discover_from_gh_archive_path,
+    write_gh_archive_candidates_jsonl,
+)
 from swe_factory.sources.git_mine import (
     GitMineError,
     GitMineReport,
     mine_allowlist_git_only,
     probe_oxylabs_live,
 )
-
-# Funnel / monorepo / clone cache are importable as submodules to avoid cycles:
-#   swe_factory.sources.funnel, .monorepo, .clone_cache
-# Re-export primary symbols for package consumers after skip_reasons is loaded.
 from swe_factory.sources.github import (
     DISCOVERY_PATH_LIST_PULLS,
     DISCOVERY_PATH_SEARCH,
@@ -48,6 +54,8 @@ from swe_factory.sources.github import (
     GitHubError,
     GitHubRateLimitError,
     build_merged_pr_search_query,
+    redact_proxy_url,
+    resolve_github_proxy_url,
     resolve_github_token,
 )
 from swe_factory.sources.license_gate import (
@@ -101,6 +109,7 @@ __all__ = [
     "DiscoverReject",
     "DiscoverReport",
     "DISCOVERY_PATHS",
+    "DISCOVERY_PATH_GH_ARCHIVE",
     "DISCOVERY_PATH_LIST_PULLS",
     "DISCOVERY_PATH_SEARCH",
     "DictGitHubTransport",
@@ -124,6 +133,8 @@ __all__ = [
     "build_merged_pr_search_query",
     "classify_license",
     "describe_skip_reason",
+    "discover_from_gh_archive_lines",
+    "discover_from_gh_archive_path",
     "discover_merge_range_from_git",
     "discover_offline_fixture",
     "document_all_skip_reasons",
@@ -142,8 +153,10 @@ __all__ = [
     "normalize_reason_code",
     "probe_oxylabs_live",
     "real_pr_seed_pool",
+    "redact_proxy_url",
     "remote_mine_seeds",
     "require_full_sha",
+    "resolve_github_proxy_url",
     "resolve_github_token",
     "resolve_oxylabs_credentials",
     "sanitize_api_candidate",
@@ -153,4 +166,5 @@ __all__ = [
     "summary_seed_pool_for_select5",
     "under_supply_reasons",
     "validate_hybrid_curated",
+    "write_gh_archive_candidates_jsonl",
 ]

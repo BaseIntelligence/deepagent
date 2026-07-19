@@ -49,6 +49,11 @@ from swe_factory.pipeline.intrinsic_difficulty import (
     intrinsic_from_pack_dir,
 )
 from swe_factory.pipeline.prompt_alignment import alignment_result_from_pack_dir
+from swe_factory.pipeline.repo_diversity import (
+    DEFAULT_MAX_PACKS_PER_REPO,
+    apply_max_packs_per_repo,
+    normalize_upstream_repo,
+)
 
 CURSOR_SCHEMA = "deepagent.prod_hard_curation.v1"
 DEFAULT_SRC = Path("datasets/test_n10")
@@ -1007,6 +1012,127 @@ def force_drop_from_scoreboard(
     return drops, report
 
 
+# Unit-test / offline placeholder hosts — diversity cap must not collapse fixture packs
+# that all share a synthetic URL (tests/test_curate_prod_hard.py uses example/x).
+_DIVERSITY_IGNORE_OWNERS: frozenset[str] = frozenset(
+    {
+        "example",
+        "examples",
+        "test",
+        "tests",
+        "fixture",
+        "fixtures",
+        "local",
+    }
+)
+
+
+def _repo_for_pack(
+    tid: str,
+    *,
+    pack_dir: Path,
+    pack_row: Mapping[str, Any] | None,
+) -> str:
+    """Best-effort upstream owner/name for diversity cap (VAL-DCOV-003)."""
+
+    def _accept(norm: str) -> str:
+        if not norm or "/" not in norm:
+            return ""
+        owner = norm.split("/", 1)[0].lower()
+        if owner in _DIVERSITY_IGNORE_OWNERS:
+            return ""
+        return norm
+
+    if pack_row:
+        for key in ("repository_url", "repo", "upstream_repo"):
+            accepted = _accept(normalize_upstream_repo(str(pack_row.get(key) or "")))
+            if accepted:
+                return accepted
+    toml_path = pack_dir / "task.toml"
+    if toml_path.is_file():
+        try:
+            text = toml_path.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        for line in text.splitlines():
+            if "repository_url" in line and "=" in line:
+                raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                accepted = _accept(normalize_upstream_repo(raw))
+                if accepted:
+                    return accepted
+    # Fallback: realpr-<name>-N → unknown; leave empty so diversity pass skips.
+    return ""
+
+
+def _hardness_score_for_diversity(d: PackDisposition) -> float:
+    """Prefer denser packs when capping >max_packs_per_repo within one repo."""
+    hunks = float(d.source_hunk_count or 0)
+    f2p = float(d.f2p_count or 0)
+    return hunks * 10.0 + f2p
+
+
+def apply_repo_diversity_cap(
+    dispositions: Sequence[PackDisposition],
+    *,
+    max_packs_per_repo: int = DEFAULT_MAX_PACKS_PER_REPO,
+) -> list[PackDisposition]:
+    """Flip excess same-repo keeps to drops (max 2/repo default, M28).
+
+    Only operates on currently-kept dispositions. Prefers higher hunk/F2P score.
+    """
+    keepers = [d for d in dispositions if d.keep]
+    if not keepers:
+        return list(dispositions)
+    items: list[dict[str, Any]] = []
+    for d in keepers:
+        repo = ""
+        if d.meta:
+            repo = str(d.meta.get("repo") or d.meta.get("repository_url") or "")
+        items.append(
+            {
+                "pack_id": d.task_id,
+                "repo": repo,
+                "score": _hardness_score_for_diversity(d),
+            }
+        )
+    _kept, dropped = apply_max_packs_per_repo(
+        items,
+        max_packs=max_packs_per_repo,
+        score_key="score",
+    )
+    drop_ids = {str(row.get("pack_id")) for row in dropped}
+    if not drop_ids:
+        return list(dispositions)
+    out: list[PackDisposition] = []
+    for d in dispositions:
+        if d.task_id in drop_ids and d.keep:
+            out.append(
+                PackDisposition(
+                    task_id=d.task_id,
+                    keep=False,
+                    reason_code="max_packs_per_repo",
+                    detail=(
+                        f"Repo diversity cap: >{max_packs_per_repo} certified packs "
+                        f"for one upstream repo (M28 / VAL-DCOV-003)."
+                    ),
+                    alignment_ok=d.alignment_ok,
+                    hardness_ok=d.hardness_ok,
+                    dual_truth_ok=d.dual_truth_ok,
+                    f2p_count=d.f2p_count,
+                    source_hunk_count=d.source_hunk_count,
+                    solution_reward=d.solution_reward,
+                    null_reward=d.null_reward,
+                    panel_verdict=d.panel_verdict,
+                    panel_rule=d.panel_rule,
+                    frontier_pass_at_k=d.frontier_pass_at_k,
+                    meta={**dict(d.meta), "diversity_capped": True},
+                )
+            )
+        else:
+            out.append(d)
+    return out
+
+
 def curate_dispositions(
     src: Path | str,
     *,
@@ -1017,6 +1143,7 @@ def curate_dispositions(
     include_explicit_drops: bool = True,
     drop_on_solve_all: bool = False,
     apply_intrinsic: bool = True,
+    max_packs_per_repo: int | None = DEFAULT_MAX_PACKS_PER_REPO,
 ) -> list[PackDisposition]:
     """Score every pack under *src*.
 
@@ -1028,6 +1155,9 @@ def curate_dispositions(
 
     Scoreboard rows also annotate ``panel_row`` so dual solve-all keeps surface as
     ``keep_despite_model_solve_all`` rather than bare ``keep_hard_dual_truth``.
+
+    *max_packs_per_repo* (default 2, M28): after per-pack gates, cap certified
+    keeps per upstream repo. Pass ``None`` to disable the diversity guard.
     """
     src_path = Path(src)
     task_ids = list_pack_task_ids(src_path)
@@ -1060,17 +1190,42 @@ def curate_dispositions(
 
     out: list[PackDisposition] = []
     for tid in task_ids:
-        out.append(
-            decide_pack(
-                tid,
-                pack_dir=src_path / "tasks" / tid,
-                pack_row=pack_idx.get(tid),
-                panel_row=panel_idx.get(tid),
-                force_drop=merged_drop,
-                min_f2p_nodes=min_f2p_nodes,
-                apply_intrinsic=apply_intrinsic,
-            )
+        pack_row = pack_idx.get(tid)
+        pack_dir = src_path / "tasks" / tid
+        disp = decide_pack(
+            tid,
+            pack_dir=pack_dir,
+            pack_row=pack_row,
+            panel_row=panel_idx.get(tid),
+            force_drop=merged_drop,
+            min_f2p_nodes=min_f2p_nodes,
+            apply_intrinsic=apply_intrinsic,
         )
+        # Attach repo onto meta for diversity cap.
+        repo = _repo_for_pack(tid, pack_dir=pack_dir, pack_row=pack_row)
+        if repo:
+            meta = dict(disp.meta)
+            meta["repo"] = repo
+            disp = PackDisposition(
+                task_id=disp.task_id,
+                keep=disp.keep,
+                reason_code=disp.reason_code,
+                detail=disp.detail,
+                alignment_ok=disp.alignment_ok,
+                hardness_ok=disp.hardness_ok,
+                dual_truth_ok=disp.dual_truth_ok,
+                f2p_count=disp.f2p_count,
+                source_hunk_count=disp.source_hunk_count,
+                solution_reward=disp.solution_reward,
+                null_reward=disp.null_reward,
+                panel_verdict=disp.panel_verdict,
+                panel_rule=disp.panel_rule,
+                frontier_pass_at_k=disp.frontier_pass_at_k,
+                meta=meta,
+            )
+        out.append(disp)
+    if max_packs_per_repo is not None and max_packs_per_repo > 0:
+        out = apply_repo_diversity_cap(out, max_packs_per_repo=max_packs_per_repo)
     return out
 
 

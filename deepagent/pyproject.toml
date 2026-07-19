@@ -15,6 +15,10 @@ dependencies = [
   "pydantic-settings>=2.2",
   "typer>=0.12",
   "httpx==0.28.1",
+  # SOCKS5/socks5h for GitHub REST via OXYLABS_PROXY_URL (M28 VAL-DCOV-001).
+  # httpx uses socksio (HTTP CONNECT not enough); PySocks also accepted.
+  "socksio>=1.0.0",
+  "PySocks>=1.7.1",
   "python-dotenv>=1.0",
   # Structural pack load smoke (TaskConfig / TaskPaths) for ship_harbor / pier cert.
   # Offline unit ships and pier-ready hooks require this; installer must match product.
@@ -30,6 +34,8 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.10",
   "types-requests",
+  # SOCKS extras already on main deps; listed for installer clarity (httpx[socks]).
+  "httpx[socks]==0.28.1",
 ]
 
 [project.scripts]

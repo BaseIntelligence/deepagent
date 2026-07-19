@@ -8,9 +8,20 @@ Discovery paths (product live mine):
 Token resolution order (never logged):
   explicit → GITHUB_TOKEN → GH_TOKEN → ``gh auth token`` subprocess.
 
+Optional HTTP(S)/SOCKS proxy (VAL-DCOV-001 / M28):
+  resolve order: OXYLABS_PROXY_URL → ALL_PROXY → HTTPS_PROXY → HTTP_PROXY.
+  When an explicit proxy is set on HttpxGitHubTransport, ``httpx.Client`` is
+  constructed with ``proxy=...`` and ``trust_env=False`` so process-level
+  HTTPS_PROXY/ALL_PROXY are **not** double-applied on top of the explicit one.
+  When proxy is unset, trust_env stays default True (standard httpx env proxy).
+  Proxy passwords and Authorization must never be logged (use redact_proxy_url).
+
+SOCKS5/socks5h requires PySocks (or httpx[socks]); both are available in the
+product env. Routes only to api.github.com (or injectable base_url) — never
+Oxylabs Realtime for REST/Search shapes.
+
 Respects Retry-After / X-RateLimit-* with injectable sleep; fail closed on
-401/403/exhausted rate limits with reason codes. Routes only to api.github.com
-(or injectable base_url) — never Oxylabs Realtime for REST/Search shapes.
+401/403/exhausted rate limits with reason codes.
 """
 
 from __future__ import annotations
@@ -22,7 +33,7 @@ import time
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -36,6 +47,17 @@ API_VERSION = "2022-11-28"
 DISCOVERY_PATH_SEARCH = "search"
 DISCOVERY_PATH_LIST_PULLS = "list_pulls"
 DISCOVERY_PATHS = frozenset({DISCOVERY_PATH_SEARCH, DISCOVERY_PATH_LIST_PULLS})
+
+# Proxy env keys in preference order (M28 Oxylabs SOCKS rate-limit path).
+_PROXY_ENV_KEYS: tuple[str, ...] = (
+    "OXYLABS_PROXY_URL",
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+)
 
 # Bound secondary-rate sleep so unit tests / storms do not wait forever.
 _MAX_BACKOFF_SECONDS = 60.0
@@ -152,6 +174,54 @@ def resolve_github_token(explicit: str | None = None) -> str | None:
     return _gh_auth_token()
 
 
+def resolve_github_proxy_url(explicit: str | None = None) -> str | None:
+    """Resolve optional proxy URL for GitHub REST transport.
+
+    Order: explicit → OXYLABS_PROXY_URL → ALL_PROXY → HTTPS_PROXY → HTTP_PROXY.
+    Never logs the value (may embed username:password). Returns stripped URL or None.
+    """
+    if explicit is not None:
+        cleaned = explicit.strip()
+        return cleaned or None
+    for key in _PROXY_ENV_KEYS:
+        raw = os.environ.get(key)
+        if raw and raw.strip():
+            return raw.strip()
+    return None
+
+
+def redact_proxy_url(url: str | None) -> str:
+    """Redact userinfo password from a proxy URL for safe logging.
+
+    ``socks5h://user:secret@host:port`` → ``socks5h://user:***@host:port``.
+    Never raises on malformed input — returns a safe placeholder string.
+    """
+    if url is None:
+        return ""
+    text = str(url).strip()
+    if not text:
+        return ""
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return "<proxy>"
+    if not parts.scheme and not parts.netloc:
+        # bare host:port-ish — no credentials to redact
+        return text
+    # netloc may be user:pass@host:port
+    netloc = parts.netloc
+    if "@" not in netloc:
+        return text
+    userinfo, _, hostport = netloc.rpartition("@")
+    if ":" in userinfo:
+        user, _, _password = userinfo.partition(":")
+        safe_userinfo = f"{user}:***"
+    else:
+        safe_userinfo = userinfo
+    safe_netloc = f"{safe_userinfo}@{hostport}"
+    return urlunsplit((parts.scheme, safe_netloc, parts.path, parts.query, parts.fragment))
+
+
 def build_merged_pr_search_query(
     *,
     language: str | None = None,
@@ -192,13 +262,23 @@ class GitHubTransport(Protocol):
 class HttpxGitHubTransport:
     """Live GitHub REST transport over httpx (timeouts, auth header only).
 
-    Never logs Authorization. Base URL defaults to api.github.com (not Oxylabs).
+    Never logs Authorization or proxy passwords. Base URL defaults to
+    api.github.com (not Oxylabs Realtime).
+
+    Proxy behaviour (document for VAL-DCOV-001):
+      * ``proxy`` set → ``httpx.Client(proxy=..., trust_env=False)`` so the
+        explicit URL is the only proxy layer (no env double-apply).
+      * ``proxy`` unset → omit ``proxy`` kwarg and leave ``trust_env=True``
+        (httpx default) so process HTTPS_PROXY/ALL_PROXY still apply if present
+        outside ForgeSettings wiring.
+      * SOCKS URLs (``socks5://``, ``socks5h://``) need PySocks / httpx[socks].
     """
 
     token: str | None = None
     base_url: str = GITHUB_API_DEFAULT
     timeout: float = 30.0
     user_agent: str = USER_AGENT
+    proxy: str | None = None
     _client: httpx.Client | None = field(default=None, repr=False)
 
     def _ensure_client(self) -> httpx.Client:
@@ -210,11 +290,22 @@ class HttpxGitHubTransport:
             }
             if self.token:
                 headers["Authorization"] = f"Bearer {self.token}"
-            self._client = httpx.Client(
-                base_url=self.base_url.rstrip("/"),
-                headers=headers,
-                timeout=self.timeout,
-            )
+            kwargs: dict[str, Any] = {
+                "base_url": self.base_url.rstrip("/"),
+                "headers": headers,
+                "timeout": self.timeout,
+            }
+            proxy = (self.proxy or "").strip() or None
+            if proxy:
+                # Explicit proxy: disable env trust so ALL_PROXY/HTTPS_PROXY
+                # are not layered on top of OXYLABS_PROXY_URL (double-proxy).
+                kwargs["proxy"] = proxy
+                kwargs["trust_env"] = False
+                logger.info(
+                    "GitHub transport proxy=%s trust_env=False",
+                    redact_proxy_url(proxy),
+                )
+            self._client = httpx.Client(**kwargs)
         return self._client
 
     def close(self) -> None:
@@ -228,7 +319,7 @@ class HttpxGitHubTransport:
         try:
             response = client.get(url, params=dict(params or {}))
         except httpx.HTTPError as exc:
-            # Never interpolate headers/tokens into the message.
+            # Never interpolate headers/tokens/proxy secrets into the message.
             raise GitHubError(
                 f"GitHub request failed: {type(exc).__name__}",
                 reason_code="transport_error",
@@ -337,15 +428,18 @@ class GitHubClient:
         token: str | None = None,
         base_url: str = GITHUB_API_DEFAULT,
         timeout: float = 30.0,
+        proxy: str | None = None,
         sleep_fn: Callable[[float], None] | None = None,
         max_retries: int = _DEFAULT_MAX_RETRIES,
     ) -> GitHubClient:
         resolved = resolve_github_token(token)
+        resolved_proxy = resolve_github_proxy_url(proxy)
         return cls(
             transport=HttpxGitHubTransport(
                 token=resolved,
                 base_url=base_url,
                 timeout=timeout,
+                proxy=resolved_proxy,
             ),
             sleep_fn=sleep_fn if sleep_fn is not None else time.sleep,
             max_retries=max_retries,
@@ -593,5 +687,7 @@ __all__ = [
     "build_merged_pr_search_query",
     "load_offline_routes",
     "parse_rate_limit_headers",
+    "redact_proxy_url",
+    "resolve_github_proxy_url",
     "resolve_github_token",
 ]
