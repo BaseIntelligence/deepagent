@@ -1,0 +1,95 @@
+{
+  "feature": "m28c-hf-upload-diversified-median",
+  "fulfills": ["VAL-DCOV-006"],
+  "generated_at_utc": "2026-07-19T16:15:00Z",
+  "ok": true,
+  "pushed": true,
+  "schema_ok": true,
+  "repo_id": "BaseIntelligence/deepagent",
+  "revision": "test",
+  "local_src": "datasets/prod_hard_deepswe_med",
+  "upload_stage_src": "datasets/_m28c_hf_stage",
+  "stage_note": "Mirrored product packs + corpus meta; excluded generate_*.log residue from upload tree",
+  "band": "deepswe_median_m27",
+  "pack_count": 9,
+  "task_ids": [
+    "realpr-click-3442",
+    "realpr-itemadapter-101",
+    "realpr-oauthlib-889",
+    "realpr-packaging-1120",
+    "realpr-packaging-1267",
+    "realpr-rich-3930",
+    "realpr-werkzeug-2637",
+    "realpr-werkzeug-3116",
+    "realpr-wtforms-923"
+  ],
+  "diversity": {
+    "N": 9,
+    "unique_repos": 7,
+    "max_packs_per_repo": 2,
+    "packs_per_repo": {
+      "scrapy/itemadapter": 1,
+      "pypa/packaging": 2,
+      "Textualize/rich": 1,
+      "pallets-eco/wtforms": 1,
+      "pallets/werkzeug": 2,
+      "oauthlib/oauthlib": 1,
+      "pallets/click": 1
+    },
+    "ok_n_ge_8": true,
+    "ok_unique_repos_ge_5": true,
+    "ok_max_packs_le_2": true
+  },
+  "upload_commit_sha": "3904cbbd0418fcc53233149dd49f2636de0c9465",
+  "upload_commit_url": "https://huggingface.co/datasets/BaseIntelligence/deepagent/commit/3904cbbd0418fcc53233149dd49f2636de0c9465",
+  "upload_message": "upload_folder complete",
+  "supersession": {
+    "previous_hf_test": "M27d DeepSWE-median N=5 (upload SHA 60b77df…)",
+    "previous_task_ids_removed_from_test": ["realpr-werkzeug-2608"],
+    "new_task_ids_added": [
+      "realpr-packaging-1267",
+      "realpr-rich-3930",
+      "realpr-wtforms-923",
+      "realpr-oauthlib-889",
+      "realpr-click-3442"
+    ],
+    "card_documents_m28_diversity": true,
+    "card_documents_N": 9
+  },
+  "card": {
+    "readme": "datasets/prod_hard_deepswe_med/README.md",
+    "product_readme": "datasets/prod_hard_deepswe_med/PRODUCT_README.md",
+    "notes": [
+      "M28 diversity cap max 2 packs/repo",
+      "Certified N=9",
+      "M27 DeepSWE-median floors held",
+      "Non-werkzeug majority 7/9"
+    ]
+  },
+  "pull_back": {
+    "out": "/tmp/da_m28c_hf_pull",
+    "ok": true,
+    "pack_count": 9,
+    "task_ids_match_local": true,
+    "old_third_werkzeug_gone": true,
+    "sample_pack": "realpr-itemadapter-101",
+    "sample_files_present": [
+      "task.toml",
+      "instruction.md",
+      "environment/Dockerfile",
+      "tests/test.patch",
+      "solution/solution.patch"
+    ],
+    "coverage_stats_N": 9,
+    "coverage_stats_unique_repos": 7,
+    "coverage_stats_max_packs_per_repo": 2
+  },
+  "secrets": {
+    "local_pre_upload_scan_ok": true,
+    "pull_tree_scan_ok": true,
+    "cli_json_token_free": true,
+    "hit_count": 0
+  },
+  "remote_list_match": true,
+  "did_not_push_main": true
+}
