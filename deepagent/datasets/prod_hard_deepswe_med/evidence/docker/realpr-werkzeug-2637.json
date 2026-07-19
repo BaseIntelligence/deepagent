@@ -58,7 +58,7 @@
       "has_test_patch": false,
       "isolated": true
     },
-    "agent_image": "harbor-sdf-agent-rpr02:oracle",
+    "agent_image": "harbor-sdf-agent-rpr08:oracle",
     "agent_isolated": true,
     "config_ok": true,
     "details": {
@@ -90,9 +90,9 @@
     "solution_reward": 1,
     "task_id": "realpr-werkzeug-2637",
     "test_patch_ok": true,
-    "tests_image": "harbor-sdf-tests-rpr02:oracle"
+    "tests_image": "harbor-sdf-tests-rpr08:oracle"
   },
-  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-werkzeug-2637",
+  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-werkzeug-2637",
   "pack_meta": {
     "base_commit_hash": "4f8fddd2ec527d70331e35440fa14edb377dcff0",
     "language": "python",
@@ -115,9 +115,15 @@
       "errors": [],
       "harbor_version": "0.18.0",
       "listed": [
+        "realpr-click-3442",
         "realpr-itemadapter-101",
+        "realpr-marshmallow-2733",
+        "realpr-oauthlib-889",
         "realpr-packaging-1120",
-        "realpr-werkzeug-2637"
+        "realpr-packaging-1267",
+        "realpr-rich-3930",
+        "realpr-werkzeug-2637",
+        "realpr-wtforms-923"
       ],
       "metadata_language": "python",
       "ok": true,
@@ -138,7 +144,7 @@
     },
     "missing_relpaths": [],
     "notes": [],
-    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-werkzeug-2637",
+    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-werkzeug-2637",
     "pier_job_prefix": "/tmp/harbor-deepagent-jobs",
     "required_relpaths_ok": true,
     "structural_ok": true

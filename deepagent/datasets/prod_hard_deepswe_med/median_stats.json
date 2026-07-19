@@ -2,12 +2,12 @@
   "band": "deepswe_median_m27",
   "product_root": "datasets/prod_hard_deepswe_med",
   "historical_soft_band": "datasets/prod_hard_keep",
-  "generated_at_utc": "2026-07-19T01:24:55Z",
-  "certified_n": 5,
-  "target_n": 10,
-  "min_packs": 5,
+  "generated_at_utc": "2026-07-19T15:43:40Z",
+  "certified_n": 8,
+  "target_n": 15,
+  "min_packs": 8,
   "max_packs": 15,
-  "fail_closed_n_lt_5": false,
+  "fail_closed_n_lt_8": false,
   "ok_for_product_wave": true,
   "fixture_pad": false,
   "floors": {
@@ -18,80 +18,33 @@
     "multi_file_rule": "files>=4 OR (files>=3 AND added>=500 AND hunks>=14)"
   },
   "product_p50": {
-    "source_files": 5.0,
-    "source_hunks": 24.0,
-    "gold_added_lines": 582.0,
-    "f2p_nodes": 13.0
+    "source_files": 9.0,
+    "source_hunks": 26.5,
+    "gold_added_lines": 673.0,
+    "f2p_nodes": 22.0
   },
-  "deepswe_sample_reference": {
-    "n_approx": 48,
-    "source_files_p50": 6,
-    "source_hunks_p50": 14,
-    "gold_added_lines_p50": 640,
-    "note": "Public DeepSWE sample band from mission AGENTS.md"
-  },
-  "keeps": [
-    {
-      "task_id": "realpr-itemadapter-101",
-      "source_files": 4,
-      "source_hunks": 15,
-      "gold_added_lines": 726,
-      "f2p_nodes": 43,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-packaging-1120",
-      "source_files": 3,
-      "source_hunks": 24,
-      "gold_added_lines": 882,
-      "f2p_nodes": 9,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-werkzeug-2608",
-      "source_files": 16,
-      "source_hunks": 83,
-      "gold_added_lines": 479,
-      "f2p_nodes": 5,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-werkzeug-2637",
-      "source_files": 5,
-      "source_hunks": 24,
-      "gold_added_lines": 468,
-      "f2p_nodes": 13,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-werkzeug-3116",
-      "source_files": 16,
-      "source_hunks": 74,
-      "gold_added_lines": 582,
-      "f2p_nodes": 28,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    }
+  "accepted_ids": [
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-rich-3930",
+    "realpr-wtforms-923",
+    "realpr-werkzeug-2637",
+    "realpr-werkzeug-3116",
+    "realpr-oauthlib-889",
+    "realpr-click-3442"
   ],
-  "p50_vs_deepswe": {
-    "files_delta_vs_6": -1.0,
-    "hunks_delta_vs_14": 10.0,
-    "added_delta_vs_640": -58.0,
-    "p50_added_meets_400": true,
-    "p50_files_meets_hybrid_or_3": true
+  "unique_repos": 7,
+  "max_packs_per_repo": 2,
+  "packs_per_repo": {
+    "scrapy/itemadapter": 1,
+    "pypa/packaging": 1,
+    "Textualize/rich": 1,
+    "pallets-eco/wtforms": 1,
+    "pallets/werkzeug": 2,
+    "oauthlib/oauthlib": 1,
+    "pallets/click": 1
   },
-  "campaign": {
-    "approach": "m27f isolation+green-flake+hybrid densify; packaging-1120 hybrid admit; agent Dockerfile pytest-xprocess for werkzeug docker oracle; dual-truth N>=5",
-    "fixture_pad": false,
-    "prod_hard_keep_left_historical": true,
-    "admitted": [
-      "realpr-packaging-1120",
-      "realpr-werkzeug-2637",
-      "realpr-werkzeug-2608"
-    ]
+  "diversity_policy": {
+    "max_packs_per_repo": 2
   }
 }

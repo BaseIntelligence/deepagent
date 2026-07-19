@@ -106,7 +106,7 @@
     "stdout_tail": "scripted pier ok",
     "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-itemadapter-101/scripted-trial-oracle"
   },
-  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-itemadapter-101",
+  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-itemadapter-101",
   "pack_meta": {
     "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
     "language": "python",
@@ -130,7 +130,8 @@
       "harbor_version": "0.18.0",
       "listed": [
         "realpr-itemadapter-101",
-        "realpr-packaging-1120"
+        "realpr-packaging-1120",
+        "realpr-packaging-1267"
       ],
       "metadata_language": "python",
       "ok": true,
@@ -151,7 +152,7 @@
     },
     "missing_relpaths": [],
     "notes": [],
-    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-itemadapter-101",
+    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-itemadapter-101",
     "pier_job_prefix": "/tmp/harbor-deepagent-jobs-ship",
     "required_relpaths_ok": true,
     "structural_ok": true

@@ -965,27 +965,32 @@ def _ensure_dynamic_version_stubs(repo: Path) -> None:
 
 #: Common dual-run suite deps installed into the **isolated** host venv only.
 #: NEVER pip install these with -U into the factory site-packages.
+#:
+#: IMPORTANT (m28b dual-yield): do **not** install SUT-shadow packages here
+#: (werkzeug/click/jinja2/packaging/attrs/flask/httpcore/httpx/oauthlib/…).
+#: Those explode into site-packages and beat PYTHONPATH for flat / nested
+#: layouts, wiping F2P (base imports host wheel, not the clone@SHA tree).
+#: Product dual-run always puts the clone on PYTHONPATH instead.
 HOST_SUITE_COMMON_DEPS: tuple[str, ...] = (
-    "httpx==0.28.1",
+    # core runners
     "pytest",
     "pytest-asyncio",
+    "pytest-timeout",
     "pytest-mock",
+    "pytest-xprocess",
     "freezegun",
     "hypothesis",
     "pretend",
+    # network/async helpers used by many suites (not the SUT itself)
     "anyio",
     "trio",
     "sniffio",
-    "httpcore",
     "h11",
-    "werkzeug>=3.0",
-    "blinker>=1.8",
-    "itsdangerous",
-    "jinja2",
-    "markupsafe",
-    "click",
-    "attrs",
     "idna",
+    "certifi",
+    "blinker>=1.8",
+    "markupsafe",
+    "itsdangerous",
     "ephemeral-port-reserve",
     "cloudpickle",
     "tomli_w",
@@ -998,7 +1003,6 @@ HOST_SUITE_COMMON_DEPS: tuple[str, ...] = (
     "jaraco.collections",
     "jaraco.test",
     "more_itertools",
-    "packaging",
     "platformdirs",
     # dual-run green suite deps seen on hard-median packs
     "simplejson",
@@ -1008,10 +1012,48 @@ HOST_SUITE_COMMON_DEPS: tuple[str, ...] = (
     "croniter",
     "click-plugins",
     "dataclasses-json",
-    # werkzeug/flask conftest ProcessStarter plugin
-    "pytest-xprocess",
+    "greenlet",
+    # Suite-support only (never force SUT wheels that shadow clone trees):
+    "pyjwt",
+    "cryptography",
+    "bcrypt",
+    "pynacl",
+    "email-validator",
+    "babel",
+    "uvicorn",
+    "icecream",
+    "trustme",
+    "socksio",
     # NOTE: intentionally no bare "pydantic"/"pydantic-core" force install —
     # editable-adjacent upgrades poisoned the factory CLI.
+    # NOTE: intentionally no werkzeug/click/jinja2/packaging/attrs/flask/
+    # httpcore/httpx/oauthlib/wtforms/marshmallow/paramiko/rich — SUTs.
+)
+
+#: Relation: when dual-running a pack whose task_id contains these needles,
+#: uninstall that PyPI distribution from the isolated host venv (if present)
+#: so PYTHONPATH clone@SHA always wins as the SUT.
+HOST_SUITE_SUT_SHADOW_UNINSTALL: tuple[tuple[str, str], ...] = (
+    # (task_id needle, pip dist name)
+    ("werkzeug", "werkzeug"),
+    ("flask", "flask"),
+    ("click", "click"),
+    ("jinja", "jinja2"),
+    ("packaging", "packaging"),
+    ("attrs", "attrs"),
+    ("httpcore", "httpcore"),
+    ("httpx", "httpx"),
+    ("oauthlib", "oauthlib"),
+    ("wtforms", "wtforms"),
+    ("marshmallow", "marshmallow"),
+    ("paramiko", "paramiko"),
+    ("rich-", "rich"),
+    ("charset", "charset-normalizer"),
+    ("boltons", "boltons"),
+    ("quart", "quart"),
+    ("rq-", "rq"),
+    ("scrapy", "scrapy"),
+    ("itemadapter", "itemadapter"),
 )
 
 FORBIDDEN_FACTORY_PIP_FLAGS: frozenset[str] = frozenset({"-U", "--upgrade"})
@@ -1097,11 +1139,55 @@ def build_host_suite_pip_command(
     return cmd
 
 
+def host_suite_pip_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Env for isolated host pip: strip SOCKS/HTTP proxy so PyPI is reachable.
+
+    Mission ``ALL_PROXY`` / ``OXYLABS_PROXY_URL`` is for GitHub REST only. Bare
+    host-venv pip has no socksio transport and fails collection of suite deps
+    when those proxies leak into dual-run install (m28b dual-yield).
+    """
+    import os
+
+    env = dict(base if base is not None else os.environ)
+    drop_keys = []
+    for k in list(env):
+        ku = k.upper()
+        if ku in {
+            "ALL_PROXY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "FTP_PROXY",
+            "OXYLABS_PROXY_URL",
+        } or ku.endswith("_PROXY"):
+            drop_keys.append(k)
+        # mitigate residual lookups
+        if ku in {"NO_PROXY", "no_proxy"}:
+            drop_keys.append(k)
+    for k in drop_keys:
+        env.pop(k, None)
+    # Explicitly force direct for common hosts (in case outer wrappers re-inject).
+    env["NO_PROXY"] = "*"
+    env["no_proxy"] = "*"
+    return env
+
+
+def sut_shadow_dists_for_task(task_id: str | None) -> list[str]:
+    """Return PyPI dist names that must not shadow clone@SHA for *task_id*."""
+    tid = (task_id or "").lower().replace("_", "-")
+    out: list[str] = []
+    for needle, dist in HOST_SUITE_SUT_SHADOW_UNINSTALL:
+        if needle in tid:
+            if dist not in out:
+                out.append(dist)
+    return out
+
+
 def _prepare_host_suite_env(
     repo: Path,
     *,
     language: str = "python",
     work_root: Path | str | None = None,
+    task_id: str | None = None,
 ) -> HostSuiteEnv:
     """Prepare an **isolated** host dual-run suite env (VAL-DMED-010).
 
@@ -1109,6 +1195,9 @@ def _prepare_host_suite_env(
     installs suite deps (pytest-xprocess, simplejson, redis, …) **there only**.
     Never ``pip install -U`` into the factory site-packages. Non-python languages
     return a passthrough HostSuiteEnv.
+
+    ``task_id`` (when known) uninstalls SUT-shadow wheels so PYTHONPATH clone
+    wins over host site-packages (m28b dual-yield).
     """
     import os
     import subprocess
@@ -1116,6 +1205,7 @@ def _prepare_host_suite_env(
 
     lang = (language or "python").strip().lower()
     factory_py = sys.executable
+    pip_env = host_suite_pip_env()
 
     if lang in {"javascript", "js", "typescript", "ts"}:
         if shutil.which("npm") is None or not (repo / "package.json").is_file():
@@ -1132,6 +1222,7 @@ def _prepare_host_suite_env(
             capture_output=True,
             text=True,
             check=False,
+            env=pip_env,
         )
         try:
             from swe_factory.producers.harbor_labeling import ensure_local_node_bin_on_path
@@ -1184,6 +1275,7 @@ def _prepare_host_suite_env(
             capture_output=True,
             text=True,
             check=False,
+            env=pip_env,
         )
     if not iso_py.is_file():
         # Fallback dirs (Windows layout) — still refuse factory poison if missing.
@@ -1212,9 +1304,11 @@ def _prepare_host_suite_env(
         capture_output=True,
         text=True,
         check=False,
+        env=pip_env,
     )
 
     # Install common suite deps into isolated venv only (no -U).
+    # Proxy stripped so SOCKS ALL_PROXY does not break plain PyPI (m28b).
     pip_cmd = build_host_suite_pip_command(iso_python, packages=HOST_SUITE_COMMON_DEPS)
     assert_host_suite_pip_safe(pip_cmd, factory_python=factory_py)
     subprocess.run(
@@ -1223,6 +1317,7 @@ def _prepare_host_suite_env(
         capture_output=True,
         text=True,
         check=False,
+        env=pip_env,
     )
 
     # Optional non-editable pure dep lists into isolated venv only.
@@ -1232,6 +1327,10 @@ def _prepare_host_suite_env(
         "requirements_dev.txt",
         "dev-requirements.txt",
         "tests/requirements.txt",
+        "requirements/tests.txt",
+        "requirements/test.txt",
+        "tests/requirements-test.txt",
+        "dev/requirements.txt",
     ):
         req = repo / req_name
         if not req.is_file():
@@ -1241,7 +1340,81 @@ def _prepare_host_suite_env(
         except OSError:
             continue
         # Refuse path/VCS installs.
-        if any(tok in body for tok in ("-e ", "file:", "git+", "http://", "https://", "path =")):
+        if any(tok in body for tok in ("-e ", "file:", "git+", "svn+", "path =")):
+            # Soft-filter: write a cleaned temp req without -e/git lines.
+            clean_lines = []
+            for ln in body.splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if any(tok in s for tok in ("-e ", "file:", "git+", "svn+", "http://", "https://")):
+                    continue
+                # Also skip known SUT shadow names when task known
+                low = s.lower().split("==")[0].split(">=")[0].split("<=")[0].split("[")[0].strip()
+                if low in {
+                    "werkzeug",
+                    "click",
+                    "jinja2",
+                    "flask",
+                    "packaging",
+                    "attrs",
+                    "httpcore",
+                    "httpx",
+                    "oauthlib",
+                    "wtforms",
+                    "marshmallow",
+                    "paramiko",
+                    "rich",
+                    "charset-normalizer",
+                    "boltons",
+                    "quart",
+                    "rq",
+                    "scrapy",
+                    "itemadapter",
+                }:
+                    shadows = sut_shadow_dists_for_task(task_id) if task_id else []
+                    # Always skip SUT-pillar requirement lines when they name the pkg itself;
+                    # without a task_id, skip the common SUT set to keep PYTHONPATH honest.
+                    if not task_id or low in {d.lower() for d in shadows} or low in {
+                        "werkzeug",
+                        "click",
+                        "jinja2",
+                        "flask",
+                        "packaging",
+                        "attrs",
+                        "httpcore",
+                        "httpx",
+                        "oauthlib",
+                        "wtforms",
+                        "marshmallow",
+                        "paramiko",
+                        "rich",
+                        "charset-normalizer",
+                        "boltons",
+                        "quart",
+                        "rq",
+                        "scrapy",
+                        "itemadapter",
+                    }:
+                        continue
+                clean_lines.append(ln)
+            if not clean_lines:
+                continue
+            clean_req = venv_root / f"_sdf_clean_{req_name.replace('/', '_')}"
+            try:
+                clean_req.write_text("\n".join(clean_lines) + "\n", encoding="utf-8")
+            except OSError:
+                continue
+            rcmd = build_host_suite_pip_command(iso_python, requirements=clean_req)
+            assert_host_suite_pip_safe(rcmd, factory_python=factory_py)
+            subprocess.run(
+                rcmd,
+                cwd=str(repo),
+                capture_output=True,
+                text=True,
+                check=False,
+                env=pip_env,
+            )
             continue
         rcmd = build_host_suite_pip_command(iso_python, requirements=req)
         assert_host_suite_pip_safe(rcmd, factory_python=factory_py)
@@ -1251,6 +1424,22 @@ def _prepare_host_suite_env(
             capture_output=True,
             text=True,
             check=False,
+            env=pip_env,
+        )
+
+    # After all installs, uninstall task-specific SUT shadows so clone@SHA wins.
+    shadows = sut_shadow_dists_for_task(task_id) if task_id else []
+    # Infer from repo path basename when task_id omitted
+    if not shadows:
+        shadows = sut_shadow_dists_for_task(repo.name)
+    for dist in shadows:
+        subprocess.run(
+            [iso_python, "-m", "pip", "uninstall", "-y", "-q", dist],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=pip_env,
         )
 
     # Never editable-install the clone into factory or isolated env as site poison
@@ -1265,7 +1454,10 @@ def _prepare_host_suite_env(
             "factory_python": factory_py,
             "install_target": "isolated_host_venv",
             "no_pip_upgrade_factory": True,
+            "pip_proxy_stripped": True,
             "common_deps": list(HOST_SUITE_COMMON_DEPS),
+            "sut_shadow_uninstalled": list(shadows),
+            "task_id": task_id,
         },
     )
 
@@ -1438,10 +1630,12 @@ def _label_dual_run_for_material(
         work, material.task_id, dest=dest, offline_only=False
     )
     # VAL-DMED-010: isolated host suite env (never pip -U factory site-packages).
+    # task_id drives SUT-shadow uninstall so PYTHONPATH clone@SHA wins (m28b).
     host_env = _prepare_host_suite_env(
         base_repo,
         language=material.language or "python",
         work_root=dual_work,
+        task_id=material.task_id,
     )
     try:
         agent_ctx = pack_dir / "environment"

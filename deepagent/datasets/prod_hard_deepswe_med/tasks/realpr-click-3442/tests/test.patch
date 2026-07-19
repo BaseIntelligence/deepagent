@@ -1,0 +1,2386 @@
+diff --git a/tests/test_commands.py b/tests/test_commands.py
+--- a/tests/test_commands.py
++++ b/tests/test_commands.py
+@@ -573,3 +573,35 @@ def cli():
+     assert rv.exit_code == 1
+     assert isinstance(rv.exception.__cause__, exc)
+     assert rv.exception.__cause__.args == ("catch me!",)
++
++
++def test_unknown_command(runner):
++    result = runner.invoke(click.Group(), "unknown")
++    assert result.exception
++    assert "No such command 'unknown'." in result.output
++
++
++@pytest.mark.parametrize(
++    ("value", "expect"),
++    [
++        ("pause", "Did you mean 'push'?"),
++        ("decline", "(Did you mean one of: 'declare', 'refine'?)"),
++    ],
++)
++def test_suggest_possible_commands(runner, value, expect):
++    cli = click.Group()
++
++    @cli.command()
++    def push():
++        pass
++
++    @cli.command()
++    def declare():
++        pass
++
++    @cli.command()
++    def refine():
++        pass
++
++    result = runner.invoke(cli, [value])
++    assert expect in result.output
+diff --git a/tests/test_compat.py b/tests/test_compat.py
+--- a/tests/test_compat.py
++++ b/tests/test_compat.py
+@@ -1,4 +1,10 @@
+-from click._compat import should_strip_ansi
++from __future__ import annotations
++
++import sys
++
++import pytest
++
++import click
+ 
+ 
+ def test_is_jupyter_kernel_output():
+@@ -7,4 +13,43 @@ class JupyterKernelFakeStream:
+ 
+     # implementation detail, aka cheapskate test
+     JupyterKernelFakeStream.__module__ = "ipykernel.faked"
+-    assert not should_strip_ansi(stream=JupyterKernelFakeStream())
++    assert click._compat._is_jupyter_kernel_output(stream=JupyterKernelFakeStream())
++
++
++@pytest.mark.parametrize(
++    "stream",
++    [None, sys.stdin, sys.stderr, sys.stdout],
++)
++@pytest.mark.parametrize(
++    ("color", "expected_override"),
++    [
++        (True, False),
++        (False, True),
++        (None, None),
++    ],
++)
++@pytest.mark.parametrize(
++    ("isatty", "is_jupyter", "expected"),
++    [
++        (True, False, False),
++        (False, True, False),
++        (False, False, True),
++    ],
++)
++def test_should_strip_ansi(
++    monkeypatch,
++    stream,
++    color: bool | None,
++    expected_override: bool | None,
++    isatty: bool,
++    is_jupyter: bool,
++    expected: bool,
++) -> None:
++    monkeypatch.setattr(click._compat, "isatty", lambda x: isatty)
++    monkeypatch.setattr(
++        click._compat, "_is_jupyter_kernel_output", lambda x: is_jupyter
++    )
++
++    if expected_override is not None:
++        expected = expected_override
++    assert click._compat.should_strip_ansi(stream=stream, color=color) == expected
+diff --git a/tests/test_defaults.py b/tests/test_defaults.py
+--- a/tests/test_defaults.py
++++ b/tests/test_defaults.py
+@@ -357,6 +357,43 @@ def cli(value):
+     assert result.output == repr(expected)
+ 
+ 
++@pytest.mark.parametrize(
++    ("default_map", "option_kwargs", "cli_args", "expected"),
++    [
++        # String is split for nargs=2 option.
++        ({"point": "3 4"}, {"nargs": 2, "type": int}, [], (3, 4)),
++        # String is split for explicit Tuple type.
++        ({"point": "hello world"}, {"type": (str, str)}, [], ("hello", "world")),
++        # Already-structured tuple passes through unchanged.
++        ({"point": ("a", "b")}, {"nargs": 2}, [], ("a", "b")),
++        # Already-structured list passes through unchanged.
++        ({"point": [5, 6]}, {"nargs": 2, "type": int}, [], (5, 6)),
++        # CLI args override default_map for nargs > 1.
++        (
++            {"point": "3 4"},
++            {"nargs": 2, "type": int},
++            ["--point", "10", "20"],
++            (10, 20),
++        ),
++    ],
++)
++def test_default_map_nargs(runner, default_map, option_kwargs, cli_args, expected):
++    """A string in ``default_map`` for an option with ``nargs > 1`` should be
++    split the same way an environment variable string is split.
++
++    Regression test for https://github.com/pallets/click/issues/2745.
++    """
++
++    @click.command()
++    @click.option("--point", **option_kwargs)
++    def cli(point):
++        click.echo(repr(point))
++
++    result = runner.invoke(cli, cli_args, default_map=default_map)
++    assert result.exit_code == 0
++    assert result.output.strip() == repr(expected)
++
++
+ def test_unset_in_default_map(runner):
+     """An ``UNSET`` value in ``default_map`` should be treated as if
+     the key is absent, and so fallback to the parameter's own default.
+diff --git a/tests/test_formatting.py b/tests/test_formatting.py
+--- a/tests/test_formatting.py
++++ b/tests/test_formatting.py
+@@ -1,4 +1,7 @@
++import pytest
++
+ import click
++from click._compat import strip_ansi
+ 
+ 
+ def test_basic_functionality(runner):
+@@ -246,6 +249,71 @@ def cmd(arg):
+     ]
+ 
+ 
++@pytest.mark.parametrize(
++    ("help_names", "extra_options", "expected_hint"),
++    [
++        # No shadowing, longest name is picked.
++        (["-h", "--help"], [], "Try 'cli foo --help' for help."),
++        # -h shadowed by a subcommand option, --help still available.
++        (
++            ["-h", "--help"],
++            [click.option("--host", "-h")],
++            "Try 'cli foo --help' for help.",
++        ),
++        # --help shadowed, -h still available.
++        (
++            ["-h", "--help"],
++            [click.option("--help-file", "--help")],
++            "Try 'cli foo -h' for help.",
++        ),
++        # Both names shadowed: no hint line at all.
++        (
++            ["-h", "--help"],
++            [click.option("--host", "-h"), click.option("--help-file", "--help")],
++            None,
++        ),
++        # Single custom help name, not shadowed.
++        (["--man"], [], "Try 'cli foo --man' for help."),
++        # Three help names, one shadowed, longest survivor picked.
++        (
++            ["-h", "--help", "--info"],
++            [click.option("--info-file", "--info")],
++            "Try 'cli foo --help' for help.",
++        ),
++    ],
++)
++def test_formatting_usage_error_help_hint(
++    runner, help_names, extra_options, expected_hint
++):
++    """The error hint should only show non-shadowed help option names,
++    picking the longest for readability.
++
++    https://github.com/pallets/click/issues/2790
++    """
++
++    @click.group(context_settings={"help_option_names": help_names})
++    def cli():
++        pass
++
++    @cli.command()
++    @click.argument("required_arg")
++    def foo(required_arg, **kwargs):
++        pass
++
++    for option in extra_options:
++        option(foo)
++
++    result = runner.invoke(cli, ["foo"])
++    assert result.exit_code == 2
++    lines = result.output.splitlines()
++    assert lines[0] == "Usage: cli foo [OPTIONS] REQUIRED_ARG"
++    assert lines[-1] == "Error: Missing argument 'REQUIRED_ARG'."
++    if expected_hint is not None:
++        assert expected_hint in lines
++    else:
++        assert not any(line.startswith("Try ") for line in lines)
++
++
+ def test_formatting_custom_type_metavar(runner):
+     class MyType(click.ParamType):
+         def get_metavar(self, param: click.Parameter, ctx: click.Context):
+@@ -366,3 +434,183 @@ def test_help_formatter_write_text():
+     actual = formatter.getvalue()
+     expected = "  Lorem ipsum dolor sit amet,\n  consectetur adipiscing elit\n"
+     assert actual == expected
++
++
++@pytest.mark.parametrize(
++    ("body", "width", "initial_indent"),
++    [
++        # Styled ``initial_indent`` must be measured by visible width, so the
++        # ``Usage:`` prefix shouldn't push ``[OPTIONS]`` to the second line.
++        # Regression for the asymmetry between ``HelpFormatter.write_usage``
++        # (which sized the prefix with ``term_len``) and ``wrap_text``
++        # (which previously used raw ``len``).
++        pytest.param(
++            "[OPTIONS]",
++            30,
++            "\x1b[38;2;38;139;210m\x1b[1mUsage:\x1b[0m ",
++            id="styled-initial-indent-does-not-break-body",
++        ),
++        # Styled chunks in the body itself wrap on visible width.
++        pytest.param(
++            "\x1b[31malpha\x1b[0m \x1b[31mbeta\x1b[0m"
++            " \x1b[31mgamma\x1b[0m \x1b[31mdelta\x1b[0m",
++            15,
++            "",
++            id="styled-body-wraps-on-visible-width",
++        ),
++        # ``_handle_long_word`` cuts a styled token between visible
++        # characters; the ANSI escape sequence must not be split.
++        pytest.param(
++            "\x1b[31mabcdefghij\x1b[0m",
++            5,
++            "",
++            id="styled-long-word-breaks-on-visible-width",
++        ),
++    ],
++)
++def test_wrap_text_visible_width(body, width, initial_indent):
++    """``wrap_text`` of styled input produces the same line layout as
++    ``wrap_text`` of the ANSI-stripped input.
++
++    ANSI escape bytes must not count toward the width budget, regardless
++    of whether they appear in the body, in ``initial_indent``, or when a
++    styled token has to be broken in the middle.
++    """
++    styled = click.formatting.wrap_text(
++        body, width=width, initial_indent=initial_indent
++    )
++    plain = click.formatting.wrap_text(
++        strip_ansi(body), width=width, initial_indent=strip_ansi(initial_indent)
++    )
++
++    styled_visible = [strip_ansi(line) for line in styled.splitlines()]
++    assert styled_visible == plain.splitlines()
++
++
++def test_write_usage_styled_prefix_keeps_options_on_one_line():
++    """End-to-end: a downstream-styled ``Usage:`` prefix should not split
++    ``[OPTIONS]`` across two lines.
++    """
++    styled_prefix = "\x1b[38;2;38;139;210m\x1b[1mUsage:\x1b[0m "
++
++    formatter = click.HelpFormatter(width=40)
++    formatter.write_usage("cli", "[OPTIONS]", prefix=styled_prefix)
++    rendered = formatter.getvalue()
++
++    visible = strip_ansi(rendered)
++    assert visible == "Usage: cli [OPTIONS]\n"
++
++
++@pytest.mark.parametrize(
++    ("formatter_kwargs", "current_indent", "prog", "args", "prefix", "expected"),
++    [
++        # Issue #3360: the default prefix used to emit only
++        # a blank line because ``wrap_text("", initial_indent=usage_prefix)``
++        # returned ``""`` and discarded the prefix.
++        pytest.param(
++            {},
++            0,
++            "Program",
++            "",
++            None,
++            "Usage: Program\n",
++            id="empty-args-default-prefix",
++        ),
++        # A caller-supplied prefix is preserved verbatim.
++        pytest.param(
++            {},
++            0,
++            "Program",
++            "",
++            "Run: ",
++            "Run: Program\n",
++            id="empty-args-custom-prefix",
++        ),
++        # ``current_indent`` is preserved even with no args to render.
++        pytest.param(
++            {},
++            4,
++            "Program",
++            "",
++            None,
++            "Usage: Program\n",
++            id="empty-args-indented",
++        ),
++        # Prog too long to share a line with args: the wrap branch must not
++        # emit a second line.
++        pytest.param(
++            {"width": 20},
++            0,
++            "VeryLongProgramName",
++            "",
++            None,
++            "Usage: VeryLongProgramName\n",
++            id="empty-args-long-prog",
++        ),
++        # With non-empty args, the separator space between prog and args is preserved.
++        pytest.param(
++            {},
++            0,
++            "Program",
++            "[OPTIONS]",
++            None,
++            "Usage: Program [OPTIONS]\n",
++            id="with-args-default-prefix",
++        ),
++    ],
++)
++def test_help_formatter_write_usage(
++    formatter_kwargs, current_indent, prog, args, prefix, expected
++):
++    """``HelpFormatter.write_usage`` renders a single usage line whose
++    trailing separator tracks whether ``args`` is non-empty.
++    """
++    f = click.HelpFormatter(**formatter_kwargs)
++    f.current_indent = current_indent
++    if prefix is None:
++        f.write_usage(prog, args)
++    else:
++        f.write_usage(prog, args, prefix=prefix)
++    assert f.getvalue() == expected
++
++
++def test_help_formatter_write_usage_without_args_styled_prefix():
++    """A downstream-styled prefix is preserved when ``args`` is empty:
++    the ANSI escape sequences survive, only the trailing separator is
++    removed.
++    """
++    styled_prefix = "\x1b[38;2;38;139;210m\x1b[1mUsage:\x1b[0m "
++    f = click.HelpFormatter()
++    f.write_usage("cli", prefix=styled_prefix)
++    rendered = f.getvalue()
++    assert strip_ansi(rendered) == "Usage: cli\n"
++    assert "\x1b[" in rendered
++
++
++@pytest.mark.parametrize(
++    ("command_kwargs", "expected_usage_line"),
++    [
++        # End-to-end regression for #3360: an empty ``options_metavar`` with
++        # no parameters used to render a blank usage line.
++        pytest.param(
++            {"options_metavar": ""},
++            "Usage: cli",
++            id="empty-options-metavar-no-params",
++        ),
++        # End-to-end regression: ``options_metavar=None`` is the documented
++        # way to suppress the ``[OPTIONS]`` slot entirely.
++        pytest.param(
++            {"options_metavar": None},
++            "Usage: cli",
++            id="none-options-metavar-no-params",
++        ),
++    ],
++)
++def test_command_write_usage_no_args(runner, command_kwargs, expected_usage_line):
++    """End-to-end: a command with no parameters and an empty or absent
++    ``options_metavar`` renders a usage line with just the program name,
++    no trailing space.
++    """
++    cli = click.Command("cli", **command_kwargs)
++    result = runner.invoke(cli, ["--help"])
++    assert result.output.splitlines()[0] == expected_usage_line
+diff --git a/tests/test_imports.py b/tests/test_imports.py
+--- a/tests/test_imports.py
++++ b/tests/test_imports.py
+@@ -27,6 +27,7 @@ def tracking_import(module, locals=None, globals=None, fromlist=None,
+ 
+ ALLOWED_IMPORTS = {
+     "__future__",
++    "abc",
+     "codecs",
+     "collections",
+     "collections.abc",
+@@ -49,6 +50,7 @@ def tracking_import(module, locals=None, globals=None, fromlist=None,
+     "threading",
+     "types",
+     "typing",
++    "uuid",
+     "weakref",
+ }
+ 
+diff --git a/tests/test_options.py b/tests/test_options.py
+--- a/tests/test_options.py
++++ b/tests/test_options.py
+@@ -141,15 +141,15 @@ def cli():
+ 
+     result = runner.invoke(cli, [unknown_flag])
+     assert result.exception
+-    assert f"No such option: {unknown_flag}" in result.output
++    assert f"No such option '{unknown_flag}'." in result.output
+ 
+ 
+ @pytest.mark.parametrize(
+     ("value", "expect"),
+     [
+-        ("--cat", "Did you mean --count?"),
+-        ("--bounds", "(Possible options: --bound, --count)"),
+-        ("--bount", "(Possible options: --bound, --count)"),
++        ("--cat", "Did you mean '--count'?"),
++        ("--bounds", "(Did you mean one of: '--bound', '--count'?)"),
++        ("--bount", "(Did you mean one of: '--bound', '--count'?)"),
+     ],
+ )
+ def test_suggest_possible_options(runner, value, expect):
+@@ -1406,6 +1406,11 @@ def test_type_from_flag_value():
+     assert param.type is click.INT
+     param = click.Option(["-b", "x"], flag_value=8)
+     assert param.type is click.INT
++    # Non-basic types auto-detect as UNPROCESSED to avoid stringification.
++    param = click.Option(["-c", "x"], flag_value=EngineType.OSS)
++    assert param.type is click.UNPROCESSED
++    param = click.Option(["-d", "x"], flag_value=frozenset())
++    assert param.type is click.UNPROCESSED
+ 
+ 
+ @pytest.mark.parametrize(
+@@ -2127,13 +2132,13 @@ class Class2:
+             [],
+             EngineType.OSS,
+         ),
+-        # Type is not specified and default to string, so the default value is
+-        # returned as a string, even if it is a boolean. Also, defaults to the
+-        # flag_value instead of the default value to support legacy behavior.
++        # Type is not specified. For string flag_value, STRING type is used and
++        # the default value is converted to string. For non-basic types (like
++        # enums), UNPROCESSED is used and values pass through unchanged.
+         ({"flag_value": "1", "default": True}, [], "1"),
+         ({"flag_value": "1", "default": 42}, [], "42"),
+-        ({"flag_value": EngineType.OSS, "default": True}, [], "EngineType.OSS"),
+-        ({"flag_value": EngineType.OSS, "default": 42}, [], "42"),
++        ({"flag_value": EngineType.OSS, "default": True}, [], EngineType.OSS),
++        ({"flag_value": EngineType.OSS, "default": 42}, [], 42),
+         # See: the result is the same if we force the type to be str.
+         ({"type": str, "flag_value": 1, "default": True}, [], "1"),
+         ({"type": str, "flag_value": 1, "default": 42}, [], "42"),
+@@ -2199,28 +2204,29 @@ def scan(pro):
+             ["--opt2"],
+             EngineType.PRO,
+         ),
+-        # Check that passing exotic flag values like classes is supported, but are
+-        # rendered to strings when the type is not specified.
++        # Exotic flag values like classes are passed through unchanged when no
++        # explicit type is given (UNPROCESSED is auto-detected).
++        # https://github.com/pallets/click/issues/2012
+         # https://github.com/pallets/click/issues/3121
+         (
+             {"flag_value": Class1, "default": True},
+             {"flag_value": Class2},
+             [],
+-            "<class 'test_options.Class1'>",
++            Class1,
+         ),
+         (
+             {"flag_value": Class1, "default": True},
+             {"flag_value": Class2},
+             ["--opt1"],
+-            "<class 'test_options.Class1'>",
++            Class1,
+         ),
+         (
+             {"flag_value": Class1, "default": True},
+             {"flag_value": Class2},
+             ["--opt2"],
+-            "<class 'test_options.Class2'>",
++            Class2,
+         ),
+-        # Even the default is processed as a string.
++        # String and None defaults pass through unchanged.
+         ({"flag_value": Class1, "default": "True"}, {"flag_value": Class2}, [], "True"),
+         ({"flag_value": Class1, "default": None}, {"flag_value": Class2}, [], None),
+         # To get the classes as-is, we need to specify the type as UNPROCESSED.
+@@ -2245,18 +2251,18 @@ def scan(pro):
+         ),
+         # Setting the default to a class, an instance of the class is returned instead
+         # of the class itself, because the default is allowed to be callable (and
+-        # consummd). And this happens whatever the type is.
++        # consumed). And this happens whatever the type is.
+         (
+             {"flag_value": Class1, "default": Class1},
+             {"flag_value": Class2},
+             [],
+-            re.compile(r"'<test_options.Class1 object at 0x[0-9A-Fa-f]+>'"),
++            re.compile(r"<test_options.Class1 object at 0x[0-9A-Fa-f]+>"),
+         ),
+         (
+             {"flag_value": Class1, "default": Class2},
+             {"flag_value": Class2},
+             [],
+-            re.compile(r"'<test_options.Class2 object at 0x[0-9A-Fa-f]+>'"),
++            re.compile(r"<test_options.Class2 object at 0x[0-9A-Fa-f]+>"),
+         ),
+         (
+             {"flag_value": Class1, "type": UNPROCESSED, "default": Class1},
+@@ -2322,12 +2328,13 @@ def cli(dual_option):
+             ["--opt"],
+             Class1,
+         ),
+-        # Without UNPROCESSED, the class is str()-ified by the default STRING type.
+-        ({"flag_value": Class1, "default": True}, [], "<class 'test_options.Class1'>"),
++        # Without explicit UNPROCESSED, the class still passes through unchanged
++        # because UNPROCESSED is auto-detected for non-basic flag_value types.
++        ({"flag_value": Class1, "default": True}, [], Class1),
+         (
+             {"flag_value": Class1, "default": True},
+             ["--opt"],
+-            "<class 'test_options.Class1'>",
++            Class1,
+         ),
+         # Explicit default=Class1 (not via default=True alignment): callable IS invoked,
+         # because the user explicitly set a callable as the default.
+@@ -2473,6 +2480,48 @@ def cli(value):
+     assert opt.get_default(ctx, call=True) is expected_get_default
+ 
+ 
++def test_flag_value_not_stringified_for_custom_types(runner):
++    """Non-basic flag_value types are passed through unchanged without
++    requiring ``type=click.UNPROCESSED``.
++
++    Regression test for https://github.com/pallets/click/issues/2012
++    """
++
++    @click.command()
++    @click.option("--cls1", "config_cls", flag_value=Class1, default=True)
++    @click.option("--cls2", "config_cls", flag_value=Class2)
++    def cli(config_cls):
++        click.echo(repr(config_cls), nl=False)
++
++    # Default activates --cls1 (default=True resolves to flag_value).
++    result = runner.invoke(cli, [])
++    assert result.exit_code == 0
++    assert result.output == repr(Class1)
++
++    result = runner.invoke(cli, ["--cls1"])
++    assert result.exit_code == 0
++    assert result.output == repr(Class1)
++
++    result = runner.invoke(cli, ["--cls2"])
++    assert result.exit_code == 0
++    assert result.output == repr(Class2)
++
++    # Enum flag_value without explicit type is also preserved.
++    @click.command()
++    @click.option("--oss", "engine", flag_value=EngineType.OSS, default=True)
++    @click.option("--pro", "engine", flag_value=EngineType.PRO)
++    def cli2(engine):
++        click.echo(repr(engine), nl=False)
++
++    result = runner.invoke(cli2, [])
++    assert result.exit_code == 0
++    assert result.output == repr(EngineType.OSS)
++
++    result = runner.invoke(cli2, ["--pro"])
++    assert result.exit_code == 0
++    assert result.output == repr(EngineType.PRO)
++
++
+ def test_custom_type_frozenset_flag_value(runner):
+     """Check that frozenset is correctly handled as a type, a flag value and a default.
+ 
+@@ -2532,6 +2581,823 @@ def cli(flag):
+     assert result.output == repr(expected)
+ 
+ 
++@pytest.mark.parametrize(
++    ("opts", "args", "expected"),
++    [
++        # #3403 reproducer: enable/disable pair with explicit ``default=True``
++        # on the positive flag, declared after (inner decorator) the negative.
++        # https://github.com/pallets/click/issues/3403
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": True}),
++            ],
++            [],
++            True,
++            id="3403-reproducer-no-args",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": True}),
++            ],
++            ["--with-xyz"],
++            True,
++            id="3403-reproducer-with-only",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": True}),
++            ],
++            ["--without-xyz"],
++            False,
++            id="3403-reproducer-without-only",
++        ),
++        # When both flags are passed, the parser keeps the last value seen.
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": True}),
++            ],
++            ["--with-xyz", "--without-xyz"],
++            False,
++            id="3403-reproducer-with-then-without",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": True}),
++            ],
++            ["--without-xyz", "--with-xyz"],
++            True,
++            id="3403-reproducer-without-then-with",
++        ),
++        # Order-independence: explicit ``default=True`` on the OUTER
++        # decorator (declared first) must produce the same behavior.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True, "default": True}),
++                ("--without-xyz", {"flag_value": False}),
++            ],
++            [],
++            True,
++            id="explicit-default-outer-no-args",
++        ),
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True, "default": True}),
++                ("--without-xyz", {"flag_value": False}),
++            ],
++            ["--without-xyz"],
++            False,
++            id="explicit-default-outer-cmdline-overrides",
++        ),
++        # Explicit ``default=False`` on the negative flag wins over the
++        # auto-derived default of the positive one. Result value is False
++        # either way, but the assertion still guards source tracking.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True}),
++                ("--without-xyz", {"flag_value": False, "default": False}),
++            ],
++            [],
++            False,
++            id="explicit-default-false-on-negative",
++        ),
++        # Explicit ``default=True`` on the negative flag is unusual but
++        # legal: post-#3239, it is a literal Python value, not a sentinel.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True}),
++                ("--without-xyz", {"flag_value": False, "default": True}),
++            ],
++            [],
++            True,
++            id="explicit-default-true-on-negative",
++        ),
++        # Both options carry an explicit default: last-wins, so the option
++        # declared last in the source code keeps the slot. Confirms the
++        # explicit-beats-auto tie-break does not also promote first-declared
++        # over a later explicit default.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True, "default": True}),
++                ("--without-xyz", {"flag_value": False, "default": False}),
++            ],
++            [],
++            False,
++            id="both-explicit-defaults-last-wins",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False, "default": False}),
++                ("--with-xyz", {"flag_value": True, "default": True}),
++            ],
++            [],
++            True,
++            id="both-explicit-defaults-last-wins-swapped",
++        ),
++        # No option has an explicit default: every boolean flag
++        # auto-derives ``default=False`` regardless of its ``flag_value``,
++        # so the slot is False either way. Last-wins applies under the hood
++        # but is not observable because both values are equal.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True}),
++                ("--without-xyz", {"flag_value": False}),
++            ],
++            [],
++            False,
++            id="both-auto-defaults-positive-first",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True}),
++            ],
++            [],
++            False,
++            id="both-auto-defaults-negative-first",
++        ),
++        # Explicit ``default=False`` matching the auto-derived value:
++        # the explicit option still wins the slot. Confirms tracking is
++        # source-based and not value-based.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True, "default": False}),
++                ("--without-xyz", {"flag_value": False}),
++            ],
++            [],
++            False,
++            id="explicit-default-matches-auto-still-wins",
++        ),
++        # Three-flag group: the explicit default wins regardless of its
++        # position in the decorator stack.
++        pytest.param(
++            [
++                ("--auto-a", {"flag_value": True}),
++                ("--explicit", {"flag_value": False, "default": False}),
++                ("--auto-b", {"flag_value": True}),
++            ],
++            [],
++            False,
++            id="three-flags-explicit-in-middle",
++        ),
++        pytest.param(
++            [
++                ("--auto-a", {"flag_value": True}),
++                ("--auto-b", {"flag_value": False}),
++                ("--explicit", {"flag_value": True, "default": True}),
++            ],
++            [],
++            True,
++            id="three-flags-explicit-last",
++        ),
++        pytest.param(
++            [
++                ("--explicit", {"flag_value": False, "default": False}),
++                ("--auto-a", {"flag_value": True}),
++                ("--auto-b", {"flag_value": True}),
++            ],
++            [],
++            False,
++            id="three-flags-explicit-first",
++        ),
++        # Three-state pattern: explicit ``default=None`` on one option
++        # must beat a sibling's auto-derived ``False``.
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": None}),
++            ],
++            [],
++            None,
++            id="explicit-default-none-three-state",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": None}),
++            ],
++            ["--with-xyz"],
++            True,
++            id="explicit-default-none-three-state-with",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False}),
++                ("--with-xyz", {"flag_value": True, "default": None}),
++            ],
++            ["--without-xyz"],
++            False,
++            id="explicit-default-none-three-state-without",
++        ),
++        # Command-line input always beats any default, regardless of
++        # which option carried the explicit default.
++        pytest.param(
++            [
++                ("--with-xyz", {"flag_value": True, "default": True}),
++                ("--without-xyz", {"flag_value": False}),
++            ],
++            ["--without-xyz"],
++            False,
++            id="cmdline-beats-explicit-default",
++        ),
++        pytest.param(
++            [
++                ("--without-xyz", {"flag_value": False, "default": False}),
++                ("--with-xyz", {"flag_value": True}),
++            ],
++            ["--with-xyz"],
++            True,
++            id="cmdline-beats-explicit-default-symmetric",
++        ),
++    ],
++)
++def test_bool_flag_group_competition(runner, opts, args, expected):
++    """Competing boolean flags sharing a single parameter name.
++
++    Verifies the arbitration rules between options that target the same
++    variable name in a feature-switch group.
++
++    Regression test for https://github.com/pallets/click/issues/3403
++    """
++
++    @click.command()
++    def cli(enable_xyz):
++        click.echo(repr(enable_xyz), nl=False)
++
++    for opt_name, opt_kwargs in opts:
++        cli = click.option(opt_name, "enable_xyz", **opt_kwargs)(cli)
++
++    result = runner.invoke(cli, args)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++@pytest.mark.parametrize(
++    ("envvar_value", "args", "expected"),
++    [
++        # An env var on one option in the group provides ENVIRONMENT source,
++        # which beats any sibling's DEFAULT regardless of explicit-default.
++        ("1", [], True),
++        ("0", [], False),
++        # Command-line still beats the env var.
++        ("0", ["--with-xyz"], True),
++        ("1", ["--without-xyz"], False),
++    ],
++)
++def test_bool_flag_group_competition_with_envvar(
++    runner, monkeypatch, envvar_value, args, expected
++):
++    monkeypatch.setenv("XYZ", envvar_value)
++
++    @click.command()
++    @click.option("--without-xyz", "enable_xyz", flag_value=False)
++    @click.option(
++        "--with-xyz",
++        "enable_xyz",
++        flag_value=True,
++        default=False,
++        envvar="XYZ",
++    )
++    def cli(enable_xyz):
++        click.echo(repr(enable_xyz), nl=False)
++
++    result = runner.invoke(cli, args)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++@pytest.mark.parametrize(
++    ("default_map", "args", "expected"),
++    [
++        # ``default_map`` provides DEFAULT_MAP source, beating either default.
++        ({"enable_xyz": True}, [], True),
++        ({"enable_xyz": False}, [], False),
++        # Command-line still beats default_map.
++        ({"enable_xyz": False}, ["--with-xyz"], True),
++        ({"enable_xyz": True}, ["--without-xyz"], False),
++    ],
++)
++def test_bool_flag_group_competition_with_default_map(
++    runner, default_map, args, expected
++):
++    @click.command()
++    @click.option("--without-xyz", "enable_xyz", flag_value=False)
++    @click.option("--with-xyz", "enable_xyz", flag_value=True, default=True)
++    def cli(enable_xyz):
++        click.echo(repr(enable_xyz), nl=False)
++
++    result = runner.invoke(cli, args, default_map=default_map)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++@pytest.mark.parametrize(
++    ("opts", "args", "expected"),
++    [
++        # Non-boolean feature switch group: classic --upper/--lower
++        # pattern. The option with ``default=True`` acts as the default
++        # via the substitution rule (#3239) for non-boolean ``flag_value``.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": True}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            [],
++            "upper",
++            id="string-default-true-substitutes-to-flag-value",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": True}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            ["--upper"],
++            "upper",
++            id="string-default-true-cmdline-positive",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": True}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            ["--lower"],
++            "lower",
++            id="string-default-true-cmdline-overrides",
++        ),
++        # Explicit literal string default beats sibling's absent default.
++        # Confirms the explicit-beats-absent rule applies regardless of type.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": "lower"}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            [],
++            "lower",
++            id="string-explicit-default-wins-over-absent",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper"}),
++                ("--lower", {"flag_value": "lower", "default": "upper"}),
++            ],
++            [],
++            "upper",
++            id="string-explicit-default-wins-from-second-position",
++        ),
++        # Empty string as ``flag_value``: still a legal value, including
++        # under the ``default=True`` substitution rule.
++        pytest.param(
++            [
++                ("--empty", {"flag_value": "", "default": True}),
++                ("--filled", {"flag_value": "filled"}),
++            ],
++            [],
++            "",
++            id="empty-string-flag-value-default-true",
++        ),
++        pytest.param(
++            [
++                ("--empty", {"flag_value": "", "default": True}),
++                ("--filled", {"flag_value": "filled"}),
++            ],
++            ["--empty"],
++            "",
++            id="empty-string-flag-value-cmdline",
++        ),
++        # Empty string as ``default``: explicit empty string beats
++        # the sibling's absent default.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": ""}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            [],
++            "",
++            id="empty-string-explicit-default",
++        ),
++        # ``flag_value=None`` is a legal flag value: when the option is
++        # activated, the function receives ``None``.
++        pytest.param(
++            [
++                ("--none", {"flag_value": None, "default": "fallback"}),
++                ("--other", {"flag_value": "other"}),
++            ],
++            [],
++            "fallback",
++            id="none-flag-value-default-fallback",
++        ),
++        pytest.param(
++            [
++                ("--none", {"flag_value": None, "default": "fallback"}),
++                ("--other", {"flag_value": "other"}),
++            ],
++            ["--none"],
++            None,
++            id="none-flag-value-cmdline-passes-none",
++        ),
++        pytest.param(
++            [
++                ("--none", {"flag_value": None, "default": "fallback"}),
++                ("--other", {"flag_value": "other"}),
++            ],
++            ["--other"],
++            "other",
++            id="none-flag-value-cmdline-passes-other",
++        ),
++        # Explicit ``default=None`` is a real value (not absence) and
++        # must beat a sibling's absent default. Three-state pattern for
++        # non-boolean flag groups.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": None}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            [],
++            None,
++            id="explicit-default-none-three-state",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": None}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            ["--upper"],
++            "upper",
++            id="explicit-default-none-cmdline-upper",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": None}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            ["--lower"],
++            "lower",
++            id="explicit-default-none-cmdline-lower",
++        ),
++        # Passing ``default=UNSET`` explicitly is the same as not passing
++        # ``default`` at all, so the sibling's explicit default wins.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": UNSET}),
++                ("--lower", {"flag_value": "lower", "default": "lower"}),
++            ],
++            [],
++            "lower",
++            id="unset-default-equivalent-to-absent",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": UNSET}),
++                ("--lower", {"flag_value": "lower", "default": "lower"}),
++            ],
++            ["--upper"],
++            "upper",
++            id="unset-default-cmdline-still-works",
++        ),
++        # Neither option has a default: the slot resolves to ``None``
++        # because non-boolean flags do not auto-derive a default.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper"}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            [],
++            None,
++            id="non-boolean-no-defaults-resolves-to-none",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper"}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            ["--upper"],
++            "upper",
++            id="non-boolean-no-defaults-cmdline-still-works",
++        ),
++        # Three-flag string group: explicit default wins from any
++        # position in the decorator stack.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper"}),
++                ("--mixed", {"flag_value": "MiXeD", "default": "MiXeD"}),
++                ("--lower", {"flag_value": "lower"}),
++            ],
++            [],
++            "MiXeD",
++            id="three-flags-explicit-default-in-middle",
++        ),
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper"}),
++                ("--lower", {"flag_value": "lower"}),
++                ("--default-choice", {"flag_value": "chosen", "default": True}),
++            ],
++            [],
++            "chosen",
++            id="three-flags-default-true-substitution-last",
++        ),
++        # Both options have explicit defaults: last-wins, so the option
++        # declared last keeps the slot, regardless of value type.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": "first"}),
++                ("--lower", {"flag_value": "lower", "default": "second"}),
++            ],
++            [],
++            "second",
++            id="both-explicit-defaults-string-last-wins",
++        ),
++        # Mixed boolean and non-boolean ``flag_value`` in the same group
++        # is allowed. Both options here carry an explicit default, so last-wins
++        # picks the option declared last regardless of value type. The boolean
++        # ``default=False`` is a literal value (post-#3239), not a sentinel.
++        pytest.param(
++            [
++                ("--bool-flag", {"flag_value": True, "default": False}),
++                ("--str-flag", {"flag_value": "named", "default": "explicit"}),
++            ],
++            [],
++            "explicit",
++            id="mixed-bool-and-string-last-wins",
++        ),
++        pytest.param(
++            [
++                ("--str-flag", {"flag_value": "named", "default": "explicit"}),
++                ("--bool-flag", {"flag_value": True, "default": False}),
++            ],
++            [],
++            False,
++            id="mixed-bool-and-string-last-wins-swapped",
++        ),
++        # Empty string default coexisting with ``default=True``
++        # substitution: ``default=""`` is explicit, ``default=True`` is also
++        # explicit (and substitutes to the option's ``flag_value``). Last-wins
++        # picks the option declared last.
++        pytest.param(
++            [
++                ("--upper", {"flag_value": "upper", "default": True}),
++                ("--blank", {"flag_value": "blank", "default": ""}),
++            ],
++            [],
++            "",
++            id="default-true-vs-empty-string-last-wins",
++        ),
++        pytest.param(
++            [
++                ("--blank", {"flag_value": "blank", "default": ""}),
++                ("--upper", {"flag_value": "upper", "default": True}),
++            ],
++            [],
++            "upper",
++            id="default-true-vs-empty-string-last-wins-swapped",
++        ),
++    ],
++)
++def test_flag_group_competition_non_boolean(runner, opts, args, expected):
++    """Same arbitration rules as :func:`test_bool_flag_group_competition`,
++    but for feature-switch groups with non-boolean ``flag_value``.
++    """
++
++    @click.command()
++    def cli(case):
++        click.echo(repr(case), nl=False)
++
++    for opt_name, opt_kwargs in opts:
++        cli = click.option(opt_name, "case", **opt_kwargs)(cli)
++
++    result = runner.invoke(cli, args)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++@pytest.mark.parametrize(
++    ("default_a", "default_b", "args", "expected"),
++    [
++        # ``default=UNSET`` and an absent ``default`` keyword must produce
++        # identical behavior. Both options here are bare boolean flags, so
++        # both auto-derive ``False`` and last-wins applies (``--a`` is
++        # processed last); the value is ``False`` either way.
++        (UNSET, UNSET, [], False),
++        # ``default=UNSET`` on one side, explicit on the other: the explicit
++        # one wins regardless of decorator order.
++        (UNSET, True, [], True),
++        (True, UNSET, [], True),
++        (UNSET, False, [], False),
++        (False, UNSET, [], False),
++        # ``default=None`` is a real value, distinct from ``UNSET``, and
++        # remains explicit even when the sibling carries an explicit
++        # boolean default (3-state).
++        (None, UNSET, [], None),
++        (UNSET, None, [], None),
++        # Explicit ``None`` competing with explicit boolean. The decorator
++        # order in this test puts ``--a`` last in ``params``, so the value
++        # carried by ``default_a`` wins these "both explicit" ties under
++        # last-wins.
++        (None, True, [], None),
++        (True, None, [], True),
++    ],
++)
++def test_flag_group_unset_vs_none_vs_explicit(
++    runner, default_a, default_b, args, expected
++):
++    """``UNSET`` as an explicit ``default`` must be indistinguishable from
++    omitting ``default`` entirely, while ``None`` is a real explicit value.
++    """
++    a_kwargs = {"flag_value": True}
++    if default_a is not UNSET:
++        a_kwargs["default"] = default_a
++    elif default_a is UNSET:
++        # Pass UNSET explicitly to verify it's treated as absent. Skip when
++        # the test wants the absent-keyword case (matches default behavior
++        # because ``Parameter.__init__`` defaults ``default`` to ``UNSET``).
++        a_kwargs["default"] = UNSET
++
++    b_kwargs = {"flag_value": False}
++    if default_b is not UNSET:
++        b_kwargs["default"] = default_b
++    elif default_b is UNSET:
++        b_kwargs["default"] = UNSET
++
++    @click.command()
++    @click.option("--b", "state", **b_kwargs)
++    @click.option("--a", "state", **a_kwargs)
++    def cli(state):
++        click.echo(repr(state), nl=False)
++
++    result = runner.invoke(cli, args)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++def test_flag_group_competition_duplicate_option_name(runner):
++    """The same option name declared twice on the same command is a user
++    error.
++    """
++
++    @click.command()
++    @click.option("--xyz", default="first")
++    @click.option("--xyz", default="second")
++    def cli(xyz):
++        click.echo(repr(xyz), nl=False)
++
++    result = runner.invoke(cli, [])
++    assert result.exit_code == 1
++    assert isinstance(result.exception, UserWarning)
++    assert "used more than once" in str(result.exception)
++
++
++@pytest.mark.parametrize(
++    ("args", "expected"),
++    [
++        (["--with-xyz", "--with-xyz"], True),
++        (["--without-xyz", "--without-xyz"], False),
++        (["--with-xyz", "--without-xyz", "--with-xyz"], True),
++        (["--without-xyz", "--with-xyz", "--without-xyz"], False),
++    ],
++)
++def test_flag_group_competition_repeated_cmdline(runner, args, expected):
++    """Duplicate flags passed in different order to the CLI."""
++
++    @click.command()
++    @click.option("--without-xyz", "enable_xyz", flag_value=False)
++    @click.option("--with-xyz", "enable_xyz", flag_value=True, default=True)
++    def cli(enable_xyz):
++        click.echo(repr(enable_xyz), nl=False)
++
++    result = runner.invoke(cli, args)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++@pytest.mark.parametrize(
++    ("opts", "args", "expected"),
++    [
++        pytest.param(
++            [
++                ("--a", {"flag_value": "a"}),
++                ("--b", {"flag_value": "b"}),
++                ("--c", {"flag_value": "c"}),
++                ("--d", {"flag_value": "d"}),
++            ],
++            [],
++            None,
++            id="four-flags-no-defaults-resolves-to-none",
++        ),
++        pytest.param(
++            [
++                ("--a", {"flag_value": "a"}),
++                ("--b", {"flag_value": "b", "default": "from-b"}),
++                ("--c", {"flag_value": "c"}),
++                ("--d", {"flag_value": "d"}),
++            ],
++            [],
++            "from-b",
++            id="four-flags-only-second-explicit-wins",
++        ),
++        pytest.param(
++            [
++                ("--a", {"flag_value": "a"}),
++                ("--b", {"flag_value": "b", "default": "from-b"}),
++                ("--c", {"flag_value": "c"}),
++                ("--d", {"flag_value": "d", "default": "from-d"}),
++            ],
++            [],
++            "from-d",
++            id="four-flags-two-explicit-last-wins",
++        ),
++        pytest.param(
++            [
++                ("--a", {"flag_value": "a"}),
++                ("--b", {"flag_value": "b"}),
++                ("--c", {"flag_value": "c"}),
++                ("--d", {"flag_value": "d"}),
++            ],
++            ["--c"],
++            "c",
++            id="four-flags-cmdline-beats-everything",
++        ),
++    ],
++)
++def test_flag_group_competition_four_flags(runner, opts, args, expected):
++    """Arbitration rules applies to groups of any size."""
++
++    @click.command()
++    def cli(case):
++        click.echo(repr(case), nl=False)
++
++    for opt_name, opt_kwargs in opts:
++        cli = click.option(opt_name, "case", **opt_kwargs)(cli)
++
++    result = runner.invoke(cli, args)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
++@pytest.mark.parametrize(
++    ("env", "default_map", "args", "expected"),
++    [
++        # ``auto_envvar_prefix`` produces an ``ENVIRONMENT`` source through a
++        # different code path than an explicit ``envvar=`` keyword. It still
++        # must beat any sibling default and be beaten by command-line input.
++        pytest.param(
++            {"AUTO_ENABLE_XYZ": "1"},
++            None,
++            [],
++            True,
++            id="auto-envvar-prefix-beats-default",
++        ),
++        pytest.param(
++            {"AUTO_ENABLE_XYZ": "1"},
++            None,
++            ["--without-xyz"],
++            False,
++            id="auto-envvar-prefix-loses-to-cmdline",
++        ),
++        # ``Sentinel.UNSET`` in ``default_map`` must be skipped (#3224
++        # carve-out): the lookup falls through to the parameter default.
++        # Inside a feature switch group, the explicit ``default=True`` on
++        # ``--with-xyz`` then wins over the sibling's auto-``False``.
++        pytest.param(
++            {},
++            {"enable_xyz": UNSET},
++            [],
++            True,
++            id="unset-default-map-falls-through-to-explicit-default",
++        ),
++        pytest.param(
++            {},
++            {"enable_xyz": False},
++            [],
++            False,
++            id="real-default-map-beats-explicit-default",
++        ),
++    ],
++)
++def test_flag_group_competition_envvar_prefix_and_unset_default_map(
++    runner, monkeypatch, env, default_map, args, expected
++):
++    for name, value in env.items():
++        monkeypatch.setenv(name, value)
++
++    @click.command()
++    @click.option("--without-xyz", "enable_xyz", flag_value=False)
++    @click.option("--with-xyz", "enable_xyz", flag_value=True, default=True)
++    def cli(enable_xyz):
++        click.echo(repr(enable_xyz), nl=False)
++
++    invoke_kwargs = {"auto_envvar_prefix": "AUTO"}
++    if default_map is not None:
++        invoke_kwargs["default_map"] = default_map
++
++    result = runner.invoke(cli, args, **invoke_kwargs)
++    assert result.exit_code == 0, result.output
++    assert result.output == repr(expected)
++
++
+ @pytest.mark.parametrize(
+     ("flag_type", "args", "expect_output"),
+     [
+diff --git a/tests/test_shell_completion.py b/tests/test_shell_completion.py
+--- a/tests/test_shell_completion.py
++++ b/tests/test_shell_completion.py
+@@ -357,9 +357,9 @@ def test_full_source(runner, shell):
+         ("bash", {"COMP_WORDS": "a b", "COMP_CWORD": "1"}, "plain,b\n"),
+         ("zsh", {"COMP_WORDS": "", "COMP_CWORD": "0"}, "plain\na\n_\nplain\nb\nbee\n"),
+         ("zsh", {"COMP_WORDS": "a b", "COMP_CWORD": "1"}, "plain\nb\nbee\n"),
+-        ("fish", {"COMP_WORDS": "", "COMP_CWORD": ""}, "plain,a\nplain,b\tbee\n"),
+-        ("fish", {"COMP_WORDS": "a b", "COMP_CWORD": "b"}, "plain,b\tbee\n"),
+-        ("fish", {"COMP_WORDS": 'a "b', "COMP_CWORD": '"b'}, "plain,b\tbee\n"),
++        ("fish", {"COMP_WORDS": "", "COMP_CWORD": ""}, "plain\na\n_\nplain\nb\nbee\n"),
++        ("fish", {"COMP_WORDS": "a b", "COMP_CWORD": "b"}, "plain\nb\nbee\n"),
++        ("fish", {"COMP_WORDS": 'a "b', "COMP_CWORD": '"b'}, "plain\nb\nbee\n"),
+     ],
+ )
+ @pytest.mark.usefixtures("_patch_for_completion")
+@@ -559,3 +559,50 @@ def cli(ctx, config_file):
+             assert not current_warnings, "There should be no warnings to start"
+             _get_completions(cli, args=[], incomplete="")
+             assert not current_warnings, "There should be no warnings after either"
++
++
++@pytest.mark.usefixtures("_patch_for_completion")
++def test_fish_multiline_help_complete(runner):
++    """Test Fish completion with multi-line help text doesn't cause errors."""
++    cli = Command(
++        "cli",
++        params=[
++            Option(
++                ["--at", "--attachment-type"],
++                type=(str, str),
++                multiple=True,
++                help=(
++                    "\b\nAttachment with explicit mimetype,\n--at image.jpg image/jpeg"
++                ),
++            ),
++            Option(["--other"], help="Normal help"),
++        ],
++    )
++
++    result = runner.invoke(
++        cli,
++        env={
++            "COMP_WORDS": "cli --",
++            "COMP_CWORD": "--",
++            "_CLI_COMPLETE": "fish_complete",
++        },
++    )
++
++    # Should not fail
++    assert result.exit_code == 0
++
++    # Output should contain escaped newlines, not literal newlines
++    # Fish expects: plain\n--at\n{help_with_\\n}
++    lines = result.output.split("\n")
++
++    # Find the --at completion block (3 lines: type, value, help)
++    for i in range(0, len(lines) - 2, 3):
++        if lines[i] == "plain" and lines[i + 1] in ("--at", "--attachment-type"):
++            help_line = lines[i + 2]
++            # Help should have escaped newlines (\\n), not actual newlines
++            assert "\\n" in help_line
++            # Should contain the example text
++            assert "image.jpg" in help_line.replace("\\n", " ")
++            break
++    else:
++        pytest.fail("--at completion not found in output")
+diff --git a/tests/test_termui.py b/tests/test_termui.py
+--- a/tests/test_termui.py
++++ b/tests/test_termui.py
+@@ -1,11 +1,16 @@
++import contextlib
++import io
+ import platform
+ import shlex
++import shutil
++import sys
+ import tempfile
+ import time
+ from unittest.mock import patch
+ 
+ import pytest
+ 
++import click
+ import click._termui_impl
+ from click._compat import WIN
+ from click._termui_impl import Editor
+@@ -620,6 +625,229 @@ def test_pager_shlex_split(pager_env, expected_parts):
+     assert shlex.split(pager_env) == expected_parts
+ 
+ 
++def _get_real_pager_command() -> str:
++    """Return a real pager binary path used to exercise the pipe pager branch.
++
++    ..warning::
++        Unix-only for now: ``more.com`` on Windows is interactive and goes
++        through ``_tempfilepager`` rather than ``_pipepager``.
++    """
++    pager_path = shutil.which("cat")
++    assert pager_path is not None, "cat not available"
++    return pager_path
++
++
++def _run_get_pager_file_with_real_pager(monkeypatch, capfd, writer, color=False):
++    """Run through the pipe pager backend selected by ``PAGER``."""
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
++    monkeypatch.setitem(
++        click._termui_impl.os.environ, "PAGER", _get_real_pager_command()
++    )
++
++    with click.get_pager_file(color=color) as pager:
++        writer(pager)
++
++    # The real pager writes to the process stdout; stderr should stay quiet.
++    out, err = capfd.readouterr()
++    assert err == ""
++    return out
++
++
++def _write_pager_from_multiple_sites(pager):
++    pager.write("prefix\n")
++    click.echo("middle", file=pager)
++    pager.write("suffix\n")
++
++
++@pytest.mark.skipif(
++    WIN,
++    reason="Exercises the pipe pager path; Windows uses _tempfilepager.",
++)
++@pytest.mark.parametrize(
++    ("writer", "color", "expected"),
++    [
++        pytest.param(
++            _write_pager_from_multiple_sites,
++            False,
++            "prefix\nmiddle\nsuffix\n",
++            id="multiple write sites",
++        ),
++        pytest.param(
++            lambda pager: pager.write("hello\n"), False, "hello\n", id="plain text"
++        ),
++        pytest.param(
++            lambda pager: pager.write(click.style("hello", fg="red") + "\n"),
++            False,
++            "hello\n",
++            id="strip ansi",
++        ),
++        pytest.param(
++            lambda pager: pager.write(click.style("hello", fg="red") + "\n"),
++            True,
++            click.style("hello", fg="red") + "\n",
++            id="preserve ansi",
++        ),
++        pytest.param(lambda pager: pager.write(""), False, "", id="empty string"),
++    ],
++)
++def test_get_pager_file_with_real_pager_binary_stream(
++    monkeypatch, capfd, writer, color, expected
++):
++    """A real pager should exercise the BinaryIO branch."""
++    output = _run_get_pager_file_with_real_pager(
++        monkeypatch, capfd, writer, color=color
++    )
++
++    assert output == expected
++
++
++@pytest.mark.skipif(
++    WIN,
++    reason="Exercises the pipe pager path; Windows uses _tempfilepager.",
++)
++@pytest.mark.parametrize(
++    ("color", "expected"),
++    [
++        pytest.param(False, "hello\n", id="strip ansi"),
++        pytest.param(True, click.style("hello", fg="red") + "\n", id="preserve ansi"),
++    ],
++)
++def test_echo_via_pager_real_pager_handles_ansi(monkeypatch, capfd, color, expected):
++    """``echo_via_pager`` should honor ``color`` like ``get_pager_file``."""
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
++    monkeypatch.setitem(
++        click._termui_impl.os.environ, "PAGER", _get_real_pager_command()
++    )
++
++    click.echo_via_pager(click.style("hello", fg="red"), color=color)
++
++    out, err = capfd.readouterr()
++    assert err == ""
++    assert out == expected
++
++
++def test_get_pager_file_pager_missing_binary_falls_back(monkeypatch, tmp_path):
++    """``PAGER`` pointing to a nonexistent binary falls back to the text stdout."""
++    pager_out = tmp_path / "pager_out.txt"
++
++    monkeypatch.setitem(
++        click._termui_impl.os.environ,
++        "PAGER",
++        "click-tests-nonexistent-pager-9b3f2",
++    )
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
++
++    with pager_out.open("w", encoding="utf-8") as text_stream:
++        monkeypatch.setattr(
++            click._termui_impl, "_default_text_stdout", lambda: text_stream
++        )
++
++        with click.get_pager_file() as pager:
++            pager.write("hello\n")
++
++    assert pager_out.read_text(encoding="utf-8") == "hello\n"
++
++
++def test_get_pager_file_pager_unset_falls_back_when_no_default(monkeypatch, tmp_path):
++    """``PAGER`` unset still works when the platform default isn't installed."""
++    pager_out = tmp_path / "pager_out.txt"
++
++    monkeypatch.delitem(click._termui_impl.os.environ, "PAGER", raising=False)
++    monkeypatch.delitem(click._termui_impl.os.environ, "TERM", raising=False)
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
++    monkeypatch.setattr(shutil, "which", lambda _name: None)
++
++    with pager_out.open("w", encoding="utf-8") as text_stream:
++        monkeypatch.setattr(
++            click._termui_impl, "_default_text_stdout", lambda: text_stream
++        )
++
++        with click.get_pager_file() as pager:
++            pager.write("hello\n")
++
++    assert pager_out.read_text(encoding="utf-8") == "hello\n"
++
++
++@pytest.mark.parametrize(
++    ("color", "expected"),
++    [
++        pytest.param(False, "hello\n", id="strip ansi"),
++        pytest.param(True, click.style("hello", fg="red") + "\n", id="preserve ansi"),
++    ],
++)
++def test_get_pager_file_nullpager_wraps_textio_stream(
++    monkeypatch, tmp_path, color, expected
++):
++    """When paging falls back to a real TextIO stream, ``.buffer`` is wrapped."""
++    pager_out = tmp_path / "pager_out.txt"
++
++    with pager_out.open("w", encoding="utf-8") as text_stream:
++        monkeypatch.setattr(
++            click._termui_impl, "_default_text_stdout", lambda: text_stream
++        )
++        monkeypatch.setattr(
++            click._termui_impl, "isatty", lambda stream: stream is not sys.stdin
++        )
++
++        with click.get_pager_file(color=color) as pager:
++            pager.write(click.style("hello", fg="red") + "\n")
++
++    assert pager_out.read_text(encoding="utf-8") == expected
++
++
++def test_get_pager_file_nullpager_keeps_stringio_stream(monkeypatch):
++    """The no-stdout fallback should keep a text-only stream and set ``.color``."""
++
++    created = []
++
++    def make_stringio():
++        stream = io.StringIO()
++        created.append(stream)
++        return stream
++
++    monkeypatch.setattr(sys, "stdout", None)
++    monkeypatch.setattr(click._termui_impl, "StringIO", make_stringio)
++    monkeypatch.setattr(click._termui_impl, "isatty", lambda _: False)
++
++    styled_text = click.style("hello", fg="red")
++
++    with click.get_pager_file(color=False) as pager:
++        assert pager is created[0]
++        pager.write(styled_text)
++
++    assert created[0].getvalue() == styled_text
++
++
++def test_get_pager_file_flushes_stream_on_exception(monkeypatch):
++    """Exceptions should still flush the yielded stream in ``finally``."""
++
++    class FlushableTextStream(io.StringIO):
++        def __init__(self):
++            super().__init__()
++            self.color = None
++            self.flush_calls = 0
++
++        def flush(self):
++            self.flush_calls += 1
++
++    stream = FlushableTextStream()
++
++    @contextlib.contextmanager
++    def pager_contextmanager(color=None):
++        yield stream, "utf-8", color
++
++    monkeypatch.setattr(
++        click._termui_impl, "_pager_contextmanager", pager_contextmanager
++    )
++
++    with pytest.raises(RuntimeError, match="boom"):
++        with click.get_pager_file() as pager:
++            assert pager is stream
++            raise RuntimeError("boom")
++
++    assert stream.flush_calls == 1
++
++
+ def test_editor_unclosed_quote():
+     """An unclosed quote in the editor command raises ValueError."""
+     with pytest.raises(ValueError, match="No closing quotation"):
+@@ -988,3 +1216,259 @@ def cli(flag):
+         assert result.output == expected_output
+         assert not result.stderr
+         assert result.exit_code == 0 if expected not in (REPEAT, INVALID) else 1
++
++
++class _CustomTypeNoValue(click.ParamType):
++    name = "custom"
++
++    def convert(self, value, param, ctx):
++        if len(value) < 4:
++            self.fail("Password must be at least 4 characters", param, ctx)
++        return value
++
++
++class _CustomTypeWithRawValue(click.ParamType):
++    name = "custom_raw"
++
++    def convert(self, value, param, ctx):
++        if value == "bad":
++            self.fail(f"rejected: {value}", param, ctx)
++        return value
++
++
++class _PasswordLengthType(click.ParamType):
++    """Mirrors the issue's original use case: a password validator
++    that references the user-typed value in its error message without
++    quoting it.
++    """
++
++    name = "password"
++
++    def convert(self, value, param, ctx):
++        if len(value) < 10:
++            self.fail(f"{value} is too short", param, ctx)
++        return value
++
++
++class _MixedQuotedAndRawType(click.ParamType):
++    """Custom type that mentions the user input both quoted (built-in
++    pattern) and raw within the same message.
++    """
++
++    name = "mixed"
++
++    def convert(self, value, param, ctx):
++        self.fail(f"got {value!r} which is the same as {value}", param, ctx)
++
++
++class _StaticMessageType(click.ParamType):
++    """Custom type whose error message never references the value."""
++
++    name = "static"
++
++    def convert(self, value, param, ctx):
++        self.fail("Authentication failed for this account", param, ctx)
++
++
++class _RejectAllRawType(click.ParamType):
++    """Always rejects, with the raw value (unquoted) in the message."""
++
++    name = "reject_all_raw"
++
++    def convert(self, value, param, ctx):
++        self.fail(f"rejected: {value}", param, ctx)
++
++
++class _MultiRawType(click.ParamType):
++    """Mentions the raw value multiple times in the same message."""
++
++    name = "multi_raw"
++
++    def convert(self, value, param, ctx):
++        self.fail(f"got {value} but {value} is bad", param, ctx)
++
++
++class _MultiReprType(click.ParamType):
++    """Mentions ``repr(value)`` multiple times in the same message."""
++
++    name = "multi_repr"
++
++    def convert(self, value, param, ctx):
++        self.fail(f"got {value!r} and {value!r}", param, ctx)
++
++
++class _ApostropheReprType(click.ParamType):
++    """Custom type whose ``repr(value)`` switches to double quotes when
++    the value itself contains a single quote.
++    """
++
++    name = "apostrophe_repr"
++
++    def convert(self, value, param, ctx):
++        self.fail(f"rejected {value!r}", param, ctx)
++
++
++@pytest.mark.parametrize(
++    ("type", "user_input", "expected_fragment", "unexpected_fragment"),
++    [
++        pytest.param(
++            click.INT,
++            "bad",
++            "'***' is not a valid integer",
++            "bad",
++            id="builtin-int-masks-repr-value",
++        ),
++        pytest.param(
++            _CustomTypeNoValue(),
++            "bad",
++            "Password must be at least 4 characters",
++            None,
++            id="custom-no-value-shows-message",
++        ),
++        pytest.param(
++            _CustomTypeWithRawValue(),
++            "bad",
++            "rejected: '***'",
++            "bad",
++            id="custom-raw-value-masked",
++        ),
++        pytest.param(
++            _PasswordLengthType(),
++            "PASSWORD",
++            "'***' is too short",
++            "PASSWORD",
++            id="unquoted-custom-message-should-mask-not-fallback",
++        ),
++        pytest.param(
++            _MixedQuotedAndRawType(),
++            "leakybits",
++            "got '***' which is the same as '***'",
++            "leakybits",
++            id="mixed-quoted-and-raw-both-masked-at-source",
++        ),
++        pytest.param(
++            click.IntRange(min=10, max=99),
++            "1",
++            "is not in the range",
++            None,
++            id="intrange-numeric-substring-falls-back-to-generic",
++        ),
++        pytest.param(
++            _StaticMessageType(),
++            "ent",
++            "Authentication failed for this account",
++            None,
++            id="partial-word-match-falls-back-to-generic",
++        ),
++        # When the raw (unquoted) value appears in the message, mask it instead
++        # of replacing the whole message with a generic fallback that throws
++        # useful information away.
++        pytest.param(
++            _RejectAllRawType(),
++            "secret",
++            "rejected: '***'",
++            "secret",
++            id="raw-value-should-be-masked-not-fallback",
++        ),
++        # When the raw value occurs more than
++        # once unquoted, every occurrence must be masked.
++        pytest.param(
++            _MultiRawType(),
++            "secret",
++            "got '***' but '***' is bad",
++            "secret",
++            id="multi-occurrence-raw-mask-all",
++        ),
++        pytest.param(
++            _MultiReprType(),
++            "secret",
++            "got '***' and '***'",
++            "secret",
++            id="multi-occurrence-repr-mask-all",
++        ),
++        pytest.param(
++            _PasswordLengthType(),
++            "a.b*c+",
++            "'***' is too short",
++            "a.b*c+",
++            id="regex-special-chars-must-be-escaped",
++        ),
++        pytest.param(
++            _PasswordLengthType(),
++            "пароль",
++            "'***' is too short",
++            "пароль",
++            id="unicode-value-masked",
++        ),
++        pytest.param(
++            _ApostropheReprType(),
++            "it's",
++            "rejected '***'",
++            "it's",
++            id="apostrophe-in-value-uses-double-quote-repr",
++        ),
++        pytest.param(
++            _MixedQuotedAndRawType(),
++            "leakybits",
++            "got '***' which is the same as '***'",
++            "leakybits",
++            id="mixed-quoted-and-raw-mask-both",
++        ),
++    ],
++)
++def test_hide_input_error_message(
++    runner, type, user_input, expected_fragment, unexpected_fragment
++):
++    """https://github.com/pallets/click/issues/2809"""
++
++    @click.command()
++    @click.option("--password", prompt=True, hide_input=True, type=type)
++    def cli(password):
++        click.echo(password)
++
++    result = runner.invoke(cli, input=user_input)
++    assert expected_fragment in result.output
++    if unexpected_fragment is not None:
++        assert unexpected_fragment not in result.output
++
++
++def test_hide_input_confirmation_prompt_mismatch_unaffected(runner):
++    """The ``hide_input`` mask logic only applies to ``value_proc``
++    failures. The separate ``confirmation_prompt`` mismatch path must
++    keep emitting its own message, with no value leak from either entry.
++    """
++
++    @click.command()
++    @click.option("--password", prompt=True, confirmation_prompt=True, hide_input=True)
++    def cli(password):
++        click.echo(f"got: {password}")
++
++    # First pair mismatches, second pair matches.
++    result = runner.invoke(cli, input="firstone\nsecondone\nfinalone\nfinalone\n")
++    assert "Error: The two entered values do not match." in result.output
++    assert "firstone" not in result.output
++    assert "secondone" not in result.output
++    # Successful prompt echoes the final value back via the command body.
++    assert "got: finalone" in result.output
++    assert result.exit_code == 0
++
++
++def test_hide_input_value_never_leaks_when_err_true(runner):
++    """``click.prompt(..., err=True)`` routes its error message to
++    stderr. The masking logic must apply on that path too: the raw
++    input must not appear on either stream.
++    """
++
++    @click.command()
++    def cli():
++        value = click.prompt(
++            "Password",
++            hide_input=True,
++            type=_PasswordLengthType(),
++            err=True,
++        )
++        click.echo(value)
++
++    result = runner.invoke(cli, input="leaky\n", mix_stderr=False)
++    assert "leaky" not in result.stdout
++    assert "leaky" not in result.stderr
+diff --git a/tests/test_testing.py b/tests/test_testing.py
+--- a/tests/test_testing.py
++++ b/tests/test_testing.py
+@@ -1,4 +1,5 @@
+ import faulthandler
++import io
+ import os
+ import pdb
+ import sys
+@@ -522,26 +523,227 @@ def cli():
+     assert pdb.Pdb.__init__ is original
+ 
+ 
+-def test_faulthandler_enable(runner):
+-    """``faulthandler.enable()`` inside ``CliRunner`` should not crash with
+-    ``io.UnsupportedOperation: fileno``.
++needs_fd_capture = pytest.mark.skipif(
++    sys.platform == "win32",
++    reason="fd capture not supported on Windows",
++)
++
++
++def test_capture_invalid_mode():
++    """Invalid capture mode raises ValueError."""
++    with pytest.raises(ValueError, match="capture"):
++        CliRunner(capture="invalid")  # type: ignore[arg-type]
++
++
++@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
++def test_capture_fd_windows_error():
++    """fd capture raises ValueError on Windows."""
++    with pytest.raises(ValueError, match="not supported on Windows"):
++        CliRunner(capture="fd")
++
++
++@needs_fd_capture
++def test_capture_fd_os_write():
++    """capture='fd' captures writes to fd 1/2 that bypass sys.stdout."""
++
++    @click.command()
++    def cli():
++        click.echo("python stdout")
++        os.write(1, b"fd stdout\n")
++        os.write(2, b"fd stderr\n")
++
++    runner = CliRunner(capture="fd")
++    result = runner.invoke(cli)
++    assert "python stdout" in result.stdout
++    assert "fd stdout" in result.stdout
++    assert "fd stderr" in result.stderr
++
++
++@needs_fd_capture
++def test_capture_fd_stale_reference():
++    """capture='fd' captures writes from stale stdout references (issue #2874).
++
++    Simulates ``from sys import stdout`` at import time, which grabs
++    the real stdout connected to fd 1.  The stale object's underlying
++    FileIO uses fd 1, so redirecting fd 1 captures its writes.
++    """
++    # open(1, ..., closefd=False) creates a writer whose underlying
++    # FileIO uses fd 1 directly. This mirrors the real scenario:
++    # the original sys.stdout is a TextIOWrapper -> BufferedWriter ->
++    # FileIO(fd=1).
++    stale_stdout = open(1, "w", closefd=False)  # noqa: SIM115
++
++    @click.command()
++    def cli():
++        stale_stdout.write("stale write\n")
++        stale_stdout.flush()
++        click.echo("normal write")
++
++    runner = CliRunner(capture="fd")
++    result = runner.invoke(cli)
++    assert "normal write" in result.stdout
++    assert "stale write" in result.stdout
++
++
++@needs_fd_capture
++def test_capture_fd_logging_handler(tmp_path):
++    """capture='fd' captures logging output from a handler holding a stale
++    stderr reference (issue #2827).
++
++    stdlib logging.StreamHandler grabs sys.stderr at configuration time.
++    Under normal CliRunner (sys-level capture), the handler still writes
++    to the original stream object and output is lost. fd-level capture
++    redirects the underlying file descriptor, so the writes are captured.
++    """
++    import logging
++
++    # Create a writer backed by the real fd 2, simulating a handler
++    # configured at import time before pytest or CliRunner replaced
++    # sys.stderr. open(2, closefd=False) mirrors the real scenario:
++    # the original sys.stderr is a TextIOWrapper -> BufferedWriter ->
++    # FileIO(fd=2).
++    stale_stderr = open(2, "w", closefd=False)  # noqa: SIM115
++    handler = logging.StreamHandler(stale_stderr)
++    handler.setFormatter(logging.Formatter("%(message)s"))
++
++    logger = logging.getLogger(f"click_test_{tmp_path.name}")
++    logger.addHandler(handler)
++    logger.setLevel(logging.INFO)
++    logger.propagate = False
++
++    @click.command()
++    def cli():
++        logger.info("log from stale handler")
++        click.echo("normal echo")
++
++    # sys-level capture misses the log line (it bypasses sys.stderr).
++    runner_sys = CliRunner(capture="sys")
++    result_sys = runner_sys.invoke(cli)
++    assert "normal echo" in result_sys.output
++    assert "log from stale handler" not in result_sys.output
++
++    # fd-level capture catches it by redirecting fd 2.
++    runner_fd = CliRunner(capture="fd")
++    result_fd = runner_fd.invoke(cli)
++    assert "normal echo" in result_fd.output
++    assert "log from stale handler" in result_fd.output
++
++    logger.removeHandler(handler)
++
++
++@needs_fd_capture
++def test_capture_fd_faulthandler():
++    """faulthandler.enable() works with capture='fd' (issue #2865)."""
++
++    @click.command()
++    def cli():
++        faulthandler.enable()
++        click.echo("after faulthandler")
++
++    runner = CliRunner(capture="fd")
++    result = runner.invoke(cli)
++    assert result.exit_code == 0
++    assert "after faulthandler" in result.output
+ 
+-    ``faulthandler.enable()`` needs a real OS file descriptor to register
+-    its signal handler. ``CliRunner`` replaces ``sys.stderr`` with a
+-    ``BytesIO`` wrapper that has no ``fileno()``, causing the call to fail.
+ 
+-    Reproduce:https://github.com/pallets/click/issues/2865
++def test_capture_sys_fileno_raises():
++    """capture='sys' leaves fileno() raising UnsupportedOperation, so user
++    code that does ``os.dup2(w, sys.stdout.fileno())`` cannot mutate the host
++    runner's stdout (issue #3384).
+     """
+ 
+     @click.command()
+-    @click.option("--flag", type=bool, default=True)
+-    def cli(flag):
+-        click.echo("Executing main function...")
+-        if flag:
+-            click.echo("Registering faulthandler")
+-            faulthandler.enable()
+-        click.echo("Finished executing main function.")
++    def cli():
++        with pytest.raises(io.UnsupportedOperation):
++            sys.stdout.fileno()
++        with pytest.raises(io.UnsupportedOperation):
++            sys.stderr.fileno()
++        click.echo("ok")
+ 
+-    result = runner.invoke(cli, ["--flag", True])
++    runner = CliRunner(capture="sys")
++    result = runner.invoke(cli)
+     assert result.exit_code == 0, result.output
+-    assert "Finished executing main function." in result.output
++    assert "ok" in result.stdout
++
++
++@needs_fd_capture
++def test_capture_fd_stderr_separation():
++    """capture='fd' properly separates fd-level stdout and stderr."""
++
++    @click.command()
++    def cli():
++        click.echo("py-out")
++        click.echo("py-err", err=True)
++        os.write(1, b"fd-out\n")
++        os.write(2, b"fd-err\n")
++
++    runner = CliRunner(capture="fd")
++    result = runner.invoke(cli)
++    assert "py-out" in result.stdout
++    assert "fd-out" in result.stdout
++    assert "py-err" in result.stderr
++    assert "fd-err" in result.stderr
++    # Mixed output has all of them
++    assert "py-out" in result.output
++    assert "py-err" in result.output
++    assert "fd-out" in result.output
++    assert "fd-err" in result.output
++
++
++@needs_fd_capture
++def test_capture_fd_nesting():
++    """Nested CliRunner.invoke() with fd capture works correctly."""
++
++    @click.command("inner")
++    def inner_cli():
++        click.echo("inner")
++
++    @click.command("outer")
++    def outer_cli():
++        click.echo("outer")
++        os.write(1, b"outer fd\n")
++        inner_runner = CliRunner(capture="fd")
++        inner_result = inner_runner.invoke(inner_cli)
++        click.echo(f"inner captured: {inner_result.stdout.strip()}")
++
++    runner = CliRunner(capture="fd")
++    result = runner.invoke(outer_cli)
++    assert "outer" in result.stdout
++    assert "outer fd" in result.stdout
++    assert "inner captured: inner" in result.stdout
++
++
++@needs_fd_capture
++@pytest.mark.parametrize("runner_capture", ["sys", "fd"])
++@pytest.mark.parametrize("pytest_fixture", ["capsys", "capfd"])
++def test_capture_pytest_matrix(
++    request: pytest.FixtureRequest,
++    runner_capture: str,
++    pytest_fixture: str,
++) -> None:
++    """Matrix of ``CliRunner`` capture modes and Pytest capture fixtures."""
++    pytest_cap = request.getfixturevalue(pytest_fixture)
++
++    @click.command()
++    def cli() -> None:
++        click.echo("inside-stdout")
++        click.echo("inside-stderr", err=True)
++
++    runner = CliRunner(capture=runner_capture)
++    result = runner.invoke(cli)
++
++    # CliRunner sees Click's output.
++    assert result.exit_code == 0
++    assert "inside-stdout" in result.stdout
++    assert "inside-stderr" in result.stderr
++
++    # Pytest capture machinery is still working after invoke().
++    print("post-invoke-stdout")
++    print("post-invoke-stderr", file=sys.stderr)
++    captured = pytest_cap.readouterr()
++    assert "post-invoke-stdout" in captured.out
++    assert "post-invoke-stderr" in captured.err
++
++    # Click output is not leaking into Pytest.
++    assert "inside-stdout" not in captured.out
++    assert "inside-stderr" not in captured.err
+diff --git a/tests/test_types.py b/tests/test_types.py
+--- a/tests/test_types.py
++++ b/tests/test_types.py
+@@ -51,6 +51,25 @@ def test_range_fail(type, value, expect):
+     assert expect in exc_info.value.message
+ 
+ 
++@pytest.mark.parametrize(
++    ("error_message", "expected"),
++    [
++        ("bad value: nope", "bad value: nope"),
++        ("", "nope"),
++    ],
++)
++def test_func_param_type_uses_value_error_message(error_message, expected):
++    def parse(value):
++        raise ValueError(error_message if error_message else "")
++
++    func_type = click.types.FuncParamType(parse)
++
++    with pytest.raises(click.BadParameter) as exc_info:
++        func_type.convert("nope", None, None)
++
++    assert expected in exc_info.value.message
++
++
+ def test_float_range_no_clamp_open():
+     with pytest.raises(TypeError):
+         click.FloatRange(0, 1, max_open=True, clamp=True)
+diff --git a/tests/test_utils.py b/tests/test_utils.py
+--- a/tests/test_utils.py
++++ b/tests/test_utils.py
+@@ -225,7 +225,38 @@ def f(_):
+         click.echo("interrupted")
+ 
+     out, err = capsys.readouterr()
+-    assert out == "Password:\ninterrupted\n"
++    # On non-Windows, prompt is passed directly to getpass, not echoed separately
++    assert out == "\ninterrupted\n"
++
++
++@pytest.mark.skipif(WIN, reason="Different behavior on windows.")
++@pytest.mark.parametrize(
++    ("call", "expected_prompt"),
++    [
++        (lambda: click.prompt("Name"), "Name: "),
++        (lambda: click.prompt("Pw", hide_input=True), "Pw: "),
++        (lambda: click.prompt("IP", prompt_suffix="."), "IP."),
++        (lambda: click.confirm("OK"), "OK [y/N]: "),
++    ],
++    ids=["prompt", "prompt-hidden", "prompt-custom-suffix", "confirm"],
++)
++def test_full_prompt_passed_to_readline(monkeypatch, call, expected_prompt):
++    """On non-Windows, prompt and confirm pass the full prompt text to the
++    underlying prompt function so readline handles editing correctly.
++
++    https://github.com/pallets/click/issues/2968
++    https://github.com/pallets/click/pull/2969
++    """
++    received = []
++
++    def capture(text):
++        received.append(text)
++        return "y"
++
++    monkeypatch.setattr("click.termui.visible_prompt_func", capture)
++    monkeypatch.setattr("click.termui.hidden_prompt_func", capture)
++    call()
++    assert received == [expected_prompt]
+ 
+ 
+ def test_prompts_eof(runner):
+@@ -484,17 +515,21 @@ def emulate_input(text):
+     assert out == "Prompt to stdin with no suffix"
+     assert err == ""
+ 
++    # On non-Windows the full prompt goes through redirect_stdout so
++    # nothing leaks to stdout when err=True.
++    # https://github.com/pallets/click/issues/2968
+     emulate_input("asdlkj\n")
+     click.prompt("Prompt to stderr", err=True)
+     out, err = capfd.readouterr()
+-    assert out == " "
+-    assert err == "Prompt to stderr:"
++    assert out == ""
++    assert err == "Prompt to stderr: "
+ 
++    # https://github.com/pallets/click/issues/3019
+     emulate_input("asdlkj\n")
+     click.prompt("Prompt to stderr with no suffix", prompt_suffix="", err=True)
+     out, err = capfd.readouterr()
+-    assert out == "x"
+-    assert err == "Prompt to stderr with no suffi"
++    assert out == ""
++    assert err == "Prompt to stderr with no suffix"
+ 
+     emulate_input("y\n")
+     click.confirm("Prompt to stdin")
+@@ -508,17 +543,19 @@ def emulate_input(text):
+     assert out == "Prompt to stdin with no suffix [y/N]"
+     assert err == ""
+ 
++    # https://github.com/pallets/click/issues/2968
+     emulate_input("y\n")
+     click.confirm("Prompt to stderr", err=True)
+     out, err = capfd.readouterr()
+-    assert out == " "
+-    assert err == "Prompt to stderr [y/N]:"
++    assert out == ""
++    assert err == "Prompt to stderr [y/N]: "
+ 
++    # https://github.com/pallets/click/issues/3019
+     emulate_input("y\n")
+     click.confirm("Prompt to stderr with no suffix", prompt_suffix="", err=True)
+     out, err = capfd.readouterr()
+-    assert out == "]"
+-    assert err == "Prompt to stderr with no suffix [y/N"
++    assert out == ""
++    assert err == "Prompt to stderr with no suffix [y/N]"
+ 
+     monkeypatch.setattr(click.termui, "isatty", lambda x: True)
+     monkeypatch.setattr(click.termui, "getchar", lambda: " ")

@@ -16,13 +16,13 @@
   "disposition": "accept",
   "evidence_files": {
     "backend": "docker",
-    "combined_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/product_stage/evidence/pier/realpr-werkzeug-3116.pier_evidence.json",
+    "combined_path": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/product_stage/evidence/pier/realpr-werkzeug-3116.pier_evidence.json",
     "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
-    "null_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/product_stage/evidence/pier/realpr-werkzeug-3116.null.reward.json",
+    "null_path": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/product_stage/evidence/pier/realpr-werkzeug-3116.null.reward.json",
     "null_reward": 0,
     "oracle_mode": "docker",
     "pier_path_class": "scripted",
-    "sol_path": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/product_stage/evidence/pier/realpr-werkzeug-3116.sol.reward.json",
+    "sol_path": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/product_stage/evidence/pier/realpr-werkzeug-3116.sol.reward.json",
     "sol_reward": 1
   },
   "isolation": {
@@ -120,7 +120,7 @@
     "stdout_tail": "scripted pier ok",
     "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-werkzeug-3116/scripted-trial-oracle"
   },
-  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-werkzeug-3116",
+  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-werkzeug-3116",
   "pack_meta": {
     "base_commit_hash": "a792bc2d1ebd52abfd285db847ef0fd42a911df9",
     "language": "python",
@@ -242,7 +242,7 @@
       "stdout_tail": "scripted pier ok",
       "trial_dir": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-werkzeug-3116/scripted-trial-oracle"
     },
-    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-werkzeug-3116",
+    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-werkzeug-3116",
     "pack_meta": {
       "base_commit_hash": "a792bc2d1ebd52abfd285db847ef0fd42a911df9",
       "language": "python",
@@ -265,10 +265,16 @@
         "errors": [],
         "harbor_version": "0.18.0",
         "listed": [
+          "realpr-click-3442",
           "realpr-itemadapter-101",
+          "realpr-marshmallow-2733",
+          "realpr-oauthlib-889",
           "realpr-packaging-1120",
+          "realpr-packaging-1267",
+          "realpr-rich-3930",
           "realpr-werkzeug-2637",
-          "realpr-werkzeug-3116"
+          "realpr-werkzeug-3116",
+          "realpr-wtforms-923"
         ],
         "metadata_language": "python",
         "ok": true,
@@ -289,7 +295,7 @@
       },
       "missing_relpaths": [],
       "notes": [],
-      "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-werkzeug-3116",
+      "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-werkzeug-3116",
       "pier_job_prefix": "/tmp/harbor-deepagent-jobs-ship",
       "required_relpaths_ok": true,
       "structural_ok": true

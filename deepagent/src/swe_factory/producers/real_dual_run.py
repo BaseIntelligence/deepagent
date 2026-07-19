@@ -802,6 +802,64 @@ def _broken_fail_set(outcome: SuiteOutcome) -> set[str]:
     return set(outcome.failed) | set(outcome.errors)
 
 
+def expand_collection_errors_to_f2p_nodes(
+    broken_fail: Sequence[str] | set[str],
+    green_pass: Sequence[str] | set[str],
+) -> list[str]:
+    """Map collection/module-level broken fails onto green-pass concrete nodes.
+
+    Pytest collection errors often emit file-level ids
+    (``tests.test_foo`` / ``tests/test_foo.py``) while green pass emits full
+    node ids (``tests.test_foo.TestX.test_y``). Exact-set F2P intersection is
+    then empty even though base truly cannot load the held-out module.
+
+    Expansion rules (prefix match, longest-first):
+    - exact node stays
+    - broken prefix matches green node when green.startswith(broken + '.')
+    - broken file path ``tests/test_foo.py`` ↔ ``tests.test_foo``
+    Never invent green nodes — only expand into the green_pass set.
+    """
+    broken_list = [str(n).strip() for n in broken_fail if str(n).strip()]
+    green_set = {str(n).strip() for n in green_pass if str(n).strip()}
+    if not broken_list:
+        return []
+    if not green_set:
+        return list(dict.fromkeys(broken_list))
+
+    def _norm_mod(n: str) -> str:
+        s = n.replace("\\", "/")
+        if s.endswith(".py"):
+            s = s[:-3]
+        return s.replace("/", ".")
+
+    expanded: list[str] = []
+    for b in broken_list:
+        b_mod = _norm_mod(b)
+        # Exact keep
+        if b in green_set:
+            expanded.append(b)
+            continue
+        if b_mod in green_set and b_mod not in expanded:
+            expanded.append(b_mod)
+            continue
+        # Prefix expand to green nodes under this module/file
+        hits = [
+            g
+            for g in green_set
+            if g in (b_mod, b)
+            or g.startswith(b_mod + ".")
+            or g.startswith(b + ".")
+            or _norm_mod(g) == b_mod
+            or _norm_mod(g).startswith(b_mod + ".")
+        ]
+        if hits:
+            expanded.extend(hits)
+        else:
+            # Keep original (may still fail floor honesty lids) so audit shows it
+            expanded.append(b)
+    return list(dict.fromkeys(expanded))
+
+
 def labels_from_real_suite_outcomes(
     green: SuiteOutcome,
     broken: SuiteOutcome,
@@ -839,10 +897,18 @@ def labels_from_real_suite_outcomes(
     green_product_passed = list(filter_suite_product_nodes(green.passed))
 
     # Union failed + errors on the broken/base side early (flake policy needs it).
-    broken_fail = set(filter_suite_product_nodes(tuple(set(broken.failed) | set(broken.errors))))
-    broken_pass = set(filter_suite_product_nodes(broken.passed)) - broken_fail
+    raw_broken_fail = set(
+        filter_suite_product_nodes(tuple(set(broken.failed) | set(broken.errors)))
+    )
     green_pass = set(filter_suite_product_nodes(green.passed))
     green_fail = set(filter_suite_product_nodes(green.failed))
+
+    # Expand collection-level errors (file/module node ids) to the concrete
+    # green-pass test nodes they block. Without this, base collection ImportError
+    # for held-out modules yields broken_failed={tests.test_foo} which never
+    # intersects green_pass={tests.test_foo.TestX.test_y, …}, wiping F2P (m28b).
+    broken_fail = set(expand_collection_errors_to_f2p_nodes(raw_broken_fail, green_pass))
+    broken_pass = set(filter_suite_product_nodes(broken.passed)) - broken_fail
 
     flake_notes: dict[str, Any] = {}
     flake_reason_codes: list[str] = []

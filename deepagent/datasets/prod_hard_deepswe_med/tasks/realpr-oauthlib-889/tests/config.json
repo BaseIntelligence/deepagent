@@ -1,0 +1,37 @@
+{
+ "base_commit": "1fd5253630c03e3f12719dd8c13d43111f66a8d2",
+ "f2p_node_ids": [
+  "tests.oauth2.rfc8628.grant_types.test_device_code.test_create_token_response",
+  "tests.oauth2.rfc8628.grant_types.test_device_code.test_custom_auth_validators_unsupported",
+  "tests.oauth2.rfc8628.grant_types.test_device_code.test_custom_pre_and_post_token_validators",
+  "tests.oauth2.rfc8628.grant_types.test_device_code.test_duplicate_params_error",
+  "tests.oauth2.rfc8628.grant_types.test_device_code.test_invalid_client_error",
+  "tests.oauth2.rfc8628.grant_types.test_device_code.test_invalid_grant_type_error"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [],
+ "pytest_paths": [
+  "tests/oauth2/rfc8628/grant_types/test_device_code.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/oauth2/rfc8628/grant_types/test_device_code.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}

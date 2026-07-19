@@ -1,0 +1,233 @@
+diff --git a/tests/test_cells.py b/tests/test_cells.py
+--- a/tests/test_cells.py
++++ b/tests/test_cells.py
+@@ -1,7 +1,34 @@
++from __future__ import annotations
++
+ import string
+ 
++import pytest
++
+ from rich import cells
+-from rich.cells import _is_single_cell_widths, chop_cells
++from rich.cells import (
++    CellSpan,
++    _is_single_cell_widths,
++    cell_len,
++    chop_cells,
++    get_character_cell_size,
++    split_graphemes,
++    split_text,
++)
++
++
++@pytest.mark.parametrize(
++    "character,size",
++    [
++        ("\0", 0),
++        ("\u200d", 0),
++        ("a", 1),
++        ("💩", 2),
++        (chr(917999 + 1), 0),
++    ],
++)
++def test_get_character_cell_size(character: str, size: int) -> None:
++    """Test single character cell size."""
++    assert get_character_cell_size(character) == size
+ 
+ 
+ def test_cell_len_long_string():
+@@ -45,6 +72,50 @@ def test_set_cell_size_infinite():
+         )
+ 
+ 
++FM = "👩\u200d🔧"
++
++
++@pytest.mark.parametrize(
++    "text,offset,left,right",
++    [
++        # Edge cases
++        ("", -1, "", ""),
++        ("x", -1, "", "x"),
++        ("x", 1, "x", ""),
++        ("x", 2, "x", ""),
++        ("", 0, "", ""),
++        ("", 1, "", ""),
++        ("a", 0, "", "a"),
++        ("a", 1, "a", ""),
++        # Check simple double width character
++        ("💩", 0, "", "💩"),
++        ("💩", 1, " ", " "),  # Split in the middle of a double wide results in spaces
++        ("💩", 2, "💩", ""),
++        ("💩x", 1, " ", " x"),
++        ("💩x", 2, "💩", "x"),
++        ("💩x", 3, "💩x", ""),
++        # Check same for multi-codepoint emoji
++        (FM, 0, "", FM),
++        (FM, 1, " ", " "),  # Split in the middle of a double wide results in spaces
++        (FM, 2, FM, ""),
++        (FM + "x", 1, " ", " x"),
++        (FM + "x", 2, FM, "x"),
++        (FM + "x", 3, FM + "x", ""),
++        # Edge cases
++        ("xxxxxxxxxxxxxxx💩💩", 10, "xxxxxxxxxx", "xxxxx💩💩"),
++        ("xxxxxxxxxxxxxxx💩💩", 15, "xxxxxxxxxxxxxxx", "💩💩"),
++        ("xxxxxxxxxxxxxxx💩💩", 16, "xxxxxxxxxxxxxxx ", " 💩"),
++        ("💩💩", 3, "💩 ", " "),
++        ("💩💩xxxxxxxxxx", 2, "💩", "💩xxxxxxxxxx"),
++        ("💩💩xxxxxxxxxx", 3, "💩 ", " xxxxxxxxxx"),
++        ("💩💩xxxxxxxxxx", 4, "💩💩", "xxxxxxxxxx"),
++    ],
++)
++def test_split_text(text: str, offset: int, left: str, right: str) -> None:
++    """Check that split_text works on grapheme boundaries"""
++    assert split_text(text, offset) == (left, right)
++
++
+ def test_chop_cells():
+     """Simple example of splitting cells into lines of width 3."""
+     text = "abcdefghijk"
+@@ -79,3 +150,34 @@ def test_is_single_cell_widths() -> None:
+ 
+     for character in "わさび":
+         assert not _is_single_cell_widths(character)
++
++
++@pytest.mark.parametrize(
++    "text,expected_spans,expected_cell_length",
++    [
++        ("", [], 0),
++        ("a", [(0, 1, 1)], 1),
++        ("ab", [(0, 1, 1), (1, 2, 1)], 2),
++        ("💩", [(0, 1, 2)], 2),
++        ("わさび", [(0, 1, 2), (1, 2, 2), (2, 3, 2)], 6),
++        (
++            "👩\u200d🔧",
++            [(0, 3, 2)],
++            2,
++        ),  # 3 code points for female mechanic: female, joiner, spanner
++        ("a👩\u200d🔧", [(0, 1, 1), (1, 4, 2)], 3),
++        ("a👩\u200d🔧b", [(0, 1, 1), (1, 4, 2), (4, 5, 1)], 4),
++        ("⬇", [(0, 1, 1)], 1),
++        ("⬇️", [(0, 2, 2)], 2),  # Variation selector, makes it double width
++        ("♻", [(0, 1, 1)], 1),
++        ("♻️", [(0, 2, 2)], 2),
++        ("♻♻️", [(0, 1, 1), (1, 3, 2)], 3),
++    ],
++)
++def test_split_graphemes(
++    text: str, expected_spans: list[CellSpan], expected_cell_length: int
++):
++    spans, cell_length = split_graphemes(text)
++    assert cell_len(text) == expected_cell_length
++    assert spans == expected_spans
++    assert cell_length == expected_cell_length
+diff --git a/tests/test_text.py b/tests/test_text.py
+--- a/tests/test_text.py
++++ b/tests/test_text.py
+@@ -525,6 +525,16 @@ def test_wrap_long():
+     assert lines[2] == Text("bra ")
+ 
+ 
++def test_wrap_long_multi_codepoint():
++    female_mechanic = "👩\u200d🔧"
++    text = Text(female_mechanic * 5, justify="left")
++    lines = text.wrap(Console(), 4)
++    assert len(lines) == 3
++    assert lines[0] == Text(female_mechanic * 2)
++    assert lines[1] == Text(female_mechanic * 2)
++    assert lines[2] == Text(female_mechanic + "  ")
++
++
+ def test_wrap_overflow():
+     text = Text("Some more words")
+     lines = text.wrap(Console(), 4, overflow="ellipsis")
+@@ -605,6 +615,18 @@ def test_wrap_multiple_consecutive_spaces():
+     ]
+ 
+ 
++def test_wrap_multi_codepoint():
++    """Test wrapping of multi-codepoint characters."""
++    female_mechanic = "👩\u200d🔧"
++    text = Text(female_mechanic * 6 + " " + female_mechanic * 4)
++    lines = text.wrap(Console(), 12)
++    print(repr(lines))
++    assert lines._lines == [
++        Text(female_mechanic * 6),
++        Text(female_mechanic * 4),
++    ]
++
++
+ def test_wrap_long_words_justify_left():
+     text = Text("X 123456789", justify="left")
+     lines = text.wrap(Console(), 4)
+diff --git a/tests/test_unicode_data.py b/tests/test_unicode_data.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_unicode_data.py
+@@ -0,0 +1,64 @@
++from __future__ import annotations
++
++import pytest
++
++from rich._unicode_data import VERSIONS, _parse_version, load
++
++
++def test_load():
++    """Test all versions may be loaded."""
++    for version in VERSIONS:
++        load(version)
++
++
++@pytest.mark.parametrize(
++    "version_str,version_tuple",
++    [
++        ("1", (1, 0, 0)),
++        ("1.0", (1, 0, 0)),
++        ("1.2", (1, 2, 0)),
++        ("1.2.3", (1, 2, 3)),
++    ],
++)
++def test_parse_version(version_str: str, version_tuple: tuple[str, ...]) -> None:
++    assert _parse_version(version_str) == version_tuple
++
++
++@pytest.mark.parametrize(
++    "version_in,version_selected",
++    [
++        # Lower versions will pick the first (4.1.0)
++        ("0", "4.1.0"),
++        ("1", "4.1.0"),
++        ("1.0", "4.1.0"),
++        ("1.0.0", "4.1.0"),
++        ("4.0.0", "4.1.0"),
++        ("4.0.2", "4.1.0"),
++        ("4.1.0", "4.1.0"),
++        ("4.1.1", "4.1.0"),
++        ("4.2.1", "4.1.0"),
++        # Nearest version lower
++        ("5", "5.0.0"),
++        ("5.0", "5.0.0"),
++        ("5.0.0", "5.0.0"),
++        ("5.0.1", "5.0.0"),
++        ("5.1.0", "5.1.0"),
++        ("5.1.1", "5.1.0"),
++        # Maximum version if greater than the maximum
++        ("17.0.0", "17.0.0"),
++        ("17.0.1", "17.0.0"),
++        ("17.1.0", "17.0.0"),
++        # Greater than the maximum
++        ("18.0.0", "17.0.0"),
++    ],
++)
++def test_load_version(version_in: str, version_selected: str) -> None:
++    """Test that load will pick the nearest lower version if it exists, or the lowest version if below the first available version."""
++    assert load(version_in).unicode_version == version_selected
++
++
++def test_load_version_invalid() -> None:
++    """Check that invalid versions load the latest unicode data."""
++    assert load("foo").unicode_version == "17.0.0"
++    assert load("a.b.c").unicode_version == "17.0.0"
++    assert load("1.2.3a").unicode_version == "17.0.0"

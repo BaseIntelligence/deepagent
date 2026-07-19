@@ -1,0 +1,63 @@
+{
+  "base_commit": "d5fbd32842da361cc9be8658d94a64e9cc417fb5",
+  "f2p_node_ids": [
+    "tests.test_commands.test_suggest_possible_commands[decline-(Did you mean one of: 'declare', 'refine'?)]",
+    "tests.test_commands.test_suggest_possible_commands[pause-Did you mean 'push'?]",
+    "tests.test_defaults.test_default_map_nargs[default_map0-option_kwargs0-cli_args0-expected0]",
+    "tests.test_defaults.test_default_map_nargs[default_map1-option_kwargs1-cli_args1-expected1]",
+    "tests.test_formatting.test_command_write_usage_no_args[empty-options-metavar-no-params]",
+    "tests.test_formatting.test_command_write_usage_no_args[none-options-metavar-no-params]",
+    "tests.test_formatting.test_formatting_usage_error_help_hint[help_names0-extra_options0-Try 'cli foo --help' for help.]",
+    "tests.test_formatting.test_formatting_usage_error_help_hint[help_names1-extra_options1-Try 'cli foo --help' for help.]",
+    "tests.test_formatting.test_formatting_usage_error_help_hint[help_names5-extra_options5-Try 'cli foo --help' for help.]",
+    "tests.test_formatting.test_help_formatter_write_usage[empty-args-custom-prefix]",
+    "tests.test_formatting.test_help_formatter_write_usage[empty-args-default-prefix]",
+    "tests.test_formatting.test_help_formatter_write_usage[empty-args-indented]",
+    "tests.test_formatting.test_help_formatter_write_usage[empty-args-long-prog]",
+    "tests.test_formatting.test_help_formatter_write_usage_without_args_styled_prefix",
+    "tests.test_formatting.test_wrap_text_visible_width[styled-body-wraps-on-visible-width]",
+    "tests.test_formatting.test_wrap_text_visible_width[styled-initial-indent-does-not-break-body]",
+    "tests.test_formatting.test_wrap_text_visible_width[styled-long-word-breaks-on-visible-width]",
+    "tests.test_formatting.test_write_usage_styled_prefix_keeps_options_on_one_line",
+    "tests.test_shell_completion.test_fish_multiline_help_complete",
+    "tests.test_shell_completion.test_full_complete[fish-env4-plain\\na\\n_\\nplain\\nb\\nbee\\n]"
+  ],
+  "grade": {
+    "format": "junit",
+    "node_id": "mod.name",
+    "reports": [
+      "/logs/verifier/new.xml",
+      "/logs/verifier/base.xml"
+    ],
+    "tool_label": "pytest"
+  },
+  "label_method": "real_pr_dual_run_base_vs_gold",
+  "p2p_node_ids": [],
+  "pytest_paths": [
+    "tests/test_commands.py",
+    "tests/test_defaults.py",
+    "tests/test_formatting.py",
+    "tests/test_shell_completion.py",
+    "tests/test_testing.py",
+    "tests/test_types.py",
+    "tests/test_utils.py"
+  ],
+  "source_track": "real_pr",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "suite_paths": [
+    "tests/test_commands.py",
+    "tests/test_defaults.py",
+    "tests/test_formatting.py",
+    "tests/test_shell_completion.py",
+    "tests/test_testing.py",
+    "tests/test_types.py",
+    "tests/test_utils.py"
+  ],
+  "suite_reporter": {
+    "language": "python",
+    "node_id_form": "mod.name",
+    "reporter_id": "python_pytest_v1",
+    "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+    "tool_label": "pytest"
+  }
+}

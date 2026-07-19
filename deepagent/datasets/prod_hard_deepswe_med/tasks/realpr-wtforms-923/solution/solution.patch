@@ -1,0 +1,872 @@
+diff --git a/src/wtforms/__init__.py b/src/wtforms/__init__.py
+--- a/src/wtforms/__init__.py
++++ b/src/wtforms/__init__.py
+@@ -1,6 +1,7 @@
+ from wtforms import validators
+ from wtforms import widgets
+ from wtforms.datalist import DataList
++from wtforms.datalist import DataListChoice
+ from wtforms.fields.choices import Choice
+ from wtforms.fields.choices import RadioField
+ from wtforms.fields.choices import SelectChoice
+@@ -84,4 +85,5 @@
+     "ColorField",
+     "Choice",
+     "SelectChoice",
++    "DataListChoice",
+ ]
+diff --git a/src/wtforms/_compat.py b/src/wtforms/_compat.py
+new file mode 100644
+--- /dev/null
++++ b/src/wtforms/_compat.py
+@@ -0,0 +1,15 @@
++"""Compatibility helpers for different Python versions."""
++
++import inspect
++import sys
++
++if sys.version_info >= (3, 14):
++    from annotationlib import Format
++
++    def get_signature(callable):
++        return inspect.signature(callable, annotation_format=Format.FORWARDREF)
++
++else:
++
++    def get_signature(callable):
++        return inspect.signature(callable)
+diff --git a/src/wtforms/datalist.py b/src/wtforms/datalist.py
+--- a/src/wtforms/datalist.py
++++ b/src/wtforms/datalist.py
+@@ -1,9 +1,76 @@
+-import inspect
++import warnings
++from dataclasses import dataclass
++from dataclasses import field
+ 
+ from wtforms import widgets
++from wtforms._compat import get_signature
+ from wtforms.fields.choices import Choice
+ 
+-__all__ = ("DataList",)
++__all__ = ("DataList", "DataListChoice")
++
++
++@dataclass
++class DataListChoice:
++    """
++    An option declared via :class:`~wtforms.DataList`'s ``choices=``
++    parameter.
++
++    :param value:
++        The value rendered as the ``<option>``'s ``value`` attribute.
++    :param label:
++        The label of the option. Defaults to ``value`` when omitted.
++    :param render_kw:
++        A dict containing HTML attributes that will be rendered
++        with the option. Defaults to an empty dict when omitted.
++    """
++
++    value: str
++    label: str | None = None
++    render_kw: dict = field(default_factory=dict)
++
++    def __post_init__(self):
++        if self.label is None:
++            self.label = self.value
++
++    def __iter__(self):
++        return iter((self.value, self.label, self.render_kw))
++
++    @classmethod
++    def from_enum(cls, enum_cls, *, label=None):
++        """Build a list of choices from an :class:`enum.Enum` class.
++
++        See :meth:`SelectChoice.from_enum` for details.
++        """
++        if label is None:
++            label = str if "__str__" in enum_cls.__dict__ else lambda m: m.name
++        return [cls(value=m.name, label=label(m)) for m in enum_cls]
++
++    @classmethod
++    def from_input(cls, input):
++        """Coerce a value passed by the user into a :class:`DataListChoice`."""
++        if isinstance(input, DataListChoice):
++            return input
++
++        if isinstance(input, Choice):
++            warnings.warn(
++                "Passing Choice to a DataList is deprecated; Choice is the "
++                "output type returned by iter_choices(). Use DataListChoice "
++                "instead. Support for Choice as input will be removed in "
++                "WTForms 4.0.",
++                DeprecationWarning,
++                stacklevel=4,
++            )
++            return cls(
++                value=input.value,
++                label=input.label,
++                render_kw=input.render_kw,
++            )
++
++        if isinstance(input, str):
++            return cls(value=input)
++
++        if isinstance(input, tuple):
++            return cls(*input)
+ 
+ 
+ class DataList:
+@@ -18,6 +85,7 @@ class DataList:
+ 
+     def __init__(self, choices=None, *, render_kw=None, widget=None):
+         self._raw_choices = choices
++        self._choices = None if callable(choices) else choices
+         self.render_kw = render_kw or {}
+         if widget is not None:
+             self.widget = widget
+@@ -26,27 +94,29 @@ def __init__(self, choices=None, *, render_kw=None, widget=None):
+     def _clone(self, id):
+         clone = DataList.__new__(DataList)
+         clone._raw_choices = self._raw_choices
++        clone._choices = None if callable(self._raw_choices) else self._raw_choices
+         clone.render_kw = self.render_kw
+         clone.widget = self.widget
+         clone.id = id
+         return clone
+ 
+-    def iter_choices(self, field=None):
++    def _resolve(self, field):
+         raw = self._raw_choices
+-        if callable(raw):
+-            n = len(inspect.signature(raw).parameters)
+-            raw = raw(field) if n >= 1 else raw()
++        if not callable(raw):
++            return
++        try:
++            sig = get_signature(raw)
++            sig.bind(field._form, field)
++        except TypeError:
++            self._choices = raw()
++            return
++        self._choices = raw(field._form, field)
++
++    def iter_choices(self, field=None):
++        raw = self._choices
+         if raw is None:
+             return []
+-        choices = [
+-            item if isinstance(item, Choice) else Choice(value=item) for item in raw
+-        ]
+-        value = field.data if field is not None else None
+-        if value is not None:
+-            for choice in choices:
+-                if choice.value == value:
+-                    choice._selected = True
+-        return choices
++        return [DataListChoice.from_input(item) for item in raw]
+ 
+     def __call__(self, field=None, **kwargs):
+         return self.widget(self, field=field, **kwargs)
+diff --git a/src/wtforms/fields/choices.py b/src/wtforms/fields/choices.py
+--- a/src/wtforms/fields/choices.py
++++ b/src/wtforms/fields/choices.py
+@@ -1,9 +1,14 @@
+ import warnings
+ from dataclasses import dataclass
+ from dataclasses import field
++from dataclasses import replace
+ from enum import Enum
++from itertools import groupby
++from operator import attrgetter
++from typing import NamedTuple
+ 
+ from wtforms import widgets
++from wtforms._compat import get_signature
+ from wtforms.fields.core import Field
+ from wtforms.validators import ValidationError
+ 
+@@ -28,24 +33,62 @@ def coerce(v):
+     return coerce
+ 
+ 
+-@dataclass
+-class Choice:
++class Choice(NamedTuple):
+     """
+-    A dataclass that represents an available choice for choice fields.
++    A rendered option yielded by
++    :meth:`SelectFieldBase.iter_choices` and
++    :meth:`SelectFieldBase.iter_groups`.
++
++    ``selected`` is computed against the field's current data. To
++    declare options on a :class:`SelectField`, use
++    :class:`SelectChoice` instead.
+ 
+     :param value:
+         The value that will be sent in the request.
+     :param label:
+         The label of the option.
++    :param selected:
++        Whether the option is currently selected. Set by ``iter_choices``;
++        you rarely set this yourself.
+     :param render_kw:
+         A dict containing HTML attributes that will be rendered
+         with the option.
+     """
+ 
+     value: str
+-    label: str | None = None
+-    render_kw: dict | None = None
+-    _selected: bool = field(default=False, kw_only=True)
++    label: str
++    selected: bool
++    render_kw: dict
++
++
++@dataclass
++class SelectChoice:
++    """
++    An option declared via :class:`SelectField` and
++    :class:`SelectMultipleField`'s ``choices=`` parameter.
++
++    :param value:
++        The value that will be sent in the request.
++    :param label:
++        The label of the option. Defaults to ``value`` when omitted.
++    :param render_kw:
++        A dict containing HTML attributes that will be rendered
++        with the option. Defaults to an empty dict when omitted.
++    :param optgroup:
++        The ``<optgroup>`` HTML tag in which the option will be rendered.
++    """
++
++    value: str
++    label: str = None  # type: ignore[assignment]
++    render_kw: dict = field(default_factory=dict)
++    optgroup: str | None = None
++
++    def __post_init__(self):
++        if self.label is None:
++            self.label = self.value
++
++    def __iter__(self):
++        return iter((self.value, self.label, self.render_kw, self.optgroup))
+ 
+     @classmethod
+     def from_enum(cls, enum_cls, *, label=None):
+@@ -60,48 +103,75 @@ def from_enum(cls, enum_cls, *, label=None):
+             label = str if "__str__" in enum_cls.__dict__ else lambda m: m.name
+         return [cls(value=m.name, label=label(m)) for m in enum_cls]
+ 
+-
+-@dataclass
+-class SelectChoice(Choice):
+-    """
+-    A :class:`Choice` augmented with an ``<optgroup>`` hint for
+-    :class:`SelectField`.
+-
+-    :param optgroup:
+-        The ``<optgroup>`` HTML tag in which the option will be rendered.
+-    """
+-
+-    optgroup: str | None = None
+-
+     @classmethod
+     def from_input(cls, input, optgroup=None):
++        """Coerce a value passed by the user via ``choices=...`` into a
++        :class:`SelectChoice`.
++        """
+         if isinstance(input, SelectChoice):
+             if optgroup:
+-                input.optgroup = optgroup
++                return replace(input, optgroup=optgroup)
+             return input
+ 
+         if isinstance(input, Choice):
++            warnings.warn(
++                "Passing Choice to a SelectField is deprecated; Choice is the "
++                "output type returned by iter_choices(). Use SelectChoice "
++                "instead. Support for Choice as input will be removed in "
++                "WTForms 4.0.",
++                DeprecationWarning,
++                stacklevel=4,
++            )
+             return cls(
+                 value=input.value,
+                 label=input.label,
+                 render_kw=input.render_kw,
+                 optgroup=optgroup,
+-                _selected=input._selected,
+             )
+ 
+         if isinstance(input, str):
+             return cls(value=input, optgroup=optgroup)
+ 
+         if isinstance(input, tuple):
+-            warnings.warn(
+-                "Passing SelectField choices as tuples is deprecated and will be "
+-                "removed in wtforms 3.4. Please use Choice or SelectChoice instead.",
+-                DeprecationWarning,
+-                stacklevel=2,
+-            )
++            if len(input) not in (2, 3):
++                raise ValueError(
++                    f"SelectField choice tuple must have 2 or 3 elements, "
++                    f"got {len(input)}"
++                )
+             return cls(*input, optgroup=optgroup)
+ 
+ 
++def _normalize_iter_choice(choice):
++    """Coerce a value yielded by :meth:`SelectFieldBase.iter_choices` or
++    :meth:`SelectFieldBase.iter_groups` into a :class:`Choice`.
++    """
++    if isinstance(choice, Choice):
++        return choice
++    if isinstance(choice, tuple):
++        warnings.warn(
++            "Yielding raw tuples from iter_choices() or iter_groups() is "
++            "deprecated; yield Choice instances instead. Will be removed "
++            "in WTForms 4.0.",
++            DeprecationWarning,
++            stacklevel=3,
++        )
++        if len(choice) == 4:
++            value, label, selected, render_kw = choice
++        elif len(choice) == 3:
++            value, label, selected = choice
++            render_kw = {}
++        else:
++            raise TypeError(
++                f"iter_choices()/iter_groups() yielded a tuple of unsupported "
++                f"length: {len(choice)}"
++            )
++        return Choice(value=value, label=label, selected=selected, render_kw=render_kw)
++    raise TypeError(
++        f"iter_choices()/iter_groups() yielded an unsupported type: "
++        f"{type(choice).__name__}"
++    )
++
++
+ class SelectFieldBase(Field):
+     option_widget = widgets.Option()
+ 
+@@ -119,48 +189,72 @@ def __init__(self, label=None, validators=None, option_widget=None, **kwargs):
+             self.option_widget = option_widget
+ 
+     def iter_choices(self):
++        """Provide data for choice widget rendering.
++
++        Should yield :class:`Choice` instances.
+         """
+-        Provides data for choice widget rendering. Must return a sequence or
+-        iterable of SelectChoice.
+-        """
+         raise NotImplementedError()
+ 
++    def _iter_choices_normalized(self):
++        """Wrap :meth:`iter_choices` to always yield :class:`Choice`."""
++        for choice in self.iter_choices():
++            yield _normalize_iter_choice(choice)
++
++    def has_groups(self):
++        """Whether the field's choices include any ``optgroup`` hint."""
++        return False
++
++    def iter_groups(self):
++        """Yield ``(group_label, [Choice, ...])`` pairs for grouped rendering."""
++        raise NotImplementedError()
++
++    def _iter_groups_normalized(self):
++        """Wrap :meth:`iter_groups` to always yield ``(name, [Choice, ...])``."""
++        for name, group in self.iter_groups():
++            yield name, [_normalize_iter_choice(c) for c in group]
++
+     def __iter__(self):
+         opts = dict(
+             widget=self.option_widget,
+             validators=self.validators,
+             name=self.name,
+             render_kw=self.render_kw,
+-            _form=None,
++            _form=self._form,
+             _meta=self.meta,
+         )
+-        for i, choice in enumerate(self.iter_choices()):
++        for i, choice in enumerate(self._iter_choices_normalized()):
+             opt = self._Option(
+                 id=f"{self.id}-{i}",
+                 label=choice.label or choice.value,
+                 **opts,
+             )
+             opt.choice = choice
+-            opt.checked = choice._selected
++            opt.checked = choice.selected
+             opt.process(None, choice.value)
+             yield opt
+ 
+-    def choices_from_input(self, choices):
++    def _choices_from_input(self, choices):
++        """Parse the user-supplied ``choices`` into a list of :class:`SelectChoice`."""
+         if callable(choices):
+-            choices = choices()
++            choices = self._invoke_choices_callback(choices)
+ 
+         if choices is None:
+             return None
+ 
+         if isinstance(choices, dict):
+-            warnings.warn(
+-                "Passing SelectField choices in a dict deprecated and will be removed "
+-                "in wtforms 3.4. Please pass a list of SelectChoice objects with a "
+-                "custom optgroup attribute instead.",
+-                DeprecationWarning,
+-                stacklevel=2,
+-            )
+-
++            if self._is_shorthand_dict(choices):
++                result = []
++                for key, value in choices.items():
++                    if isinstance(value, dict):
++                        for inner_value, inner_label in value.items():
++                            result.append(
++                                SelectChoice(
++                                    value=inner_value, label=inner_label, optgroup=key
++                                )
++                            )
++                    else:
++                        result.append(SelectChoice(value=key, label=value))
++                return result
+             return [
+                 SelectChoice.from_input(input, optgroup)
+                 for optgroup, inputs in choices.items()
+@@ -169,6 +263,57 @@ def choices_from_input(self, choices):
+ 
+         return [SelectChoice.from_input(input) for input in choices]
+ 
++    @staticmethod
++    def _is_shorthand_dict(choices):
++        """``True`` if ``choices`` matches the shorthand dict syntax.
++
++        Shorthand is ``dict[str, str | dict[str, str]]``.
++        """
++        return all(isinstance(v, (str, dict)) for v in choices.values())
++
++    @staticmethod
++    def _warn_legacy_choices(choices):
++        """Emit a one-shot ``DeprecationWarning`` for legacy ``choices`` shapes.
++
++        Legacy shapes are raw tuples or ``dict``.
++        """
++        if isinstance(choices, dict):
++            if SelectFieldBase._is_shorthand_dict(choices):
++                return
++            warnings.warn(
++                "Passing SelectField choices in a dict is deprecated and will be "
++                "removed in wtforms 3.4. Please pass a list of SelectChoice "
++                "objects with a custom optgroup attribute instead.",
++                DeprecationWarning,
++                stacklevel=3,
++            )
++            items = (i for v in choices.values() for i in v)
++        else:
++            items = choices
++        for item in items:
++            if isinstance(item, (SelectChoice, Choice)):
++                continue
++            if isinstance(item, tuple):
++                warnings.warn(
++                    "Passing SelectField choices as tuples is deprecated and "
++                    "will be removed in wtforms 3.4. Please use SelectChoice "
++                    "instead.",
++                    DeprecationWarning,
++                    stacklevel=3,
++                )
++                return
++
++    def _invoke_choices_callback(self, cb):
++        try:
++            sig = get_signature(cb)
++        except (ValueError, TypeError):
++            return cb()
++        try:
++            sig.bind(self._form, self)
++        except TypeError:
++            return cb()
++        return cb(self._form, self)
++
+     class _Option(Field):
+         def _value(self):
+             return str(self.data)
+@@ -192,7 +337,18 @@ def __init__(
+         if isinstance(coerce, type) and issubclass(coerce, Enum):
+             coerce = _enum_coerce(coerce)
+         self.coerce = coerce
+-        self.choices = self.choices_from_input(choices)
++        if callable(choices):
++            self._choices_callable = choices
++            self.choices = None
++        else:
++            self._choices_callable = None
++            if choices is None:
++                self.choices = None
++            else:
++                self._warn_legacy_choices(choices)
++                self.choices = (
++                    dict(choices) if isinstance(choices, dict) else list(choices)
++                )
+         self.validate_choice = validate_choice
+         self.invalid_value_message = invalid_value_message or self.gettext(
+             "Invalid Choice: could not coerce."
+@@ -202,10 +358,41 @@ def __init__(
+         )
+ 
+     def iter_choices(self):
+-        choices = self.choices_from_input(self.choices) or []
+-        for choice in choices:
+-            choice._selected = self.coerce(choice.value) == self.data
+-        return choices
++        choices = self._choices_from_input(self.choices) or []
++        return [
++            Choice(
++                value=c.value,
++                label=c.label,
++                selected=self.coerce(c.value) == self.data,
++                render_kw=c.render_kw,
++            )
++            for c in choices
++        ]
++
++    def has_groups(self):
++        choices = self._choices_from_input(self.choices) or []
++        return any(c.optgroup is not None for c in choices)
++
++    def iter_groups(self):
++        choices = self._choices_from_input(self.choices) or []
++        for optgroup, group in groupby(choices, key=attrgetter("optgroup")):
++            yield (
++                optgroup,
++                [
++                    Choice(
++                        value=c.value,
++                        label=c.label,
++                        selected=self.coerce(c.value) == self.data,
++                        render_kw=c.render_kw,
++                    )
++                    for c in group
++                ],
++            )
++
++    def post_process(self):
++        super().post_process()
++        if self._choices_callable is not None:
++            self.choices = self._invoke_choices_callback(self._choices_callable)
+ 
+     def process_data(self, value):
+         try:
+@@ -233,7 +420,7 @@ def pre_validate(self, form):
+         if self.choices is None:
+             raise TypeError(self.gettext("Choices cannot be None."))
+ 
+-        if not any(choice._selected for choice in self.iter_choices()):
++        if not any(choice.selected for choice in self._iter_choices_normalized()):
+             raise ValidationError(self.invalid_choice_message)
+ 
+ 
+@@ -276,11 +463,34 @@ def __init__(
+         self.invalid_choice_message = invalid_choice_message
+ 
+     def iter_choices(self):
+-        choices = self.choices_from_input(self.choices) or []
+-        if self.data:
+-            for choice in choices:
+-                choice._selected = self.coerce(choice.value) in self.data
+-        return choices
++        choices = self._choices_from_input(self.choices) or []
++        data = self.data or ()
++        return [
++            Choice(
++                value=c.value,
++                label=c.label,
++                selected=self.coerce(c.value) in data,
++                render_kw=c.render_kw,
++            )
++            for c in choices
++        ]
++
++    def iter_groups(self):
++        choices = self._choices_from_input(self.choices) or []
++        data = self.data or ()
++        for optgroup, group in groupby(choices, key=attrgetter("optgroup")):
++            yield (
++                optgroup,
++                [
++                    Choice(
++                        value=c.value,
++                        label=c.label,
++                        selected=self.coerce(c.value) in data,
++                        render_kw=c.render_kw,
++                    )
++                    for c in group
++                ],
++            )
+ 
+     def process_data(self, value):
+         try:
+@@ -304,7 +514,9 @@ def pre_validate(self, form):
+         if self.choices is None:
+             raise TypeError(self.gettext("Choices cannot be None."))
+ 
+-        acceptable = {self.coerce(choice.value) for choice in self.iter_choices()}
++        acceptable = {
++            self.coerce(choice.value) for choice in self._iter_choices_normalized()
++        }
+         if any(data not in acceptable for data in self.data):
+             unacceptable = [
+                 str(data) for data in set(self.data) if data not in acceptable
+diff --git a/src/wtforms/fields/core.py b/src/wtforms/fields/core.py
+--- a/src/wtforms/fields/core.py
++++ b/src/wtforms/fields/core.py
+@@ -110,6 +110,8 @@ def __init__(
+         else:
+             raise TypeError("Must provide one of _form or _meta")
+ 
++        self._form = _form
++
+         self.default = default
+         self.description = description
+         self.invalid_value_message = invalid_value_message
+@@ -348,6 +350,17 @@ def process(self, formdata, data=unset_value, extra_filters=None):
+         except ValueError as e:
+             self.process_errors.append(e.args[0])
+ 
++    def post_process(self):
++        """Hook called after every field in the enclosing form has been processed.
++
++        Override this when a field needs to read other fields' processed data,
++        for example to resolve dynamic choices that depend on the form state.
++        The base implementation resolves any inline :class:`~wtforms.DataList`
++        attached to the field.
++        """
++        if self._datalist is not None and not isinstance(self._datalist, str):
++            self._datalist._resolve(self)
++
+     def process_data(self, value):
+         """
+         Process the Python data applied to this field and store the result.
+diff --git a/src/wtforms/fields/form.py b/src/wtforms/fields/form.py
+--- a/src/wtforms/fields/form.py
++++ b/src/wtforms/fields/form.py
+@@ -54,9 +54,24 @@ def process(self, formdata, data=unset_value, extra_filters=None):
+ 
+         prefix = self.name + self.separator
+         if isinstance(data, dict):
+-            self.form = self.form_class(formdata=formdata, prefix=prefix, **data)
++            user_meta = data.get("meta") or {}
++            data_kwargs = {k: v for k, v in data.items() if k != "meta"}
++            self.form = self.form_class(
++                formdata=formdata,
++                prefix=prefix,
++                meta={**user_meta, "_parent_form": self._form},
++                **data_kwargs,
++            )
+         else:
+-            self.form = self.form_class(formdata=formdata, obj=data, prefix=prefix)
++            self.form = self.form_class(
++                formdata=formdata,
++                obj=data,
++                prefix=prefix,
++                meta={"_parent_form": self._form},
++            )
++
++    def post_process(self):
++        self.form.post_process()
+ 
+     def validate(self, form, extra_validators=()):
+         if extra_validators:
+diff --git a/src/wtforms/fields/list.py b/src/wtforms/fields/list.py
+--- a/src/wtforms/fields/list.py
++++ b/src/wtforms/fields/list.py
+@@ -114,6 +114,10 @@ def _extract_indices(self, prefix, formdata):
+                 if k.isdigit():
+                     yield int(k)
+ 
++    def post_process(self):
++        for entry in self.entries:
++            entry.post_process()
++
+     def validate(self, form, extra_validators=()):
+         """
+         Validate this FieldList.
+@@ -175,7 +179,7 @@ def _add_entry(self, formdata=None, data=unset_value, index=None):
+             _meta=self.meta,
+             translations=self._translations,
+         )
+-        field = self.meta.bind_field(None, self.unbound_field, options)
++        field = self.meta.bind_field(self._form, self.unbound_field, options)
+         field.index = index
+         field.process(formdata, data)
+         self.entries.append(field)
+diff --git a/src/wtforms/form.py b/src/wtforms/form.py
+--- a/src/wtforms/form.py
++++ b/src/wtforms/form.py
+@@ -15,6 +15,8 @@ class BaseForm:
+     validation, and data and error proxying.
+     """
+ 
++    _parent_form = None
++
+     def __init__(self, fields, prefix="", meta=_default_meta):
+         """
+         :param fields:
+@@ -30,6 +32,7 @@ def __init__(self, fields, prefix="", meta=_default_meta):
+             prefix += "-"
+ 
+         self.meta = meta
++        self._parent_form = getattr(meta, "_parent_form", None)
+         self._form_error_key = ""
+         self._prefix = prefix
+         self._fields = OrderedDict()
+@@ -127,6 +130,26 @@ def process(self, formdata=None, obj=None, data=None, extra_filters=None, **kwar
+ 
+             field.process(formdata, data, extra_filters=field_extra_filters)
+ 
++        if self._parent_form is None:
++            self.post_process()
++
++    def post_process(self):
++        """Hook called at the end of :meth:`process` on the root form.
++
++        Runs the :meth:`~fields.Field.post_process` hook on every field, after
++        all fields have been processed. Override this on a form subclass to add
++        cross-field finalization logic; call ``super().post_process()`` to keep
++        per-field hooks running.
++
++        ``post_process`` is only triggered automatically on the root form. Forms
++        nested inside a :class:`~fields.FormField` (or via :class:`~fields.FieldList`
++        entries) propagate the call through :meth:`fields.FormField.post_process`
++        and :meth:`fields.FieldList.post_process`, so every nested field's
++        ``post_process`` runs exactly once per processing cycle.
++        """
++        for field in self._fields.values():
++            field.post_process()
++
+     def validate(self, extra_validators=None):
+         """
+         Validates the form by calling `validate` on each field.
+@@ -206,6 +229,7 @@ def __call__(cls, *args, **kwargs):
+                 if "Meta" in mro_class.__dict__:
+                     bases.append(mro_class.Meta)
+             cls._wtforms_meta = type("Meta", tuple(bases), {})
++
+         return type.__call__(cls, *args, **kwargs)
+ 
+     def __setattr__(cls, name, value):
+diff --git a/src/wtforms/widgets/core.py b/src/wtforms/widgets/core.py
+--- a/src/wtforms/widgets/core.py
++++ b/src/wtforms/widgets/core.py
+@@ -1,6 +1,10 @@
++import warnings
++
+ from markupsafe import escape
+ from markupsafe import Markup
+ 
++from wtforms._compat import get_signature
++
+ __all__ = (
+     "Button",
+     "CheckboxInput",
+@@ -172,7 +176,7 @@ def __call__(self, datalist, field=None, **kwargs):
+         options = []
+         for choice in datalist.iter_choices(field):
+             option_attrs = {"value": choice.value}
+-            if choice.label is not None:
++            if choice.label is not None and choice.label != choice.value:
+                 option_attrs["label"] = choice.label
+             if choice.render_kw:
+                 option_attrs = {**choice.render_kw, **option_attrs}
+@@ -420,15 +424,19 @@ def __call__(self, field, **kwargs):
+                 kwargs[k] = getattr(flags, k)
+         select_params = html_params(name=field.name, **kwargs)
+         html = [f"<select {select_params}>"]
+-        choice_groups = self.sort_by_optgroup(field.iter_choices())
+-        for optgroup, choices in choice_groups.items():
+-            if optgroup:
+-                optgroup_params = html_params(label=optgroup)
+-                html.append(f"<optgroup {optgroup_params}>")
+-            for choice in choices:
+-                html.append(self.render_option(choice))
+-            if optgroup:
+-                html.append("</optgroup>")
++        render = type(self)._dispatch_render_option()
++        if field.has_groups():
++            for optgroup, choices in field._iter_groups_normalized():
++                if optgroup is not None:
++                    optgroup_params = html_params(label=optgroup)
++                    html.append(f"<optgroup {optgroup_params}>")
++                for choice in choices:
++                    html.append(render(choice))
++                if optgroup is not None:
++                    html.append("</optgroup>")
++        else:
++            for choice in field._iter_choices_normalized():
++                html.append(render(choice))
+         html.append("</select>")
+         return Markup("".join(html))
+ 
+@@ -438,17 +446,48 @@ def render_option(cls, choice, **kwargs):
+         if isinstance(value, bool):
+             value = str(value)
+         options = {"value": value, **(choice.render_kw or {}), **kwargs}
+-        if choice._selected:
++        if choice.selected:
+             options["selected"] = True
+         label = escape(choice.label or choice.value)
+         return Markup(f"<option {html_params(**options)}>{label}</option>")
+ 
+     @classmethod
+-    def sort_by_optgroup(cls, choices):
+-        optgroups = {}
+-        for choice in choices:
+-            optgroups.setdefault(choice.optgroup, []).append(choice)
+-        return optgroups
++    def _dispatch_render_option(cls):
++        """Return a callable ``(choice) -> str`` that invokes :meth:`render_option`.
++
++        Picks the right signature for the override.
++        """
++        ro = cls.render_option
++        try:
++            sig = get_signature(ro)
++        except (ValueError, TypeError):
++            return ro
++        positional_required = [
++            p
++            for p in sig.parameters.values()
++            if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
++            and p.default is p.empty
++        ]
++        if len(positional_required) <= 1:
++            return ro
++        warnings.warn(
++            f"{cls.__module__}.{cls.__qualname__}.render_option uses the "
++            "pre-3.3 signature (value, label, selected, **kwargs). Override "
++            "render_option(cls, choice, **kwargs) instead — choice is a "
++            "SelectChoice. The legacy signature will be removed in WTForms "
++            "4.0.",
++            DeprecationWarning,
++            stacklevel=3,
++        )
++        accepts_kwargs = any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values())
++
++        def adapter(choice):
++            args = (choice.value, choice.label or choice.value, choice.selected)
++            if accepts_kwargs:
++                return ro(*args, **(choice.render_kw or {}))
++            return ro(*args)
++
++        return adapter
+ 
+ 
+ class Option:

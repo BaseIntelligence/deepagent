@@ -1,110 +1,20 @@
 {
-  "band": "deepswe_median_m27",
-  "campaign": {
-    "admitted": [
-      "realpr-packaging-1120",
-      "realpr-werkzeug-2637",
-      "realpr-werkzeug-2608"
-    ],
-    "approach": "m27f isolation+green-flake+hybrid densify; packaging-1120 hybrid admit; agent Dockerfile pytest-xprocess for werkzeug docker oracle; dual-truth N>=5",
-    "fixture_pad": false,
-    "prod_hard_keep_left_historical": true
-  },
-  "certified_count": 5,
-  "certified_n": 5,
-  "fail_closed_n_lt_5": false,
+  "certified_count": 8,
+  "accepted_ids": [
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-rich-3930",
+    "realpr-wtforms-923",
+    "realpr-werkzeug-2637",
+    "realpr-werkzeug-3116",
+    "realpr-oauthlib-889",
+    "realpr-click-3442"
+  ],
   "fixture_pad": false,
-  "floors": {
-    "f2p_nodes_min": 5,
-    "gold_added_lines_min": 400,
-    "multi_file_rule": "files>=4 OR (files>=3 AND added>=500 AND hunks>=14)",
-    "source_files_min": 4,
-    "source_hunks_min": 14
-  },
-  "gate_audit_accepted_count": 5,
-  "gate_audit_pass": true,
-  "generated_at_utc": "2026-07-19T01:27:38Z",
-  "historical_soft_band": "datasets/prod_hard_keep",
-  "keep_details": [
-    {
-      "f2p_nodes": 43,
-      "floors_ok": true,
-      "gold_added_lines": 726,
-      "reason": "hardness_floors_ok",
-      "source_files": 4,
-      "source_hunks": 15,
-      "task_id": "realpr-itemadapter-101"
-    },
-    {
-      "f2p_nodes": 9,
-      "floors_ok": true,
-      "gold_added_lines": 882,
-      "reason": "hardness_floors_ok",
-      "source_files": 3,
-      "source_hunks": 24,
-      "task_id": "realpr-packaging-1120"
-    },
-    {
-      "f2p_nodes": 5,
-      "floors_ok": true,
-      "gold_added_lines": 479,
-      "reason": "hardness_floors_ok",
-      "source_files": 16,
-      "source_hunks": 83,
-      "task_id": "realpr-werkzeug-2608"
-    },
-    {
-      "f2p_nodes": 13,
-      "floors_ok": true,
-      "gold_added_lines": 468,
-      "reason": "hardness_floors_ok",
-      "source_files": 5,
-      "source_hunks": 24,
-      "task_id": "realpr-werkzeug-2637"
-    },
-    {
-      "f2p_nodes": 28,
-      "floors_ok": true,
-      "gold_added_lines": 582,
-      "reason": "hardness_floors_ok",
-      "source_files": 16,
-      "source_hunks": 74,
-      "task_id": "realpr-werkzeug-3116"
-    }
-  ],
-  "keeps": [
-    "realpr-itemadapter-101",
-    "realpr-packaging-1120",
-    "realpr-werkzeug-2608",
-    "realpr-werkzeug-2637",
-    "realpr-werkzeug-3116"
-  ],
-  "max_packs": 15,
-  "min_packs": 5,
-  "note_m27g": "Rolled realpr-werkzeug-2608 dual-truth into root gate_audit + evidence/docker; PROVENANCE certified N=5 (m27g honesty fix).",
-  "notes": [
-    "m27c densify after m27f hybrid+isolation+green-flake",
-    "packaging-1120 hybrid multi-file admit + dual-truth",
-    "pytest-xprocess in agent Dockerfile for werkzeug ProcessStarter",
-    "werkzeug-2608 certified after ambient 2-node fileurl P2P trim",
-    "prod_hard_keep left historical"
-  ],
-  "ok": true,
-  "ok_for_product_wave": true,
-  "product_p50": {
-    "f2p_nodes": 13.0,
-    "gold_added_lines": 582.0,
-    "source_files": 5.0,
-    "source_hunks": 24.0
-  },
+  "live_mine": true,
   "product_root": "datasets/prod_hard_deepswe_med",
-  "status": "PASS",
-  "target_n": 10,
-  "task_ids": [
-    "realpr-itemadapter-101",
-    "realpr-packaging-1120",
-    "realpr-werkzeug-2608",
-    "realpr-werkzeug-2637",
-    "realpr-werkzeug-3116"
-  ]
+  "band": "deepswe_median_m27",
+  "unique_repos": 7,
+  "max_packs_per_repo": 2,
+  "reason": "m28b retry densify: host-venv SUT-shadow uninstall + SOCKS-free host pip; pytest collection-error capture + worktree-prefix nodeid strip unlock dual F2P; GH Archive 24 hourly dumps under datasets/gh_archive_m28b; Docker dual-truth keeps N=8 repos=7 max/repo=2; click-3442 side-certified with trimmed F2P + empty P2P (docker ambient P2P flake); no fixture pad."
 }

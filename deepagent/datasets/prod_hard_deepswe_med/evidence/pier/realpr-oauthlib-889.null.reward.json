@@ -1,0 +1,29 @@
+{
+  "agent": "nop",
+  "backend": "docker",
+  "base_commit_hash": "1fd5253630c03e3f12719dd8c13d43111f66a8d2",
+  "disposition": "accept",
+  "isolation": "clean",
+  "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
+  "oracle_mode": "docker",
+  "phase": "null",
+  "pier_path_class": "scripted",
+  "reason_codes": [
+    "RPIER_SCRIPTED_PATH",
+    "PIER_STRUCTURAL_OK",
+    "G5_LEAK_CLEAN",
+    "PIER_ORACLE_REWARD_1",
+    "PIER_NULL_REWARD_0",
+    "PIER_CERT_PASS",
+    "RPIER_STRUCTURAL_OK",
+    "RPIER_SOL_1",
+    "RPIER_NULL_0",
+    "RPIER_PASS"
+  ],
+  "repository_url": "https://github.com/oauthlib/oauthlib.git",
+  "reward": 0,
+  "reward_source_path": "/tmp/harbor-deepagent-jobs-ship/nop/nop-realpr-oauthlib-889/scripted-trial-nop/verifier/reward.json",
+  "source_track": "real_pr",
+  "structural_ok": true,
+  "task_id": "realpr-oauthlib-889"
+}

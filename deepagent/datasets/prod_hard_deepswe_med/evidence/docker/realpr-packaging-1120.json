@@ -92,7 +92,7 @@
     "test_patch_ok": true,
     "tests_image": "harbor-sdf-tests-rpr00:oracle"
   },
-  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-packaging-1120",
+  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-packaging-1120",
   "pack_meta": {
     "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
     "language": "python",
@@ -136,7 +136,7 @@
     },
     "missing_relpaths": [],
     "notes": [],
-    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-packaging-1120",
+    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m28b_work_cert4/gen_work/staging/realpr-packaging-1120",
     "pier_job_prefix": "/tmp/harbor-deepagent-jobs",
     "required_relpaths_ok": true,
     "structural_ok": true

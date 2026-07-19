@@ -168,7 +168,7 @@
   "open_reserved_usd": "0",
   "path": "/projects/Agent-SWE/deepagent/datasets/.factory/ledger.jsonl",
   "remaining_usd": "600.0",
-  "settled_call_count": 34856,
+  "settled_call_count": 38524,
   "settled_exact_usd": "0",
   "total_commit_usd": "0",
   "under_cap": true,

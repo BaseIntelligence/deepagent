@@ -478,6 +478,17 @@ def _soft_relax_pytest_ini(repo: Path) -> None:
         except OSError:
             continue
         new = _strip_strict_flags(text)
+        # pytest>≥8 refuses bare [pytest] in setup.cfg — rewrite to [tool:pytest].
+        if name == "setup.cfg" and re.search(r"(?m)^\[pytest\]\s*$", new):
+            new = re.sub(r"(?m)^\[pytest\]\s*$", "[tool:pytest]", new)
+        section_hdr = "[tool:pytest]" if name == "setup.cfg" else "[pytest]"
+        if section_hdr in new and re.search(r"(?m)^markers\s*=", new) is None:
+            new = new.replace(
+                section_hdr,
+                section_hdr + "\nmarkers =\n    " + "\n    ".join(markers_needed),
+                1,
+            )
+        # legacy bare [pytest] still present after non-setup.cfg files
         if "[pytest]" in new and re.search(r"(?m)^markers\s*=", new) is None:
             new = new.replace(
                 "[pytest]",
@@ -632,12 +643,15 @@ def run_python_suite(
     _soft_relax_pytest_ini(repo)
 
     # Resolve suite targets (held-out files when provided and present).
-    # Always use absolute paths — relative paths are parsed by pytest as
-    # nodeid expressions and can explode into whole-suite selection (then hang
-    # in interactive termui modules if -k filters are imperfect).
+    # Prefer **repo-relative** paths so pytest nodeids stay `tests.mod...`
+    # rather than absolute worktree prefixes like
+    # `datasets._work.dual_run.<tid>.base.tests...` (those wipe F2P set
+    # intersections across base/gold and poisoned m28b oauthlib keeps).
+    # Fall back to absolute only when the path is outside the repo.
     targets: list[str] = []
+    repo_res = repo.resolve()
     for rel in test_paths or ():
-        cand = (repo / rel).resolve() if not Path(rel).is_absolute() else Path(rel)
+        cand = (repo / rel).resolve() if not Path(rel).is_absolute() else Path(rel).resolve()
         if cand.exists() and (cand.is_file() or cand.is_dir()):
             # Ignore non-test residue (coveragerc etc.) that inventory may list.
             name = cand.name.lower()
@@ -647,13 +661,23 @@ def run_python_suite(
                 or "test" in cand.as_posix().lower()
             ):
                 continue
-            targets.append(str(cand))
+            try:
+                targets.append(str(cand.relative_to(repo_res)))
+            except ValueError:
+                targets.append(str(cand))
     if not targets:
         tests_dir = repo / "tests"
-        targets = [str((tests_dir if tests_dir.is_dir() else repo).resolve())]
-    targets = [t for t in targets if Path(t).exists()]
+        targets = ["tests"] if tests_dir.is_dir() else ["."]
+    # Drop missing (relative) targets.
+    kept_t: list[str] = []
+    for t in targets:
+        p = Path(t)
+        exists = p.exists() if p.is_absolute() else (repo / p).exists()
+        if exists:
+            kept_t.append(t)
+    targets = kept_t
     if not targets:
-        targets = [str((repo / "tests" if (repo / "tests").is_dir() else repo).resolve())]
+        targets = ["tests"] if (repo / "tests").is_dir() else ["."]
     # Drop interactive/hang-prone test modules (click termui prompts etc.).
     hang_needles = (
         "termui",
@@ -679,12 +703,60 @@ def run_python_suite(
     # Isolate pytest: ignore hang packages via -p no: and short timeouts.
     env["CLICK_DISABLE"] = "1"  # noop for most pkgs; harmless
     # Isolated interpreter so ambient pytest plugins / chdir cannot poison collection.
-    code = r"""
-import json, sys
+    # NOTE: embedded collector source must not itself use triple double-quotes.
+    code = r'''
+import json, sys, contextlib
 from pathlib import Path
 import pytest
 
 targets = sys.argv[1:]
+
+def _node_from_nodeid(nodeid: str) -> str:
+    # Normalize pytest nodeid to flared suite id (tests.mod.Class.test_x).
+    # Critical: when dual-run worktrees live under the factory repo (e.g.
+    # datasets/_work/.../dual/base), pytest may emit rootdir-relative nodeids
+    # like "datasets/_work/.../dual/base/tests/foo.py::test" which convert to
+    # ``datasets._work....base.tests.foo.test`` and wipe base/gold F2P set
+    # intersection (m28b oauthlib empty F2P under product generate).
+    # Always strip everything before the suite ``tests.`` / ``test.`` root.
+    def _strip_worktree_prefix(mod: str) -> str:
+        s = mod.replace("\\", "/")
+        # keep path-like for locating tests/ first
+        low = s.lower()
+        for marker in ("/tests/", "/test/", "\\tests\\", "\\test\\"):
+            idx = low.find(marker)
+            if idx >= 0:
+                s = s[idx + 1 :]  # drop leading slash -> tests/...
+                break
+        else:
+            # already dotted or bare "tests...."
+            dotted = s.replace("/", ".")
+            lowd = dotted.lower()
+            for marker in (".tests.", ".test."):
+                idx = lowd.find(marker)
+                if idx >= 0:
+                    return dotted[idx + 1 :]  # tests....
+            if lowd.startswith("tests.") or lowd.startswith("test."):
+                return dotted
+            return dotted
+        return s.replace("/", ".")
+
+    if "::" in nodeid:
+        file_part, name = nodeid.split("::", 1)
+        file_part = file_part.replace("\\", "/")
+        mod = (
+            file_part[:-3].replace("/", ".").replace("\\", ".")
+            if file_part.endswith(".py")
+            else file_part.replace("/", ".").replace("\\", ".")
+        )
+        mod = _strip_worktree_prefix(mod)
+        return f"{mod}.{name.replace('::', '.')}"
+    # Collection-path style: tests/test_foo.py -> tests.test_foo (file-level)
+    raw = nodeid
+    if raw.endswith(".py"):
+        raw = raw[:-3]
+    return _strip_worktree_prefix(raw.replace("/", ".").replace("\\", "."))
+
 
 class Collector:
     def __init__(self) -> None:
@@ -693,35 +765,35 @@ class Collector:
         self.errors: list[str] = []
 
     def pytest_configure(self, config) -> None:  # type: ignore[no-untyped-def]
-        for mark in ("anyio", "trio", "network"):
+        for mark in ("anyio", "trio", "network", "asyncio"):
             with contextlib.suppress(Exception):
                 config.addinivalue_line(
                     "markers", f"{mark}: soft-registered by sdf dual-run"
                 )
 
+    def pytest_collectreport(self, report) -> None:  # type: ignore[no-untyped-def]
+        # Critical for dual-run F2P: held-out tests often collection-fail on
+        # base (ImportError of gold symbols). Without this hook errors=[], so
+        # broken_failed stays empty and F2P is wiped (m28b empty-F2P root cause).
+        if getattr(report, "failed", False) or getattr(report, "outcome", "") == "failed":
+            nid = getattr(report, "nodeid", "") or ""
+            if not nid and getattr(report, "fspath", None) is not None:
+                nid = str(report.fspath)
+            if nid:
+                self.errors.append(_node_from_nodeid(str(nid)))
+
     def pytest_runtest_logreport(self, report) -> None:  # type: ignore[no-untyped-def]
         if report.when == "setup" and report.failed:
-            self.errors.append(report.nodeid)
+            self.errors.append(_node_from_nodeid(report.nodeid))
             return
         if report.when != "call":
             return
-        nodeid = report.nodeid
-        if "::" in nodeid:
-            file_part, name = nodeid.split("::", 1)
-            mod = (
-                file_part[:-3].replace("/", ".").replace("\\", ".")
-                if file_part.endswith(".py")
-                else file_part.replace("/", ".").replace("\\", ".")
-            )
-            node = f"{mod}.{name.replace('::', '.')}"
-        else:
-            node = nodeid
+        node = _node_from_nodeid(report.nodeid)
         if report.passed:
             self.passed.append(node)
         elif report.failed:
             self.failed.append(node)
 
-import contextlib
 collector = Collector()
 rc = pytest.main(
     [
@@ -753,7 +825,7 @@ print(
         }
     )
 )
-"""
+'''
     try:
         proc = subprocess.run(
             [py_exe, "-c", code, *targets],

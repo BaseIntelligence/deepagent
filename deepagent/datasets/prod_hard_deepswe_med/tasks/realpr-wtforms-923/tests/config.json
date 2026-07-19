@@ -1,0 +1,55 @@
+{
+ "base_commit": "b68f4d2bbd04fb6b6b06451e22d0457305fadaf5",
+ "f2p_node_ids": [
+  "tests.test_datalist.test_callable_choices_receives_form_and_field[data-is-none]",
+  "tests.test_datalist.test_callable_choices_receives_form_and_field[with-data]",
+  "tests.test_datalist.test_choice_choices_render_value_and_label",
+  "tests.test_datalist.test_choice_render_kw_on_option",
+  "tests.test_datalist.test_default_widget_is_datalist_widget",
+  "tests.test_datalist.test_email_field_compatible",
+  "tests.test_datalist.test_field_datalist_empty_for_string_ref",
+  "tests.test_datalist.test_field_datalist_empty_when_absent",
+  "tests.test_datalist.test_field_without_datalist_has_no_list_attr",
+  "tests.test_datalist.test_inline_callable_datalist_per_fieldlist_entry",
+  "tests.test_datalist.test_inline_datalist_form_prefix_propagates",
+  "tests.test_datalist.test_inline_datalist_in_fieldlist_renders_per_entry",
+  "tests.test_datalist.test_inline_datalist_in_fieldlist_unique_ids_per_entry",
+  "tests.test_datalist.test_inline_datalist_in_formfield_subform",
+  "tests.test_datalist.test_none_choices_renders_empty_datalist",
+  "tests.test_datalist.test_render_kw_on_datalist",
+  "tests.test_datalist.test_render_kwargs_override_render_kw",
+  "tests.test_datalist.test_render_kwargs_passed_to_datalist_attributes",
+  "tests.test_datalist.test_str_choices_render_options",
+  "tests.test_datalist.test_string_reference_emits_list_attr",
+  "tests.test_datalist.test_widget_preserved_through_clone",
+  "tests.test_datalist.test_widget_receives_field_for_callable_choices",
+  "tests.test_datalist.test_widget_replaces_default_rendering",
+  "tests.test_datalist.test_zero_arg_callable_choices"
+ ],
+ "grade": {
+  "format": "junit",
+  "node_id": "mod.name",
+  "reports": [
+   "/logs/verifier/new.xml",
+   "/logs/verifier/base.xml"
+  ],
+  "tool_label": "pytest"
+ },
+ "label_method": "real_pr_dual_run_base_vs_gold",
+ "p2p_node_ids": [],
+ "pytest_paths": [
+  "tests/test_datalist.py"
+ ],
+ "source_track": "real_pr",
+ "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+ "suite_paths": [
+  "tests/test_datalist.py"
+ ],
+ "suite_reporter": {
+  "language": "python",
+  "node_id_form": "mod.name",
+  "reporter_id": "python_pytest_v1",
+  "suite_command": "pytest -q -p no:cacheprovider --tb=no",
+  "tool_label": "pytest"
+ }
+}
