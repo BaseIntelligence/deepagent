@@ -1,28 +1,77 @@
 {
   "band": "deepswe_median_m27",
-  "product_root": "datasets/prod_hard_deepswe_med",
-  "historical_soft_band": "datasets/prod_hard_keep",
-  "generated_at_utc": "2026-07-19T01:27:38Z",
+  "campaign": {
+    "admitted": [
+      "realpr-packaging-1120",
+      "realpr-werkzeug-2637",
+      "realpr-werkzeug-2608"
+    ],
+    "approach": "m27f isolation+green-flake+hybrid densify; packaging-1120 hybrid admit; agent Dockerfile pytest-xprocess for werkzeug docker oracle; dual-truth N>=5",
+    "fixture_pad": false,
+    "prod_hard_keep_left_historical": true
+  },
+  "certified_count": 5,
   "certified_n": 5,
-  "target_n": 10,
-  "min_packs": 5,
-  "max_packs": 15,
-  "ok_for_product_wave": true,
   "fail_closed_n_lt_5": false,
   "fixture_pad": false,
-  "product_p50": {
-    "source_files": 5.0,
-    "source_hunks": 24.0,
-    "gold_added_lines": 582.0,
-    "f2p_nodes": 13.0
-  },
   "floors": {
-    "source_files_min": 4,
-    "source_hunks_min": 14,
-    "gold_added_lines_min": 400,
     "f2p_nodes_min": 5,
-    "multi_file_rule": "files>=4 OR (files>=3 AND added>=500 AND hunks>=14)"
+    "gold_added_lines_min": 400,
+    "multi_file_rule": "files>=4 OR (files>=3 AND added>=500 AND hunks>=14)",
+    "source_files_min": 4,
+    "source_hunks_min": 14
   },
+  "gate_audit_accepted_count": 5,
+  "gate_audit_pass": true,
+  "generated_at_utc": "2026-07-19T01:27:38Z",
+  "historical_soft_band": "datasets/prod_hard_keep",
+  "keep_details": [
+    {
+      "f2p_nodes": 43,
+      "floors_ok": true,
+      "gold_added_lines": 726,
+      "reason": "hardness_floors_ok",
+      "source_files": 4,
+      "source_hunks": 15,
+      "task_id": "realpr-itemadapter-101"
+    },
+    {
+      "f2p_nodes": 9,
+      "floors_ok": true,
+      "gold_added_lines": 882,
+      "reason": "hardness_floors_ok",
+      "source_files": 3,
+      "source_hunks": 24,
+      "task_id": "realpr-packaging-1120"
+    },
+    {
+      "f2p_nodes": 5,
+      "floors_ok": true,
+      "gold_added_lines": 479,
+      "reason": "hardness_floors_ok",
+      "source_files": 16,
+      "source_hunks": 83,
+      "task_id": "realpr-werkzeug-2608"
+    },
+    {
+      "f2p_nodes": 13,
+      "floors_ok": true,
+      "gold_added_lines": 468,
+      "reason": "hardness_floors_ok",
+      "source_files": 5,
+      "source_hunks": 24,
+      "task_id": "realpr-werkzeug-2637"
+    },
+    {
+      "f2p_nodes": 28,
+      "floors_ok": true,
+      "gold_added_lines": 582,
+      "reason": "hardness_floors_ok",
+      "source_files": 16,
+      "source_hunks": 74,
+      "task_id": "realpr-werkzeug-3116"
+    }
+  ],
   "keeps": [
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
@@ -30,68 +79,32 @@
     "realpr-werkzeug-2637",
     "realpr-werkzeug-3116"
   ],
-  "keep_details": [
-    {
-      "task_id": "realpr-itemadapter-101",
-      "source_files": 4,
-      "source_hunks": 15,
-      "gold_added_lines": 726,
-      "f2p_nodes": 43,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-packaging-1120",
-      "source_files": 3,
-      "source_hunks": 24,
-      "gold_added_lines": 882,
-      "f2p_nodes": 9,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-werkzeug-2608",
-      "source_files": 16,
-      "source_hunks": 83,
-      "gold_added_lines": 479,
-      "f2p_nodes": 5,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-werkzeug-2637",
-      "source_files": 5,
-      "source_hunks": 24,
-      "gold_added_lines": 468,
-      "f2p_nodes": 13,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    },
-    {
-      "task_id": "realpr-werkzeug-3116",
-      "source_files": 16,
-      "source_hunks": 74,
-      "gold_added_lines": 582,
-      "f2p_nodes": 28,
-      "floors_ok": true,
-      "reason": "hardness_floors_ok"
-    }
-  ],
-  "campaign": {
-    "approach": "m27f isolation+green-flake+hybrid densify; packaging-1120 hybrid admit; agent Dockerfile pytest-xprocess for werkzeug docker oracle; dual-truth N>=5",
-    "fixture_pad": false,
-    "prod_hard_keep_left_historical": true,
-    "admitted": [
-      "realpr-packaging-1120",
-      "realpr-werkzeug-2637",
-      "realpr-werkzeug-2608"
-    ]
-  },
+  "max_packs": 15,
+  "min_packs": 5,
+  "note_m27g": "Rolled realpr-werkzeug-2608 dual-truth into root gate_audit + evidence/docker; PROVENANCE certified N=5 (m27g honesty fix).",
   "notes": [
     "m27c densify after m27f hybrid+isolation+green-flake",
     "packaging-1120 hybrid multi-file admit + dual-truth",
     "pytest-xprocess in agent Dockerfile for werkzeug ProcessStarter",
     "werkzeug-2608 certified after ambient 2-node fileurl P2P trim",
     "prod_hard_keep left historical"
+  ],
+  "ok": true,
+  "ok_for_product_wave": true,
+  "product_p50": {
+    "f2p_nodes": 13.0,
+    "gold_added_lines": 582.0,
+    "source_files": 5.0,
+    "source_hunks": 24.0
+  },
+  "product_root": "datasets/prod_hard_deepswe_med",
+  "status": "PASS",
+  "target_n": 10,
+  "task_ids": [
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-werkzeug-2608",
+    "realpr-werkzeug-2637",
+    "realpr-werkzeug-3116"
   ]
 }
