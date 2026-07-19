@@ -2,7 +2,9 @@
 
 **Status:** certified **N=5** (min 5, target 10). **ok_for_product_wave=True**.
 **Role:** Current PRODUCT hardness root under M27 floors (hybrid multi-file + isolation + green-flake).
-**Historical softer band (M25/M26):** datasets/prod_hard_keep (retained for audit; not deleted).
+**HF:** `BaseIntelligence/deepagent` revision **`test`** (current product after m27d upload).
+**Historical softer band (M25/M26) SUPERSEDED on HF `test`:** `datasets/prod_hard_keep` N=10 retained **locally for audit only** (not deleted; no longer the live HF product).
+**Dataset card:** see `README.md` (DeepSWE-median floors + supersession note).
 
 ## Floors (product defaults)
 

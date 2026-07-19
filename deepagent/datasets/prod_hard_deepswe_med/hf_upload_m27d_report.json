@@ -1,0 +1,71 @@
+{
+  "feature": "m27d-hf-upload-deepswe-median",
+  "fulfills": ["VAL-DMED-006"],
+  "generated_at_utc": "2026-07-19T02:10:00Z",
+  "ok": true,
+  "pushed": true,
+  "schema_ok": true,
+  "repo_id": "BaseIntelligence/deepagent",
+  "revision": "test",
+  "local_src": "datasets/prod_hard_deepswe_med",
+  "band": "deepswe_median_m27",
+  "pack_count": 5,
+  "task_ids": [
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-werkzeug-2608",
+    "realpr-werkzeug-2637",
+    "realpr-werkzeug-3116"
+  ],
+  "upload_commit_sha": "60b77df5408cc3a399c463de58103fc6ac7dfcdf",
+  "upload_commit_url": "https://huggingface.co/datasets/BaseIntelligence/deepagent/commit/60b77df5408cc3a399c463de58103fc6ac7dfcdf",
+  "upload_message": "upload_folder complete",
+  "supersession": {
+    "previous_hf_test_band": "datasets/prod_hard_keep (M25/M26 soft band, N=10)",
+    "previous_task_ids_removed_from_test": [
+      "realpr-attrs-1323",
+      "realpr-attrs-1457",
+      "realpr-httpx-3672",
+      "realpr-qs-487",
+      "realpr-qs-488",
+      "realpr-werkzeug-2979",
+      "realpr-werkzeug-3006",
+      "realpr-werkzeug-3101"
+    ],
+    "historical_local_path_kept": "datasets/prod_hard_keep",
+    "card_documents_supersession": true,
+    "card_documents_deepswe_median_floors": true
+  },
+  "card": {
+    "readme": "datasets/prod_hard_deepswe_med/README.md",
+    "product_readme": "datasets/prod_hard_deepswe_med/PRODUCT_README.md",
+    "notes": [
+      "DeepSWE-median floors (files>=4 OR hybrid, hunks>=14, added>=400, F2P>=5)",
+      "M25 prod_hard_keep soft band superseded on HF revision test"
+    ]
+  },
+  "pull_back": {
+    "out": "/tmp/da_m27d_hf_pull",
+    "ok": true,
+    "pack_count": 5,
+    "task_ids_match_local": true,
+    "old_soft_band_gone": true,
+    "sample_pack": "realpr-itemadapter-101",
+    "sample_files_present": [
+      "task.toml",
+      "instruction.md",
+      "environment/Dockerfile",
+      "tests/test.patch",
+      "solution/solution.patch"
+    ]
+  },
+  "secrets": {
+    "local_pre_upload_scan_ok": true,
+    "pull_tree_scan_ok": true,
+    "cli_json_token_free": true,
+    "hit_count": 0
+  },
+  "remote_list_match": true,
+  "n_remote_files": 155,
+  "did_not_push_main": true
+}
