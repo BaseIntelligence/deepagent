@@ -1,0 +1,40 @@
+schema_version = "1.1"
+artifacts = ["/logs/artifacts/model.patch"]
+[task]
+name = "swe-factory/realpr-packaging-1267"
+description = ""
+authors = []
+keywords = []
+[metadata]
+task_id = "realpr-packaging-1267"
+language = "python"
+repository_url = "https://github.com/pypa/packaging.git"
+base_commit_hash = "256686340e6b9247fae23045715d54bac9b3204c"
+source_track = "real_pr"
+license = "MIT"
+[verifier]
+environment_mode = "separate"
+timeout_sec = 1800.0
+
+[verifier.env]
+[verifier.environment]
+build_timeout_sec = 1800.0
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+allow_internet = false
+
+[agent]
+timeout_sec = 5400.0
+[environment]
+build_timeout_sec = 1800.0
+os = "linux"
+cpus = 2
+memory_mb = 4096
+storage_mb = 10240
+gpus = 0
+allow_internet = false
+mcp_servers = []
+
+[environment.env]
+[solution.env]

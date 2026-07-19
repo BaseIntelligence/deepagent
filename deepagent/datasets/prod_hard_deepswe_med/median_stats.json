@@ -2,8 +2,8 @@
   "band": "deepswe_median_m27",
   "product_root": "datasets/prod_hard_deepswe_med",
   "historical_soft_band": "datasets/prod_hard_keep",
-  "generated_at_utc": "2026-07-19T15:43:40Z",
-  "certified_n": 8,
+  "generated_at_utc": "2026-07-19T15:59:05Z",
+  "certified_n": 9,
   "target_n": 15,
   "min_packs": 8,
   "max_packs": 15,
@@ -19,13 +19,14 @@
   },
   "product_p50": {
     "source_files": 9.0,
-    "source_hunks": 26.5,
-    "gold_added_lines": 673.0,
-    "f2p_nodes": 22.0
+    "source_hunks": 24.0,
+    "gold_added_lines": 726.0,
+    "f2p_nodes": 24.0
   },
   "accepted_ids": [
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
+    "realpr-packaging-1267",
     "realpr-rich-3930",
     "realpr-wtforms-923",
     "realpr-werkzeug-2637",
@@ -37,7 +38,7 @@
   "max_packs_per_repo": 2,
   "packs_per_repo": {
     "scrapy/itemadapter": 1,
-    "pypa/packaging": 1,
+    "pypa/packaging": 2,
     "Textualize/rich": 1,
     "pallets-eco/wtforms": 1,
     "pallets/werkzeug": 2,

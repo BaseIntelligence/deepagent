@@ -1,12 +1,12 @@
 {
-  "generated_at_utc": "2026-07-19T15:43:40Z",
+  "generated_at_utc": "2026-07-19T15:59:05Z",
   "product_root": "datasets/prod_hard_deepswe_med",
-  "N": 8,
+  "N": 9,
   "unique_repos": 7,
   "max_packs_per_repo": 2,
   "packs_per_repo": {
     "scrapy/itemadapter": 1,
-    "pypa/packaging": 1,
+    "pypa/packaging": 2,
     "Textualize/rich": 1,
     "pallets-eco/wtforms": 1,
     "pallets/werkzeug": 2,
@@ -14,18 +14,18 @@
     "pallets/click": 1
   },
   "langs": {
-    "python": 8
+    "python": 9
   },
   "p50": {
     "source_files": 9.0,
-    "source_hunks": 26.5,
-    "gold_added_lines": 673.0,
-    "f2p_nodes": 22.0
+    "source_hunks": 24.0,
+    "gold_added_lines": 726.0,
+    "f2p_nodes": 24.0
   },
   "p50_vs_deepswe": {
     "files_delta_vs_6": 3.0,
-    "hunks_delta_vs_14": 12.5,
-    "added_delta_vs_640": 33.0,
+    "hunks_delta_vs_14": 10.0,
+    "added_delta_vs_640": 86.0,
     "p50_added_meets_400": true
   },
   "floors_band": "deepswe_median_m27",
@@ -40,10 +40,12 @@
   "ok_unique_repos_ge_6": true,
   "ok_max_packs_le_2": true,
   "ok_n_ge_12": false,
+  "ok_n_ge_10": false,
   "ok_n_ge_8": true,
   "accepted_ids": [
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
+    "realpr-packaging-1267",
     "realpr-rich-3930",
     "realpr-wtforms-923",
     "realpr-werkzeug-2637",
@@ -75,6 +77,18 @@
       "base_sha": "ff14df979f865165553999d9d1a111feec6f4843",
       "language": "python",
       "license": "Apache-2.0"
+    },
+    {
+      "task_id": "realpr-packaging-1267",
+      "source_files": 3,
+      "source_hunks": 22,
+      "gold_added_lines": 1200,
+      "f2p_nodes": 144,
+      "repository_url": "https://github.com/pypa/packaging.git",
+      "repo": "pypa/packaging",
+      "base_sha": "256686340e6b9247fae23045715d54bac9b3204c",
+      "language": "python",
+      "license": "MIT"
     },
     {
       "task_id": "realpr-rich-3930",
@@ -149,7 +163,7 @@
       "license": "MIT"
     }
   ],
-  "m28b_funnel_note": "m28b retry densify: host-venv SUT-shadow uninstall + SOCKS-free host pip; pytest collection-error capture + worktree-prefix nodeid strip unlock dual F2P; GH Archive 24 hourly dumps under datasets/gh_archive_m28b; Docker dual-truth keeps N=8 repos=7 max/repo=2; click-3442 side-certified with trimmed F2P + empty P2P (docker ambient P2P flake); no fixture pad.",
+  "m28b_funnel_note": "m28b densify: N=9 with side-cert packaging-1267 (unit F2P trimmed from property/hypothesis suite; Docker sol=1/null=0). Prior N=8 keeps retained. max 2 packs/repo (pypa/packaging + pallets/werkzeug at 2). GH Archive 24h + dual-yield infra (SOCKS-free host pip, SUT-shadow uninstall, nodeid strip). marshmallow-2733 Docker gold still 0/12 F2P (not shipped). No fixture pad.",
   "evidence_paths": [
     "datasets/_m28b_evidence2/",
     "datasets/_m28b_work_cert4/",

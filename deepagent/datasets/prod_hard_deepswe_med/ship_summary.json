@@ -1,8 +1,9 @@
 {
-  "certified_count": 8,
+  "certified_count": 9,
   "accepted_ids": [
     "realpr-itemadapter-101",
     "realpr-packaging-1120",
+    "realpr-packaging-1267",
     "realpr-rich-3930",
     "realpr-wtforms-923",
     "realpr-werkzeug-2637",
@@ -16,5 +17,5 @@
   "band": "deepswe_median_m27",
   "unique_repos": 7,
   "max_packs_per_repo": 2,
-  "reason": "m28b retry densify: host-venv SUT-shadow uninstall + SOCKS-free host pip; pytest collection-error capture + worktree-prefix nodeid strip unlock dual F2P; GH Archive 24 hourly dumps under datasets/gh_archive_m28b; Docker dual-truth keeps N=8 repos=7 max/repo=2; click-3442 side-certified with trimmed F2P + empty P2P (docker ambient P2P flake); no fixture pad."
+  "reason": "m28b densify: N=9 with side-cert packaging-1267 (unit F2P trimmed from property/hypothesis suite; Docker sol=1/null=0). Prior N=8 keeps retained. max 2 packs/repo (pypa/packaging + pallets/werkzeug at 2). GH Archive 24h + dual-yield infra (SOCKS-free host pip, SUT-shadow uninstall, nodeid strip). marshmallow-2733 Docker gold still 0/12 F2P (not shipped). No fixture pad."
 }

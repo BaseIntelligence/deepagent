@@ -2,8 +2,8 @@
   "schema": "deepagent_pack_manifest_v1",
   "product_root": "datasets/prod_hard_deepswe_med",
   "band": "deepswe_median_m27",
-  "generated_at_utc": "2026-07-19T15:43:40Z",
-  "certified_n": 8,
+  "generated_at_utc": "2026-07-19T15:59:05Z",
+  "certified_n": 9,
   "fixture_pad": false,
   "source_track": "real_pr",
   "packs": [
@@ -30,6 +30,19 @@
       "source_hunks": 24,
       "gold_added_lines": 882,
       "f2p_nodes": 9,
+      "source_track": "real_pr",
+      "materials_is_fixture": false
+    },
+    {
+      "task_id": "realpr-packaging-1267",
+      "repository_url": "https://github.com/pypa/packaging.git",
+      "base_commit": "256686340e6b9247fae23045715d54bac9b3204c",
+      "language": "python",
+      "license": "MIT",
+      "source_files": 3,
+      "source_hunks": 22,
+      "gold_added_lines": 1200,
+      "f2p_nodes": 144,
       "source_track": "real_pr",
       "materials_is_fixture": false
     },
