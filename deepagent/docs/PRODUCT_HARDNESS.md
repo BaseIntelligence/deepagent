@@ -112,6 +112,28 @@ Rules:
 | `swe_factory.producers.hard_filter` | Mine-time files≥4 / hunks≥14 floors |
 | `swe_factory.panel.band` | Solve-all / solve-none band labels |
 
+## M27e median product scoreboard (default eval pair)
+
+Authoritative **current median product** dual-model matrix:
+
+- root: `datasets/prod_hard_deepswe_med`
+- panel: `datasets/panel_prod_hard_deepswe_med_n5`
+- models: `x-ai/grok-4.5` + `moonshotai/kimi-k2.7-code` via CLI `--model` override
+  (eval defaults remain k2.6 for historical soft-band panels)
+- quality gate: dual-solve pack rate ≤ **0.30** (M27e recorded **0.20** on N=5)
+- ranking Grok vs Kimi2.7 is **observational** (not a product drop gate)
+- historical soft-band matrix: `datasets/panel_prod_hard_m26_n5` (M25/M26 `prod_hard_keep`)
+
+```bash
+.venv/bin/deepagent eval \
+  --product-root datasets/prod_hard_deepswe_med \
+  --max-packs 15 --k 1 --n-concurrent 5 --hard-stop-usd 600 \
+  --out datasets/panel_prod_hard_deepswe_med_n5 \
+  --jobs-dir /tmp/harbor-deepagent-jobs-prod-m27 \
+  --no-reclaim --skip-preflight \
+  --model x-ai/grok-4.5 --model moonshotai/kimi-k2.7-code --json
+```
+
 ## Related docs
 
 - [architecture.md](architecture.md) — certified keep gates

@@ -53,3 +53,12 @@ Gates: p50(added)>=400 -> **True**; p50(files)>=3 hybrid-ok -> **True**; N>=5 ->
 - ship_summary.json, pack_manifest.json, gate_audit.jsonl, oracle_evidence.json
 - densify logs: generate_m27c_densify*.log
 - dual-truth evidence under evidence/oracle_* and densify work dirs
+
+## M27e live scoreboard (authoritative current median product matrix)
+
+- panel: `datasets/panel_prod_hard_deepswe_med_n5` (SUMMARY + scoreboard.json)
+- models: `x-ai/grok-4.5` + `moonshotai/kimi-k2.7-code` (explicit `--model`; defaults still k2.6)
+- k=1, n_concurrent=5 true pool, hard-stop $600, jobs `/tmp/harbor-deepagent-jobs-prod-m27` `--no-reclaim`
+- **dual_solve_rate = 0.20** (gate ≤0.30) — PASS
+- overall pass@1: Grok **0.400**, Kimi2.7 **0.200** (observational ranking: Grok above Kimi2.7 on N=5)
+- supersedes M26 `panel_prod_hard_m26_n5` for this median product root (M26 remains historical soft-band matrix)

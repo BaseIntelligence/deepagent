@@ -1,0 +1,387 @@
+{
+  "actual_max_inflight": 5,
+  "agent": "mini-swe-agent",
+  "budget_stop": false,
+  "concurrent_pool": true,
+  "fidelity": "pier_miniswe_harbor",
+  "finished_at": "2026-07-19T02:29:20.096151+00:00",
+  "hard_stop_usd": "600.0",
+  "host_mem_after": {
+    "available": 179.2,
+    "total": 377.26,
+    "used": 198.05
+  },
+  "host_mem_before": {
+    "available": 180.74,
+    "total": 377.26,
+    "used": 196.52
+  },
+  "invented_rewards": false,
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-prod-m27",
+  "k": 1,
+  "ledger_path": "datasets/panel_prod_hard_deepswe_med_n5/ledger.jsonl",
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.7-code"
+  ],
+  "n_concurrent": 5,
+  "n_packs_preflight_ok": 0,
+  "n_packs_requested": 5,
+  "n_packs_scored": 5,
+  "never_solve_panel": false,
+  "offline": false,
+  "out_dir": "/projects/Agent-SWE/deepagent/datasets/panel_prod_hard_deepswe_med_n5",
+  "pack_results": [
+    {
+      "pack_id": "realpr-itemadapter-101",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-itemadapter-101",
+      "complete": true,
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_usd": "0.6177968",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27-retry-grok/_trials/realpr-itemadapter-101__x-ai_grok-4.5__k0__cb7494c0/eval-realpr-itemadapter-101-x-ai_grok-4.5-k0-1784426814-1cc2db22",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "90902d9fa34640de8bc1d9244c856d4e",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27-retry-grok/_trials/realpr-itemadapter-101__x-ai_grok-4.5__k0__cb7494c0/eval-realpr-itemadapter-101-x-ai_grok-4.5-k0-1784426814-1cc2db22/realpr-itemadapter-101__xZZteLs/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "1.1515621800000002",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-itemadapter-101__moonshotai_kimi-k2.7-code__k0__371a5134/eval-realpr-itemadapter-101-moonshotai_kimi-k2.7-code-k0-1784425228-8834b9ed",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "5ebcbc7367eb482ab8e8c27209402569",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-itemadapter-101__moonshotai_kimi-k2.7-code__k0__371a5134/eval-realpr-itemadapter-101-moonshotai_kimi-k2.7-code-k0-1784425228-8834b9ed/realpr-itemadapter-101__dtj9yHn/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "decision": {
+        "rule": "partial",
+        "verdict": "keep",
+        "note": "soft-panel stamp only; M25 forbids product drop from dual solve-all"
+      },
+      "merged_retry_grok": true
+    },
+    {
+      "pack_id": "realpr-packaging-1120",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-packaging-1120",
+      "complete": true,
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-packaging-1120",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "5.569898000000001",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27-retry-grok/_trials/realpr-packaging-1120__x-ai_grok-4.5__k0__68757a57/eval-realpr-packaging-1120-x-ai_grok-4.5-k0-1784427068-0b8aacb3",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-packaging-1120",
+              "physical_call_id": "1b95911e6a24471587fc2a3b1f639f59",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27-retry-grok/_trials/realpr-packaging-1120__x-ai_grok-4.5__k0__68757a57/eval-realpr-packaging-1120-x-ai_grok-4.5-k0-1784427068-0b8aacb3/realpr-packaging-1120__Efu83ci/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-packaging-1120",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "1.6704196500000008",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-packaging-1120__moonshotai_kimi-k2.7-code__k0__361bf106/eval-realpr-packaging-1120-moonshotai_kimi-k2.7-code-k0-1784425228-7170f324",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-packaging-1120",
+              "physical_call_id": "3020d32ebbbf413ba8f38fc80efadcc5",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-packaging-1120__moonshotai_kimi-k2.7-code__k0__361bf106/eval-realpr-packaging-1120-moonshotai_kimi-k2.7-code-k0-1784425228-7170f324/realpr-packaging-1120__nuBXeNs/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "decision": {
+        "rule": "solve-none",
+        "verdict": "drop",
+        "note": "soft-panel stamp only; M25 forbids product drop from dual solve-all"
+      },
+      "merged_retry_grok": true
+    },
+    {
+      "pack_id": "realpr-werkzeug-2608",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-2608",
+      "complete": true,
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-werkzeug-2608",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "5.5789568",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__x-ai_grok-4.5__k0__c3126e00/eval-realpr-werkzeug-2608-x-ai_grok-4.5-k0-1784425227-b9c1c5ff",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-werkzeug-2608",
+              "physical_call_id": "d148b60b20dc4fabb2c0ac94da03786e",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__x-ai_grok-4.5__k0__c3126e00/eval-realpr-werkzeug-2608-x-ai_grok-4.5-k0-1784425227-b9c1c5ff/realpr-werkzeug-2608__QhwyjUt/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-werkzeug-2608",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "3.782127789999999",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__moonshotai_kimi-k2.7-code__k0__e9d27ef3/eval-realpr-werkzeug-2608-moonshotai_kimi-k2.7-code-k0-1784425227-1b0bc95b",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-werkzeug-2608",
+              "physical_call_id": "e7fb990b2cd14ab194c64a923d27f2fb",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__moonshotai_kimi-k2.7-code__k0__e9d27ef3/eval-realpr-werkzeug-2608-moonshotai_kimi-k2.7-code-k0-1784425227-1b0bc95b/realpr-werkzeug-2608__btDYKfm/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "decision": {
+        "rule": "solve-none",
+        "verdict": "drop",
+        "note": "soft-panel stamp only; M25 forbids product drop from dual solve-all"
+      },
+      "merged_retry_grok": false
+    },
+    {
+      "pack_id": "realpr-werkzeug-2637",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-2637",
+      "complete": true,
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-werkzeug-2637",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "2.7472092",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__x-ai_grok-4.5__k0__73353b9d/eval-realpr-werkzeug-2637-x-ai_grok-4.5-k0-1784425228-5c81f6da",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-werkzeug-2637",
+              "physical_call_id": "1aeae4c92b7149c88df982a5c20d96d9",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__x-ai_grok-4.5__k0__73353b9d/eval-realpr-werkzeug-2637-x-ai_grok-4.5-k0-1784425228-5c81f6da/realpr-werkzeug-2637__sMVDFr9/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-werkzeug-2637",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "2.5250044799999998",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__moonshotai_kimi-k2.7-code__k0__04299a24/eval-realpr-werkzeug-2637-moonshotai_kimi-k2.7-code-k0-1784425652-1918b51f",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-werkzeug-2637",
+              "physical_call_id": "d6534683a5074b608da2e41f73056a35",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__moonshotai_kimi-k2.7-code__k0__04299a24/eval-realpr-werkzeug-2637-moonshotai_kimi-k2.7-code-k0-1784425652-1918b51f/realpr-werkzeug-2637__bQkwYsN/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "decision": {
+        "rule": "solve-none",
+        "verdict": "drop",
+        "note": "soft-panel stamp only; M25 forbids product drop from dual solve-all"
+      },
+      "merged_retry_grok": false
+    },
+    {
+      "pack_id": "realpr-werkzeug-3116",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-3116",
+      "complete": true,
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-werkzeug-3116",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_usd": "1.2363699999999997",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__x-ai_grok-4.5__k0__0786c0fe/eval-realpr-werkzeug-3116-x-ai_grok-4.5-k0-1784425800-eb5abcc1",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-werkzeug-3116",
+              "physical_call_id": "7c5c14819fe045099da88d212b6b339d",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__x-ai_grok-4.5__k0__0786c0fe/eval-realpr-werkzeug-3116-x-ai_grok-4.5-k0-1784425800-eb5abcc1/realpr-werkzeug-3116__zgFRFgs/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-werkzeug-3116",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_usd": "5.697626330000001",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__moonshotai_kimi-k2.7-code__k0__0a9c2f96/eval-realpr-werkzeug-3116-moonshotai_kimi-k2.7-code-k0-1784425835-b4818a2d",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-werkzeug-3116",
+              "physical_call_id": "3550806851644634951356eea901c6cc",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__moonshotai_kimi-k2.7-code__k0__0a9c2f96/eval-realpr-werkzeug-3116-moonshotai_kimi-k2.7-code-k0-1784425835-b4818a2d/realpr-werkzeug-3116__HCGqfda/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        }
+      ],
+      "decision": {
+        "rule": "solve-all",
+        "verdict": "drop",
+        "note": "soft-panel stamp only; M25 forbids product drop from dual solve-all"
+      },
+      "merged_retry_grok": false
+    }
+  ],
+  "pass_at_k_present": true,
+  "pier_bin": "/tmp/pier-venv/bin/pier",
+  "pool_workers": 5,
+  "preferred_pack_ids": [
+    "realpr-itemadapter-101",
+    "realpr-click-3645",
+    "realpr-attrs-1323",
+    "realpr-httpx-3672",
+    "realpr-packaging-1120"
+  ],
+  "preflight_enabled": false,
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med",
+  "remaining_usd": "569.4230287699999985",
+  "runtime": "pier",
+  "scaffold": "pier/mini-swe-agent",
+  "soft_l2_panel": false,
+  "spend_usd": "30.5769712300000015",
+  "started_at": "2026-07-19T01:40:27.399470+00:00",
+  "stop_reason": null,
+  "total_spend_usd": "30.5769712300000015",
+  "wall_s": 1456.193,
+  "dual_solve_rate": 0.2,
+  "dual_solve_packs": [
+    "realpr-werkzeug-3116"
+  ],
+  "merge_note": "Primary n_concurrent=5 wave had 2 grok mintag docker-race fail-closed zeros (image already exists). Those two grok trials re-run n_concurrent=2 and merged into matrix; kimi primary successes retained. Retry jobs retained under jobs_dir_retry_grok."
+}

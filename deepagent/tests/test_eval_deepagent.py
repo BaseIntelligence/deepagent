@@ -37,6 +37,7 @@ from swe_factory.panel.runner import REQUIRED_PANEL_MODELS
 
 GROK = "x-ai/grok-4.5"
 KIMI = "moonshotai/kimi-k2.6"
+KIMI27 = "moonshotai/kimi-k2.7-code"
 runner = CliRunner()
 
 
@@ -93,6 +94,137 @@ def test_models_exact_grok_kimi_pair() -> None:
     assert openrouter_model_flag(GROK) == f"openrouter/{GROK}"
     with pytest.raises(DeepAgentEvalError):
         resolve_eval_models(["anthropic/claude-opus-4.8"])
+
+
+def test_resolve_eval_models_accepts_kimi_k27_override() -> None:
+    """M27/VAL-DMED-007: explicit override allows kimi-k2.7-code (not only k2.6)."""
+    assert resolve_eval_models([GROK, KIMI27]) == (GROK, KIMI27)
+    assert resolve_eval_models([f"openrouter/{GROK}", f"openrouter/{KIMI27}"]) == (
+        GROK,
+        KIMI27,
+    )
+    # Defaults unchanged when no override.
+    assert resolve_eval_models() == (GROK, KIMI)
+    # Explicit default pair still accepted.
+    assert resolve_eval_models([GROK, KIMI]) == (GROK, KIMI)
+    # Random model pair still fail-closed without grok + k*allowlist.
+    with pytest.raises(DeepAgentEvalError):
+        resolve_eval_models(["anthropic/claude-opus-4.8", "openai/gpt-5"])
+    with pytest.raises(DeepAgentEvalError):
+        resolve_eval_models([GROK])  # need full pair
+
+
+def test_offline_eval_with_kimi_k27_models(tmp_path: Path) -> None:
+    """M27: run_deepagent_eval scores with explicit kimi-k2.7-code pair."""
+    product = tmp_path / "prod_hard_deepswe_med"
+    for pid in ("realpr-itemadapter-101", "realpr-packaging-1120"):
+        _write_min_pack(product, pid)
+
+    matrix = {
+        "realpr-itemadapter-101": {GROK: [True], KIMI27: [False]},
+        "realpr-packaging-1120": {GROK: [False], KIMI27: [False]},
+    }
+    invoker = mocked_miniswe_invoker(matrix, job_root=tmp_path / "mock-jobs-k27")
+    out = tmp_path / "panel_k27"
+    jobs = tmp_path / "jobs-k27"
+    report = run_deepagent_eval(
+        product_root=product,
+        out_dir=out,
+        max_packs=2,
+        models=[GROK, KIMI27],
+        k=1,
+        n_concurrent=1,
+        hard_stop_usd=Decimal("600"),
+        reserve_usd=Decimal("1.00"),
+        jobs_dir=jobs,
+        preflight=True,
+        invoker=invoker,
+        offline=True,
+        reclaim=False,
+    )
+    assert list(report.models) == [GROK, KIMI27]
+    assert report.n_packs_scored == 2
+    blob = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    assert blob["models"] == [GROK, KIMI27]
+
+
+def test_cli_eval_deepagent_model_override(tmp_path: Path) -> None:
+    """M27: CLI --model repeatable overrides defaults to kimi-k2.7-code."""
+    product = tmp_path / "prod"
+    _write_min_pack(product, "realpr-itemadapter-101")
+    out = tmp_path / "out"
+    jobs = tmp_path / "jobs"
+    result = runner.invoke(
+        app,
+        [
+            "eval-deepagent",
+            "--product-root",
+            str(product),
+            "--out",
+            str(out),
+            "--max-packs",
+            "1",
+            "--k",
+            "1",
+            "--n-concurrent",
+            "1",
+            "--hard-stop-usd",
+            "600",
+            "--jobs-dir",
+            str(jobs),
+            "--offline",
+            "--no-reclaim",
+            "--json",
+            "--model",
+            GROK,
+            "--model",
+            KIMI27,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["models"] == [GROK, KIMI27]
+    assert (out / "report.json").is_file()
+
+
+def test_deepagent_cli_eval_model_override(tmp_path: Path) -> None:
+    """M27: primary deepagent eval --model accepts kimi-k2.7-code."""
+    from swe_factory.deepagent_cli import app as deepagent_app
+
+    product = tmp_path / "prod"
+    _write_min_pack(product, "realpr-itemadapter-101")
+    out = tmp_path / "out"
+    jobs = tmp_path / "jobs"
+    result = runner.invoke(
+        deepagent_app,
+        [
+            "eval",
+            "--product-root",
+            str(product),
+            "--out",
+            str(out),
+            "--max-packs",
+            "1",
+            "--k",
+            "1",
+            "--n-concurrent",
+            "1",
+            "--hard-stop-usd",
+            "600",
+            "--jobs-dir",
+            str(jobs),
+            "--offline",
+            "--no-reclaim",
+            "--json",
+            "--model",
+            GROK,
+            "--model",
+            KIMI27,
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["models"] == [GROK, KIMI27]
 
 
 def test_offline_mocked_pier_reward_paths(tmp_path: Path) -> None:

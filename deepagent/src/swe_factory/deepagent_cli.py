@@ -831,6 +831,17 @@ def eval_cmd(
             help="Do not delete jobs_dir before starting",
         ),
     ] = False,
+    model: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--model",
+            help=(
+                "OpenRouter model id override (repeatable). Default pair is "
+                "x-ai/grok-4.5 + moonshotai/kimi-k2.6. M27 median product uses "
+                "x-ai/grok-4.5 + moonshotai/kimi-k2.7-code via explicit --model."
+            ),
+        ),
+    ] = None,
     json_out: Annotated[
         bool,
         typer.Option("--json", help="Emit eval report path + summary as JSON"),
@@ -839,7 +850,8 @@ def eval_cmd(
     """Pier mini-swe + HarborDocker model eval (fidelity=pier_miniswe_harbor).
 
     n_concurrent accepted in 1..5 (default 1; refuse outside; n>1 has host Mem risk).
-    M16 hard-stop-usd default is 600. Models: x-ai/grok-4.5 + moonshotai/kimi-k2.6.
+    M16 hard-stop-usd default is 600. Models default x-ai/grok-4.5 + moonshotai/kimi-k2.6;
+    override with --model (M27 median pair uses moonshotai/kimi-k2.7-code).
     Wraps eval_deepagent core.
     """
     from swe_factory.cli import eval_deepagent_cmd
@@ -870,6 +882,7 @@ def eval_cmd(
         skip_preflight=skip_preflight,
         offline=offline,
         no_reclaim=no_reclaim,
+        model=model,
         json_out=json_out,
     )
 

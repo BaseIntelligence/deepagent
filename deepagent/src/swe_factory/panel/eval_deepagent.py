@@ -92,6 +92,22 @@ PREFERRED_PACK_IDS: tuple[str, ...] = (
 # on the pier -m flag without substitution to a different model family.
 DEEPAGENT_EVAL_MODELS: tuple[str, ...] = tuple(DEFAULT_PANEL_MODELS)
 
+# Canonical Grok endpoint required for live DeepAgent dual-model scoreboards.
+GROK_EVAL_MODEL = "x-ai/grok-4.5"
+# Kimi SKUs accepted on explicit --model override (defaults remain k2.6).
+# M27 DeepSWE-median product pair uses kimi-k2.7-code.
+KIMI_EVAL_MODEL_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "moonshotai/kimi-k2.6",
+        "moonshotai/kimi-k2.7-code",
+    }
+)
+# Convenience default pair for M27 median product scoreboards (explicit override).
+DEEPSWE_MEDIAN_EVAL_MODELS: tuple[str, ...] = (
+    GROK_EVAL_MODEL,
+    "moonshotai/kimi-k2.7-code",
+)
+
 
 class DeepAgentEvalError(RuntimeError):
     """Unrecoverable DeepAgent-grade eval configuration or path failure."""
@@ -431,18 +447,68 @@ def reclaim_jobs_dirs(
 
 
 def resolve_eval_models(models: Sequence[str] | None = None) -> tuple[str, ...]:
-    """Normalize + validate exact Grok+Kimi pair (allows openrouter/ prefix)."""
+    """Normalize + validate dual-model eval pair (allows openrouter/ prefix).
+
+    Defaults remain ``DEEPAGENT_EVAL_MODELS`` (Grok 4.5 + kimi-k2.6) for
+    backward compatibility with historical panels.
+
+    Explicit override (M27 DeepSWE-median / VAL-DMED-007) may pass
+    ``x-ai/grok-4.5`` + ``moonshotai/kimi-k2.7-code`` (or k2.6). Random model
+    families still fail closed.
+    """
     if models is None:
         raw = list(DEEPAGENT_EVAL_MODELS)
     else:
         raw = [normalize_model_id(m) for m in models if m and str(m).strip()]
     if not raw:
         raise DeepAgentEvalError("models must be non-empty")
-    # Map normalized back through required set.
-    try:
-        return assert_required_panel_models(raw)
-    except Exception as exc:  # noqa: BLE001 - surface as DeepAgentEvalError
-        raise DeepAgentEvalError(str(exc)) from exc
+
+    # Default pair path: unchanged assert_required_panel_models(k2.6 pair).
+    if tuple(raw) == tuple(DEEPAGENT_EVAL_MODELS):
+        try:
+            return assert_required_panel_models(raw)
+        except Exception as exc:  # noqa: BLE001 - surface as DeepAgentEvalError
+            raise DeepAgentEvalError(str(exc)) from exc
+
+    # Explicit override path: require Grok + allowed Kimi SKU (k2.6 or k2.7-code).
+    if len(raw) < 2:
+        raise DeepAgentEvalError(
+            f"models override must include at least grok + one allowed kimi SKU; got {raw}"
+        )
+    # Dedupe while preserving order.
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for mid in raw:
+        if mid not in seen:
+            seen.add(mid)
+            ordered.append(mid)
+
+    has_grok = GROK_EVAL_MODEL in ordered
+    kimi_hits = [m for m in ordered if m in KIMI_EVAL_MODEL_ALLOWLIST]
+    if not has_grok or not kimi_hits:
+        raise DeepAgentEvalError(
+            "models override must include "
+            f"{GROK_EVAL_MODEL!r} and one of {sorted(KIMI_EVAL_MODEL_ALLOWLIST)}; "
+            f"got {ordered}"
+        )
+
+    # Prefer calling order: first grok occurrence then first allowed kimi.
+    resolved: list[str] = []
+    for mid in ordered:
+        take_grok = mid == GROK_EVAL_MODEL and GROK_EVAL_MODEL not in resolved
+        take_kimi = mid in KIMI_EVAL_MODEL_ALLOWLIST and not any(
+            x in KIMI_EVAL_MODEL_ALLOWLIST for x in resolved
+        )
+        if take_grok or take_kimi:
+            resolved.append(mid)
+    # Keep extras after the required pair (historical assert_required allows extras).
+    for mid in ordered:
+        if mid not in resolved:
+            resolved.append(mid)
+
+    if len(resolved) < 2:
+        raise DeepAgentEvalError(f"models override unresolved pair from {ordered}")
+    return tuple(resolved)
 
 
 def _pack_sort_key(pack_id: str) -> tuple[int, str]:
@@ -1765,10 +1831,13 @@ __all__ = [
     "DEEPAGENT_EVAL_FIDELITY",
     "DEEPAGENT_EVAL_MODELS",
     "DEEPAGENT_EVAL_STAGE",
+    "DEEPSWE_MEDIAN_EVAL_MODELS",
     "DEFAULT_EVAL_K",
     "DEFAULT_HARD_STOP_USD",
     "DEFAULT_JOBS_ROOT",
     "DEFAULT_N_CONCURRENT",
+    "GROK_EVAL_MODEL",
+    "KIMI_EVAL_MODEL_ALLOWLIST",
     "MAX_N_CONCURRENT",
     "DEFAULT_OUT_ROOT",
     "DEFAULT_PRODUCT_ROOT",

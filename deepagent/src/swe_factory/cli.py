@@ -2087,6 +2087,17 @@ def eval_deepagent_cmd(
             help="Do not delete jobs_dir before starting",
         ),
     ] = False,
+    model: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--model",
+            help=(
+                "OpenRouter model id override (repeatable). Default pair is "
+                "x-ai/grok-4.5 + moonshotai/kimi-k2.6. M27 median product uses "
+                "x-ai/grok-4.5 + moonshotai/kimi-k2.7-code via explicit --model."
+            ),
+        ),
+    ] = None,
     json_out: Annotated[
         bool,
         typer.Option("--json", help="Emit eval report path + summary as JSON"),
@@ -2094,18 +2105,19 @@ def eval_deepagent_cmd(
 ) -> None:
     """DeepAgent-grade Pier + mini-swe-agent serial eval (VAL-DEVAL-001..007).
 
-    fidelity=pier_miniswe_harbor only. Models: x-ai/grok-4.5 + moonshotai/kimi-k2.6.
+    fidelity=pier_miniswe_harbor only. Models: x-ai/grok-4.5 + moonshotai/kimi-k2.6
+    by default; override with --model (e.g. moonshotai/kimi-k2.7-code for M27).
     NEVER uses never-solve CLI panel or host soft L2 as DeepAgent hardness.
     """
     from decimal import Decimal
 
     from swe_factory.panel.eval_deepagent import (
         DEEPAGENT_EVAL_FIDELITY,
-        DEEPAGENT_EVAL_MODELS,
         DEFAULT_N_CONCURRENT,
         MAX_N_CONCURRENT,
         DeepAgentEvalError,
         mocked_miniswe_invoker,
+        resolve_eval_models,
         run_deepagent_eval,
     )
 
@@ -2119,6 +2131,12 @@ def eval_deepagent_cmd(
             err=True,
         )
         raise typer.Exit(code=2)
+
+    try:
+        models_t = resolve_eval_models(list(model) if model else None)
+    except DeepAgentEvalError as exc:
+        typer.secho(f"eval-deepagent: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
 
     invoker = None
     if offline:
@@ -2144,7 +2162,7 @@ def eval_deepagent_cmd(
             for keep in keeps:
                 pid = str(keep["task_id"])
                 # Default offline: neither model solves (honest hard bias; never invent keep).
-                matrix[pid] = {m: [False] * max(1, int(k)) for m in DEEPAGENT_EVAL_MODELS}
+                matrix[pid] = {m: [False] * max(1, int(k)) for m in models_t}
             invoker = mocked_miniswe_invoker(matrix)
 
         report = run_deepagent_eval(
@@ -2152,7 +2170,7 @@ def eval_deepagent_cmd(
             out_dir=out,
             max_packs=max_packs,
             pack_ids=list(pack_id) if pack_id else None,
-            models=list(DEEPAGENT_EVAL_MODELS),
+            models=list(models_t),
             k=int(k),
             n_concurrent=int(n_concurrent),
             hard_stop_usd=hard_stop_usd,

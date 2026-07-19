@@ -1,0 +1,27 @@
+{
+  "by_model": {
+    "moonshotai/kimi-k2.7-code": "14.8267404300000008",
+    "x-ai/grok-4.5": "9.5625359999999997"
+  },
+  "by_stage": {
+    "deepagent-eval-pier-miniswe": "24.3892764300000005"
+  },
+  "by_task": {
+    "realpr-itemadapter-101": "1.1515621800000002",
+    "realpr-packaging-1120": "1.6704196500000008",
+    "realpr-werkzeug-2608": "9.361084589999999",
+    "realpr-werkzeug-2637": "5.2722136799999998",
+    "realpr-werkzeug-3116": "6.9339963300000007"
+  },
+  "cap_usd": "600.0",
+  "has_unknown_billing": false,
+  "open_call_count": 0,
+  "open_reserved_usd": "0",
+  "path": "datasets/panel_prod_hard_deepswe_med_n5/ledger.jsonl",
+  "remaining_usd": "575.6107235699999995",
+  "settled_call_count": 10,
+  "settled_exact_usd": "24.3892764300000005",
+  "total_commit_usd": "24.3892764300000005",
+  "under_cap": true,
+  "unknown_billing_count": 0
+}

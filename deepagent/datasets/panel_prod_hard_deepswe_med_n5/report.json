@@ -1,0 +1,451 @@
+{
+  "actual_max_inflight": 5,
+  "agent": "mini-swe-agent",
+  "budget_stop": false,
+  "concurrent_pool": true,
+  "fidelity": "pier_miniswe_harbor",
+  "finished_at": "2026-07-19T02:04:43.592918+00:00",
+  "hard_stop_usd": "600.0",
+  "host_mem_after": {
+    "available": 179.2,
+    "total": 377.26,
+    "used": 198.05
+  },
+  "host_mem_before": {
+    "available": 180.74,
+    "total": 377.26,
+    "used": 196.52
+  },
+  "invented_rewards": false,
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-prod-m27",
+  "k": 1,
+  "ledger_path": "datasets/panel_prod_hard_deepswe_med_n5/ledger.jsonl",
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.7-code"
+  ],
+  "n_concurrent": 5,
+  "n_packs_preflight_ok": 0,
+  "n_packs_requested": 5,
+  "n_packs_scored": 5,
+  "never_solve_panel": false,
+  "offline": false,
+  "out_dir": "/projects/Agent-SWE/deepagent/datasets/panel_prod_hard_deepswe_med_n5",
+  "pack_results": [
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.7-code": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "0",
+              "errors": [
+                "agent mintag ensure failed (fail-closed): docker build failed for 'deepagent-agent-6742ce8ead4f:local': [internal] load build definition from Dockerfile\n#1 transferring dockerfile: 7.47kB done\n#1 DONE 0.0s\n\n#2 [internal] load metadata for docker.io/library/python:3.12-slim\n#2 DONE 0.0s\n\n#3 [internal] load .dockerignore\n#3 transferring context: 2B done\n#3 DONE 0.0s\n\n#4 [1/9] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de\n#4 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de done\n#4 DONE 0.0s\n\n#5 [3/9] WORKDIR /app\n#5 CACHED\n\n#6 [4/9] RUN set -eux;     git clone --filter=blob:none \"https://github.com/scrapy/itemadapter.git\" /app;     cd /app;     git fetch --depth 1 origin \"f7860b6ec7c5b49f623ecd1f67e73877f08039b6\" || git fetch origin \"f7860b6ec7c5b49f623ecd1f67e73877f08039b6\";     git checkout --force \"f7860b6ec7c5b49f623ecd1f67e73877f08039b6\";     test \"$(git rev-parse HEAD)\" = \"f7860b6ec7c5b49f623ecd1f67e73877f08039b6\"       || test \"$(git rev-parse HEAD)\" = \"$(git rev-parse \"f7860b6ec7c5b49f623ecd1f67e73877f08039b6\")\";     git rev-parse --verify \"f7860b6ec7c5b49f623ecd1f67e73877f08039b6^{commit}\";     git remote remove origin || true; git reflog expire --expire=now --all || true; git gc --prune=now || true;     git rev-parse HEAD > /app/.harbor_base_commit\n#6 CACHED\n\n#7 [6/9] RUN python - <<'EOS'\n#7 CACHED\n\n#8 [2/9] RUN apt-get update && apt-get install -y --no-install-recommends     git ca-certificates     && rm -rf /var/lib/apt/lists/*\n#8 CACHED\n\n#9 [7/9] RUN cd /app  && find . -name '*.egg-info' -type d -prune -exec rm -rf {} + 2>/dev/null || true  && find . -name '*.egg-info' -type f -delete 2>/dev/null || true  && rm -rf .eggs dist build .pytest_cache .mypy_cache .ruff_cache __pycache__       target/debug target/release node_modules/.cache 2>/dev/null || true  && git checkout --force -- . 2>/dev/null || true  && git clean -fd -e .harbor_base_commit 2>/dev/null || true\n#9 CACHED\n\n#10 [8/9] RUN cd /app  && git config --global --add safe.directory /app || true  && git config core.hooksPath /dev/null || true  && git status --porcelain       | grep -v '.harbor_base_commit'       | tee /tmp/porcelain.txt  && test ! -s /tmp/porcelain.txt  && test ! -d solution  && test ! -f solution.patch  && test ! -f test.patch  && test ! -f tests/test.patch\n#10 CACHED\n\n#11 [5/9] RUN pip install --no-cache-dir pytest freezegun hypothesis pretend anyio trio sniffio h11 pytest-asyncio pytest-mock pytest-xprocess ephemeral-port-reserve tomli_w tomli appdirs cloudpickle &&     pip install --no-cache-dir jaraco.itertools jaraco.functools jaraco.context jaraco.collections jaraco.test more_itertools setuptools wheel inflect attrs pydantic dataclasses-json &&     if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ]; then pip install --no-cache-dir -e . || pip install --no-cache-dir . ; fi &&     printf '%s\\n' /app /app/src > /usr/local/lib/python3.12/site-packages/sdf_app.pth\n#11 CACHED\n\n#12 [9/9] RUN cd /app  && if [ -d solution ] || [ -f solution/solve.sh ] || [ -f gold.patch ]       || [ -f test.patch ] || [ -f tests/test.patch ]; then       echo \"FATAL: solution/gold/held-out test.patch leaked into agent context\" >&2; exit 42;     fi\n#12 CACHED\n\n#13 exporting to image\n#13 exporting layers done\n#13 exporting manifest sha256:d37ed5a245f2ee3e881c13e61d5e8077aa419af452da5b3b59d3a7e6b7fd3569 done\n#13 exporting config sha256:93db27079f5ba5f7840263ad556afc12bdaf8acd9499fd659cfe261735809147 done\n#13 exporting attestation manifest sha256:95dc4ed7a0f15372729809b8bd0d2ff7655648cf76caf11cb34261cffa477039 done\n#13 exporting manifest list sha256:07477dd9bb634ecd805b15dea3bddca58f16030aeafaefb28b0a84ae8afa9640 done\n#13 naming to docker.io/library/deepagent-agent-6742ce8ead4f:local done\n#13 ERROR: image \"docker.io/library/deepagent-agent-6742ce8ead4f:local\": already exists\n------\n > exporting to image:\n------\nERROR: failed to build: failed to solve: image \"docker.io/library/deepagent-agent-6742ce8ead4f:local\": already exists\n"
+              ],
+              "exit_code": null,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-itemadapter-101__x-ai_grok-4.5__k0__c1ff15ee",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "1bef5fc89bf44b48b7cfa2a0ecd58048",
+              "reward": null,
+              "reward_path": null,
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-itemadapter-101",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "1.1515621800000002",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-itemadapter-101__moonshotai_kimi-k2.7-code__k0__371a5134/eval-realpr-itemadapter-101-moonshotai_kimi-k2.7-code-k0-1784425228-8834b9ed",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-itemadapter-101",
+              "physical_call_id": "5ebcbc7367eb482ab8e8c27209402569",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-itemadapter-101__moonshotai_kimi-k2.7-code__k0__371a5134/eval-realpr-itemadapter-101-moonshotai_kimi-k2.7-code-k0-1784425228-8834b9ed/realpr-itemadapter-101__dtj9yHn/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-itemadapter-101",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-itemadapter-101",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "1.1515621800000002"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.7-code": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-packaging-1120",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "0",
+              "errors": [
+                "agent mintag ensure failed (fail-closed): docker build failed for 'deepagent-agent-32c5c466f301:local': \n#1 [internal] load build definition from Dockerfile\n#1 transferring dockerfile: 7.46kB done\n#1 DONE 0.0s\n\n#2 [internal] load metadata for docker.io/library/python:3.12-slim\n#2 DONE 0.0s\n\n#3 [internal] load .dockerignore\n#3 transferring context: 2B done\n#3 DONE 0.0s\n\n#4 [1/9] FROM docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de\n#4 resolve docker.io/library/python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de done\n#4 DONE 0.0s\n\n#5 [3/9] WORKDIR /app\n#5 CACHED\n\n#6 [7/9] RUN cd /app  && find . -name '*.egg-info' -type d -prune -exec rm -rf {} + 2>/dev/null || true  && find . -name '*.egg-info' -type f -delete 2>/dev/null || true  && rm -rf .eggs dist build .pytest_cache .mypy_cache .ruff_cache __pycache__       target/debug target/release node_modules/.cache 2>/dev/null || true  && git checkout --force -- . 2>/dev/null || true  && git clean -fd -e .harbor_base_commit 2>/dev/null || true\n#6 CACHED\n\n#7 [6/9] RUN python - <<'EOS'\n#7 CACHED\n\n#8 [8/9] RUN cd /app  && git config --global --add safe.directory /app || true  && git config core.hooksPath /dev/null || true  && git status --porcelain       | grep -v '.harbor_base_commit'       | tee /tmp/porcelain.txt  && test ! -s /tmp/porcelain.txt  && test ! -d solution  && test ! -f solution.patch  && test ! -f test.patch  && test ! -f tests/test.patch\n#8 CACHED\n\n#9 [5/9] RUN pip install --no-cache-dir pytest freezegun hypothesis pretend anyio trio sniffio h11 pytest-asyncio pytest-mock pytest-xprocess ephemeral-port-reserve tomli_w tomli appdirs cloudpickle &&     pip install --no-cache-dir jaraco.itertools jaraco.functools jaraco.context jaraco.collections jaraco.test more_itertools setuptools wheel inflect attrs pydantic dataclasses-json &&     if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ]; then pip install --no-cache-dir -e . || pip install --no-cache-dir . ; fi &&     printf '%s\\n' /app /app/src > /usr/local/lib/python3.12/site-packages/sdf_app.pth\n#9 CACHED\n\n#10 [2/9] RUN apt-get update && apt-get install -y --no-install-recommends     git ca-certificates     && rm -rf /var/lib/apt/lists/*\n#10 CACHED\n\n#11 [4/9] RUN set -eux;     git clone --filter=blob:none \"https://github.com/pypa/packaging.git\" /app;     cd /app;     git fetch --depth 1 origin \"ff14df979f865165553999d9d1a111feec6f4843\" || git fetch origin \"ff14df979f865165553999d9d1a111feec6f4843\";     git checkout --force \"ff14df979f865165553999d9d1a111feec6f4843\";     test \"$(git rev-parse HEAD)\" = \"ff14df979f865165553999d9d1a111feec6f4843\"       || test \"$(git rev-parse HEAD)\" = \"$(git rev-parse \"ff14df979f865165553999d9d1a111feec6f4843\")\";     git rev-parse --verify \"ff14df979f865165553999d9d1a111feec6f4843^{commit}\";     git remote remove origin || true; git reflog expire --expire=now --all || true; git gc --prune=now || true;     git rev-parse HEAD > /app/.harbor_base_commit\n#11 CACHED\n\n#12 [9/9] RUN cd /app  && if [ -d solution ] || [ -f solution/solve.sh ] || [ -f gold.patch ]       || [ -f test.patch ] || [ -f tests/test.patch ]; then       echo \"FATAL: solution/gold/held-out test.patch leaked into agent context\" >&2; exit 42;     fi\n#12 CACHED\n\n#13 exporting to image\n#13 exporting layers done\n#13 exporting manifest sha256:561551655944b45f62537290e8c816a510dfe6b010b300dce0dc5c7b738419b2 done\n#13 exporting config sha256:82601d4870fb494f7867dc9957b7599bead9b309c22c9f349695d703c73da98d done\n#13 exporting attestation manifest sha256:20d4b843c328e0e5fdd1d9fc2cfe1f2df9a3efca2ba8d524a5225f97270e2aa6 done\n#13 exporting manifest list sha256:35cebea8d38d4a46eda429271bb9cc4ac2cdfa0c517280a030bd1f2b4cfa9af4 done\n#13 naming to docker.io/library/deepagent-agent-32c5c466f301:local done\n#13 ERROR: image \"docker.io/library/deepagent-agent-32c5c466f301:local\": already exists\n------\n > exporting to image:\n------\nERROR: failed to build: failed to solve: image \"docker.io/library/deepagent-agent-32c5c466f301:local\": already exists\n"
+              ],
+              "exit_code": null,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-packaging-1120__x-ai_grok-4.5__k0__87ea5928",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-packaging-1120",
+              "physical_call_id": "809b64bcb749405baa251c26852fe850",
+              "reward": null,
+              "reward_path": null,
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-packaging-1120",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "1.6704196500000008",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-packaging-1120__moonshotai_kimi-k2.7-code__k0__361bf106/eval-realpr-packaging-1120-moonshotai_kimi-k2.7-code-k0-1784425228-7170f324",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-packaging-1120",
+              "physical_call_id": "3020d32ebbbf413ba8f38fc80efadcc5",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-packaging-1120__moonshotai_kimi-k2.7-code__k0__361bf106/eval-realpr-packaging-1120-moonshotai_kimi-k2.7-code-k0-1784425228-7170f324/realpr-packaging-1120__nuBXeNs/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-packaging-1120",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-packaging-1120",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "1.6704196500000008"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.7-code": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-werkzeug-2608",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "5.5789568",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__x-ai_grok-4.5__k0__c3126e00/eval-realpr-werkzeug-2608-x-ai_grok-4.5-k0-1784425227-b9c1c5ff",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-werkzeug-2608",
+              "physical_call_id": "d148b60b20dc4fabb2c0ac94da03786e",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__x-ai_grok-4.5__k0__c3126e00/eval-realpr-werkzeug-2608-x-ai_grok-4.5-k0-1784425227-b9c1c5ff/realpr-werkzeug-2608__QhwyjUt/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-werkzeug-2608",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "3.782127789999999",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__moonshotai_kimi-k2.7-code__k0__e9d27ef3/eval-realpr-werkzeug-2608-moonshotai_kimi-k2.7-code-k0-1784425227-1b0bc95b",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-werkzeug-2608",
+              "physical_call_id": "e7fb990b2cd14ab194c64a923d27f2fb",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2608__moonshotai_kimi-k2.7-code__k0__e9d27ef3/eval-realpr-werkzeug-2608-moonshotai_kimi-k2.7-code-k0-1784425227-1b0bc95b/realpr-werkzeug-2608__btDYKfm/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-werkzeug-2608",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-2608",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "9.361084589999999"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 0.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.7-code": 0.0,
+          "x-ai/grok-4.5": 0.0
+        },
+        "reason": "solve-none: frontier pass@k is 0.0 (no panel model solved any rollout); the task is broken or impossible",
+        "rule": "solve-none",
+        "total_solves": 0,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-werkzeug-2637",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "2.7472092",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__x-ai_grok-4.5__k0__73353b9d/eval-realpr-werkzeug-2637-x-ai_grok-4.5-k0-1784425228-5c81f6da",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-werkzeug-2637",
+              "physical_call_id": "1aeae4c92b7149c88df982a5c20d96d9",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__x-ai_grok-4.5__k0__73353b9d/eval-realpr-werkzeug-2637-x-ai_grok-4.5-k0-1784425228-5c81f6da/realpr-werkzeug-2637__sMVDFr9/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-werkzeug-2637",
+          "pass_at_k": 0.0,
+          "solves": 0,
+          "trials": [
+            {
+              "cost_usd": "2.5250044799999998",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__moonshotai_kimi-k2.7-code__k0__04299a24/eval-realpr-werkzeug-2637-moonshotai_kimi-k2.7-code-k0-1784425652-1918b51f",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-werkzeug-2637",
+              "physical_call_id": "d6534683a5074b608da2e41f73056a35",
+              "reward": 0,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-2637__moonshotai_kimi-k2.7-code__k0__04299a24/eval-realpr-werkzeug-2637-moonshotai_kimi-k2.7-code-k0-1784425652-1918b51f/realpr-werkzeug-2637__bQkwYsN/verifier/reward.json",
+              "solved": false
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-werkzeug-2637",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-2637",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "5.2722136799999998"
+    },
+    {
+      "budget_stop": false,
+      "complete": true,
+      "decision": {
+        "band_high": 0.5,
+        "discrimination": 0.0,
+        "discrimination_floor": 1.0,
+        "frontier_pass_at_k": 1.0,
+        "per_model_pass_at_k": {
+          "moonshotai/kimi-k2.7-code": 1.0,
+          "x-ai/grok-4.5": 1.0
+        },
+        "reason": "solve-all (too easy): every panel rollout solved the task (2/2)",
+        "rule": "solve-all",
+        "total_solves": 2,
+        "total_trials": 2,
+        "verdict": "drop"
+      },
+      "models": [
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "x-ai/grok-4.5",
+          "pack_id": "realpr-werkzeug-3116",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_usd": "1.2363699999999997",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__x-ai_grok-4.5__k0__0786c0fe/eval-realpr-werkzeug-3116-x-ai_grok-4.5-k0-1784425800-eb5abcc1",
+              "model": "x-ai/grok-4.5",
+              "openrouter_model": "openrouter/x-ai/grok-4.5",
+              "pack_id": "realpr-werkzeug-3116",
+              "physical_call_id": "7c5c14819fe045099da88d212b6b339d",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__x-ai_grok-4.5__k0__0786c0fe/eval-realpr-werkzeug-3116-x-ai_grok-4.5-k0-1784425800-eb5abcc1/realpr-werkzeug-3116__zgFRFgs/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        },
+        {
+          "completed_trials": 1,
+          "incomplete": false,
+          "k": 1,
+          "model": "moonshotai/kimi-k2.7-code",
+          "pack_id": "realpr-werkzeug-3116",
+          "pass_at_k": 1.0,
+          "solves": 1,
+          "trials": [
+            {
+              "cost_usd": "5.697626330000001",
+              "errors": [],
+              "exit_code": 0,
+              "index": 0,
+              "invented_reward": false,
+              "job_dir": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__moonshotai_kimi-k2.7-code__k0__0a9c2f96/eval-realpr-werkzeug-3116-moonshotai_kimi-k2.7-code-k0-1784425835-b4818a2d",
+              "model": "moonshotai/kimi-k2.7-code",
+              "openrouter_model": "openrouter/moonshotai/kimi-k2.7-code",
+              "pack_id": "realpr-werkzeug-3116",
+              "physical_call_id": "3550806851644634951356eea901c6cc",
+              "reward": 1,
+              "reward_path": "/tmp/harbor-deepagent-jobs-prod-m27/_trials/realpr-werkzeug-3116__moonshotai_kimi-k2.7-code__k0__0a9c2f96/eval-realpr-werkzeug-3116-moonshotai_kimi-k2.7-code-k0-1784425835-b4818a2d/realpr-werkzeug-3116__HCGqfda/verifier/reward.json",
+              "solved": true
+            }
+          ]
+        }
+      ],
+      "pack_id": "realpr-werkzeug-3116",
+      "pack_path": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med/tasks/realpr-werkzeug-3116",
+      "preflight": null,
+      "stop_reason": null,
+      "total_cost_usd": "6.9339963300000007"
+    }
+  ],
+  "pass_at_k_present": true,
+  "pier_bin": "/tmp/pier-venv/bin/pier",
+  "pool_workers": 5,
+  "preferred_pack_ids": [
+    "realpr-itemadapter-101",
+    "realpr-click-3645",
+    "realpr-attrs-1323",
+    "realpr-httpx-3672",
+    "realpr-packaging-1120"
+  ],
+  "preflight_enabled": false,
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med",
+  "remaining_usd": "575.6107235699999995",
+  "runtime": "pier",
+  "scaffold": "pier/mini-swe-agent",
+  "soft_l2_panel": false,
+  "spend_usd": "24.3892764300000005",
+  "started_at": "2026-07-19T01:40:27.399470+00:00",
+  "stop_reason": null,
+  "total_spend_usd": "24.3892764300000005",
+  "wall_s": 1456.193
+}

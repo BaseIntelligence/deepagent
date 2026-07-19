@@ -1,0 +1,145 @@
+{
+  "n_packs_scored": 5,
+  "n_packs_requested": 5,
+  "fidelity": "pier_miniswe_harbor",
+  "n_concurrent": 5,
+  "actual_max_inflight": 5,
+  "concurrent_pool": true,
+  "k": 1,
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.7-code"
+  ],
+  "spend_usd": "30.5769712300000015",
+  "primary_wave_spend_usd": "24.3892764300000005",
+  "retry_grok_spend_usd": "6.187694800000001",
+  "remaining_usd": "569.4230287699999985",
+  "budget_stop": false,
+  "stop_reason": null,
+  "wall_s_primary": 1456.193,
+  "wall_s_retry_grok": 1345.217,
+  "invented_rewards": false,
+  "hard_stop_usd": "600.0",
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-prod-m27",
+  "jobs_dir_retry_grok": "/tmp/harbor-deepagent-jobs-prod-m27-retry-grok",
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med",
+  "overall_pass_at_1": {
+    "x-ai/grok-4.5": {
+      "solves": 2,
+      "trials": 5,
+      "pass_at_1": 0.4
+    },
+    "moonshotai/kimi-k2.7-code": {
+      "solves": 1,
+      "trials": 5,
+      "pass_at_1": 0.2
+    }
+  },
+  "dual_solve_packs": [
+    "realpr-werkzeug-3116"
+  ],
+  "dual_solve_pack_count": 1,
+  "dual_solve_rate": 0.2,
+  "dual_solve_gate_max": 0.3,
+  "dual_solve_gate_fail_at": 0.4,
+  "dual_solve_gate_pass": true,
+  "per_pack": [
+    {
+      "pack_id": "realpr-itemadapter-101",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 1.0,
+      "decision_rule": "partial",
+      "merged_retry_grok": true,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "0.6177968"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "1.1515621800000002"
+      ]
+    },
+    {
+      "pack_id": "realpr-packaging-1120",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "merged_retry_grok": true,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "5.569898000000001"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "1.6704196500000008"
+      ]
+    },
+    {
+      "pack_id": "realpr-werkzeug-2608",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "merged_retry_grok": false,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "5.5789568"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "3.782127789999999"
+      ]
+    },
+    {
+      "pack_id": "realpr-werkzeug-2637",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "merged_retry_grok": false,
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "2.7472092"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "2.5250044799999998"
+      ]
+    },
+    {
+      "pack_id": "realpr-werkzeug-3116",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "decision_rule": "solve-all",
+      "merged_retry_grok": false,
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.2363699999999997"
+      ],
+      "kimi-k2.7-code": 1.0,
+      "kimi-k2.7-code_solves": 1,
+      "kimi-k2.7-code_cost": [
+        "5.697626330000001"
+      ]
+    }
+  ],
+  "started_at": "2026-07-19T01:40:27.399470+00:00",
+  "finished_at": "2026-07-19T02:29:20.096151+00:00",
+  "authority": "M27 DeepSWE-median product scoreboard (authoritative current median product matrix; supersedes M26 panel_prod_hard_m26_n5 for median product)",
+  "policy_note": "Informational leaderboard under M25: dual-model solve-all does not auto-drop hardness. Median product structural floors + intrinsic apply. Ranking Grok vs Kimi-k2.7-code is observational.",
+  "historical_panel_soft_band": "datasets/panel_prod_hard_m26_n5",
+  "merge_note": "Primary n_concurrent=5 wave had 2 grok mintag docker-race fail-closed zeros (image already exists). Those two grok trials re-run n_concurrent=2 and merged into matrix; kimi primary successes retained. Retry jobs retained under jobs_dir_retry_grok.",
+  "mintag_race_note": "Concurrent agent mintag docker build EXPORT can race \"image already exists\" under n=5; images deepagent-agent-6742ce8ead4f and deepagent-agent-32c5c466f301 were present; retry succeeded."
+}
