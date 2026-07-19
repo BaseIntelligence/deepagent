@@ -1,64 +1,19 @@
-# prod_hard_deepswe_med - M27 DeepSWE-median product hardness
+# prod_hard_deepswe_med — DeepSWE-median product (M27/M28)
 
-**Status:** certified **N=5** (min 5, target 10). **ok_for_product_wave=True**.
-**Role:** Current PRODUCT hardness root under M27 floors (hybrid multi-file + isolation + green-flake).
-**HF:** `BaseIntelligence/deepagent` revision **`test`** (current product after m27d upload).
-**Historical softer band (M25/M26) SUPERSEDED on HF `test`:** `datasets/prod_hard_keep` N=10 retained **locally for audit only** (not deleted; no longer the live HF product).
-**Dataset card:** see `README.md` (DeepSWE-median floors + supersession note).
+Certified **N=5** real_pr Harbor packs under M27 structural floors.
 
-## Floors (product defaults)
+| metric | value |
+|---|---|
+| N | 5 |
+| unique_repos | 3 |
+| max packs/repo | 3 |
+| p50 files | 5.0 |
+| p50 hunks | 24.0 |
+| p50 added | 582.0 |
+| p50 F2P | 13.0 |
 
-| Floor | Default |
-|------:|--------:|
-| source files | >= 4 OR hybrid (files>=3 AND added>=500 AND hunks>=14) |
-| source hunks | >= 14 |
-| gold added lines | >= 400 |
-| F2P nodes | >= 5 |
+**M28 densify status (2026-07-19):** LIVE funnel (SOCKS REST/list_pulls + historical struct-ok materials + dual-smoke isolation) did **not** yield F2P≥5 dual-truth non-fixture keeps beyond the N=5 baseline. Fail-closed vs target N=15 / min success N≥12 / hard fail N<8. No fixture pad. Diversity target max 2/repo not met while three werkzeug packs remain (prefer certified holds vs pad or drop to N=4); unique_repos=3 < 6.
 
-Dual-truth (HarborDocker sol=1/null=0) + prompt alignment + intrinsic non-easy still required.
+Floors held: files≥4 OR hybrid(3+added≥500+hunks≥14); hunks≥14; added≥400; F2P≥5; HarborDocker sol=1/null=0.
 
-## Certified keeps (N=5)
-
-| task_id | files | hunks | added | f2p | floors_ok |
-|---------|------:|------:|------:|----:|:---------:|
-| realpr-itemadapter-101 | 4 | 15 | 726 | 43 | True |
-| realpr-packaging-1120 | 3 | 24 | 882 | 9 | True |
-| realpr-werkzeug-2608 | 16 | 83 | 479 | 5 | True |
-| realpr-werkzeug-2637 | 5 | 24 | 468 | 13 | True |
-| realpr-werkzeug-3116 | 16 | 74 | 582 | 28 | True |
-
-## p50 vs DeepSWE sample
-
-| metric | product p50 | DeepSWE sample p50 |
-|--------|------------:|-------------------:|
-| source files | 5.0 | ~6 |
-| source hunks | 24.0 | ~14 |
-| gold added | 582.0 | ~640 |
-| f2p nodes | 13.0 | (n/a sample) |
-
-Gates: p50(added)>=400 -> **True**; p50(files)>=3 hybrid-ok -> **True**; N>=5 -> **True**.
-
-## Campaign (m27c after m27f)
-
-1. Final M27 floors (hybrid multi-file, isolation, green-flake).
-2. Re-admit packaging-1120 under hybrid (3 files, added=882, hunks=24) with dual-truth.
-3. Priority dual-truth densify on struct-ok materials with isolation + green-flake.
-4. Agent Dockerfile installs pytest-xprocess for werkzeug ProcessStarter under Docker oracle.
-5. Certified adds: packaging-1120, werkzeug-2637, werkzeug-2608 (ambient 2-node windows fileurl P2P trim; F2P floor held).
-6. Expanded mine attempted; GH secondary rate-limit blocked late materialize. No fixture pad. prod_hard_keep left historical.
-
-## Artifacts
-
-- median_stats.json
-- ship_summary.json, pack_manifest.json, gate_audit.jsonl, oracle_evidence.json
-- densify logs: generate_m27c_densify*.log
-- dual-truth evidence under evidence/oracle_* and densify work dirs
-
-## M27e live scoreboard (authoritative current median product matrix)
-
-- panel: `datasets/panel_prod_hard_deepswe_med_n5` (SUMMARY + scoreboard.json)
-- models: `x-ai/grok-4.5` + `moonshotai/kimi-k2.7-code` (explicit `--model`; defaults still k2.6)
-- k=1, n_concurrent=5 true pool, hard-stop $600, jobs `/tmp/harbor-deepagent-jobs-prod-m27` `--no-reclaim`
-- **dual_solve_rate = 0.20** (gate ≤0.30) — PASS
-- overall pass@1: Grok **0.400**, Kimi2.7 **0.200** (observational ranking: Grok above Kimi2.7 on N=5)
-- supersedes M26 `panel_prod_hard_m26_n5` for this median product root (M26 remains historical soft-band matrix)
+See `coverage_stats.json`, `median_stats.json`, `PROVENANCE.md`, `gate_audit_summary.json`.

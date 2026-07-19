@@ -1,0 +1,95 @@
+{
+  "generated_at_utc": "2026-07-19T14:32:48Z",
+  "product_root": "datasets/prod_hard_deepswe_med",
+  "N": 5,
+  "unique_repos": 3,
+  "max_packs_per_repo": 3,
+  "packs_per_repo": {
+    "pallets/werkzeug": 3,
+    "pypa/packaging": 1,
+    "scrapy/itemadapter": 1
+  },
+  "langs": {
+    "python": 5
+  },
+  "p50": {
+    "source_files": 5.0,
+    "source_hunks": 24.0,
+    "gold_added_lines": 582.0,
+    "f2p_nodes": 13.0
+  },
+  "p50_vs_deepswe": {
+    "files_delta_vs_6": -1.0,
+    "hunks_delta_vs_14": 10.0,
+    "added_delta_vs_640": -58.0,
+    "p50_added_meets_400": true
+  },
+  "floors_band": "deepswe_median_m27",
+  "diversity_policy": {
+    "max_packs_per_repo": 2
+  },
+  "target_n": 15,
+  "min_success_n": 12,
+  "hard_fail_n_lt": 8,
+  "fixture_pad": false,
+  "ok_unique_repos_ge_6": false,
+  "ok_max_packs_le_2": false,
+  "ok_n_ge_12": false,
+  "ok_n_ge_8": false,
+  "accepted_ids": [
+    "realpr-itemadapter-101",
+    "realpr-packaging-1120",
+    "realpr-werkzeug-2608",
+    "realpr-werkzeug-2637",
+    "realpr-werkzeug-3116"
+  ],
+  "keeps_detail": [
+    {
+      "task_id": "realpr-itemadapter-101",
+      "source_files": 4,
+      "source_hunks": 15,
+      "gold_added_lines": 726,
+      "f2p_nodes": 43,
+      "repository_url": "https://github.com/scrapy/itemadapter.git"
+    },
+    {
+      "task_id": "realpr-packaging-1120",
+      "source_files": 3,
+      "source_hunks": 24,
+      "gold_added_lines": 882,
+      "f2p_nodes": 9,
+      "repository_url": "https://github.com/pypa/packaging.git"
+    },
+    {
+      "task_id": "realpr-werkzeug-2608",
+      "source_files": 16,
+      "source_hunks": 83,
+      "gold_added_lines": 479,
+      "f2p_nodes": 5,
+      "repository_url": "https://github.com/pallets/werkzeug.git"
+    },
+    {
+      "task_id": "realpr-werkzeug-2637",
+      "source_files": 5,
+      "source_hunks": 24,
+      "gold_added_lines": 468,
+      "f2p_nodes": 13,
+      "repository_url": "https://github.com/pallets/werkzeug.git"
+    },
+    {
+      "task_id": "realpr-werkzeug-3116",
+      "source_files": 16,
+      "source_hunks": 74,
+      "gold_added_lines": 582,
+      "f2p_nodes": 28,
+      "repository_url": "https://github.com/pallets/werkzeug.git"
+    }
+  ],
+  "m28b_funnel_note": "LIVE densify via SOCKS list_pulls + Search + historical struct-ok materials dual-smoke under M27f isolation+green-flake yielded zero F2P>=5 dual-truth keeps beyond baseline. No fixture pad. Product remains N=5 dual-truth. Fail-closed vs N>=8 hard densify bar.",
+  "evidence_paths": [
+    "datasets/_m28b_evidence/",
+    "datasets/_m28b_evidence/fresh_smoke.json",
+    "datasets/_m28b_evidence/retry_gen_smoke.json",
+    "datasets/_m28b_evidence/hits.json"
+  ]
+}
