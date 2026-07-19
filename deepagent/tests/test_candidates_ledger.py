@@ -44,12 +44,21 @@ def _source(path: str, patch: str = "@@ -1 +1 @@\n-a\n+b\n") -> PrFileChange:
 
 
 def _hard_files() -> list[dict[str, Any]]:
-    """≥10 source hunks across two product sources + tests (product-eligible)."""
-    hunks = "".join(f"@@ -{i},1 +{i},1 @@\n-old{i}\n+new{i}\n" for i in range(1, 7))
-    hunks_b = "".join(f"@@ -{i},1 +{i},1 @@\n-ob{i}\n+nb{i}\n" for i in range(1, 6))
+    """M27 product-eligible: ≥4 source files, ≥14 source hunks + tests.
+
+    Pre-M27 mocks used 2 files / 11 hunks (old ≥10 floor) and now fail
+    PRODUCT_MULTI_FILE_FLOOR=4 and PRODUCT_SOURCE_HUNK_FLOOR=14.
+    """
+    # 4 + 4 + 3 + 3 = 14 source hunks across four product files
+    hunks_a = "".join(f"@@ -{i},1 +{i},1 @@\n-old_a{i}\n+new_a{i}\n" for i in range(1, 5))
+    hunks_b = "".join(f"@@ -{i},1 +{i},1 @@\n-old_b{i}\n+new_b{i}\n" for i in range(1, 5))
+    hunks_c = "".join(f"@@ -{i},1 +{i},1 @@\n-old_c{i}\n+new_c{i}\n" for i in range(1, 4))
+    hunks_d = "".join(f"@@ -{i},1 +{i},1 @@\n-old_d{i}\n+new_d{i}\n" for i in range(1, 4))
     return [
-        {"filename": "pkg/a.py", "status": "modified", "patch": hunks},
+        {"filename": "pkg/a.py", "status": "modified", "patch": hunks_a},
         {"filename": "pkg/b.py", "status": "modified", "patch": hunks_b},
+        {"filename": "pkg/c.py", "status": "modified", "patch": hunks_c},
+        {"filename": "pkg/d.py", "status": "modified", "patch": hunks_d},
         {
             "filename": "tests/test_a.py",
             "status": "added",
