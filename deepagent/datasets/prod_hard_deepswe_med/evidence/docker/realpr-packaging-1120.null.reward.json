@@ -1,0 +1,21 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
+  "disposition": "accept",
+  "isolation": "clean",
+  "oracle_mode": "docker",
+  "phase": "null",
+  "reason_codes": [
+    "ORCD_SOL_1",
+    "G3_NULL_NOT_RESOLVE",
+    "G5_LEAK_CLEAN",
+    "ORACLE_PASS",
+    "RORC_ISOLATION_CLEAN",
+    "RORC_SOL_1",
+    "RORC_NULL_0"
+  ],
+  "repository_url": "https://github.com/pypa/packaging.git",
+  "reward": 0,
+  "source_track": "real_pr",
+  "task_id": "realpr-packaging-1120"
+}

@@ -1,0 +1,1401 @@
+diff --git a/examples/couchy/utils.py b/examples/couchy/utils.py
+--- a/examples/couchy/utils.py
++++ b/examples/couchy/utils.py
+@@ -1,14 +1,14 @@
+ from os import path
+ from random import randrange
+ from random import sample
++from urllib.parse import urlsplit
+ 
+ from jinja2 import Environment
+ from jinja2 import FileSystemLoader
+ from werkzeug.local import Local
+ from werkzeug.local import LocalManager
+ from werkzeug.routing import Map
+ from werkzeug.routing import Rule
+-from werkzeug.urls import url_parse
+ from werkzeug.utils import cached_property
+ from werkzeug.wrappers import Response
+ 
+@@ -49,7 +49,7 @@ def render_template(template, **context):
+ 
+ 
+ def validate_url(url):
+-    return url_parse(url)[0] in ALLOWED_SCHEMES
++    return urlsplit(url)[0] in ALLOWED_SCHEMES
+ 
+ 
+ def get_random_uid():
+diff --git a/examples/shortly/shortly.py b/examples/shortly/shortly.py
+--- a/examples/shortly/shortly.py
++++ b/examples/shortly/shortly.py
+@@ -1,5 +1,6 @@
+ """A simple URL shortener using Werkzeug and redis."""
+ import os
++from urllib.parse import urlsplit
+ 
+ import redis
+ from jinja2 import Environment
+@@ -9,7 +10,6 @@
+ from werkzeug.middleware.shared_data import SharedDataMiddleware
+ from werkzeug.routing import Map
+ from werkzeug.routing import Rule
+-from werkzeug.urls import url_parse
+ from werkzeug.utils import redirect
+ from werkzeug.wrappers import Request
+ from werkzeug.wrappers import Response
+@@ -27,12 +27,12 @@ def base36_encode(number):
+ 
+ 
+ def is_valid_url(url):
+-    parts = url_parse(url)
++    parts = urlsplit(url)
+     return parts.scheme in ("http", "https")
+ 
+ 
+ def get_hostname(url):
+-    return url_parse(url).netloc
++    return urlsplit(url).netloc
+ 
+ 
+ class Shortly:
+diff --git a/examples/shorty/utils.py b/examples/shorty/utils.py
+--- a/examples/shorty/utils.py
++++ b/examples/shorty/utils.py
+@@ -1,6 +1,7 @@
+ from os import path
+ from random import randrange
+ from random import sample
++from urllib.parse import urlsplit
+ 
+ from jinja2 import Environment
+ from jinja2 import FileSystemLoader
+@@ -11,7 +12,6 @@
+ from werkzeug.local import LocalManager
+ from werkzeug.routing import Map
+ from werkzeug.routing import Rule
+-from werkzeug.urls import url_parse
+ from werkzeug.utils import cached_property
+ from werkzeug.wrappers import Response
+ 
+@@ -59,7 +59,7 @@ def render_template(template, **context):
+ 
+ 
+ def validate_url(url):
+-    return url_parse(url)[0] in ALLOWED_SCHEMES
++    return urlsplit(url)[0] in ALLOWED_SCHEMES
+ 
+ 
+ def get_random_uid():
+diff --git a/examples/simplewiki/utils.py b/examples/simplewiki/utils.py
+--- a/examples/simplewiki/utils.py
++++ b/examples/simplewiki/utils.py
+@@ -1,12 +1,12 @@
+ from os import path
++from urllib.parse import quote
++from urllib.parse import urlencode
+ 
+ import creoleparser
+ from genshi import Stream
+ from genshi.template import TemplateLoader
+ from werkzeug.local import Local
+ from werkzeug.local import LocalManager
+-from werkzeug.urls import url_encode
+-from werkzeug.urls import url_quote
+ from werkzeug.utils import cached_property
+ from werkzeug.wrappers import Request as BaseRequest
+ from werkzeug.wrappers import Response as BaseResponse
+@@ -58,9 +58,9 @@ def href(*args, **kw):
+     """
+     result = [f"{request.script_root if request else ''}/"]
+     for idx, arg in enumerate(args):
+-        result.append(f"{'/' if idx else ''}{url_quote(arg)}")
++        result.append(f"{'/' if idx else ''}{quote(arg)}")
+     if kw:
+-        result.append(f"?{url_encode(kw)}")
++        result.append(f"?{urlencode(kw)}")
+     return "".join(result)
+ 
+ 
+diff --git a/src/werkzeug/formparser.py b/src/werkzeug/formparser.py
+--- a/src/werkzeug/formparser.py
++++ b/src/werkzeug/formparser.py
+@@ -3,6 +3,7 @@
+ from io import BytesIO
+ from itertools import chain
+ from typing import Union
++from urllib.parse import parse_qsl
+ 
+ from . import exceptions
+ from .datastructures import FileStorage
+@@ -15,7 +16,6 @@
+ from .sansio.multipart import File
+ from .sansio.multipart import MultipartDecoder
+ from .sansio.multipart import NeedData
+-from .urls import url_decode_stream
+ from .wsgi import _make_chunk_iter
+ from .wsgi import get_content_length
+ from .wsgi import get_input_stream
+@@ -296,6 +296,49 @@ def _parse_multipart(
+         form, files = parser.parse(stream, boundary, content_length)
+         return stream, form, files
+ 
++    def _parse_urlencoded_stream(
++        self, stream: t.IO[bytes]
++    ) -> t.Iterator[t.Tuple[str, str]]:
++        """Read the stream in chunks and yield parsed ``key=value`` tuples. Data is
++        accumulated until at least one full field is available. This avoids reading the
++        whole stream into memory at once if possible, and reduces the number of calls to
++        ``parse_qsl``.
++        """
++        remaining_parts = self.max_form_parts
++        last_chunk = b""
++
++        while True:
++            chunks = [last_chunk]
++
++            while True:
++                chunk = stream.read(10_000)
++                chunk, has_sep, last_chunk = chunk.rpartition(b"&")
++                chunks.append(chunk)
++
++                if not chunk or has_sep:
++                    break
++
++            data = b"".join(chunks)
++
++            if not data and not last_chunk:
++                break
++
++            try:
++                items = parse_qsl(
++                    data.decode(self.charset),
++                    keep_blank_values=True,
++                    encoding=self.charset,
++                    errors=self.errors,
++                    max_num_fields=remaining_parts,
++                )
++            except ValueError as e:
++                raise exceptions.RequestEntityTooLarge() from e
++
++            if remaining_parts is not None:
++                remaining_parts -= len(items)
++
++            yield from items
++
+     @exhaust_stream
+     def _parse_urlencoded(
+         self,
+@@ -313,7 +356,7 @@ def _parse_urlencoded(
+             _exhaust(stream)
+             raise exceptions.RequestEntityTooLarge()
+ 
+-        form = url_decode_stream(stream, self.charset, errors=self.errors, cls=self.cls)
++        form = self.cls(self._parse_urlencoded_stream(stream))
+         return stream, form, self.cls()
+ 
+     #: mapping of mimetypes to parsing functions
+@@ -330,19 +373,6 @@ def _parse_urlencoded(
+     }
+ 
+ 
+-def _line_parse(line: str) -> t.Tuple[str, bool]:
+-    """Removes line ending characters and returns a tuple (`stripped_line`,
+-    `is_terminated`).
+-    """
+-    if line[-2:] == "\r\n":
+-        return line[:-2], True
+-
+-    elif line[-1:] in {"\r", "\n"}:
+-        return line[:-1], True
+-
+-    return line, False
+-
+-
+ class MultiPartParser:
+     def __init__(
+         self,
+diff --git a/src/werkzeug/middleware/http_proxy.py b/src/werkzeug/middleware/http_proxy.py
+--- a/src/werkzeug/middleware/http_proxy.py
++++ b/src/werkzeug/middleware/http_proxy.py
+@@ -9,11 +9,11 @@
+ """
+ import typing as t
+ from http import client
++from urllib.parse import quote
++from urllib.parse import urlsplit
+ 
+ from ..datastructures import EnvironHeaders
+ from ..http import is_hop_by_hop_header
+-from ..urls import url_parse
+-from ..urls import url_quote
+ from ..wsgi import get_input_stream
+ 
+ if t.TYPE_CHECKING:
+@@ -100,8 +100,9 @@ def _set_defaults(opts: t.Dict[str, t.Any]) -> t.Dict[str, t.Any]:
+     def proxy_to(
+         self, opts: t.Dict[str, t.Any], path: str, prefix: str
+     ) -> "WSGIApplication":
+-        target = url_parse(opts["target"])
+-        host = t.cast(str, target.ascii_host)
++        target = urlsplit(opts["target"])
++        # socket can handle unicode host, but header must be ascii
++        host = target.hostname.encode("idna").decode("ascii")
+ 
+         def application(
+             environ: "WSGIEnvironment", start_response: "StartResponse"
+@@ -157,7 +158,9 @@ def application(
+                     )
+ 
+                 con.connect()
+-                remote_url = url_quote(remote_path)
++                # safe = https://url.spec.whatwg.org/#url-path-segment-string
++                # as well as percent for things that are already quoted
++                remote_url = quote(remote_path, safe="!$&'()*+,/:;=@%")
+                 querystring = environ["QUERY_STRING"]
+ 
+                 if querystring:
+diff --git a/src/werkzeug/routing/converters.py b/src/werkzeug/routing/converters.py
+--- a/src/werkzeug/routing/converters.py
++++ b/src/werkzeug/routing/converters.py
+@@ -1,8 +1,7 @@
+ import re
+ import typing as t
+ import uuid
+-
+-from ..urls import _fast_url_quote
++from urllib.parse import quote
+ 
+ if t.TYPE_CHECKING:
+     from .map import Map
+@@ -41,8 +40,10 @@ def to_python(self, value: str) -> t.Any:
+ 
+     def to_url(self, value: t.Any) -> str:
+         if isinstance(value, (bytes, bytearray)):
+-            return _fast_url_quote(value)
+-        return _fast_url_quote(str(value).encode(self.map.charset))
++            return quote(value, safe="!$&'()*+,/:;=@")
++
++        # safe = https://url.spec.whatwg.org/#url-path-segment-string
++        return quote(str(value), encoding=self.map.charset, safe="!$&'()*+,/:;=@")
+ 
+ 
+ class UnicodeConverter(BaseConverter):
+diff --git a/src/werkzeug/routing/map.py b/src/werkzeug/routing/map.py
+--- a/src/werkzeug/routing/map.py
++++ b/src/werkzeug/routing/map.py
+@@ -1,8 +1,10 @@
+-import posixpath
+ import typing as t
+ import warnings
+ from pprint import pformat
+ from threading import Lock
++from urllib.parse import quote
++from urllib.parse import urljoin
++from urllib.parse import urlunsplit
+ 
+ from .._internal import _encode_idna
+ from .._internal import _get_environ
+@@ -14,9 +16,7 @@
+ from ..exceptions import HTTPException
+ from ..exceptions import MethodNotAllowed
+ from ..exceptions import NotFound
+-from ..urls import url_encode
+-from ..urls import url_join
+-from ..urls import url_quote
++from ..urls import _urlencode
+ from ..wsgi import get_host
+ from .converters import DEFAULT_CONVERTERS
+ from .exceptions import BuildError
+@@ -598,11 +598,12 @@ def match(
+         try:
+             result = self.map._matcher.match(domain_part, path_part, method, websocket)
+         except RequestPath as e:
++            # safe = https://url.spec.whatwg.org/#url-path-segment-string
++            new_path = quote(
++                e.path_info, safe="!$&'()*+,/:;=@", encoding=self.map.charset
++            )
+             raise RequestRedirect(
+-                self.make_redirect_url(
+-                    url_quote(e.path_info, self.map.charset, safe="/:|+"),
+-                    query_args,
+-                )
++                self.make_redirect_url(new_path, query_args)
+             ) from None
+         except RequestAliasRedirect as e:
+             raise RequestRedirect(
+@@ -647,7 +648,7 @@ def _handle_match(match: t.Match[str]) -> str:
+                     netloc = self.server_name
+ 
+                 raise RequestRedirect(
+-                    url_join(
++                    urljoin(
+                         f"{self.url_scheme or 'http'}://{netloc}{self.script_name}",
+                         redirect_url,
+                     )
+@@ -737,7 +738,7 @@ def get_default_redirect(
+ 
+     def encode_query_args(self, query_args: t.Union[t.Mapping[str, t.Any], str]) -> str:
+         if not isinstance(query_args, str):
+-            return url_encode(query_args, self.map.charset)
++            return _urlencode(query_args, encoding=self.map.charset)
+         return query_args
+ 
+     def make_redirect_url(
+@@ -750,15 +751,18 @@ def make_redirect_url(
+ 
+         :internal:
+         """
++        if query_args is None:
++            query_args = self.query_args
++
+         if query_args:
+-            suffix = f"?{self.encode_query_args(query_args)}"
+-        else:
+-            suffix = ""
++            query_args = self.encode_query_args(query_args)
+ 
+         scheme = self.url_scheme or "http"
+         host = self.get_host(domain_part)
+-        path = posixpath.join(self.script_name.strip("/"), path_info.lstrip("/"))
+-        return f"{scheme}://{host}/{path}{suffix}"
++        path = "/".join((self.script_name.strip("/"), path_info.lstrip("/")))
++        return urlunsplit(  # type: ignore[type-var,return-value]
++            (scheme, host, path, query_args, None)
++        )
+ 
+     def make_alias_redirect_url(
+         self,
+diff --git a/src/werkzeug/routing/rules.py b/src/werkzeug/routing/rules.py
+--- a/src/werkzeug/routing/rules.py
++++ b/src/werkzeug/routing/rules.py
+@@ -4,10 +4,10 @@
+ from dataclasses import dataclass
+ from string import Template
+ from types import CodeType
++from urllib.parse import quote
+ 
+-from .._internal import _to_bytes
+-from ..urls import url_encode
+-from ..urls import url_quote
++from ..datastructures import iter_multi_items
++from ..urls import _urlencode
+ from .converters import ValidationError
+ 
+ if t.TYPE_CHECKING:
+@@ -575,12 +575,12 @@ def get_converter(
+         return self.map.converters[converter_name](self.map, *args, **kwargs)
+ 
+     def _encode_query_vars(self, query_vars: t.Mapping[str, t.Any]) -> str:
+-        return url_encode(
+-            query_vars,
+-            charset=self.map.charset,
+-            sort=self.map.sort_parameters,
+-            key=self.map.sort_key,
+-        )
++        items: t.Iterable[t.Tuple[str, str]] = iter_multi_items(query_vars)
++
++        if self.map.sort_parameters:
++            items = sorted(items, key=self.map.sort_key)
++
++        return _urlencode(items, encoding=self.map.charset)
+ 
+     def _parse_rule(self, rule: str) -> t.Iterable[RulePart]:
+         content = ""
+@@ -732,8 +732,12 @@ def _compile_builder(
+                 data = self._converters[data].to_url(defaults[data])
+                 opl.append((False, data))
+             elif not is_dynamic:
++                # safe = https://url.spec.whatwg.org/#url-path-segment-string
+                 opl.append(
+-                    (False, url_quote(_to_bytes(data, self.map.charset), safe="/:|+"))
++                    (
++                        False,
++                        quote(data, safe="!$&'()*+,/:;=@", encoding=self.map.charset),
++                    )
+                 )
+             else:
+                 opl.append((True, data))
+diff --git a/src/werkzeug/sansio/request.py b/src/werkzeug/sansio/request.py
+--- a/src/werkzeug/sansio/request.py
++++ b/src/werkzeug/sansio/request.py
+@@ -1,5 +1,6 @@
+ import typing as t
+ from datetime import datetime
++from urllib.parse import parse_qsl
+ 
+ from .._internal import _to_str
+ from ..datastructures import Accept
+@@ -26,7 +27,6 @@
+ from ..http import parse_options_header
+ from ..http import parse_range_header
+ from ..http import parse_set_header
+-from ..urls import url_decode
+ from ..user_agent import UserAgent
+ from ..utils import cached_property
+ from ..utils import header_property
+@@ -177,11 +177,13 @@ def args(self) -> "MultiDict[str, str]":
+         :attr:`parameter_storage_class` to a different type.  This might
+         be necessary if the order of the form data is important.
+         """
+-        return url_decode(
+-            self.query_string,
+-            self.url_charset,
+-            errors=self.encoding_errors,
+-            cls=self.parameter_storage_class,
++        return self.parameter_storage_class(
++            parse_qsl(
++                self.query_string.decode(self.url_charset),
++                keep_blank_values=True,
++                encoding=self.url_charset,
++                errors=self.encoding_errors,
++            )
+         )
+ 
+     @cached_property
+diff --git a/src/werkzeug/sansio/utils.py b/src/werkzeug/sansio/utils.py
+--- a/src/werkzeug/sansio/utils.py
++++ b/src/werkzeug/sansio/utils.py
+@@ -1,9 +1,9 @@
+ import typing as t
++from urllib.parse import quote
+ 
+ from .._internal import _encode_idna
+ from ..exceptions import SecurityError
+ from ..urls import uri_to_iri
+-from ..urls import url_quote
+ 
+ 
+ def host_is_trusted(hostname: str, trusted_list: t.Iterable[str]) -> bool:
+@@ -127,17 +127,19 @@ def get_current_url(
+         url.append("/")
+         return uri_to_iri("".join(url))
+ 
+-    url.append(url_quote(root_path.rstrip("/")))
++    # safe = https://url.spec.whatwg.org/#url-path-segment-string
++    # as well as percent for things that are already quoted
++    url.append(quote(root_path.rstrip("/"), safe="!$&'()*+,/:;=@%"))
+     url.append("/")
+ 
+     if path is None:
+         return uri_to_iri("".join(url))
+ 
+-    url.append(url_quote(path.lstrip("/")))
++    url.append(quote(path.lstrip("/"), safe="!$&'()*+,/:;=@%"))
+ 
+     if query_string:
+         url.append("?")
+-        url.append(url_quote(query_string, safe=":&%=+$!*'(),"))
++        url.append(quote(query_string, safe="!$&'()*+,/:;=?@%"))
+ 
+     return uri_to_iri("".join(url))
+ 
+diff --git a/src/werkzeug/serving.py b/src/werkzeug/serving.py
+--- a/src/werkzeug/serving.py
++++ b/src/werkzeug/serving.py
+@@ -23,13 +23,13 @@
+ from datetime import timezone
+ from http.server import BaseHTTPRequestHandler
+ from http.server import HTTPServer
++from urllib.parse import unquote
++from urllib.parse import urlsplit
+ 
+ from ._internal import _log
+ from ._internal import _wsgi_encoding_dance
+ from .exceptions import InternalServerError
+ from .urls import uri_to_iri
+-from .urls import url_parse
+-from .urls import url_unquote
+ 
+ try:
+     import ssl
+@@ -157,7 +157,7 @@ def server_version(self) -> str:  # type: ignore
+         return f"Werkzeug/{__version__}"
+ 
+     def make_environ(self) -> "WSGIEnvironment":
+-        request_url = url_parse(self.path)
++        request_url = urlsplit(self.path)
+         url_scheme = "http" if self.server.ssl_context is None else "https"
+ 
+         if not self.client_address:
+@@ -173,7 +173,7 @@ def make_environ(self) -> "WSGIEnvironment":
+         else:
+             path_info = request_url.path
+ 
+-        path_info = url_unquote(path_info)
++        path_info = unquote(path_info)
+ 
+         environ: "WSGIEnvironment" = {
+             "wsgi.version": (1, 0),
+diff --git a/src/werkzeug/test.py b/src/werkzeug/test.py
+--- a/src/werkzeug/test.py
++++ b/src/werkzeug/test.py
+@@ -10,6 +10,9 @@
+ from random import random
+ from tempfile import TemporaryFile
+ from time import time
++from urllib.parse import unquote
++from urllib.parse import urlsplit
++from urllib.parse import urlunsplit
+ from urllib.request import Request as _UrllibRequest
+ 
+ from ._internal import _get_environ
+@@ -32,12 +35,8 @@
+ from .sansio.multipart import File
+ from .sansio.multipart import MultipartEncoder
+ from .sansio.multipart import Preamble
++from .urls import _urlencode
+ from .urls import iri_to_uri
+-from .urls import url_encode
+-from .urls import url_fix
+-from .urls import url_parse
+-from .urls import url_unparse
+-from .urls import url_unquote
+ from .utils import cached_property
+ from .utils import get_content_type
+ from .wrappers.request import Request
+@@ -384,14 +383,14 @@ def __init__(
+         path_s = _make_encode_wrapper(path)
+         if query_string is not None and path_s("?") in path:
+             raise ValueError("Query string is defined in the path and as an argument")
+-        request_uri = url_parse(path)
++        request_uri = urlsplit(path)
+         if query_string is None and path_s("?") in path:
+             query_string = request_uri.query
+         self.charset = charset
+         self.path = iri_to_uri(request_uri.path)
+         self.request_uri = path
+         if base_url is not None:
+-            base_url = url_fix(iri_to_uri(base_url, charset), charset)
++            base_url = iri_to_uri(base_url, charset)
+         self.base_url = base_url  # type: ignore
+         if isinstance(query_string, (bytes, str)):
+             self.query_string = query_string
+@@ -509,7 +508,7 @@ def _add_file_from_data(
+ 
+     @staticmethod
+     def _make_base_url(scheme: str, host: str, script_root: str) -> str:
+-        return url_unparse((scheme, host, script_root, "", "")).rstrip("/") + "/"
++        return urlunsplit((scheme, host, script_root, "", "")).rstrip("/") + "/"
+ 
+     @property
+     def base_url(self) -> str:
+@@ -525,7 +524,7 @@ def base_url(self, value: t.Optional[str]) -> None:
+             netloc = "localhost"
+             script_root = ""
+         else:
+-            scheme, netloc, script_root, qs, anchor = url_parse(value)
++            scheme, netloc, script_root, qs, anchor = urlsplit(value)
+             if qs or anchor:
+                 raise ValueError("base url must not contain a query string or fragment")
+         self.script_root = script_root.rstrip("/")
+@@ -667,7 +666,7 @@ def query_string(self) -> str:
+         """
+         if self._query_string is None:
+             if self._args is not None:
+-                return url_encode(self._args, charset=self.charset)
++                return _urlencode(self._args, encoding=self.charset)
+             return ""
+         return self._query_string
+ 
+@@ -760,7 +759,7 @@ def get_environ(self) -> "WSGIEnvironment":
+             )
+             content_type = f'{mimetype}; boundary="{boundary}"'
+         elif mimetype == "application/x-www-form-urlencoded":
+-            form_encoded = url_encode(self.form, charset=self.charset).encode("ascii")
++            form_encoded = _urlencode(self.form, encoding=self.charset).encode("ascii")
+             content_length = len(form_encoded)
+             input_stream = BytesIO(form_encoded)
+         else:
+@@ -771,7 +770,7 @@ def get_environ(self) -> "WSGIEnvironment":
+             result.update(self.environ_base)
+ 
+         def _path_encode(x: str) -> str:
+-            return _wsgi_encoding_dance(url_unquote(x, self.charset), self.charset)
++            return _wsgi_encoding_dance(unquote(x, encoding=self.charset), self.charset)
+ 
+         raw_uri = _wsgi_encoding_dance(self.request_uri, self.charset)
+         result.update(
+@@ -973,7 +972,7 @@ def resolve_redirect(
+ 
+         :meta private:
+         """
+-        scheme, netloc, path, qs, anchor = url_parse(response.location)
++        scheme, netloc, path, qs, anchor = urlsplit(response.location)
+         builder = EnvironBuilder.from_environ(
+             response.request.environ, path=path, query_string=qs
+         )
+diff --git a/src/werkzeug/urls.py b/src/werkzeug/urls.py
+--- a/src/werkzeug/urls.py
++++ b/src/werkzeug/urls.py
+@@ -3,16 +3,25 @@
+ Contains implementations of functions from :mod:`urllib.parse` that
+ handle bytes and strings.
+ """
++from __future__ import annotations
++
+ import codecs
+ import os
+ import re
+ import typing as t
++import warnings
++from urllib.parse import quote
++from urllib.parse import unquote
++from urllib.parse import urlencode
++from urllib.parse import urlsplit
++from urllib.parse import urlunsplit
+ 
+ from ._internal import _check_str_tuple
+ from ._internal import _decode_idna
+ from ._internal import _encode_idna
+ from ._internal import _make_encode_wrapper
+ from ._internal import _to_str
++from .datastructures import iter_multi_items
+ 
+ if t.TYPE_CHECKING:
+     from . import datastructures as ds
+@@ -21,15 +30,14 @@
+ _scheme_re = re.compile(r"^[a-zA-Z0-9+-.]+$")
+ 
+ # Characters that are safe in any part of an URL.
+-_always_safe = frozenset(
+-    bytearray(
+-        b"abcdefghijklmnopqrstuvwxyz"
+-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+-        b"0123456789"
+-        b"-._~"
+-        b"$!'()*+,;"  # RFC3986 sub-delims set, not including query string delimiters &=
+-    )
++_always_safe_chars = (
++    "abcdefghijklmnopqrstuvwxyz"
++    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
++    "0123456789"
++    "-._~"
++    "$!'()*+,;"  # RFC3986 sub-delims set, not including query string delimiters &=
+ )
++_always_safe = frozenset(_always_safe_chars.encode("ascii"))
+ 
+ _hexdigits = "0123456789ABCDEFabcdef"
+ _hextobyte = {
+@@ -49,18 +57,31 @@ class _URLTuple(t.NamedTuple):
+ 
+ 
+ class BaseURL(_URLTuple):
+-    """Superclass of :py:class:`URL` and :py:class:`BytesURL`."""
++    """Superclass of :py:class:`URL` and :py:class:`BytesURL`.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use the ``urllib.parse`` library instead.
++    """
+ 
+     __slots__ = ()
+     _at: str
+     _colon: str
+     _lbracket: str
+     _rbracket: str
+ 
++    def __new__(cls, *args: t.Any, **kwargs: t.Any) -> BaseURL:
++        warnings.warn(
++            f"'werkzeug.urls.{cls.__name__}' is deprecated and will be removed in"
++            " Werkzeug 2.4. Use the 'urllib.parse' library instead.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        return super().__new__(cls, *args, **kwargs)
++
+     def __str__(self) -> str:
+         return self.to_url()
+ 
+-    def replace(self, **kwargs: t.Any) -> "BaseURL":
++    def replace(self, **kwargs: t.Any) -> BaseURL:
+         """Return an URL with the same values, except for those parameters
+         given new values by whichever keyword arguments are specified."""
+         return self._replace(**kwargs)
+@@ -142,14 +163,14 @@ def raw_password(self) -> t.Optional[str]:
+         """
+         return self._split_auth()[1]
+ 
+-    def decode_query(self, *args: t.Any, **kwargs: t.Any) -> "ds.MultiDict[str, str]":
++    def decode_query(self, *args: t.Any, **kwargs: t.Any) -> ds.MultiDict[str, str]:
+         """Decodes the query part of the URL.  Ths is a shortcut for
+         calling :func:`url_decode` on the query argument.  The arguments and
+         keyword arguments are forwarded to :func:`url_decode` unchanged.
+         """
+         return url_decode(self.query, *args, **kwargs)
+ 
+-    def join(self, *args: t.Any, **kwargs: t.Any) -> "BaseURL":
++    def join(self, *args: t.Any, **kwargs: t.Any) -> BaseURL:
+         """Joins this URL with another one.  This is just a convenience
+         function for calling into :meth:`url_join` and then parsing the
+         return value again.
+@@ -206,7 +227,7 @@ def decode_netloc(self) -> str:
+             rv = f"{auth}@{rv}"
+         return rv
+ 
+-    def to_uri_tuple(self) -> "BaseURL":
++    def to_uri_tuple(self) -> BaseURL:
+         """Returns a :class:`BytesURL` tuple that holds a URI.  This will
+         encode all the information in the URL properly to ASCII using the
+         rules a web browser would follow.
+@@ -216,7 +237,7 @@ def to_uri_tuple(self) -> "BaseURL":
+         """
+         return url_parse(iri_to_uri(self))
+ 
+-    def to_iri_tuple(self) -> "BaseURL":
++    def to_iri_tuple(self) -> BaseURL:
+         """Returns a :class:`URL` tuple that holds a IRI.  This will try
+         to decode as much information as possible in the URL without
+         losing information similar to how a web browser does it for the
+@@ -331,6 +352,9 @@ class URL(BaseURL):
+     """Represents a parsed URL.  This behaves like a regular tuple but
+     also has some extra attributes that give further insight into the
+     URL.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use the ``urllib.parse`` library instead.
+     """
+ 
+     __slots__ = ()
+@@ -339,21 +363,27 @@ class URL(BaseURL):
+     _lbracket = "["
+     _rbracket = "]"
+ 
+-    def encode(self, charset: str = "utf-8", errors: str = "replace") -> "BytesURL":
++    def encode(self, charset: str = "utf-8", errors: str = "replace") -> BytesURL:
+         """Encodes the URL to a tuple made out of bytes.  The charset is
+         only being used for the path, query and fragment.
+         """
+-        return BytesURL(
+-            self.scheme.encode("ascii"),  # type: ignore
+-            self.encode_netloc(),
+-            self.path.encode(charset, errors),  # type: ignore
+-            self.query.encode(charset, errors),  # type: ignore
+-            self.fragment.encode(charset, errors),  # type: ignore
+-        )
++        with warnings.catch_warnings():
++            warnings.filterwarnings("ignore", "'werkzeug", DeprecationWarning)
++            return BytesURL(
++                self.scheme.encode("ascii"),
++                self.encode_netloc(),
++                self.path.encode(charset, errors),
++                self.query.encode(charset, errors),
++                self.fragment.encode(charset, errors),
++            )
+ 
+ 
+ class BytesURL(BaseURL):
+-    """Represents a parsed URL in bytes."""
++    """Represents a parsed URL in bytes.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use the ``urllib.parse`` library instead.
++    """
+ 
+     __slots__ = ()
+     _at = b"@"  # type: ignore
+@@ -368,17 +398,19 @@ def encode_netloc(self) -> bytes:  # type: ignore
+         """Returns the netloc unchanged as bytes."""
+         return self.netloc  # type: ignore
+ 
+-    def decode(self, charset: str = "utf-8", errors: str = "replace") -> "URL":
++    def decode(self, charset: str = "utf-8", errors: str = "replace") -> URL:
+         """Decodes the URL to a tuple made out of strings.  The charset is
+         only being used for the path, query and fragment.
+         """
+-        return URL(
+-            self.scheme.decode("ascii"),  # type: ignore
+-            self.decode_netloc(),
+-            self.path.decode(charset, errors),  # type: ignore
+-            self.query.decode(charset, errors),  # type: ignore
+-            self.fragment.decode(charset, errors),  # type: ignore
+-        )
++        with warnings.catch_warnings():
++            warnings.filterwarnings("ignore", "'werkzeug", DeprecationWarning)
++            return URL(
++                self.scheme.decode("ascii"),  # type: ignore
++                self.decode_netloc(),
++                self.path.decode(charset, errors),  # type: ignore
++                self.query.decode(charset, errors),  # type: ignore
++                self.fragment.decode(charset, errors),  # type: ignore
++            )
+ 
+ 
+ _unquote_maps: t.Dict[t.FrozenSet[int], t.Dict[bytes, int]] = {frozenset(): _hextobyte}
+@@ -468,7 +500,16 @@ def url_parse(
+     :param scheme: the default schema to use if the URL is schemaless.
+     :param allow_fragments: if set to `False` a fragment will be removed
+                             from the URL.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.urlsplit`` instead.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_parse' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.urlsplit' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+     s = _make_encode_wrapper(url)
+     is_text_based = isinstance(url, str)
+ 
+@@ -502,7 +543,10 @@ def url_parse(
+         url, query = url.split(s("?"), 1)
+ 
+     result_type = URL if is_text_based else BytesURL
+-    return result_type(scheme, netloc, url, query, fragment)
++
++    with warnings.catch_warnings():
++        warnings.filterwarnings("ignore", "'werkzeug", DeprecationWarning)
++        return result_type(scheme, netloc, url, query, fragment)
+ 
+ 
+ def _make_fast_url_quote(
+@@ -558,9 +602,19 @@ def url_quote(
+     :param safe: an optional sequence of safe characters.
+     :param unsafe: an optional sequence of unsafe characters.
+ 
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.quote`` instead.
++
+     .. versionadded:: 0.9.2
+        The `unsafe` parameter was added.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_quote' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.quote' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++
+     if not isinstance(string, (str, bytes, bytearray)):
+         string = str(string)
+     if isinstance(string, str):
+@@ -588,8 +642,20 @@ def url_quote_plus(
+     :param s: The string to quote.
+     :param charset: The charset to be used.
+     :param safe: An optional sequence of safe characters.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.quote_plus`` instead.
+     """
+-    return url_quote(string, charset, errors, safe + " ", "+").replace(" ", "+")
++    warnings.warn(
++        "'werkzeug.urls.url_quote_plus' is deprecated and will be removed in Werkzeug"
++        " 2.4. Use 'urllib.parse.quote_plus' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++
++    with warnings.catch_warnings():
++        warnings.filterwarnings("ignore", "'werkzeug", DeprecationWarning)
++        return url_quote(string, charset, errors, safe + " ", "+").replace(" ", "+")
+ 
+ 
+ def url_unparse(components: t.Tuple[str, str, str, str, str]) -> str:
+@@ -598,7 +664,16 @@ def url_unparse(components: t.Tuple[str, str, str, str, str]) -> str:
+ 
+     :param components: the parsed URL as tuple which should be converted
+                        into a URL string.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.urlunsplit`` instead.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_unparse' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.urlunsplit' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+     _check_str_tuple(components)
+     scheme, netloc, path, query, fragment = components
+     s = _make_encode_wrapper(scheme)
+@@ -637,7 +712,16 @@ def url_unquote(
+     :param charset: the charset of the query string.  If set to `None`
+         no decoding will take place.
+     :param errors: the error handling for the charset decoding.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.unquote`` instead.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_unquote' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.unquote' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+     rv = _unquote_to_bytes(s, unsafe)
+     if charset is None:
+         return rv
+@@ -657,12 +741,25 @@ def url_unquote_plus(
+     :param charset: the charset of the query string.  If set to `None`
+         no decoding will take place.
+     :param errors: The error handling for the `charset` decoding.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.unquote_plus`` instead.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_unquote_plus' is deprecated and will be removed in Werkzeug"
++        " 2.4. Use 'urllib.parse.unquote_plus' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++
+     if isinstance(s, str):
+         s = s.replace("+", " ")
+     else:
+         s = s.replace(b"+", b" ")
+-    return url_unquote(s, charset, errors)
++
++    with warnings.catch_warnings():
++        warnings.filterwarnings("ignore", "'werkzeug", DeprecationWarning)
++        return url_unquote(s, charset, errors)
+ 
+ 
+ def url_fix(s: str, charset: str = "utf-8") -> str:
+@@ -677,7 +774,15 @@ def url_fix(s: str, charset: str = "utf-8") -> str:
+     :param s: the string with the URL to fix.
+     :param charset: The target charset for the URL if the url was given
+         as a string.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_fix' is deprecated and will be removed in Werkzeug 2.4.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+     # First step is to switch to text processing and to convert
+     # backslashes (which are invalid in URLs anyways) to slashes.  This is
+     # consistent with what Chrome does.
+@@ -688,15 +793,13 @@ def url_fix(s: str, charset: str = "utf-8") -> str:
+     if s.startswith("file://") and s[7:8].isalpha() and s[8:10] in (":/", "|/"):
+         s = f"file:///{s[7:]}"
+ 
+-    url = url_parse(s)
+-    path = url_quote(url.path, charset, safe="/%+$!*'(),")
+-    qs = url_quote_plus(url.query, charset, safe=":&%=+$!*'(),")
+-    anchor = url_quote_plus(url.fragment, charset, safe=":&%=+$!*'(),")
+-    return url_unparse((url.scheme, url.encode_netloc(), path, qs, anchor))
+-
+-
+-# not-unreserved characters remain quoted when unquoting to IRI
+-_to_iri_unsafe = "".join([chr(c) for c in range(128) if c not in _always_safe])
++    with warnings.catch_warnings():
++        warnings.filterwarnings("ignore", "'werkzeug", DeprecationWarning)
++        url = url_parse(s)
++        path = url_quote(url.path, charset, safe="/%+$!*'(),")
++        qs = url_quote_plus(url.query, charset, safe=":&%=+$!*'(),")
++        anchor = url_quote_plus(url.fragment, charset, safe=":&%=+$!*'(),")
++        return url_unparse((url.scheme, url.encode_netloc(), path, qs, anchor))
+ 
+ 
+ def _codec_error_url_quote(e: UnicodeError) -> t.Tuple[str, int]:
+@@ -705,13 +808,45 @@ def _codec_error_url_quote(e: UnicodeError) -> t.Tuple[str, int]:
+     """
+     # the docs state that UnicodeError does have these attributes,
+     # but mypy isn't picking them up
+-    out = _fast_url_quote(e.object[e.start : e.end])  # type: ignore
++    out = quote(e.object[e.start : e.end], safe="")  # type: ignore
+     return out, e.end  # type: ignore
+ 
+ 
+ codecs.register_error("werkzeug.url_quote", _codec_error_url_quote)
+ 
+ 
++def _make_unquote_part(name: str, chars: str) -> t.Callable[[str, str, str], str]:
++    """Create a function that unquotes all percent encoded characters except those
++    given. This allows working with unquoted characters if possible while not changing
++    the meaning of a given part of a URL.
++    """
++    choices = "|".join(f"{ord(c):02X}" for c in sorted(chars))
++    pattern = re.compile(f"((?:%(?:{choices}))+)", re.I)
++
++    def _unquote_partial(value: str, encoding: str, errors: str) -> str:
++        parts = iter(pattern.split(value))
++        out = []
++
++        for part in parts:
++            out.append(unquote(part, encoding, errors))
++            out.append(next(parts, ""))
++
++        return "".join(out)
++
++    _unquote_partial.__name__ = f"_unquote_{name}"
++    return _unquote_partial
++
++
++# characters that should remain quoted in URL parts
++# based on https://url.spec.whatwg.org/#percent-encoded-bytes
++# always keep all controls, space, and % quoted
++_always_unsafe = bytes((*range(0x21), 0x25, 0x7F)).decode()
++_unquote_fragment = _make_unquote_part("fragment", _always_unsafe)
++_unquote_query = _make_unquote_part("query", _always_unsafe + "&=+#")
++_unquote_path = _make_unquote_part("path", _always_unsafe + "/?#")
++_unquote_user = _make_unquote_part("user", _always_unsafe + ":@/?#")
++
++
+ def uri_to_iri(
+     uri: t.Union[str, t.Tuple[str, str, str, str, str]],
+     charset: str = "utf-8",
+@@ -729,6 +864,13 @@ def uri_to_iri(
+     :param errors: Error handler to use during ``bytes.encode``. By
+         default, invalid bytes are left quoted.
+ 
++    .. versionchanged:: 2.3
++        Passing a tuple or bytes is deprecated and will be removed in Werkzeug 2.4. Pass
++        a string instead.
++
++    .. versionchanged:: 2.3
++        Which characters remain quoted is specific to each part of the URL.
++
+     .. versionchanged:: 0.15
+         All reserved and invalid characters remain quoted. Previously,
+         only some reserved characters were preserved, and invalid bytes
+@@ -737,17 +879,48 @@ def uri_to_iri(
+     .. versionadded:: 0.6
+     """
+     if isinstance(uri, tuple):
+-        uri = url_unparse(uri)
++        warnings.warn(
++            "Passing a tuple is deprecated and will be removed in Werkzeug 2.4. Pass a"
++            " string instead.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        uri = urlunsplit(uri)
++
++    if isinstance(uri, bytes):
++        warnings.warn(
++            "Passing bytes is deprecated and will be removed in Werkzeug 2.4. Pass a"
++            " string instead.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        uri = uri.decode(charset)
++
++    parts = urlsplit(uri)
++    path = _unquote_path(parts.path, charset, errors)
++    query = _unquote_query(parts.query, charset, errors)
++    fragment = _unquote_fragment(parts.fragment, charset, charset)
++
++    if parts.hostname:
++        netloc = _decode_idna(parts.hostname)
++    else:
++        netloc = ""
++
++    if ":" in netloc:
++        netloc = f"[{netloc}]"
++
++    if parts.port:
++        netloc = f"{netloc}:{parts.port}"
+ 
+-    uri = url_parse(_to_str(uri, charset))
+-    path = url_unquote(uri.path, charset, errors, _to_iri_unsafe)
+-    query = url_unquote(uri.query, charset, errors, _to_iri_unsafe)
+-    fragment = url_unquote(uri.fragment, charset, errors, _to_iri_unsafe)
+-    return url_unparse((uri.scheme, uri.decode_netloc(), path, query, fragment))
++    if parts.username:
++        auth = _unquote_user(parts.username, charset, errors)
+ 
++        if parts.password:
++            auth = f"{auth}:{_unquote_user(parts.password, charset, errors)}"
+ 
+-# reserved characters remain unquoted when quoting to URI
+-_to_uri_safe = ":/?#[]@!$&'()*+,;=%"
++        netloc = f"{auth}@{netloc}"
++
++    return urlunsplit((parts.scheme, netloc, path, query, fragment))
+ 
+ 
+ def iri_to_uri(
+@@ -784,6 +957,13 @@ def iri_to_uri(
+     but preserves the URL's semantics. Werkzeug uses this for the
+     ``Location`` header for redirects.
+ 
++    .. versionchanged:: 2.3
++        Passing a tuple or bytes is deprecated and will be removed in Werkzeug 2.4. Pass
++        a string instead.
++
++    .. versionchanged:: 2.3
++        Which characters remain unquoted is specific to each part of the URL.
++
+     .. versionchanged:: 0.15
+         All reserved characters remain unquoted. Previously, only some
+         reserved characters were left unquoted.
+@@ -794,26 +974,65 @@ def iri_to_uri(
+     .. versionadded:: 0.6
+     """
+     if isinstance(iri, tuple):
+-        iri = url_unparse(iri)
++        warnings.warn(
++            "Passing a tuple is deprecated and will be removed in Werkzeug 2.4. Pass a"
++            " string instead.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        iri = urlunsplit(iri)
++
++    if isinstance(iri, bytes):
++        warnings.warn(
++            "Passing bytes is deprecated and will be removed in Werkzeug 2.4. Pass a"
++            " string instead.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        iri = iri.decode(charset)
+ 
+     if safe_conversion:
+-        # If we're not sure if it's safe to convert the URL, and it only
+-        # contains ASCII characters, return it unconverted.
++        # If we're not sure if it's safe to normalize the URL, and it only contains
++        # ASCII characters, return it as-is.
+         try:
+-            native_iri = _to_str(iri)
+-            ascii_iri = native_iri.encode("ascii")
++            ascii_iri = iri.encode("ascii")
+ 
+             # Only return if it doesn't have whitespace. (Why?)
+             if len(ascii_iri.split()) == 1:
+-                return native_iri
++                return iri
+         except UnicodeError:
+             pass
+ 
+-    iri = url_parse(_to_str(iri, charset, errors))
+-    path = url_quote(iri.path, charset, errors, _to_uri_safe)
+-    query = url_quote(iri.query, charset, errors, _to_uri_safe)
+-    fragment = url_quote(iri.fragment, charset, errors, _to_uri_safe)
+-    return url_unparse((iri.scheme, iri.encode_netloc(), path, query, fragment))
++    parts = urlsplit(iri)
++    # safe = https://url.spec.whatwg.org/#url-path-segment-string
++    # as well as percent for things that are already quoted
++    path = quote(parts.path, safe="%!$&'()*+,/:;=@", encoding=charset, errors=errors)
++    query = quote(parts.query, safe="%!$&'()*+,/:;=?@", encoding=charset, errors=errors)
++    fragment = quote(
++        parts.fragment, safe="%!#$&'()*+,/:;=?@", encoding=charset, errors=errors
++    )
++
++    if parts.hostname:
++        netloc = parts.hostname.encode("idna").decode("ascii")
++    else:
++        netloc = ""
++
++    if ":" in netloc:
++        netloc = f"[{netloc}]"
++
++    if parts.port:
++        netloc = f"{netloc}:{parts.port}"
++
++    if parts.username:
++        auth = quote(parts.username, safe="%!$&'()*+,;=")
++
++        if parts.password:
++            pass_quoted = quote(parts.password, safe="%!$&'()*+,;=")
++            auth = f"{auth}:{pass_quoted}"
++
++        netloc = f"{auth}@{netloc}"
++
++    return urlunsplit((parts.scheme, netloc, path, query, fragment))
+ 
+ 
+ def url_decode(
+@@ -822,8 +1041,8 @@ def url_decode(
+     include_empty: bool = True,
+     errors: str = "replace",
+     separator: str = "&",
+-    cls: t.Optional[t.Type["ds.MultiDict"]] = None,
+-) -> "ds.MultiDict[str, str]":
++    cls: t.Optional[t.Type[ds.MultiDict]] = None,
++) -> ds.MultiDict[str, str]:
+     """Parse a query string and return it as a :class:`MultiDict`.
+ 
+     :param s: The query string to parse.
+@@ -834,6 +1053,9 @@ def url_decode(
+     :param separator: Separator character between pairs.
+     :param cls: Container to hold result instead of :class:`MultiDict`.
+ 
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.parse_qs`` instead.
++
+     .. versionchanged:: 2.1
+         The ``decode_keys`` parameter was removed.
+ 
+@@ -845,6 +1067,13 @@ def url_decode(
+     .. versionchanged:: 0.5
+         The ``cls`` parameter was added.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_decode' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.parse_qs' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++
+     if cls is None:
+         from .datastructures import MultiDict  # noqa: F811
+ 
+@@ -866,9 +1095,9 @@ def url_decode_stream(
+     include_empty: bool = True,
+     errors: str = "replace",
+     separator: bytes = b"&",
+-    cls: t.Optional[t.Type["ds.MultiDict"]] = None,
++    cls: t.Optional[t.Type[ds.MultiDict]] = None,
+     limit: t.Optional[int] = None,
+-) -> "ds.MultiDict[str, str]":
++) -> ds.MultiDict[str, str]:
+     """Works like :func:`url_decode` but decodes a stream.  The behavior
+     of stream and limit follows functions like
+     :func:`~werkzeug.wsgi.make_line_iter`.  The generator of pairs is
+@@ -887,11 +1116,21 @@ def url_decode_stream(
+     :param limit: the content length of the URL data.  Not necessary if
+                   a limited stream is provided.
+ 
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.parse_qs`` instead.
++
+     .. versionchanged:: 2.1
+         The ``decode_keys`` and ``return_iterator`` parameters were removed.
+ 
+     .. versionadded:: 0.8
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_decode_stream' is deprecated and will be removed in"
++        " Werkzeug 2.4. Use 'urllib.parse.parse_qs' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++
+     from .wsgi import make_chunk_iter
+ 
+     pair_iter = make_chunk_iter(stream, separator, limit)
+@@ -944,12 +1183,21 @@ def url_encode(
+     :param key: an optional function to be used for sorting.  For more details
+                 check out the :func:`sorted` documentation.
+ 
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.urlencode`` instead.
++
+     .. versionchanged:: 2.1
+         The ``encode_keys`` parameter was removed.
+ 
+     .. versionchanged:: 0.5
+         Added the ``sort``, ``key``, and ``separator`` parameters.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_encode' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.urlencode' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+     separator = _to_str(separator, "ascii")
+     return separator.join(_url_encode_impl(obj, charset, sort, key))
+ 
+@@ -976,11 +1224,20 @@ def url_encode_stream(
+     :param key: an optional function to be used for sorting.  For more details
+                 check out the :func:`sorted` documentation.
+ 
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.urlencode`` instead.
++
+     .. versionchanged:: 2.1
+         The ``encode_keys`` parameter was removed.
+ 
+     .. versionadded:: 0.8
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_encode_stream' is deprecated and will be removed in"
++        " Werkzeug 2.4. Use 'urllib.parse.urlencode' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
+     separator = _to_str(separator, "ascii")
+     gen = _url_encode_impl(obj, charset, sort, key)
+     if stream is None:
+@@ -1003,7 +1260,17 @@ def url_join(
+     :param base: the base URL for the join operation.
+     :param url: the URL to join.
+     :param allow_fragments: indicates whether fragments should be allowed.
++
++    .. deprecated:: 2.3
++        Will be removed in Werkzeug 2.4. Use ``urllib.parse.urljoin`` instead.
+     """
++    warnings.warn(
++        "'werkzeug.urls.url_join' is deprecated and will be removed in Werkzeug 2.4."
++        " Use 'urllib.parse.urljoin' instead.",
++        DeprecationWarning,
++        stacklevel=2,
++    )
++
+     if isinstance(base, tuple):
+         base = url_unparse(base)
+     if isinstance(url, tuple):
+@@ -1061,3 +1328,11 @@ def url_join(
+ 
+     path = s("/").join(segments)
+     return url_unparse((scheme, netloc, path, query, fragment))
++
++
++def _urlencode(
++    query: t.Mapping[str, str] | t.Iterable[tuple[str, str]], encoding: str = "utf-8"
++) -> str:
++    items = [x for x in iter_multi_items(query) if x[1] is not None]
++    # safe = https://url.spec.whatwg.org/#percent-encoded-bytes
++    return urlencode(items, safe="!$'()*+,/:;?@", encoding=encoding)
+diff --git a/src/werkzeug/utils.py b/src/werkzeug/utils.py
+--- a/src/werkzeug/utils.py
++++ b/src/werkzeug/utils.py
+@@ -8,6 +8,7 @@
+ import unicodedata
+ from datetime import datetime
+ from time import time
++from urllib.parse import quote
+ from zlib import adler32
+ 
+ from markupsafe import escape
+@@ -19,7 +20,6 @@
+ from .exceptions import NotFound
+ from .exceptions import RequestedRangeNotSatisfiable
+ from .security import safe_join
+-from .urls import url_quote
+ from .wsgi import wrap_file
+ 
+ if t.TYPE_CHECKING:
+@@ -470,7 +470,8 @@ def send_file(
+         except UnicodeEncodeError:
+             simple = unicodedata.normalize("NFKD", download_name)
+             simple = simple.encode("ascii", "ignore").decode("ascii")
+-            quoted = url_quote(download_name, safe="")
++            # safe = RFC 5987 attr-char
++            quoted = quote(download_name, safe="!#$&+-.^_`|~")
+             names = {"filename": simple, "filename*": f"UTF-8''{quoted}"}
+         else:
+             names = {"filename": download_name}
+diff --git a/src/werkzeug/wrappers/response.py b/src/werkzeug/wrappers/response.py
+--- a/src/werkzeug/wrappers/response.py
++++ b/src/werkzeug/wrappers/response.py
+@@ -3,13 +3,13 @@
+ import typing as t
+ import warnings
+ from http import HTTPStatus
++from urllib.parse import urljoin
+ 
+ from .._internal import _to_bytes
+ from ..datastructures import Headers
+ from ..http import remove_entity_headers
+ from ..sansio.response import Response as _SansIOResponse
+ from ..urls import iri_to_uri
+-from ..urls import url_join
+ from ..utils import cached_property
+ from ..wsgi import ClosingIterator
+ from ..wsgi import get_current_url
+@@ -530,7 +530,7 @@ def get_wsgi_headers(self, environ: "WSGIEnvironment") -> Headers:
+                 current_url = get_current_url(environ, strip_querystring=True)
+                 if isinstance(current_url, str):
+                     current_url = iri_to_uri(current_url)
+-                location = url_join(current_url, location)
++                location = urljoin(current_url, location)
+             if location != old_location:
+                 headers["Location"] = location
+ 

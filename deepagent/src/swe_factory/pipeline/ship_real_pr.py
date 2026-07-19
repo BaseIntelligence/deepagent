@@ -1997,7 +1997,7 @@ def _default_install_commands(language: str) -> list[str]:
             # collide with in-tree imports (e.g. httpx into encode/httpx, or
             # packaging into pypa/packaging). Editable install below owns that.
             "pip install --no-cache-dir pytest freezegun hypothesis pretend "
-            "anyio trio sniffio h11 pytest-asyncio pytest-mock "
+            "anyio trio sniffio h11 pytest-asyncio pytest-mock pytest-xprocess "
             "ephemeral-port-reserve tomli_w tomli appdirs cloudpickle",
             # Common jaraco/pallets transitive helpers only (not jaraco app code).
             "pip install --no-cache-dir "

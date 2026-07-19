@@ -38,7 +38,7 @@ RUN set -eux; \
     git rev-parse HEAD > /app/.harbor_base_commit
 
 # Build-time dependency install only — runtime must run with allow_internet=false (no pip network install at agent start).
-RUN pip install --no-cache-dir pytest freezegun hypothesis pretend anyio trio sniffio h11 pytest-asyncio pytest-mock ephemeral-port-reserve tomli_w tomli appdirs cloudpickle && \
+RUN pip install --no-cache-dir pytest freezegun hypothesis pretend anyio trio sniffio h11 pytest-asyncio pytest-mock pytest-xprocess ephemeral-port-reserve tomli_w tomli appdirs cloudpickle && \
     pip install --no-cache-dir jaraco.itertools jaraco.functools jaraco.context jaraco.collections jaraco.test more_itertools setuptools wheel inflect attrs pydantic dataclasses-json && \
     if [ -f pyproject.toml ] || [ -f setup.py ] || [ -f setup.cfg ]; then pip install --no-cache-dir -e . || pip install --no-cache-dir . ; fi && \
     printf '%s\n' /app /app/src > /usr/local/lib/python3.12/site-packages/sdf_app.pth

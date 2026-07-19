@@ -1,7 +1,9 @@
 {
-  "accepted_count": 2,
+  "accepted_count": 4,
   "accepted_ids": [
+    "realpr-packaging-1120",
     "realpr-itemadapter-101",
+    "realpr-werkzeug-2637",
     "realpr-werkzeug-3116"
   ],
   "assertions": [
@@ -10,12 +12,12 @@
     "VAL-LX-002"
   ],
   "gate": "product_dual_truth",
-  "intended_count": 2,
+  "intended_count": 4,
   "live_mine": true,
-  "materials_root": "datasets/live_materials_m27c_cert2",
+  "materials_root": "datasets/live_materials_m27c_densify5",
   "ok": true,
-  "path": "datasets/_m27c_work_cert2/product_stage/gate_audit.jsonl",
-  "reason": "gate_audit dual-truth PASS accepted=2/2 (HarborDocker sol=1/null=0 + live dual-run; seed5_archived=True)",
+  "path": "datasets/_m27c_work_densify5/product_stage/gate_audit.jsonl",
+  "reason": "gate_audit dual-truth PASS accepted=4/4 (HarborDocker sol=1/null=0 + live dual-run; seed5_archived=True)",
   "rejected_ids": [],
   "rows": [
     {
@@ -24,12 +26,40 @@
         "added_lines": null,
         "agent_image": "harbor-sdf-agent-rpr00:oracle",
         "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "engineering_opt_out": false,
+        "f2p_count": 9,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "datasets/live_materials_m27c_densify5",
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "null_reward": 0,
+        "p2p_count": 1662,
+        "solution_reward": 1,
+        "source_file_count": null,
+        "source_hunk_count": 24,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr00:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-packaging-1120"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "added_lines": null,
+        "agent_image": "harbor-sdf-agent-rpr01:oracle",
+        "backend_class": "HarborDockerVerifier",
         "discovery_path": null,
         "engineering_opt_out": false,
         "f2p_count": 43,
         "label_method": "real_pr_dual_run_base_vs_gold",
         "live_mine": true,
-        "materials_root": "datasets/live_materials_m27c_cert2",
+        "materials_root": "datasets/live_materials_m27c_densify5",
         "min_added_lines": 400,
         "min_f2p_nodes": 5,
         "min_source_files": 4,
@@ -40,7 +70,7 @@
         "source_file_count": null,
         "source_hunk_count": 15,
         "source_track": "real_pr",
-        "tests_image": "harbor-sdf-tests-rpr00:oracle"
+        "tests_image": "harbor-sdf-tests-rpr01:oracle"
       },
       "reasons": [],
       "stage": "gate_audit_dual_truth",
@@ -50,14 +80,42 @@
       "accepted": true,
       "fields": {
         "added_lines": null,
-        "agent_image": "harbor-sdf-agent-rpr06:oracle",
+        "agent_image": "harbor-sdf-agent-rpr02:oracle",
+        "backend_class": "HarborDockerVerifier",
+        "discovery_path": "list_pulls",
+        "engineering_opt_out": false,
+        "f2p_count": 13,
+        "label_method": "real_pr_dual_run_base_vs_gold",
+        "live_mine": true,
+        "materials_root": "datasets/live_materials_m27c_densify5",
+        "min_added_lines": 400,
+        "min_f2p_nodes": 5,
+        "min_source_files": 4,
+        "min_source_hunks": 14,
+        "null_reward": 0,
+        "p2p_count": 142,
+        "solution_reward": 1,
+        "source_file_count": null,
+        "source_hunk_count": 24,
+        "source_track": "real_pr",
+        "tests_image": "harbor-sdf-tests-rpr02:oracle"
+      },
+      "reasons": [],
+      "stage": "gate_audit_dual_truth",
+      "task_id": "realpr-werkzeug-2637"
+    },
+    {
+      "accepted": true,
+      "fields": {
+        "added_lines": null,
+        "agent_image": "harbor-sdf-agent-rpr03:oracle",
         "backend_class": "HarborDockerVerifier",
         "discovery_path": null,
         "engineering_opt_out": false,
         "f2p_count": 28,
         "label_method": "real_pr_dual_run_base_vs_gold",
         "live_mine": true,
-        "materials_root": "datasets/live_materials_m27c_cert2",
+        "materials_root": "datasets/live_materials_m27c_densify5",
         "min_added_lines": 400,
         "min_f2p_nodes": 5,
         "min_source_files": 4,
@@ -68,7 +126,7 @@
         "source_file_count": null,
         "source_hunk_count": 74,
         "source_track": "real_pr",
-        "tests_image": "harbor-sdf-tests-rpr06:oracle"
+        "tests_image": "harbor-sdf-tests-rpr03:oracle"
       },
       "reasons": [],
       "stage": "gate_audit_dual_truth",
@@ -76,5 +134,5 @@
     }
   ],
   "seed5_archived": true,
-  "timestamp_utc": "2026-07-18T23:17:45.140318+00:00"
+  "timestamp_utc": "2026-07-19T01:08:52.404857+00:00"
 }

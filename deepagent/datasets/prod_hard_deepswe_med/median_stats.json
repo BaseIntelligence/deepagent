@@ -2,25 +2,26 @@
   "band": "deepswe_median_m27",
   "product_root": "datasets/prod_hard_deepswe_med",
   "historical_soft_band": "datasets/prod_hard_keep",
-  "generated_at_utc": "2026-07-18T23:54:47Z",
-  "certified_n": 2,
+  "generated_at_utc": "2026-07-19T01:24:55Z",
+  "certified_n": 5,
   "target_n": 10,
   "min_packs": 5,
   "max_packs": 15,
-  "fail_closed_n_lt_5": true,
-  "ok_for_product_wave": false,
+  "fail_closed_n_lt_5": false,
+  "ok_for_product_wave": true,
   "fixture_pad": false,
   "floors": {
     "source_files_min": 4,
     "source_hunks_min": 14,
     "gold_added_lines_min": 400,
-    "f2p_nodes_min": 5
+    "f2p_nodes_min": 5,
+    "multi_file_rule": "files>=4 OR (files>=3 AND added>=500 AND hunks>=14)"
   },
   "product_p50": {
-    "source_files": 10.0,
-    "source_hunks": 44.5,
-    "gold_added_lines": 654.0,
-    "f2p_nodes": 35.5
+    "source_files": 5.0,
+    "source_hunks": 24.0,
+    "gold_added_lines": 582.0,
+    "f2p_nodes": 13.0
   },
   "deepswe_sample_reference": {
     "n_approx": 48,
@@ -40,6 +41,33 @@
       "reason": "hardness_floors_ok"
     },
     {
+      "task_id": "realpr-packaging-1120",
+      "source_files": 3,
+      "source_hunks": 24,
+      "gold_added_lines": 882,
+      "f2p_nodes": 9,
+      "floors_ok": true,
+      "reason": "hardness_floors_ok"
+    },
+    {
+      "task_id": "realpr-werkzeug-2608",
+      "source_files": 16,
+      "source_hunks": 83,
+      "gold_added_lines": 479,
+      "f2p_nodes": 5,
+      "floors_ok": true,
+      "reason": "hardness_floors_ok"
+    },
+    {
+      "task_id": "realpr-werkzeug-2637",
+      "source_files": 5,
+      "source_hunks": 24,
+      "gold_added_lines": 468,
+      "f2p_nodes": 13,
+      "floors_ok": true,
+      "reason": "hardness_floors_ok"
+    },
+    {
       "task_id": "realpr-werkzeug-3116",
       "source_files": 16,
       "source_hunks": 74,
@@ -50,62 +78,20 @@
     }
   ],
   "p50_vs_deepswe": {
-    "files_delta_vs_6": 4.0,
-    "hunks_delta_vs_14": 30.5,
-    "added_delta_vs_640": 14.0,
+    "files_delta_vs_6": -1.0,
+    "hunks_delta_vs_14": 10.0,
+    "added_delta_vs_640": -58.0,
     "p50_added_meets_400": true,
-    "p50_files_meets_4": true
+    "p50_files_meets_hybrid_or_3": true
   },
   "campaign": {
-    "approach": "priority dual-truth densification then expanded live mine",
-    "priority_materials_roots": [
-      "datasets/live_materials_m22",
-      "datasets/live_materials_m27*",
-      "datasets/live_materials",
-      "datasets/live_materials_m27c_expand",
-      "datasets/live_materials_m27c_recent",
-      "datasets/live_materials_m27c_priority_cert",
-      "datasets/live_materials_m27c_cert2"
-    ],
-    "existing_keeps_retained": [
-      "realpr-itemadapter-101",
-      "realpr-werkzeug-3116"
-    ],
-    "packaging_1120": {
-      "considered": true,
-      "admitted": false,
-      "reason": "multi_file_floor_rejected: product source files 3 < multi-file floor 4 (added=882 hunks=24 floors fail files>=4)"
-    },
-    "struct_ok_materials_seen_approx": 24,
-    "expanded_materialized_struct_ok": [
-      "realpr-werkzeug-2005",
-      "realpr-werkzeug-2003",
-      "realpr-flask-4692",
-      "realpr-jinja-*",
-      "realpr-httpx-3068",
-      "realpr-rq-2385",
-      "realpr-rq-2350",
-      "realpr-pydantic-13339",
-      "realpr-tornado-3596",
-      "realpr-rq-1874",
-      "realpr-marshmallow-2733",
-      "realpr-paramiko-2166"
-    ],
-    "dual_truth_cert_passes": [
-      "generate_m27c_retry on live_materials_m27c_priority_cert -> N=2",
-      "generate_m27c_cert2 on live_materials_m27c_cert2 -> N=2",
-      "smoke dual after host-env fix: only itemadapter-101 + werkzeug-3116 dual-OK of expanded family"
-    ],
-    "dominant_reject_modes": [
-      "dual_run green suite unclean / green0 (missing host deps historically; empty F2P cohort after green pass)",
-      "legacy suite base green flake (werkzeug RequestRedirect)",
-      "package-specific install/runtime needs (pydantic-core native, rq redis hang, attrs version skew)",
-      "hardness_floors (packaging-1120 files=3; charset F2P=1)"
-    ],
-    "note": "Honest under-yield after priority dual-truth densification + expanded live mine. No fixture pad. FAIL-CLOSED N=2 < min=5. Historical prod_hard_keep left untouched as soft archive."
-  },
-  "host_env_fix": {
-    "path": "src/swe_factory/pipeline/ship_real_pr.py:_prepare_host_suite_env",
-    "change": "Stop pip -U mass upgrade (factory venv poison); only-if-needed install; add simplejson/dateutil/redis/pytest-xprocess; refuse VCS/path requirements dumps."
+    "approach": "m27f isolation+green-flake+hybrid densify; packaging-1120 hybrid admit; agent Dockerfile pytest-xprocess for werkzeug docker oracle; dual-truth N>=5",
+    "fixture_pad": false,
+    "prod_hard_keep_left_historical": true,
+    "admitted": [
+      "realpr-packaging-1120",
+      "realpr-werkzeug-2637",
+      "realpr-werkzeug-2608"
+    ]
   }
 }

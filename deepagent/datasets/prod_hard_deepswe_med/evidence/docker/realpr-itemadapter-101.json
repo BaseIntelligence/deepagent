@@ -58,7 +58,7 @@
       "has_test_patch": false,
       "isolated": true
     },
-    "agent_image": "harbor-sdf-agent-rpr00:oracle",
+    "agent_image": "harbor-sdf-agent-rpr01:oracle",
     "agent_isolated": true,
     "config_ok": true,
     "details": {
@@ -90,9 +90,9 @@
     "solution_reward": 1,
     "task_id": "realpr-itemadapter-101",
     "test_patch_ok": true,
-    "tests_image": "harbor-sdf-tests-rpr00:oracle"
+    "tests_image": "harbor-sdf-tests-rpr01:oracle"
   },
-  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert2/staging/realpr-itemadapter-101",
+  "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-itemadapter-101",
   "pack_meta": {
     "base_commit_hash": "f7860b6ec7c5b49f623ecd1f67e73877f08039b6",
     "language": "python",
@@ -115,7 +115,8 @@
       "errors": [],
       "harbor_version": "0.18.0",
       "listed": [
-        "realpr-itemadapter-101"
+        "realpr-itemadapter-101",
+        "realpr-packaging-1120"
       ],
       "metadata_language": "python",
       "ok": true,
@@ -136,7 +137,7 @@
     },
     "missing_relpaths": [],
     "notes": [],
-    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_cert2/staging/realpr-itemadapter-101",
+    "pack_dir": "/projects/Agent-SWE/deepagent/datasets/_m27c_work_densify5/staging/realpr-itemadapter-101",
     "pier_job_prefix": "/tmp/harbor-deepagent-jobs",
     "required_relpaths_ok": true,
     "structural_ok": true

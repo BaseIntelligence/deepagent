@@ -7,10 +7,12 @@ are fail-closed and never appear here.
 
 | pack_id | language | license | upstream_url | base_sha | source_track | pr |
 |---|---|---|---|---|---|---:|
+| `realpr-packaging-1120` | python | Apache-2.0 | https://github.com/pypa/packaging.git | `ff14df979f865165553999d9d1a111feec6f4843` | real_pr | pr:1120 |
 | `realpr-itemadapter-101` | python | MIT | https://github.com/scrapy/itemadapter.git | `f7860b6ec7c5b49f623ecd1f67e73877f08039b6` | real_pr | pr:101 |
+| `realpr-werkzeug-2637` | python | MIT | https://github.com/pallets/werkzeug.git | `4f8fddd2ec527d70331e35440fa14edb377dcff0` | real_pr | pr:2637 |
 | `realpr-werkzeug-3116` | python | MIT | https://github.com/pallets/werkzeug.git | `a792bc2d1ebd52abfd285db847ef0fd42a911df9` | real_pr | pr:3116 |
 
-**Product certified N (real_pr only): 2**
+**Product certified N (real_pr only): 4**
 
 ## Notes
 

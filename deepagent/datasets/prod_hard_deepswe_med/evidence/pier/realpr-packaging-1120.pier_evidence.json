@@ -1,0 +1,39 @@
+{
+  "backend": "docker",
+  "base_commit_hash": "ff14df979f865165553999d9d1a111feec6f4843",
+  "extra": {
+    "disposition": "accept",
+    "reason_codes": [
+      "RPIER_SCRIPTED_PATH",
+      "PIER_STRUCTURAL_OK",
+      "G5_LEAK_CLEAN",
+      "PIER_ORACLE_REWARD_1",
+      "PIER_NULL_REWARD_0",
+      "PIER_CERT_PASS",
+      "RPIER_STRUCTURAL_OK",
+      "RPIER_SOL_1",
+      "RPIER_NULL_0",
+      "RPIER_PASS"
+    ],
+    "structural_ok": true
+  },
+  "fake_oracle": false,
+  "isolation": "clean",
+  "jobs_root": "/tmp/harbor-deepagent-jobs-ship",
+  "null": 0,
+  "null_evidence": "datasets/_m27c_work_densify5/product_stage/evidence/pier/realpr-packaging-1120.null.reward.json",
+  "null_ok": true,
+  "null_reward": 0,
+  "null_reward_path": "/tmp/harbor-deepagent-jobs-ship/nop/nop-realpr-packaging-1120/scripted-trial-nop/verifier/reward.json",
+  "oracle_mode": "docker",
+  "pair_ok": true,
+  "pier_path_class": "scripted",
+  "repository_url": "https://github.com/pypa/packaging.git",
+  "sol": 1,
+  "sol_evidence": "datasets/_m27c_work_densify5/product_stage/evidence/pier/realpr-packaging-1120.sol.reward.json",
+  "sol_ok": true,
+  "sol_reward_path": "/tmp/harbor-deepagent-jobs-ship/oracle/oracle-realpr-packaging-1120/scripted-trial-oracle/verifier/reward.json",
+  "solution_reward": 1,
+  "source_track": "real_pr",
+  "task_id": "realpr-packaging-1120"
+}

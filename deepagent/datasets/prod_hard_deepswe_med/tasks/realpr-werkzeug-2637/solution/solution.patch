@@ -1,0 +1,1059 @@
+diff --git a/src/werkzeug/_internal.py b/src/werkzeug/_internal.py
+--- a/src/werkzeug/_internal.py
++++ b/src/werkzeug/_internal.py
+@@ -1,15 +1,10 @@
+ import logging
+ import operator
+-import re
+-import string
+ import sys
+ import typing
+ import typing as t
+-from datetime import date
+ from datetime import datetime
+ from datetime import timezone
+-from itertools import chain
+-from weakref import WeakKeyDictionary
+ 
+ if t.TYPE_CHECKING:
+     from _typeshed.wsgi import StartResponse
+@@ -18,33 +13,6 @@
+     from .wrappers.request import Request  # noqa: F401
+ 
+ _logger: t.Optional[logging.Logger] = None
+-_signature_cache = WeakKeyDictionary()  # type: ignore
+-_epoch_ord = date(1970, 1, 1).toordinal()
+-_legal_cookie_chars = frozenset(
+-    c.encode("ascii")
+-    for c in f"{string.ascii_letters}{string.digits}/=!#$%&'*+-.^_`|~:"
+-)
+-
+-_cookie_quoting_map = {b",": b"\\054", b";": b"\\073", b'"': b'\\"', b"\\": b"\\\\"}
+-for _i in chain(range(32), range(127, 256)):
+-    _cookie_quoting_map[_i.to_bytes(1, sys.byteorder)] = f"\\{_i:03o}".encode("latin1")
+-
+-_octal_re = re.compile(rb"\\[0-3][0-7][0-7]")
+-_quote_re = re.compile(rb"[\\].")
+-_legal_cookie_chars_re = rb"[\w\d!#%&\'~_`><@,:/\$\*\+\-\.\^\|\)\(\?\}\{\=]"
+-_cookie_re = re.compile(
+-    rb"""
+-    (?P<key>[^=;]*)
+-    (?:\s*=\s*
+-        (?P<val>
+-            "(?:[^\\"]|\\.)*" |
+-             (?:.*?)
+-        )
+-    )?
+-    \s*;
+-""",
+-    flags=re.VERBOSE,
+-)
+ 
+ 
+ class _Missing:
+@@ -324,82 +292,6 @@ def __repr__(self) -> str:
+         return f"<{type(self).__name__} {self.name}>"
+ 
+ 
+-def _cookie_quote(b: bytes) -> bytes:
+-    buf = bytearray()
+-    all_legal = True
+-    _lookup = _cookie_quoting_map.get
+-    _push = buf.extend
+-
+-    for char_int in b:
+-        char = char_int.to_bytes(1, sys.byteorder)
+-        if char not in _legal_cookie_chars:
+-            all_legal = False
+-            char = _lookup(char, char)
+-        _push(char)
+-
+-    if all_legal:
+-        return bytes(buf)
+-    return bytes(b'"' + buf + b'"')
+-
+-
+-def _cookie_unquote(b: bytes) -> bytes:
+-    if len(b) < 2:
+-        return b
+-    if b[:1] != b'"' or b[-1:] != b'"':
+-        return b
+-
+-    b = b[1:-1]
+-
+-    i = 0
+-    n = len(b)
+-    rv = bytearray()
+-    _push = rv.extend
+-
+-    while 0 <= i < n:
+-        o_match = _octal_re.search(b, i)
+-        q_match = _quote_re.search(b, i)
+-        if not o_match and not q_match:
+-            rv.extend(b[i:])
+-            break
+-        j = k = -1
+-        if o_match:
+-            j = o_match.start(0)
+-        if q_match:
+-            k = q_match.start(0)
+-        if q_match and (not o_match or k < j):
+-            _push(b[i:k])
+-            _push(b[k + 1 : k + 2])
+-            i = k + 2
+-        else:
+-            _push(b[i:j])
+-            rv.append(int(b[j + 1 : j + 4], 8))
+-            i = j + 4
+-
+-    return bytes(rv)
+-
+-
+-def _cookie_parse_impl(b: bytes) -> t.Iterator[t.Tuple[bytes, bytes]]:
+-    """Lowlevel cookie parsing facility that operates on bytes."""
+-    i = 0
+-    n = len(b)
+-    b += b";"
+-
+-    while i < n:
+-        match = _cookie_re.match(b, i)
+-
+-        if not match:
+-            break
+-
+-        i = match.end(0)
+-        key = match.group("key").strip()
+-
+-        if not key:
+-            continue
+-
+-        value = match.group("val") or b""
+-        yield key, _cookie_unquote(value)
+-
+-
+ def _encode_idna(domain: str) -> bytes:
+     # If we're given bytes, make sure they fit into ASCII
+     if isinstance(domain, bytes):
+@@ -438,33 +330,6 @@ def decode_part(part: bytes) -> str:
+     return ".".join(decode_part(p) for p in domain.split(b"."))
+ 
+ 
+-@typing.overload
+-def _make_cookie_domain(domain: None) -> None:
+-    ...
+-
+-
+-@typing.overload
+-def _make_cookie_domain(domain: str) -> bytes:
+-    ...
+-
+-
+-def _make_cookie_domain(domain: t.Optional[str]) -> t.Optional[bytes]:
+-    if domain is None:
+-        return None
+-    domain = _encode_idna(domain)
+-    if b":" in domain:
+-        domain = domain.split(b":", 1)[0]
+-    if b"." in domain:
+-        return domain
+-    raise ValueError(
+-        "Setting 'domain' for a cookie on a server running locally (ex: "
+-        "localhost) is not supported by complying browsers. You should "
+-        "have something like: '127.0.0.1 localhost dev.localhost' on "
+-        "your hosts file and then point your server to run on "
+-        "'dev.localhost' and also set 'domain' for 'dev.localhost'"
+-    )
+-
+-
+ def _easteregg(app: t.Optional["WSGIApplication"] = None) -> "WSGIApplication":
+     """Like the name says.  But who knows how it works?"""
+ 
+diff --git a/src/werkzeug/http.py b/src/werkzeug/http.py
+--- a/src/werkzeug/http.py
++++ b/src/werkzeug/http.py
+@@ -12,13 +12,11 @@
+ from hashlib import sha1
+ from time import mktime
+ from time import struct_time
++from urllib.parse import quote
+ from urllib.parse import unquote
+ from urllib.request import parse_http_list as _parse_list_header
+ 
+-from ._internal import _cookie_quote
+ from ._internal import _dt_as_utc
+-from ._internal import _make_cookie_domain
+-from ._internal import _to_bytes
+ 
+ if t.TYPE_CHECKING:
+     from _typeshed.wsgi import WSGIEnvironment
+@@ -1286,7 +1284,7 @@ def is_hop_by_hop_header(header: str) -> bool:
+ 
+ 
+ def parse_cookie(
+-    header: t.Union["WSGIEnvironment", str, bytes, None],
++    header: t.Union["WSGIEnvironment", str, None],
+     charset: str = "utf-8",
+     errors: str = "replace",
+     cls: t.Optional[t.Type["ds.MultiDict"]] = None,
+@@ -1305,6 +1303,9 @@ def parse_cookie(
+     :param cls: A dict-like class to store the parsed cookies in.
+         Defaults to :class:`MultiDict`.
+ 
++    .. versionchanged:: 2.3
++        Passing bytes is deprecated and will not be supported in Werkzeug 2.4.
++
+     .. versionchanged:: 1.0.0
+         Returns a :class:`MultiDict` instead of a
+         ``TypeConversionDict``.
+@@ -1314,27 +1315,44 @@ def parse_cookie(
+        The ``cls`` parameter was added.
+     """
+     if isinstance(header, dict):
+-        cookie = header.get("HTTP_COOKIE", "")
+-    elif header is None:
+-        cookie = ""
++        cookie = header.get("HTTP_COOKIE")
++    elif isinstance(header, bytes):
++        warnings.warn(
++            "Passing bytes is deprecated and will not be supported in Werkzeug 2.4.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        cookie = header.decode()
+     else:
+         cookie = header
+ 
++    if cookie:
++        cookie = cookie.encode("latin1").decode()
++
+     return _sansio_http.parse_cookie(
+         cookie=cookie, charset=charset, errors=errors, cls=cls
+     )
+ 
+ 
++_token_re = re.compile(r"[\w!#$%&'*+\-.^`|~]*", re.A)
++_cookie_slash_re = re.compile(rb"[\x00-\x19\",;\\\x7f-\xff]", re.A)
++_cookie_slash_map = {b'"': b'\\"', b"\\": b"\\\\"}
++_cookie_slash_map.update(
++    (v.to_bytes(1, "big"), b"\\%03o" % v)
++    for v in [*range(0x20), *b",;", *range(0x7F, 256)]
++)
++
++
+ def dump_cookie(
+     key: str,
+-    value: t.Union[bytes, str] = "",
++    value: str = "",
+     max_age: t.Optional[t.Union[timedelta, int]] = None,
+     expires: t.Optional[t.Union[str, datetime, int, float]] = None,
+-    path: t.Optional[str] = "/",
++    path: t.Optional[str] = None,
+     domain: t.Optional[str] = None,
+     secure: bool = False,
+     httponly: bool = False,
+-    charset: str = "utf-8",
++    charset: t.Optional[str] = None,
+     sync_expires: bool = True,
+     max_size: int = 4093,
+     samesite: t.Optional[str] = None,
+@@ -1377,18 +1395,56 @@ def dump_cookie(
+ 
+     .. _`cookie`: http://browsercookielimits.squawky.net/
+ 
++    .. versionchanged:: 2.3
++        ``localhost`` and other names without a dot are allowed for the domain. A
++        leading dot is ignored.
++
++    .. versionchanged:: 2.3
++        The ``path`` parameter is ``None`` by default.
++
++    .. versionchanged:: 2.3
++        Passing bytes, and the ``charset`` parameter, are deprecated and will be removed
++        in Werkzeug 2.4.
++
+     .. versionchanged:: 1.0.0
+         The string ``'None'`` is accepted for ``samesite``.
+     """
+-    key = _to_bytes(key, charset)
+-    value = _to_bytes(value, charset)
++    if charset is not None:
++        warnings.warn(
++            "The 'charset' parameter is deprecated and will be removed"
++            " in Werkzeug 2.4.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++    else:
++        charset = "utf-8"
+ 
+-    if path is not None:
+-        from .urls import iri_to_uri
++    if isinstance(key, bytes):
++        warnings.warn(
++            "The 'key' parameter must be a string. Bytes are deprecated"
++            " and will not be supported in Werkzeug 2.4.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        key = key.decode()
++
++    if isinstance(value, bytes):
++        warnings.warn(
++            "The 'value' parameter must be a string. Bytes are"
++            " deprecated and will not be supported in Werkzeug 2.4.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        value = value.decode()
+ 
+-        path = iri_to_uri(path, charset)
++    if path is not None:
++        # safe = https://url.spec.whatwg.org/#url-path-segment-string
++        # as well as percent for things that are already quoted
++        # excluding semicolon since it's part of the header syntax
++        path = quote(path, safe="%!$&'()*+,/:=@", encoding=charset)
+ 
+-    domain = _make_cookie_domain(domain)
++    if domain:
++        domain = domain.partition(":")[0].lstrip(".").encode("idna").decode("ascii")
+ 
+     if isinstance(max_age, timedelta):
+         max_age = int(max_age.total_seconds())
+@@ -1405,54 +1461,62 @@ def dump_cookie(
+         if samesite not in {"Strict", "Lax", "None"}:
+             raise ValueError("SameSite must be 'Strict', 'Lax', or 'None'.")
+ 
+-    buf = [key + b"=" + _cookie_quote(value)]
+-
+-    # XXX: In theory all of these parameters that are not marked with `None`
+-    # should be quoted.  Because stdlib did not quote it before I did not
+-    # want to introduce quoting there now.
+-    for k, v, q in (
+-        (b"Domain", domain, True),
+-        (b"Expires", expires, False),
+-        (b"Max-Age", max_age, False),
+-        (b"Secure", secure, None),
+-        (b"HttpOnly", httponly, None),
+-        (b"Path", path, False),
+-        (b"SameSite", samesite, False),
++    # This doesn't match RFC 6265. Use quoted-string for non-token values as with header
++    # parameters. Slash-escape controls, comma, and semicolon with three octal digits.
++    if not _token_re.fullmatch(value):
++        # Work with bytes here, since a UTF-8 character could be multiple bytes.
++        value = _cookie_slash_re.sub(
++            lambda m: _cookie_slash_map[m.group()], value.encode(charset)
++        ).decode("ascii")
++        value = f'"{value}"'
++
++    # Send a non-ASCII key as mojibake. Everything else should already be ASCII.
++    # TODO Remove encoding dance, it seems like clients accept UTF-8 keys
++    buf = [f"{key.encode().decode('latin1')}={value}"]
++
++    for k, v in (
++        ("Domain", domain),
++        ("Expires", expires),
++        ("Max-Age", max_age),
++        ("Secure", secure),
++        ("HttpOnly", httponly),
++        ("Path", path),
++        ("SameSite", samesite),
+     ):
+-        if q is None:
++        if isinstance(v, bool):
+             if v:
+                 buf.append(k)
++
+             continue
+ 
+         if v is None:
+             continue
+ 
+-        tmp = bytearray(k)
+-        if not isinstance(v, (bytes, bytearray)):
+-            v = _to_bytes(str(v), charset)
+-        if q:
+-            v = _cookie_quote(v)
+-        tmp += b"=" + v
+-        buf.append(bytes(tmp))
+-
+-    # The return value will be an incorrectly encoded latin1 header for
+-    # consistency with the headers object.
+-    rv = b"; ".join(buf)
+-    rv = rv.decode("latin1")
+-
+-    # Warn if the final value of the cookie is larger than the limit. If the
+-    # cookie is too large, then it may be silently ignored by the browser,
+-    # which can be quite hard to debug.
++        if isinstance(v, bytes):
++            warnings.warn(
++                f"The '{k}' attribute must be a string. Passing bytes is deprecated and"
++                " will not be supported in Werkzeug 2.4.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            v = v.decode()
++
++        buf.append(f"{k}={v}")
++
++    rv = "; ".join(buf)
++
++    # Warn if the final value of the cookie is larger than the limit. If the cookie is
++    # too large, then it may be silently ignored by the browser, which can be quite hard
++    # to debug.
+     cookie_size = len(rv)
+ 
+     if max_size and cookie_size > max_size:
+         value_size = len(value)
+         warnings.warn(
+-            f"The {key.decode(charset)!r} cookie is too large: the value was"
+-            f" {value_size} bytes but the"
++            f"The '{key}' cookie is too large: the value was {value_size} bytes but the"
+             f" header required {cookie_size - value_size} extra bytes. The final size"
+             f" was {cookie_size} bytes but the limit is {max_size} bytes. Browsers may"
+-            f" silently ignore cookies larger than this.",
++            " silently ignore cookies larger than this.",
+             stacklevel=2,
+         )
+ 
+diff --git a/src/werkzeug/sansio/http.py b/src/werkzeug/sansio/http.py
+--- a/src/werkzeug/sansio/http.py
++++ b/src/werkzeug/sansio/http.py
+@@ -1,10 +1,9 @@
+ import re
+ import typing as t
++import warnings
+ from datetime import datetime
+ 
+-from .._internal import _cookie_parse_impl
+ from .._internal import _dt_as_utc
+-from .._internal import _to_str
+ from ..http import generate_etag
+ from ..http import parse_date
+ from ..http import parse_etags
+@@ -94,8 +93,34 @@ def is_resource_modified(
+     return not unmodified
+ 
+ 
++_cookie_re = re.compile(
++    r"""
++    ([^=;]*)
++    (?:\s*=\s*
++      (
++        "(?:[^\\"]|\\.)*"
++      |
++        .*?
++      )
++    )?
++    \s*;\s*
++    """,
++    flags=re.ASCII | re.VERBOSE,
++)
++_cookie_unslash_re = re.compile(rb"\\([0-3][0-7]{2}|.)")
++
++
++def _cookie_unslash_replace(m: t.Match[bytes]) -> bytes:
++    v = m.group(1)
++
++    if len(v) == 1:
++        return v
++
++    return int(v, 8).to_bytes(1, "big")
++
++
+ def parse_cookie(
+-    cookie: t.Union[bytes, str, None] = "",
++    cookie: t.Optional[str] = None,
+     charset: str = "utf-8",
+     errors: str = "replace",
+     cls: t.Optional[t.Type["ds.MultiDict"]] = None,
+@@ -113,23 +138,49 @@ def parse_cookie(
+     :param cls: A dict-like class to store the parsed cookies in.
+         Defaults to :class:`MultiDict`.
+ 
++    .. versionchanged:: 2.3
++        Passing bytes, and the ``charset`` and ``errors`` parameters, are deprecated and
++        will be removed in Werkzeug 2.4.
++
+     .. versionadded:: 2.2
+     """
+-    # PEP 3333 sends headers through the environ as latin1 decoded
+-    # strings. Encode strings back to bytes for parsing.
+-    if isinstance(cookie, str):
+-        cookie = cookie.encode("latin1", "replace")
+-
+     if cls is None:
+         cls = ds.MultiDict
+ 
+-    def _parse_pairs() -> t.Iterator[t.Tuple[str, str]]:
+-        for key, val in _cookie_parse_impl(cookie):  # type: ignore
+-            key_str = _to_str(key, charset, errors, allow_none_charset=True)
+-            val_str = _to_str(val, charset, errors, allow_none_charset=True)
+-            yield key_str, val_str
++    if not cookie:
++        return cls()
++
++    if isinstance(cookie, bytes):
++        warnings.warn(
++            "The 'cookie' parameter must be a string. Passing bytes is deprecated and"
++            " will not be supported in Werkzeug 2.4.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++        cookie = cookie.decode()
++
++    if not cookie:
++        return cls()
++
++    cookie = f"{cookie};"
++    out = []
++
++    for ck, cv in _cookie_re.findall(cookie):
++        ck = ck.strip()
++        cv = cv.strip()
++
++        if not ck:
++            continue
++
++        if len(cv) >= 2 and cv[0] == cv[-1] == '"':
++            # Work with bytes here, since a UTF-8 character could be multiple bytes.
++            cv = _cookie_unslash_re.sub(
++                _cookie_unslash_replace, cv[1:-1].encode()
++            ).decode(charset, errors)
++
++        out.append((ck, cv))
+ 
+-    return cls(_parse_pairs())
++    return cls(out)
+ 
+ 
+ # circular dependencies
+diff --git a/src/werkzeug/sansio/response.py b/src/werkzeug/sansio/response.py
+--- a/src/werkzeug/sansio/response.py
++++ b/src/werkzeug/sansio/response.py
+@@ -225,6 +225,7 @@ def set_cookie(
+         :param samesite: Limit the scope of the cookie to only be
+             attached to requests that are "same-site".
+         """
++        charset = None if self.charset == "utf-8" else self.charset
+         self.headers.add(
+             "Set-Cookie",
+             dump_cookie(
+@@ -236,7 +237,7 @@ def set_cookie(
+                 domain=domain,
+                 secure=secure,
+                 httponly=httponly,
+-                charset=self.charset,
++                charset=charset,
+                 max_size=self.max_cookie_size,
+                 samesite=samesite,
+             ),
+diff --git a/src/werkzeug/test.py b/src/werkzeug/test.py
+--- a/src/werkzeug/test.py
++++ b/src/werkzeug/test.py
+@@ -1,10 +1,10 @@
++import dataclasses
+ import mimetypes
+ import sys
+ import typing as t
++import warnings
+ from collections import defaultdict
+ from datetime import datetime
+-from datetime import timedelta
+-from http.cookiejar import CookieJar
+ from io import BytesIO
+ from itertools import chain
+ from random import random
+@@ -13,7 +13,6 @@
+ from urllib.parse import unquote
+ from urllib.parse import urlsplit
+ from urllib.parse import urlunsplit
+-from urllib.request import Request as _UrllibRequest
+ 
+ from ._internal import _get_environ
+ from ._internal import _make_encode_wrapper
+@@ -28,6 +27,9 @@
+ from .datastructures import MultiDict
+ from .http import dump_cookie
+ from .http import dump_options_header
++from .http import parse_cookie
++from .http import parse_date
++from .http import parse_dict_header
+ from .http import parse_options_header
+ from .sansio.multipart import Data
+ from .sansio.multipart import Epilogue
+@@ -47,6 +49,7 @@
+ if t.TYPE_CHECKING:
+     from _typeshed.wsgi import WSGIApplication
+     from _typeshed.wsgi import WSGIEnvironment
++    import typing_extensions as te
+ 
+ 
+ def stream_encode_multipart(
+@@ -152,73 +155,6 @@ def encode_multipart(
+     return boundary, stream.read()
+ 
+ 
+-class _TestCookieHeaders:
+-    """A headers adapter for cookielib"""
+-
+-    def __init__(self, headers: t.Union[Headers, t.List[t.Tuple[str, str]]]) -> None:
+-        self.headers = headers
+-
+-    def getheaders(self, name: str) -> t.Iterable[str]:
+-        headers = []
+-        name = name.lower()
+-        for k, v in self.headers:
+-            if k.lower() == name:
+-                headers.append(v)
+-        return headers
+-
+-    def get_all(
+-        self, name: str, default: t.Optional[t.Iterable[str]] = None
+-    ) -> t.Iterable[str]:
+-        headers = self.getheaders(name)
+-
+-        if not headers:
+-            return default  # type: ignore
+-
+-        return headers
+-
+-
+-class _TestCookieResponse:
+-    """Something that looks like a httplib.HTTPResponse, but is actually just an
+-    adapter for our test responses to make them available for cookielib.
+-    """
+-
+-    def __init__(self, headers: t.Union[Headers, t.List[t.Tuple[str, str]]]) -> None:
+-        self.headers = _TestCookieHeaders(headers)
+-
+-    def info(self) -> _TestCookieHeaders:
+-        return self.headers
+-
+-
+-class _TestCookieJar(CookieJar):
+-    """A cookielib.CookieJar modified to inject and read cookie headers from
+-    and to wsgi environments, and wsgi application responses.
+-    """
+-
+-    def inject_wsgi(self, environ: "WSGIEnvironment") -> None:
+-        """Inject the cookies as client headers into the server's wsgi
+-        environment.
+-        """
+-        cvals = [f"{c.name}={c.value}" for c in self]
+-
+-        if cvals:
+-            environ["HTTP_COOKIE"] = "; ".join(cvals)
+-        else:
+-            environ.pop("HTTP_COOKIE", None)
+-
+-    def extract_wsgi(
+-        self,
+-        environ: "WSGIEnvironment",
+-        headers: t.Union[Headers, t.List[t.Tuple[str, str]]],
+-    ) -> None:
+-        """Extract the server's set-cookie headers as cookies into the
+-        cookie jar.
+-        """
+-        self.extract_cookies(
+-            _TestCookieResponse(headers),  # type: ignore
+-            _UrllibRequest(get_current_url(environ)),
+-        )
+-
+-
+ def _iter_data(data: t.Mapping[str, t.Any]) -> t.Iterator[t.Tuple[str, t.Any]]:
+     """Iterate over a mapping that might have a list of values, yielding
+     all key, value pairs. Almost like iter_multi_items but only allows
+@@ -840,23 +776,28 @@ class ClientRedirectError(Exception):
+ 
+ 
+ class Client:
+-    """This class allows you to send requests to a wrapped application.
+-
+-    The use_cookies parameter indicates whether cookies should be stored and
+-    sent for subsequent requests. This is True by default, but passing False
+-    will disable this behaviour.
+-
+-    If you want to request some subdomain of your application you may set
+-    `allow_subdomain_redirects` to `True` as if not no external redirects
+-    are allowed.
++    """Simulate sending requests to a WSGI application without running a WSGI or HTTP
++    server.
++
++    :param application: The WSGI application to make requests to.
++    :param response_wrapper: A :class:`.Response` class to wrap response data with.
++        Defaults to :class:`.TestResponse`. If it's not a subclass of ``TestResponse``,
++        one will be created.
++    :param use_cookies: Persist cookies from ``Set-Cookie`` response headers to the
++        ``Cookie`` header in subsequent requests. Domain and path matching is supported,
++        but other cookie parameters are ignored.
++    :param allow_subdomain_redirects: Allow requests to follow redirects to subdomains.
++        Enable this if the application handles subdomains and redirects between them.
++
++    .. versionchanged:: 2.3
++        Simplify cookie implementation, support domain and path matching.
+ 
+     .. versionchanged:: 2.1
+         All data is available as properties on the returned response object. The
+         response cannot be returned as a tuple.
+ 
+     .. versionchanged:: 2.0
+-        ``response_wrapper`` is always a subclass of
+-        :class:``TestResponse``.
++        ``response_wrapper`` is always a subclass of :class:``TestResponse``.
+ 
+     .. versionchanged:: 0.5
+         Added the ``use_cookies`` parameter.
+@@ -883,69 +824,167 @@ def __init__(
+         self.response_wrapper = t.cast(t.Type["TestResponse"], response_wrapper)
+ 
+         if use_cookies:
+-            self.cookie_jar: t.Optional[_TestCookieJar] = _TestCookieJar()
++            self._cookies: t.Optional[t.Dict[t.Tuple[str, str, str], Cookie]] = {}
+         else:
+-            self.cookie_jar = None
++            self._cookies = None
+ 
+         self.allow_subdomain_redirects = allow_subdomain_redirects
+ 
++    @property
++    def cookie_jar(self) -> t.Optional[t.Iterable["Cookie"]]:
++        warnings.warn(
++            "The 'cookie_jar' attribute is a private API and will be removed in"
++            " Werkzeug 2.4. Use the 'get_cookie' method instead.",
++            DeprecationWarning,
++            stacklevel=2,
++        )
++
++        if self._cookies is None:
++            return None
++
++        return self._cookies.values()
++
++    def get_cookie(
++        self, key: str, domain: str = "localhost", path: str = "/"
++    ) -> t.Optional["Cookie"]:
++        """Return a :class:`.Cookie` if it exists. Cookies are uniquely identified by
++        ``(domain, path, key)``.
++
++        :param key: The decoded form of the key for the cookie.
++        :param domain: The domain the cookie was set for.
++        :param path: The path the cookie was set for.
++
++        .. versionadded:: 2.3
++        """
++        if self._cookies is None:
++            raise TypeError(
++                "Cookies are disabled. Create a client with 'use_cookies=True'."
++            )
++
++        return self._cookies.get((domain, path, key))
++
+     def set_cookie(
+         self,
+-        server_name: str,
+         key: str,
+         value: str = "",
+-        max_age: t.Optional[t.Union[timedelta, int]] = None,
+-        expires: t.Optional[t.Union[str, datetime, int, float]] = None,
++        *args: t.Any,
++        domain: str = "localhost",
++        origin_only: bool = True,
+         path: str = "/",
+-        domain: t.Optional[str] = None,
+-        secure: bool = False,
+-        httponly: bool = False,
+-        samesite: t.Optional[str] = None,
+-        charset: str = "utf-8",
++        **kwargs: t.Any,
+     ) -> None:
+-        """Sets a cookie in the client's cookie jar.  The server name
+-        is required and has to match the one that is also passed to
+-        the open call.
++        """Set a cookie to be sent in subsequent requests.
++
++        This is a convenience to skip making a test request to a route that would set
++        the cookie. To test the cookie, make a test request to a route that uses the
++        cookie value.
++
++        The client uses ``domain``, ``origin_only``, and ``path`` to determine which
++        cookies to send with a request. It does not use other cookie parameters that
++        browsers use, since they're not applicable in tests.
++
++        :param key: The key part of the cookie.
++        :param value: The value part of the cookie.
++        :param domain: Send this cookie with requests that match this domain. If
++            ``origin_only`` is true, it must be an exact match, otherwise it may be a
++            suffix match.
++        :param origin_only: Whether the domain must be an exact match to the request.
++        :param path: Send this cookie with requests that match this path either exactly
++            or as a prefix.
++        :param kwargs: Passed to :func:`.dump_cookie`.
++
++        .. versionchanged:: 2.3
++            The ``origin_only`` parameter was added.
++
++        .. versionchanged:: 2.3
++            The ``domain`` parameter defaults to ``localhost``.
++
++        .. versionchanged:: 2.3
++            The first parameter ``server_name`` is deprecated and will be removed in
++            Werkzeug 2.4. The first parameter is ``key``. Use the ``domain`` and
++            ``origin_only`` parameters instead.
+         """
+-        assert self.cookie_jar is not None, "cookies disabled"
+-        header = dump_cookie(
+-            key,
+-            value,
+-            max_age,
+-            expires,
+-            path,
+-            domain,
+-            secure,
+-            httponly,
+-            charset,
+-            samesite=samesite,
++        if self._cookies is None:
++            raise TypeError(
++                "Cookies are disabled. Create a client with 'use_cookies=True'."
++            )
++
++        if args:
++            warnings.warn(
++                "The first parameter 'server_name' is no longer used, and will be"
++                " removed in Werkzeug 2.4. The positional parameters are 'key' and"
++                " 'value'. Use the 'domain' and 'origin_only' parameters instead.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            domain = key
++            key = value
++            value = args[0]
++
++        cookie = Cookie._from_response_header(
++            domain, dump_cookie(key, value, domain=domain, path=path, **kwargs)
+         )
+-        environ = create_environ(path, base_url=f"http://{server_name}")
+-        headers = [("Set-Cookie", header)]
+-        self.cookie_jar.extract_wsgi(environ, headers)
++        cookie.origin_only = origin_only
++
++        if cookie._should_delete:
++            self._cookies.pop(cookie._storage_key, None)
++        else:
++            self._cookies[cookie._storage_key] = cookie
+ 
+     def delete_cookie(
+         self,
+-        server_name: str,
+         key: str,
++        *args: t.Any,
++        domain: str = "localhost",
+         path: str = "/",
+-        domain: t.Optional[str] = None,
+-        secure: bool = False,
+-        httponly: bool = False,
+-        samesite: t.Optional[str] = None,
++        **kwargs: t.Any,
+     ) -> None:
+-        """Deletes a cookie in the test client."""
+-        self.set_cookie(
+-            server_name,
+-            key,
+-            expires=0,
+-            max_age=0,
+-            path=path,
+-            domain=domain,
+-            secure=secure,
+-            httponly=httponly,
+-            samesite=samesite,
+-        )
++        """Delete a cookie if it exists. Cookies are uniquely identified by
++        ``(domain, path, key)``.
++
++        :param key: The decoded form of the key for the cookie.
++        :param domain: The domain the cookie was set for.
++        :param path: The path the cookie was set for.
++
++        .. versionchanged:: 2.3
++            The ``domain`` parameter defaults to ``localhost``.
++
++        .. versionchanged:: 2.3
++            The first parameter ``server_name`` is deprecated and will be removed in
++            Werkzeug 2.4. The first parameter is ``key``. Use the ``domain`` parameter
++            instead.
++
++        .. versionchanged:: 2.3
++            The ``secure``, ``httponly`` and ``samesite`` parameters are deprecated and
++            will be removed in Werkzeug 2.4.
++        """
++        if self._cookies is None:
++            raise TypeError(
++                "Cookies are disabled. Create a client with 'use_cookies=True'."
++            )
++
++        if args:
++            warnings.warn(
++                "The first parameter 'server_name' is no longer used, and will be"
++                " removed in Werkzeug 2.4. The first parameter is 'key'. Use the"
++                " 'domain' parameter instead.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            domain = key
++            key = args[0]
++
++        if kwargs:
++            kwargs_keys = ", ".join(f"'{k}'" for k in kwargs)
++            plural = "parameters are" if len(kwargs) > 1 else "parameter is"
++            warnings.warn(
++                f"The {kwargs_keys} {plural} deprecated and will be"
++                f" removed in Werkzeug 2.4.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++
++        self._cookies.pop((domain, path, key), None)
+ 
+     def run_wsgi_app(
+         self, environ: "WSGIEnvironment", buffered: bool = False
+@@ -954,13 +993,31 @@ def run_wsgi_app(
+ 
+         :meta private:
+         """
+-        if self.cookie_jar is not None:
+-            self.cookie_jar.inject_wsgi(environ)
++        url = urlsplit(get_current_url(environ))
++        hostname = url.hostname or "localhost"
++
++        if self._cookies is not None:
++            value = "; ".join(
++                c._to_request_header()
++                for c in self._cookies.values()
++                if c._matches_request(hostname, url.path)
++            )
++
++            if value:
++                environ["HTTP_COOKIE"] = value
++            else:
++                environ.pop("HTTP_COOKIE", None)
+ 
+         rv = run_wsgi_app(self.application, environ, buffered=buffered)
+ 
+-        if self.cookie_jar is not None:
+-            self.cookie_jar.extract_wsgi(environ, rv[2])
++        if self._cookies is not None:
++            for header in rv[2].getlist("Set-Cookie"):
++                cookie = Cookie._from_response_header(hostname, header)
++
++                if cookie._should_delete:
++                    self._cookies.pop(cookie._storage_key, None)
++                else:
++                    self._cookies[cookie._storage_key] = cookie
+ 
+         return rv
+ 
+@@ -1328,3 +1385,104 @@ def text(self) -> str:
+         .. versionadded:: 2.1
+         """
+         return self.get_data(as_text=True)
++
++
++@dataclasses.dataclass
++class Cookie:
++    """A cookie key, value, and parameters.
++
++    The class itself is not a public API. Its attributes are documented for inspection
++    with :meth:`.Client.get_cookie` only.
++
++    .. versionadded:: 2.3
++    """
++
++    key: str
++    """The cookie key, encoded as a client would see it."""
++
++    value: str
++    """The cookie key, encoded as a client would see it."""
++
++    decoded_key: str
++    """The cookie key, decoded as the application would set and see it."""
++
++    decoded_value: str
++    """The cookie value, decoded as the application would set and see it."""
++
++    expires: t.Optional[datetime]
++    """The time at which the cookie is no longer valid."""
++
++    max_age: t.Optional[int]
++    """The number of seconds from when the cookie was set at which it is
++    no longer valid.
++    """
++
++    domain: str
++    """The domain that the cookie was set for, or the request domain if not set."""
++
++    origin_only: bool
++    """Whether the cookie will be sent for exact domain matches only. This is ``True``
++    if the ``Domain`` parameter was not present.
++    """
++
++    path: str
++    """The path that the cookie was set for."""
++
++    secure: t.Optional[bool]
++    """The ``Secure`` parameter."""
++
++    http_only: t.Optional[bool]
++    """The ``HttpOnly`` parameter."""
++
++    same_site: t.Optional[str]
++    """The ``SameSite`` parameter."""
++
++    def _matches_request(self, server_name: str, path: str) -> bool:
++        return (
++            server_name == self.domain
++            or (
++                not self.origin_only
++                and server_name.endswith(self.domain)
++                and server_name[: -len(self.domain)].endswith(".")
++            )
++        ) and (
++            path == self.path
++            or (
++                path.startswith(self.path)
++                and path[len(self.path) - self.path.endswith("/") :].startswith("/")
++            )
++        )
++
++    def _to_request_header(self) -> str:
++        return f"{self.key}={self.value}"
++
++    @classmethod
++    def _from_response_header(cls, server_name: str, header: str) -> "te.Self":
++        header, _, parameters_str = header.partition(";")
++        parameters = parse_dict_header(",".join(parameters_str.split(";")))
++        key, _, value = header.partition("=")
++        decoded_key, decoded_value = next(parse_cookie(header).items())
++        return cls(
++            key=key.strip(),
++            value=value.strip(),
++            decoded_key=decoded_key,
++            decoded_value=decoded_value,
++            expires=parse_date(parameters.get("Expires")),
++            max_age=int(parameters["Max-Age"]) if "Max-Age" in parameters else None,
++            domain=parameters.get("Domain", server_name),
++            origin_only="Domain" not in parameters,
++            path=parameters.get("Path", "/"),
++            secure="Secure" in parameters,
++            http_only="HttpOnly" in parameters,
++            same_site=parameters.get("SameSite"),
++        )
++
++    @property
++    def _storage_key(self) -> t.Tuple[str, str, str]:
++        return self.domain, self.path, self.decoded_key
++
++    @property
++    def _should_delete(self) -> bool:
++        return self.max_age == 0 or (
++            self.expires is not None and self.expires.timestamp() == 0
++        )
