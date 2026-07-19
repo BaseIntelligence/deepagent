@@ -1,0 +1,31 @@
+{
+  "by_model": {
+    "moonshotai/kimi-k2.7-code": "13.3484922200000003",
+    "x-ai/grok-4.5": "10.28875400000000029"
+  },
+  "by_stage": {
+    "deepagent-eval-pier-miniswe": "23.63724622000000059"
+  },
+  "by_task": {
+    "realpr-click-3442": "0.62071678999999999",
+    "realpr-itemadapter-101": "1.9008040899999995",
+    "realpr-oauthlib-889": "2.4586853600000002",
+    "realpr-packaging-1120": "4.0918899600000002",
+    "realpr-packaging-1267": "1.0804482400000002",
+    "realpr-rich-3930": "3.46672159",
+    "realpr-werkzeug-2637": "4.4685275800000006",
+    "realpr-werkzeug-3116": "4.1496311300000001",
+    "realpr-wtforms-923": "1.3998214799999998"
+  },
+  "cap_usd": "600.0",
+  "has_unknown_billing": false,
+  "open_call_count": 0,
+  "open_reserved_usd": "0",
+  "path": "datasets/panel_prod_hard_deepswe_med_m28/ledger.jsonl",
+  "remaining_usd": "576.36275377999999941",
+  "settled_call_count": 18,
+  "settled_exact_usd": "23.63724622000000059",
+  "total_commit_usd": "23.63724622000000059",
+  "under_cap": true,
+  "unknown_billing_count": 0
+}

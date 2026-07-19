@@ -1,0 +1,244 @@
+{
+  "wave": "m28d",
+  "authority": "M28 diversified DeepSWE-median product matrix (post m28b N=9)",
+  "n_packs_scored": 9,
+  "n_packs_requested": 9,
+  "fidelity": "pier_miniswe_harbor",
+  "n_concurrent": 5,
+  "actual_max_inflight": 5,
+  "concurrent_pool": true,
+  "pool_workers": 5,
+  "k": 1,
+  "models": [
+    "x-ai/grok-4.5",
+    "moonshotai/kimi-k2.7-code"
+  ],
+  "spend_usd": "23.63724622000000059",
+  "remaining_usd": "576.36275377999999941",
+  "budget_stop": false,
+  "stop_reason": null,
+  "wall_s": 1776.562,
+  "invented_rewards": false,
+  "hard_stop_usd": "600.0",
+  "jobs_dir": "/tmp/harbor-deepagent-jobs-prod-m28",
+  "product_root": "/projects/Agent-SWE/deepagent/datasets/prod_hard_deepswe_med",
+  "out_dir": "/projects/Agent-SWE/deepagent/datasets/panel_prod_hard_deepswe_med_m28",
+  "started_at": "2026-07-19T16:07:06.262834+00:00",
+  "finished_at": "2026-07-19T16:36:42.824863+00:00",
+  "preflight_enabled": false,
+  "skip_preflight": true,
+  "skip_preflight_note": "Pier gold preflight known FN; HarborDocker dual-truth authority",
+  "overall_pass_at_1": {
+    "x-ai/grok-4.5": {
+      "solves": 3,
+      "trials": 9,
+      "pass_at_1": 0.3333333333333333
+    },
+    "moonshotai/kimi-k2.7-code": {
+      "solves": 1,
+      "trials": 9,
+      "pass_at_1": 0.1111111111111111
+    }
+  },
+  "dual_solve_packs": [
+    "realpr-wtforms-923"
+  ],
+  "dual_solve_pack_count": 1,
+  "dual_solve_rate": 0.1111111111111111,
+  "dual_solve_gate_max": 0.3,
+  "dual_solve_gate_fail_at": 0.4,
+  "dual_solve_gate_pass": true,
+  "observational_ranking": {
+    "winner": "x-ai/grok-4.5",
+    "note": "Grok 3/9=0.333 above Kimi2.7 1/9=0.111 on N=9; observational only, not a hard gate"
+  },
+  "diversity": {
+    "unique_repos": 7,
+    "max_packs_per_repo": 2,
+    "pack_ids": [
+      "realpr-click-3442",
+      "realpr-itemadapter-101",
+      "realpr-oauthlib-889",
+      "realpr-packaging-1120",
+      "realpr-packaging-1267",
+      "realpr-rich-3930",
+      "realpr-werkzeug-2637",
+      "realpr-werkzeug-3116",
+      "realpr-wtforms-923"
+    ]
+  },
+  "per_pack": [
+    {
+      "pack_id": "realpr-click-3442",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.08333879999999999"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "0.53737799"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-itemadapter-101",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.656654"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "1.2441500899999995"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-oauthlib-889",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "1.0271596"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "1.4315257600000002"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-packaging-1120",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "1.4692424000000002"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "2.62264756"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-packaging-1267",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "0.7204736000000002"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "0.35997464"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-rich-3930",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "decision_rule": "in-band-high-discrimination",
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.9761376"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "1.49058399"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-werkzeug-2637",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 0.0,
+      "decision_rule": "solve-none",
+      "grok-4.5": 0.0,
+      "grok-4.5_solves": 0,
+      "grok-4.5_cost": [
+        "1.9433172000000003"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "2.5252103800000003"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-werkzeug-3116",
+      "complete": true,
+      "decision": "keep",
+      "frontier": 0.5,
+      "decision_rule": "in-band-high-discrimination",
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "1.8777751999999996"
+      ],
+      "kimi-k2.7-code": 0.0,
+      "kimi-k2.7-code_solves": 0,
+      "kimi-k2.7-code_cost": [
+        "2.2718559300000005"
+      ],
+      "dual": false
+    },
+    {
+      "pack_id": "realpr-wtforms-923",
+      "complete": true,
+      "decision": "drop",
+      "frontier": 1.0,
+      "decision_rule": "solve-all",
+      "grok-4.5": 1.0,
+      "grok-4.5_solves": 1,
+      "grok-4.5_cost": [
+        "0.5346556"
+      ],
+      "kimi-k2.7-code": 1.0,
+      "kimi-k2.7-code_solves": 1,
+      "kimi-k2.7-code_cost": [
+        "0.8651658799999998"
+      ],
+      "dual": true
+    }
+  ],
+  "host_mem_before": {
+    "available": 102.51,
+    "total": 377.26,
+    "used": 274.74
+  },
+  "host_mem_after": {
+    "available": 108.57,
+    "total": 377.26,
+    "used": 268.68
+  }
+}
