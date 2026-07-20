@@ -18,18 +18,29 @@ def test_readme_documents_build_export_score() -> None:
 
 
 def test_readme_product_surface_is_deepagent_v1() -> None:
-    """VAL-SHIP-010 / product docs: deepagent_v1 is primary; fixtures labeled historical."""
+    """Product docs: current hardness is prod_hard_deepswe_med N=9; archives labeled historical."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     lowered = readme.lower()
-    assert "datasets/deepagent_v1" in readme
+    # Authoritative current product (M27/M28/M29).
+    assert "datasets/prod_hard_deepswe_med" in readme
+    assert "n=9" in lowered or "**n=9**" in lowered or "n = **9**" in lowered
+    assert "baseintelligence/deepagent" in lowered
+    assert "deepagent" in lowered
+    # Compatibility / historical factory still documented.
     assert "ship-deepagent" in lowered
-    # Historical surfaces must be clearly non-product.
+    assert "datasets/deepagent_v1" in readme
     assert "datasets/harbor_v1" in readme
     assert "datasets/v1" in readme
-    assert "historical fixture" in lowered or "fixtures only" in lowered
-    assert "not" in lowered and "deep" in lowered
-    # Product path should be presented as north star / product surface.
-    assert "product surface" in lowered or "product north star" in lowered
+    # Historical surfaces must be clearly non-product.
+    assert (
+        "historical" in lowered
+        or "historical only" in lowered
+        or "not** current product" in lowered
+        or "not current product" in lowered
+        or "audit only" in lowered
+    )
+    # Current product called out as authoritative / current product surface.
+    assert "current product" in lowered or "authoritative" in lowered
     # Mission diary / assertion ledger must stay out of the tracked README.
     assert "worker session" not in lowered
     assert "/root/.factory/missions" not in readme

@@ -1176,9 +1176,8 @@ def sut_shadow_dists_for_task(task_id: str | None) -> list[str]:
     tid = (task_id or "").lower().replace("_", "-")
     out: list[str] = []
     for needle, dist in HOST_SUITE_SUT_SHADOW_UNINSTALL:
-        if needle in tid:
-            if dist not in out:
-                out.append(dist)
+        if needle in tid and dist not in out:
+            out.append(dist)
     return out
 
 
@@ -1375,27 +1374,32 @@ def _prepare_host_suite_env(
                     shadows = sut_shadow_dists_for_task(task_id) if task_id else []
                     # Always skip SUT-pillar requirement lines when they name the pkg itself;
                     # without a task_id, skip the common SUT set to keep PYTHONPATH honest.
-                    if not task_id or low in {d.lower() for d in shadows} or low in {
-                        "werkzeug",
-                        "click",
-                        "jinja2",
-                        "flask",
-                        "packaging",
-                        "attrs",
-                        "httpcore",
-                        "httpx",
-                        "oauthlib",
-                        "wtforms",
-                        "marshmallow",
-                        "paramiko",
-                        "rich",
-                        "charset-normalizer",
-                        "boltons",
-                        "quart",
-                        "rq",
-                        "scrapy",
-                        "itemadapter",
-                    }:
+                    if (
+                        not task_id
+                        or low in {d.lower() for d in shadows}
+                        or low
+                        in {
+                            "werkzeug",
+                            "click",
+                            "jinja2",
+                            "flask",
+                            "packaging",
+                            "attrs",
+                            "httpcore",
+                            "httpx",
+                            "oauthlib",
+                            "wtforms",
+                            "marshmallow",
+                            "paramiko",
+                            "rich",
+                            "charset-normalizer",
+                            "boltons",
+                            "quart",
+                            "rq",
+                            "scrapy",
+                            "itemadapter",
+                        }
+                    ):
                         continue
                 clean_lines.append(ln)
             if not clean_lines:

@@ -704,7 +704,7 @@ def run_python_suite(
     env["CLICK_DISABLE"] = "1"  # noop for most pkgs; harmless
     # Isolated interpreter so ambient pytest plugins / chdir cannot poison collection.
     # NOTE: embedded collector source must not itself use triple double-quotes.
-    code = r'''
+    code = r"""
 import json, sys, contextlib
 from pathlib import Path
 import pytest
@@ -825,7 +825,7 @@ print(
         }
     )
 )
-'''
+"""
     try:
         proc = subprocess.run(
             [py_exe, "-c", code, *targets],

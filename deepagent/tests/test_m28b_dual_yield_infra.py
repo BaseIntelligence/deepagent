@@ -15,9 +15,7 @@ from swe_factory.producers.real_dual_run import (
 
 
 def test_host_suite_common_deps_exclude_sut_shadows() -> None:
-    tokens = {
-        d.split("==")[0].split(">=")[0].split("[")[0].lower() for d in HOST_SUITE_COMMON_DEPS
-    }
+    tokens = {d.split("==")[0].split(">=")[0].split("[")[0].lower() for d in HOST_SUITE_COMMON_DEPS}
     for ban in (
         "werkzeug",
         "click",
@@ -96,9 +94,7 @@ def test_labels_from_collection_errors_produce_f2p() -> None:
         errors=("tests.mod",),
         returncode=2,
     )
-    lab = labels_from_real_suite_outcomes(
-        green, broken, require_nonempty_f2p=True, min_f2p_nodes=1
-    )
+    lab = labels_from_real_suite_outcomes(green, broken, require_nonempty_f2p=True, min_f2p_nodes=1)
     assert "tests.mod.test_new_feature" in lab.f2p_node_ids
     assert "tests.mod.test_other" in lab.f2p_node_ids
     assert "tests.keep.test_p2p" in lab.p2p_node_ids
