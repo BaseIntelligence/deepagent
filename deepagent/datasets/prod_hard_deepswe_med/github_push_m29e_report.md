@@ -67,3 +67,11 @@ Did **not** stage or push:
 ## Note on this report commit
 
 A follow-up commit may land this file on `origin/main` after the primary tip push above; primary published tip for m29a–d remains `4a433b44d47785a06b809201eedde145d24389ce` (or a later report-only tip that remains `0 0` with origin).
+
+## Follow-up push (m29 scrutiny prep)
+
+| Ref | SHA |
+|---|---|
+| post lint-fix tip | `cae0fc8` |
+| `git push origin main` | advanced origin past m29e evidence commit `00c2c8c` to include lint-fix |
+| final `origin/main...HEAD` | `0 0` after push |
