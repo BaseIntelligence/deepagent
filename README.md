@@ -5,7 +5,7 @@
 **Hard, Docker-verifiable software-engineering benchmarks from real merged PRs**
 
 [![License](https://img.shields.io/github/license/BaseIntelligence/deepagent)](https://github.com/BaseIntelligence/deepagent/blob/main/LICENSE)
-[![HF](https://img.shields.io/badge/HF-BaseIntelligence%2Fdeepagent-yellow.svg)](https://huggingface.co/datasets/BaseIntelligence/deepagent/tree/test)
+[![HF](https://img.shields.io/badge/HF-BaseIntelligence%2Fdeepagent-yellow.svg)](https://huggingface.co/datasets/BaseIntelligence/deepagent/tree/main)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 [![CLI](https://img.shields.io/badge/CLI-deepagent-black.svg)](deepagent/README.md)
 
@@ -25,7 +25,8 @@ DeepAgent ships **real_pr Harbor hardness packs**: live-mined multi-file pull re
 | **N** | **9** certified packs |
 | **unique_repos** | **7** |
 | **max packs / repo** | **2** (M28 diversity) |
-| **HF dataset** | [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent) revision **`test`** |
+| **HF stable pin** | [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent) revision **`main`** (N=9) |
+| **HF automation mirror** | same repo revision **`test`** (also N=9; CI/dev default write target) |
 | **Primary CLI** | `deepagent` (`generate` / `upload` / `pull` / `eval` / `oracle`) |
 | **Scoreboard** | [`deepagent/datasets/panel_prod_hard_deepswe_med_m28`](deepagent/datasets/panel_prod_hard_deepswe_med_m28/) |
 
@@ -72,7 +73,8 @@ flowchart LR
   Mine[Live mine real_pr] --> Dual[Dual-run F2P/P2P]
   Dual --> Oracle[HarborDocker sol=1 null=0]
   Oracle --> Product[prod_hard_deepswe_med N=9]
-  Product --> HF[HF BaseIntelligence/deepagent @test]
+  Product --> HF[HF BaseIntelligence/deepagent @main]
+  Product --> HFtest[HF @test automation mirror]
   Product --> Eval[deepagent eval Pier + Harbor]
   Eval --> Board[panel_prod_hard_deepswe_med_m28]
 ```
@@ -99,17 +101,21 @@ deepagent generate \
   --out datasets/prod_hard_deepswe_med \
   --live-mine --oracle docker --panel offline --pier scripted
 
-# Push pack trees to HF revision test
+# Push pack trees to HF stable pin (main) and/or automation mirror (test)
+deepagent upload \
+  --src datasets/prod_hard_deepswe_med \
+  --repo-id BaseIntelligence/deepagent \
+  --revision main
 deepagent upload \
   --src datasets/prod_hard_deepswe_med \
   --repo-id BaseIntelligence/deepagent \
   --revision test
 
-# Pull from HF
+# Pull stable product pin from HF main
 deepagent pull \
   --repo-id BaseIntelligence/deepagent \
-  --revision test \
-  --out datasets/hf_pull_test
+  --revision main \
+  --out datasets/hf_pull_main
 
 # Dual-model Pier + Harbor eval (n_concurrent 1..5; hard-stop $600)
 deepagent eval \

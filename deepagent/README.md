@@ -12,7 +12,7 @@
 
 [![Python](https://img.shields.io/badge/python-%3E%3D3.12-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](pyproject.toml)
-[![HF](https://img.shields.io/badge/HF-BaseIntelligence%2Fdeepagent-yellow.svg)](https://huggingface.co/datasets/BaseIntelligence/deepagent/tree/test)
+[![HF](https://img.shields.io/badge/HF-BaseIntelligence%2Fdeepagent-yellow.svg)](https://huggingface.co/datasets/BaseIntelligence/deepagent/tree/main)
 
 </div>
 
@@ -29,7 +29,8 @@ isolation.
 | Surface | Path / ref | Role |
 |---|---|---|
 | **Current product** | `datasets/prod_hard_deepswe_med` | DeepSWE-median hard Real-PR, **N=9** (M27 floors + M28 max 2 packs/repo, unique_repos=7) |
-| **HF revision** | `BaseIntelligence/deepagent` **`test`** | Live Hub mirror of the current product |
+| **HF stable pin** | `BaseIntelligence/deepagent` **`main`** | Current product on Hub (N=9) |
+| **HF automation mirror** | `BaseIntelligence/deepagent` **`test`** | CI/dev write target; also N=9 after M29/M30 |
 | **Scoreboard** | `datasets/panel_prod_hard_deepswe_med_m28` | Grok 4.5 + Kimi 2.7-code dual-model matrix |
 | Product detail | `datasets/prod_hard_deepswe_med/PRODUCT_README.md` | Floors, p50 stats, diversity notes |
 | Historical M16 wave | `datasets/test_n10` | M16 N=10 only — **not** current product |
@@ -52,7 +53,8 @@ New product work should prefer `deepagent`.
 | **N** | **9** certified packs |
 | **unique_repos** | **7** |
 | **max packs / repo** | **2** (M28 diversity) |
-| **HF dataset** | [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent) revision **`test`** |
+| **HF stable pin** | [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent) revision **`main`** (N=9) |
+| **HF automation mirror** | same repo revision **`test`** (also N=9; CI/dev default write target) |
 | **Primary CLI** | `deepagent` (`generate` / `upload` / `pull` / `eval` / `oracle`) |
 | **Scoreboard** | [`datasets/panel_prod_hard_deepswe_med_m28`](datasets/panel_prod_hard_deepswe_med_m28/) |
 | **Default eval models** | `x-ai/grok-4.5` + `moonshotai/kimi-k2.7-code` |
@@ -129,17 +131,21 @@ deepagent generate \
   --out datasets/prod_hard_deepswe_med \
   --live-mine --oracle docker --panel offline --pier scripted
 
-# Push pack trees + manifest to HF revision test
+# Push pack trees + manifest to HF stable pin (main) and/or automation mirror (test)
+deepagent upload \
+  --src datasets/prod_hard_deepswe_med \
+  --repo-id BaseIntelligence/deepagent \
+  --revision main
 deepagent upload \
   --src datasets/prod_hard_deepswe_med \
   --repo-id BaseIntelligence/deepagent \
   --revision test
 
-# Pull packs from HF revision test
+# Pull packs from HF stable pin (main)
 deepagent pull \
   --repo-id BaseIntelligence/deepagent \
-  --revision test \
-  --out datasets/hf_pull_test
+  --revision main \
+  --out datasets/hf_pull_main
 
 # Pier mini-swe + Harbor dual-model eval (current median models)
 deepagent eval \
@@ -160,8 +166,8 @@ deepagent --help
 | Command | What it does |
 |---|---|
 | `generate` | Live mine hard `real_pr` via ship-deepagent path; product out `datasets/prod_hard_deepswe_med`; Docker oracle only; refuses fixture pad |
-| `upload` | Validate local pack root, push trees + `pack_manifest` to HF (`BaseIntelligence/deepagent`, default revision **`test`**) |
-| `pull` | Download pack trees from HF revision (`main` or `test`) into local out dir |
+| `upload` | Validate local pack root, push trees + `pack_manifest` to HF (`BaseIntelligence/deepagent`). Prefer **`main`** for the stable product pin; **`test`** remains the automation/dev default write target |
+| `pull` | Download pack trees from HF revision (`main` stable pin or `test` automation mirror) into local out dir |
 | `eval` | Pier + mini-swe-agent + HarborDocker model eval (`n_concurrent` 1..5, hard-stop **$600**, fidelity **`pier_miniswe_harbor`**). Current median panel: **grok-4.5** + **kimi-k2.7-code** |
 | `oracle` | HarborDocker dual-truth cert on one pack dir (solution reward 1, null 0; refuse fake) |
 | `version` | Package version identity |
@@ -190,19 +196,20 @@ auto-drop hardness packs (intrinsic policy).
 
 | Ref | Content |
 |---|---|
-| **`test`** (current) | Live N=9 packs from `datasets/prod_hard_deepswe_med` |
-| `main` | Reserved for larger / product cuts when promoted |
+| **`main`** (stable product pin) | Current N=9 packs from `datasets/prod_hard_deepswe_med` |
+| **`test`** (automation / dev mirror) | Same N=9 product after M29/M30; default write target for CI and live automation |
 
-Operator loop: **generate** → **upload** (revision `test`) → **pull** →
-**eval** / **oracle**. Do not embed tokens in CLI flags; use `HF_TOKEN` env /
-`.env` only.
+Operator loop: **generate** → **upload** (prefer revision `main` for the stable
+public pin; keep `test` in sync for automation) → **pull** → **eval** /
+**oracle**. Do not embed tokens in CLI flags; use `HF_TOKEN` env / `.env` only.
 
 ## Wave dataset vs archives
 
 | Path | N | Status |
 |---|---:|---|
 | `datasets/prod_hard_deepswe_med` | **9** | **Current product** — DeepSWE-median + M28 diversity |
-| HF `…/deepagent` `@test` | **9** | **Live on Hub** (mirror of current product) |
+| HF `…/deepagent` **`@main`** | **9** | **Stable product pin** on Hub |
+| HF `…/deepagent` `@test` | **9** | Automation / dev mirror (also N=9) |
 | `datasets/panel_prod_hard_deepswe_med_m28` | 9 scored | **Authoritative** Grok/Kimi2.7 scoreboard |
 | `datasets/test_n10` | 10 | **Historical** M16 wave only |
 | `datasets/prod_hard_keep` | ~10 | Soft M25/M26 band — audit only |
@@ -252,7 +259,8 @@ flowchart LR
   Label --> Oracle[Docker oracle sol=1 null=0]
   Oracle --> Export[Harbor pack export]
   Export --> Product[datasets/prod_hard_deepswe_med N=9]
-  Product --> HF[HF BaseIntelligence/deepagent @test]
+  Product --> HF[HF BaseIntelligence/deepagent @main]
+  Product --> HFtest[HF @test automation mirror]
   HF --> Eval[deepagent eval Pier mini-swe Harbor]
   Eval --> Board[panel_prod_hard_deepswe_med_m28]
 ```
@@ -362,7 +370,7 @@ Prefer `pytest -n 0` (or ≤ `-n 2`); never `pytest -n auto` on shared hosts.
 3. **Label** fail-to-pass and pass-to-pass node ids via dual-run suites.
 4. **Oracle-cert** with Docker: solution reward 1, null reward 0; refuse fake.
 5. **Export** Harbor v1.1 tree with held-out tests and isolation-clean agent view.
-6. **Upload / pull** HF mirror (`BaseIntelligence/deepagent` `@test`).
+6. **Upload / pull** HF (`BaseIntelligence/deepagent` **`@main`** stable pin; `@test` automation mirror).
 7. **Eval** Pier mini-swe + Harbor under hard-stop budget (fidelity
    `pier_miniswe_harbor`) with Grok 4.5 + Kimi 2.7-code for the current median panel.
 
@@ -411,8 +419,9 @@ docs/
 
 ## Limits and non-goals
 
-- Current product N is `prod_hard_deepswe_med` / HF `test` only. Historical
-  `test_n10`, soft `prod_hard_keep`, hybrid/seed/fixture surfaces never substitute.
+- Current product N is `prod_hard_deepswe_med` / HF **`main`** (stable pin; `test`
+  is the automation mirror at the same N=9). Historical `test_n10`, soft
+  `prod_hard_keep`, hybrid/seed/fixture surfaces never substitute.
 - Not a browser UI; CLI + Docker + Pier only.
 - Copyleft / unknown licenses are fail-closed and never appear in PROVENANCE.
 - On constrained hosts, prefer serial Docker cert and lower `n_concurrent` eval.
