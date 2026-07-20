@@ -16,13 +16,16 @@ size_categories:
 
 # DeepAgent — current product hardness (DeepSWE-median / M28 diversity)
 
-**Hugging Face revision:** `test` on [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent).  
+**Hugging Face stable pin:** revision **`main`** on [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent).  
+**Automation / dev mirror:** revision **`test`** (may stay in sync at the same N=9 product).  
 **Local product root:** `datasets/prod_hard_deepswe_med`  
 **Band:** `deepswe_median_m27` · certified **N=9** (M28 densify hard gate N≥8 PASS; target 15 shortfall honest)
 
+**`main` = current stable product pin.** Full-folder M30 promotion ships the same certified hardness tree that automation previously published only on `test`. Pull `main` for the stable public pin; `test` remains available for CI/dev mirrors and is expected to stay N=9-aligned unless a later wave moves it first.
+
 This revision is the **current product hardness corpus**. Structural difficulty stays on the **DeepSWE median** floors (M27). **M28** adds coverage volume under a **repo diversity cap** so one upstream no longer dominates the set.
 
-> **Not M16 N=10.** Historical `datasets/test_n10` / early M16 `test` trees are **not** the live product. Current certified hardness is **N=9** under M27 floors + M28 diversity.
+> **Not M16 N=10.** Historical `datasets/test_n10` / early M16 trees are **not** the live product. Current certified hardness is **N=9** under M27 floors + M28 diversity.
 
 ## M28 coverage + diversity policy
 
@@ -43,11 +46,12 @@ Preferred targets N≥12/15 remain aspirational; shortfall is honest (many floor
 
 | Item | Status |
 |------|--------|
-| **Current product (this revision)** | `datasets/prod_hard_deepswe_med` · M27 floors + **M28 diversity (max 2/repo)** · **N=9** |
+| **Current stable product (HF `main`)** | `datasets/prod_hard_deepswe_med` · M27 floors + **M28 diversity (max 2/repo)** · **N=9** |
+| **HF `test` mirror** | Same N=9 product after M29/M30; automation default write target (may stay in sync) |
 | **M16 N=10 / `test_n10` claims** | **Superseded** — early M16 live wave and any card/docs that called N=10 the current product are historical only |
 | Prior M27 HF `test` (N=5, denser werkzeug) | Superseded by this diversified tree (drops weak 3rd-werkzeug keep; adds non-werkzeug dual-truth keeps) |
-| Prior M28c HF `test` (same N=9 ids) | Re-asserted by M29d full-folder re-upload with refreshed card (`pretty_name: DeepAgent`) |
-| Historical softer band | `datasets/prod_hard_keep` (M25/M26) retained **locally for audit only** — not HF `test` |
+| Prior M28c/M29d HF `test` (same N=9 ids) | Promoted to **`main`** by M30a full-folder upload (card `pretty_name: DeepAgent`) |
+| Historical softer band | `datasets/prod_hard_keep` (M25/M26) retained **locally for audit only** — not HF `main` |
 
 Do **not** treat model dual-solve alone as a product drop (M25 intrinsic policy). Hardness refusals remain dual-truth fail, prompt–verifier misalignment, structural floors, and high-confidence intrinsic `EASY_REQUEST`.
 
@@ -104,12 +108,20 @@ tasks/<task_id>/
 
 ## Pull / eval (product)
 
+Prefer the stable pin:
+
 ```bash
-deepagent pull --repo-id BaseIntelligence/deepagent --revision test --out datasets/hf_pull_test --json
-deepagent eval --product-root datasets/hf_pull_test \
+deepagent pull --repo-id BaseIntelligence/deepagent --revision main --out datasets/hf_pull_main --json
+deepagent eval --product-root datasets/hf_pull_main \
   --max-packs 15 --k 1 --n-concurrent 5 --hard-stop-usd 600 \
   --model x-ai/grok-4.5 --model moonshotai/kimi-k2.7-code \
   --out datasets/panel_prod_hard_deepswe_med_m28 --json
+```
+
+Automation / dev mirror (same N=9 after M29/M30):
+
+```bash
+deepagent pull --repo-id BaseIntelligence/deepagent --revision test --out datasets/hf_pull_test --json
 ```
 
 Default median eval pair: `x-ai/grok-4.5` + `moonshotai/kimi-k2.7-code`.  
