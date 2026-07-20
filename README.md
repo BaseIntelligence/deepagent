@@ -2,111 +2,165 @@
 
 # DeepAgent
 
-**Real-code software engineering benchmarks for Platform agents**
+**Hard, Docker-verifiable software-engineering benchmarks from real merged PRs**
 
 [![License](https://img.shields.io/github/license/BaseIntelligence/deepagent)](https://github.com/BaseIntelligence/deepagent/blob/main/LICENSE)
-[![Platform SDK](https://img.shields.io/badge/Platform-SDK-black)](https://github.com/PlatformNetwork/platform)
+[![HF](https://img.shields.io/badge/HF-BaseIntelligence%2Fdeepagent-yellow.svg)](https://huggingface.co/datasets/BaseIntelligence/deepagent/tree/test)
 [![Python](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
-[![SWE-Forge](https://img.shields.io/badge/SWE--Forge-CortexLM-blue)](https://huggingface.co/datasets/CortexLM/swe-forge)
+[![CLI](https://img.shields.io/badge/CLI-deepagent-black.svg)](deepagent/README.md)
 
 ![DeepAgent Banner](assets/banner.png)
 
 </div>
 
-DeepAgent turns real repositories into benchmark tasks for autonomous software engineering agents. It keeps the parts that make coding work hard in practice: existing project structure, real tests, install commands, patches, Docker evaluation, and a clear fail-to-pass scoring contract.
+DeepAgent ships **real_pr Harbor hardness packs**: live-mined multi-file pull requests, clone@SHA agent images, held-out verifier tests, and Docker dual-truth (solution reward = 1, null reward = 0). Primary product work runs through the **`deepagent`** CLI under [`deepagent/`](deepagent/).
 
-The synthetic task pipeline is inspired by Cursor's public writing on Composer, Composer 2, and Composer 2.5. Cursor described training coding agents on tasks grounded in real codebases, including a feature-deletion style setup: remove a testable behavior, ask the agent to restore it, and use tests as the reward signal. DeepAgent adapts that idea into an open benchmark-generation workflow for Platform agents.
+---
 
-This project is not affiliated with Cursor. It is an implementation inspired by the public methodology described in their posts and reports.
+## Current product (authoritative)
 
-## Why DeepAgent Exists
+| Field | Value |
+|---|---|
+| **Product root** | [`deepagent/datasets/prod_hard_deepswe_med`](deepagent/datasets/prod_hard_deepswe_med/) |
+| **N** | **9** certified packs |
+| **unique_repos** | **7** |
+| **max packs / repo** | **2** (M28 diversity) |
+| **HF dataset** | [`BaseIntelligence/deepagent`](https://huggingface.co/datasets/BaseIntelligence/deepagent) revision **`test`** |
+| **Primary CLI** | `deepagent` (`generate` / `upload` / `pull` / `eval` / `oracle`) |
+| **Scoreboard** | [`deepagent/datasets/panel_prod_hard_deepswe_med_m28`](deepagent/datasets/panel_prod_hard_deepswe_med_m28/) |
 
-Most coding benchmarks are either real but scarce, or synthetic but too detached from real development. DeepAgent aims for the middle ground: tasks are synthetic enough to scale, but grounded enough that agents still need to inspect a real repository, understand context, edit code, and run tests.
+### M27 DeepSWE-median hardness floors
 
-A good DeepAgent task should answer three questions:
+Every keep must pass:
 
-1. Can the agent understand the existing codebase?
-2. Can it restore the intended behavior without seeing the oracle patch?
-3. Can the result pass both targeted reward tests and regression tests?
+- **Multi-file:** source files ≥ **4**, **or** hybrid files ≥ **3** + gold added ≥ **500** + hunks ≥ **14**
+- source **hunks ≥ 14**
+- gold **added lines ≥ 400**
+- **F2P nodes ≥ 5**
+- HarborDocker **dual-truth** (sol = 1, null = 0) + prompt–verifier alignment
+- live-mined `source_track=real_pr` only (no fixture pad, no hybrid motors)
 
-## Inspired by Cursor Composer
+See [`deepagent/datasets/prod_hard_deepswe_med/PRODUCT_README.md`](deepagent/datasets/prod_hard_deepswe_med/PRODUCT_README.md) and `coverage_stats.json`.
 
-Cursor's Composer work is the main public inspiration for the synthetic path in DeepAgent:
+### Pack IDs (N=9)
 
-- [Composer: Building a fast frontier model with RL](https://cursor.com/blog/composer)
-- [Introducing Composer 2](https://cursor.com/blog/composer-2)
-- [A technical report on Composer 2](https://cursor.com/blog/composer-2-technical-report)
-- [Composer 2 Technical Report PDF](https://cursor.com/resources/Composer2.pdf)
-- [Introducing Composer 2.5](https://cursor.com/blog/composer-2-5)
+`realpr-click-3442` · `realpr-itemadapter-101` · `realpr-oauthlib-889` · `realpr-packaging-1120` · `realpr-packaging-1267` · `realpr-rich-3930` · `realpr-werkzeug-2637` · `realpr-werkzeug-3116` · `realpr-wtforms-923`
 
-The important idea is simple: instead of only collecting issues and pull requests, generate new tasks from real repositories. In the feature-deletion variant, a known behavior is removed from the codebase, the inverse patch becomes the oracle solution, and tests define whether the agent recovered the behavior.
+### Scoreboard (M28 diversified panel)
 
-DeepAgent currently implements this idea for Python functions and methods. It keeps the public signature, replaces the body with a synthetic failure, writes that mutation to `deletion_patch.diff`, and stores the inverse repair as `patch.diff`.
+Durable dual-model matrix on the current product (observational ranking only; dual-solve rate is the hardness quality gate ≤ 0.30):
 
-## What DeepAgent Does
+| Model | pass@1 (k=1) |
+|---|---|
+| `x-ai/grok-4.5` | **3/9 ≈ 0.33** |
+| `moonshotai/kimi-k2.7-code` | **1/9 ≈ 0.11** |
+| dual_solve rate | **≈ 0.11** (1/9) |
 
-DeepAgent supports two sources of benchmark tasks:
+Evidence: [`deepagent/datasets/panel_prod_hard_deepswe_med_m28/SUMMARY.md`](deepagent/datasets/panel_prod_hard_deepswe_med_m28/SUMMARY.md) and `scoreboard.json`.
 
-1. **Real pull requests** mined from GitHub and converted into SWE-style workspaces.
-2. **Synthetic feature-deletion tasks** generated from real repositories, inspired by the public Composer 2.5 training method.
+### Historical (not current product)
 
-Both flows export a workspace that can be evaluated in Docker. The agent being tested should never see the oracle patch or hidden benchmark files.
+| Path | Note |
+|---|---|
+| `deepagent/datasets/test_n10` | **Historical** M16 wave N=10 — not the live hardness product |
+| `deepagent/datasets/prod_hard_keep` | Softer M25/M26 band — audit only |
+| `deepagent/datasets/deepagent_v1` | Older Real-PR product archive N=20 |
+| `deepagent/fixtures/real_pr_ship` | Unit shortlist only — never product N |
 
 ```mermaid
 flowchart LR
-    Repo[Real repo] --> Build[Build task]
-    Build --> Export[Export workspace]
-    Export --> Run[Docker eval]
-    Run --> Score[Task score]
-    Score --> Plat[Platform]
+  Mine[Live mine real_pr] --> Dual[Dual-run F2P/P2P]
+  Dual --> Oracle[HarborDocker sol=1 null=0]
+  Oracle --> Product[prod_hard_deepswe_med N=9]
+  Product --> HF[HF BaseIntelligence/deepagent @test]
+  Product --> Eval[deepagent eval Pier + Harbor]
+  Eval --> Board[panel_prod_hard_deepswe_med_m28]
 ```
 
-## Install
+---
+
+## Quick start (Real-PR product)
 
 ```bash
 git clone https://github.com/BaseIntelligence/deepagent.git
-cd deepagent
+cd deepagent/deepagent          # package root for the Real-PR factory
+python3 -m venv .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install -e ".[dev]"
+cp .env.example .env            # fill placeholders; never commit .env
+```
+
+Primary loop (paths relative to `deepagent/`):
+
+```bash
+# Live-mine hard real_pr under M27 floors (diversity max 2/repo)
+deepagent generate \
+  --target 10 --min-packs 5 --max-packs 15 \
+  --out datasets/prod_hard_deepswe_med \
+  --live-mine --oracle docker --panel offline --pier scripted
+
+# Push pack trees to HF revision test
+deepagent upload \
+  --src datasets/prod_hard_deepswe_med \
+  --repo-id BaseIntelligence/deepagent \
+  --revision test
+
+# Pull from HF
+deepagent pull \
+  --repo-id BaseIntelligence/deepagent \
+  --revision test \
+  --out datasets/hf_pull_test
+
+# Dual-model Pier + Harbor eval (n_concurrent 1..5; hard-stop $600)
+deepagent eval \
+  --product-root datasets/prod_hard_deepswe_med \
+  --max-packs 9 --k 1 --n-concurrent 5 \
+  --hard-stop-usd 600 \
+  --model x-ai/grok-4.5 \
+  --model moonshotai/kimi-k2.7-code \
+  --out datasets/panel_prod_hard_deepswe_med_m28
+
+# HarborDocker dual-truth on one pack
+deepagent oracle --pack-dir datasets/prod_hard_deepswe_med/tasks/realpr-click-3442
+```
+
+Full factory docs: [`deepagent/README.md`](deepagent/README.md).
+
+Compatibility entry `swe-factory` remains for longer historical stages (`ship-deepagent`, `real-pr-pool`, `ledger`, …). Prefer **`deepagent`** for product work.
+
+---
+
+## Environment and GitHub 429 mitigation
+
+Set secrets in `deepagent/.env` (gitignored). Placeholders only — never commit real tokens.
+
+| Variable | Purpose |
+|---|---|
+| `GITHUB_TOKEN` / `GH_TOKEN` | GitHub REST + Search auth. Prefer `export GITHUB_TOKEN="$(gh auth token)"` after `gh auth login` |
+| `OXYLABS_PROXY_URL` | **SOCKS** residential proxy URL for GitHub API rate-limit relief (e.g. `socks5h://user:pass@host:port`) |
+| `ALL_PROXY` / `HTTPS_PROXY` | Optional chain so git/HTTPS clients share the same proxy |
+| `HF_TOKEN` | Hugging Face upload/pull for `BaseIntelligence/deepagent` |
+| `OPENROUTER_API_KEY` | Live panel / Pier model eval spend |
+| `FACTORY_BUDGET_USD` | Hard spend cap (default `600`) |
+
+**Notes:**
+
+- Live mine hits `api.github.com`. Authenticated REST (`GITHUB_TOKEN` / `gh auth`) plus optional **SOCKS** via `OXYLABS_PROXY_URL` (and/or `ALL_PROXY` / `HTTPS_PROXY`) are the primary anti-429 path.
+- The **Oxylabs realtime Web Scraper API** (`realtime.oxylabs.io`, page-shaped) is **optional** and **not required** for GitHub REST/Search mining.
+- Never log proxy userinfo, Bearer tokens, `gho_`, or `hf_*` values. Never commit `.env`.
+
+---
+
+## Synthetic feature-deletion tasks (secondary path)
+
+Besides live Real-PR mining, DeepAgent can generate **synthetic feature-deletion** tasks from a local checkout: remove a testable behavior, keep tests as the reward signal, and store the inverse repair as the oracle. The synthetic path is a scaling tool; **hardness product truth remains real_pr Harbor packs**.
+
+Install the root package (exposes `swe-forge`):
+
+```bash
+cd /path/to/deepagent          # monorepo root
 pip install -e ".[dev]"
-```
 
-Set the tokens used by the mining and LLM-assisted parts of the pipeline:
-
-```bash
-export GITHUB_TOKEN="ghp_..."
-export OPENROUTER_API_KEY="************"
-```
-
-## Commands
-
-### Mine real PR tasks
-
-Use this when you want SWE-bench style tasks from GitHub pull requests.
-
-```bash
-swe-forge mine mine \
-  --target 10 \
-  --output ./tasks.jsonl \
-  --output-folder ./tasks \
-  --parallel 8
-```
-
-### Verify one pull request end-to-end
-
-Use this for a known repository and PR number.
-
-```bash
-swe-forge mine complete \
-  --repo owner/repo \
-  --pr 12345 \
-  --output ./tasks.jsonl \
-  --model openai/gpt-5.4
-```
-
-### Generate a synthetic feature-deletion task
-
-Use this when you already have a local checkout and know which Python function or method should be removed.
-
-```bash
 git clone https://github.com/owner/repo.git ./target-repo
 
 swe-forge synthetic generate \
@@ -122,138 +176,98 @@ swe-forge synthetic generate \
   --overwrite
 ```
 
-### Evaluate the oracle patch
+Workspace layout and evaluation details: [docs/architecture/synthetic-feature-deletion.md](docs/architecture/synthetic-feature-deletion.md), [docs/architecture/workspace-format.md](docs/architecture/workspace-format.md).
 
-Use this to confirm that a generated task is valid with its gold solution.
+### Brief methodology note
 
-```bash
-python3 scripts/run_evaluation.py \
-  --predictions_path gold \
-  --instance_ids owner-repo-1234 \
-  --max_workers 4
-```
+The synthetic feature-deletion idea is loosely inspired by public Cursor writing on Composer-style training (remove a behavior, restore it under tests). DeepAgent is **not affiliated with Cursor**. Real-PR Harbor hardness is the product north star; Composer is not the primary story.
 
-### Evaluate model predictions
-
-Use this after an agent has produced patches.
-
-```bash
-python3 scripts/run_evaluation.py \
-  --predictions_path predictions.jsonl \
-  --max_workers 4
-```
-
-`predictions.jsonl` contains one prediction per line:
-
-```json
-{"instance_id": "owner-repo-1234", "model_patch": "diff --git a/..."}
-```
-
-## Workspace Format
-
-A task workspace is the portable benchmark unit:
-
-```text
-tasks/
-└── owner-repo-1234/
-    ├── workspace.yaml
-    ├── patch.diff
-    ├── deletion_patch.diff
-    ├── test_patch.diff
-    ├── tests/
-    ├── run_tests.sh
-    └── evaluate.sh
-```
-
-The files have different audiences:
-
-- `workspace.yaml` describes the task, repo, install commands, tests, and synthetic metadata.
-- `patch.diff` is the oracle solution and must be hidden from the evaluated agent.
-- `deletion_patch.diff` is the synthetic mutation applied before evaluation.
-- `tests/` contains generated or extracted benchmark tests.
-- `evaluate.sh` is a simple local scoring script.
-
-For details, read [docs/architecture/workspace-format.md](docs/architecture/workspace-format.md).
-
-## Documentation
-
-The architecture docs explain how the pieces fit together:
-
-- [Architecture overview](docs/architecture/README.md)
-- [Synthetic feature deletion](docs/architecture/synthetic-feature-deletion.md)
-- [Workspace format](docs/architecture/workspace-format.md)
-- [Evaluation flow](docs/architecture/evaluation.md)
+---
 
 ## Development
 
+### Real-PR factory (`deepagent/`)
+
 ```bash
+cd deepagent
+ruff format --check src tests && ruff check src tests
+mypy src
+pytest tests -q -m "not integration" -n 0   # never -n auto on this host
+```
+
+### Root forge package (`swe-forge`)
+
+```bash
+# monorepo root
 ruff format src/ tests/
 ruff check src/ tests/
 mypy src/
 pytest tests/ -v
 ```
 
-## Repository Layout
+---
+
+## Repository layout
 
 ```text
-deepagent/
+.
+├── README.md                 # this file (public product surface)
 ├── assets/
-├── datasets/
-├── docs/
-│   └── architecture/
-├── scripts/
-├── src/swe_forge/
-│   ├── cli/
-│   ├── docker_test/
-│   ├── export/
-│   ├── swe/
-│   └── synthetic/
-├── deepagent/   # Real-PR product + factory (subproject)
-└── tests/
+├── docs/architecture/        # synthetic workspace + eval docs
+├── src/swe_forge/            # synthetic / forge package (CLI: swe-forge)
+├── tests/
+└── deepagent/                # Real-PR factory + product datasets
+    ├── README.md
+    ├── src/swe_factory/      # CLI: deepagent (+ swe-factory compat)
+    ├── datasets/
+    │   ├── prod_hard_deepswe_med/           # CURRENT product N=9
+    │   ├── panel_prod_hard_deepswe_med_m28/ # CURRENT scoreboard
+    │   ├── test_n10/                        # historical M16 only
+    │   └── prod_hard_keep/                  # historical softer band
+    └── fixtures/             # unit shortlists only
 ```
 
-## Real-PR factory (`deepagent/`)
+---
 
-DeepAgent includes the **DeepAgent Real-PR factory** under [`deepagent/`](deepagent/):
-a subproject that ships Docker-verifiable Real-PR Harbor packs (live mine → HF →
-Pier mini-swe eval).
+## What you get in a Real-PR pack
 
-| Surface | Path / ref | Role |
-|---|---|---|
-| Wave N=10 (M16) | `deepagent/datasets/test_n10/` | Live-mined hard Real-PR packs |
-| HF revision `test` | `BaseIntelligence/deepagent` | N=10 packs live on Hub |
-| Product archive N=20 | `deepagent/datasets/deepagent_v1/` | Certified Real-PR product archive |
-| Seed archive | `deepagent/datasets/deepagent_v1_seed5_archive/` | Historical seed5 only |
-| Primary CLI | `deepagent` | generate / upload / pull / eval / oracle / version |
-| Compat CLI | `swe-factory` | Historical factory stages |
+Each pack under `deepagent/datasets/prod_hard_deepswe_med/tasks/<task_id>/`:
 
-Install and use from the subproject (Python >= 3.12; needs `huggingface_hub`):
-
-```bash
-cd deepagent
-pip install -e ".[dev]"
-cp .env.example .env   # HF_TOKEN, OPENROUTER_API_KEY; GitHub via gh — never commit .env
-
-deepagent generate --target 10 --out datasets/test_n10 --live-mine
-deepagent upload --src datasets/test_n10 \
-  --repo-id BaseIntelligence/deepagent --revision test
-deepagent pull --repo-id BaseIntelligence/deepagent --revision test \
-  --out datasets/hf_pull_test
-deepagent eval --product-root datasets/hf_pull_test \
-  --n-concurrent 1 --hard-stop-usd 600 --max-packs 5
-deepagent oracle --pack-dir datasets/test_n10/tasks/<id>
+```text
+task.toml                 # schema, repository_url, base_commit_hash
+instruction.md            # agent-facing problem (no gold leak)
+environment/Dockerfile    # agent image @ base SHA
+tests/
+  Dockerfile
+  test.sh / grader.py
+  config.json             # fail_to_pass / pass_to_pass
+  test.patch              # held-out verifier tests
+solution/
+  solution.patch          # multi-file product sources
+  solve.sh
 ```
 
-Details, ship commands, and honesty boundaries live in
-[`deepagent/README.md`](deepagent/README.md).
-Forge mining remains the DeepAgent forge path under `src/swe_forge`
-(`swe-forge` CLI); the Real-PR factory is a clean subproject so it does not
-clash with that package.
+Corpus-level: `pack_manifest.json`, `PRODUCT_README.md`, `PROVENANCE.md`, `coverage_stats.json`, `median_stats.json`, Docker dual-truth under `evidence/`.
 
-## Platform Integration
+---
 
-DeepAgent is designed to feed Platform challenge validators with deterministic repository-repair tasks. Validators can sample tasks, run agent patches in isolated workspaces, and turn task completion rates into raw challenge scores for Platform.
+## Platform integration
+
+DeepAgent feeds Platform challenge validators with deterministic repository-repair tasks. Validators sample packs, run agent patches in isolated Docker workspaces, and turn fail-to-pass completion into challenge scores.
+
+---
+
+## Documentation
+
+| Doc | Role |
+|---|---|
+| [deepagent/README.md](deepagent/README.md) | Real-PR CLI, honesty floors, ship loop |
+| [prod_hard PRODUCT_README](deepagent/datasets/prod_hard_deepswe_med/PRODUCT_README.md) | Current N=9 product facts |
+| [M28 panel SUMMARY](deepagent/datasets/panel_prod_hard_deepswe_med_m28/SUMMARY.md) | Grok vs Kimi 2.7-code matrix |
+| [docs/architecture/](docs/architecture/README.md) | Synthetic workspace + eval |
+
+---
 
 ## License
 
-Apache-2.0
+Apache-2.0 (root). The Real-PR factory package under `deepagent/` is MIT unless noted in that tree.
