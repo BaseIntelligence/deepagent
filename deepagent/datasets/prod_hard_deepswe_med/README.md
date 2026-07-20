@@ -1,5 +1,5 @@
 ---
-pretty_name: DeepAgent Hardness — DeepSWE-median diversified (M28)
+pretty_name: DeepAgent
 tags:
   - code
   - software-engineering
@@ -22,6 +22,8 @@ size_categories:
 
 This revision is the **current product hardness corpus**. Structural difficulty stays on the **DeepSWE median** floors (M27). **M28** adds coverage volume under a **repo diversity cap** so one upstream no longer dominates the set.
 
+> **Not M16 N=10.** Historical `datasets/test_n10` / early M16 `test` trees are **not** the live product. Current certified hardness is **N=9** under M27 floors + M28 diversity.
+
 ## M28 coverage + diversity policy
 
 | Policy | Value |
@@ -41,8 +43,10 @@ Preferred targets N≥12/15 remain aspirational; shortfall is honest (many floor
 
 | Item | Status |
 |------|--------|
-| **Current product (this revision)** | `datasets/prod_hard_deepswe_med` · M27 floors + **M28 diversity (max 2/repo)** · N=9 |
+| **Current product (this revision)** | `datasets/prod_hard_deepswe_med` · M27 floors + **M28 diversity (max 2/repo)** · **N=9** |
+| **M16 N=10 / `test_n10` claims** | **Superseded** — early M16 live wave and any card/docs that called N=10 the current product are historical only |
 | Prior M27 HF `test` (N=5, denser werkzeug) | Superseded by this diversified tree (drops weak 3rd-werkzeug keep; adds non-werkzeug dual-truth keeps) |
+| Prior M28c HF `test` (same N=9 ids) | Re-asserted by M29d full-folder re-upload with refreshed card (`pretty_name: DeepAgent`) |
 | Historical softer band | `datasets/prod_hard_keep` (M25/M26) retained **locally for audit only** — not HF `test` |
 
 Do **not** treat model dual-solve alone as a product drop (M25 intrinsic policy). Hardness refusals remain dual-truth fail, prompt–verifier misalignment, structural floors, and high-confidence intrinsic `EASY_REQUEST`.
